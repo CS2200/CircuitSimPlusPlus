@@ -2,27 +2,41 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import PropertiesDialog from "./components/PropertiesDialog";
+import SimBar from "./components/SimBar";
+import WatchPanel from "./components/WatchPanel";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
 import { PALETTE, compPins, compSpec } from "./editor/catalog";
 import { buildDemoDoc } from "./editor/demoCircuit";
+import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
+import { getCore } from "./ipc";
+import { SimController } from "./sim/controller";
+import type { CompId, WireValue } from "./ipc/types";
 
 /**
- * App shell: header + palette + canvas + statusbar. The circuit editor is
- * the default view; the U1 stress harness stays reachable at ?stress=1 for
- * perf work.
+ * App shell: header + sim transport + palette + canvas + watch panel +
+ * statusbar. The circuit editor is the default view; the U1 stress harness
+ * stays reachable at ?stress=1, the U4 visual showcase at ?demo=1, and the
+ * U5 mock-core demo circuit at ?simdemo=1.
  */
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const stress = useMemo(() => new URLSearchParams(window.location.search).has("stress"), []);
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const stress = params.has("stress");
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
-  const demo = useMemo(() => new URLSearchParams(window.location.search).has("demo"), []);
   const [doc] = useState(() => {
-    const d = demo ? buildDemoDoc() : CircuitDocument.create("untitled");
+    const d = params.has("simdemo")
+      ? buildMockDemoDoc()
+      : params.has("demo")
+        ? buildDemoDoc()
+        : CircuitDocument.create("untitled");
     // editor injects pin knowledge so type/attr edits prune dangling wires
     d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
     return d;
   });
+  // One sim session per app lifetime (U5). Core is the mock under
+  // VITE_MOCK_CORE=1 (dev default), else the Tauri adapter.
+  const [sim] = useState(() => new SimController(getCore()));
   const editorRef = useRef<EditorHandle>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -40,6 +54,38 @@ export default function App() {
       delete w.__circuitDoc;
     };
   }, [doc]);
+
+  // DEV hook: e2e drives/inspects the sim session through this.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as {
+      __sim?: {
+        state: () => {
+          loaded: boolean;
+          running: boolean;
+          cycle: number;
+          halted: string | null;
+          netCount: number;
+        };
+        load: () => Promise<boolean>;
+        poke: (comp: CompId, pin: string, val: WireValue) => Promise<void>;
+      };
+    };
+    w.__sim = {
+      state: () => ({
+        loaded: sim.store.loaded,
+        running: sim.store.status?.running ?? false,
+        cycle: sim.store.cycle,
+        halted: sim.store.halted?.reason ?? null,
+        netCount: sim.store.netValues.size,
+      }),
+      load: () => sim.load(doc),
+      poke: (comp, pin, val) => sim.poke(comp, pin, val),
+    };
+    return () => {
+      delete w.__sim;
+    };
+  }, [sim, doc]);
 
   // "?" toggles the shortcut overlay; Escape closes it.
   useEffect(() => {
@@ -97,6 +143,7 @@ export default function App() {
           </button>
         </div>
       </header>
+      {!stress && <SimBar ctl={sim} doc={doc} />}
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -130,8 +177,10 @@ export default function App() {
                 themeName={theme}
                 onStatus={onStatus}
                 onEditComponent={setEditingComp}
+                sim={sim}
               />
             </div>
+            <WatchPanel ctl={sim} />
           </>
         )}
       </main>

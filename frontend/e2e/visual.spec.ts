@@ -10,6 +10,7 @@ test("demo circuit renders consistently (dark + light)", async ({ page }) => {
   const canvas = page.locator("canvas.circuit-canvas");
   await expect(canvas).toBeVisible();
   await page.waitForTimeout(400); // let the first frames settle
+  await page.addStyleTag({ content: ".canvas-overlay { display: none }" }); // fps text is nondeterministic
   await expect(page.locator(".editor-wrap")).toHaveScreenshot("demo-dark.png", {
     maxDiffPixelRatio: 0.02,
   });

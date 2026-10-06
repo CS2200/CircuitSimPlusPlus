@@ -12,18 +12,20 @@
 import type { CoreApi } from "./types";
 import type { CoreEvents } from "./events";
 import { mockCore } from "./mock";
+import { createTauriCore } from "./tauri";
 
 export interface Core {
   api: CoreApi;
   events: CoreEvents;
 }
 
+let tauriCore: Core | null = null;
+
 export function getCore(): Core {
   if (import.meta.env.VITE_MOCK_CORE === "1") {
     return mockCore;
   }
-  // TODO(U5): return the Tauri adapter (src/ipc/tauri.ts) here.
-  throw new Error(
-    "csim-core adapter is not implemented until task U5; run with VITE_MOCK_CORE=1 to use the mock core",
-  );
+  // Real core: Tauri command adapter over csim-core (task U5).
+  tauriCore ??= createTauriCore();
+  return tauriCore;
 }

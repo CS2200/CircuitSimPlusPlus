@@ -33,7 +33,19 @@
 
 import { CoreEventEmitter } from "./events";
 import { IpcEvents } from "./types";
-import type { CompId, CoreApi, LoadResult, SaveResult, SimMode, WireValue } from "./types";
+import type {
+  CompId,
+  CoreApi,
+  LoadResult,
+  NamedComponent,
+  NamedKind,
+  SaveResult,
+  SimMode,
+  WireValue,
+} from "./types";
+import { isPinEndpoint, type CsxDocument } from "../model/csx";
+import { deriveNets } from "../model/nets";
+import { MOCK_DEMO_CIRCUIT, MOCK_DEMO_COMPS, MOCK_DEMO_WIRES } from "./mockDemoSpec";
 
 /** Component IDs of the demo circuit. */
 export const MOCK_COMP = {
@@ -66,6 +78,39 @@ const MOCK_T_OBS_NS = 42.5;
 const MIN_PERIOD_MS = 4;
 /** Safety valve so a fat-fingered run_until can't hang the dev session. */
 const MAX_RUN_UNTIL_CYCLES = 10_000_000;
+
+/**
+ * Behavior-net layout of the loaded circuit, in the load's own net-id
+ * space. Standalone loads use the hardcoded legacy ids (MOCK_NET/MOCK_COMP);
+ * the demo document (mockDemoSpec) maps behavior through its derived nets.
+ */
+interface BehaviorLayout {
+  clk: number;
+  pcQ: number;
+  nextPc: number;
+  bus: number;
+  gates: number[];
+  /** Always-driven constant nets (register enable, adder +1 input). */
+  constants: [number, WireValue][];
+  pcComp: CompId;
+  adderComp: CompId;
+  bufferComp: CompId;
+}
+
+const STANDALONE_LAYOUT: BehaviorLayout = {
+  clk: MOCK_NET.clk,
+  pcQ: MOCK_NET.pcQ,
+  nextPc: MOCK_NET.nextPc,
+  bus: MOCK_NET.bus,
+  gates: Array.from({ length: MOCK_GATE_COUNT }, (_, i) => MOCK_NET.gateBase + i),
+  constants: [],
+  pcComp: MOCK_COMP.pc,
+  adderComp: MOCK_COMP.adder,
+  bufferComp: MOCK_COMP.buffer,
+};
+
+/** A 1-bit floating value (generic-mode nets are never driven). */
+const Z_BIT: WireValue = { v: "0", x: "0", z: "1" };
 
 // ---- value encoding helpers (contract: docs/ipc.md §1) ----
 
@@ -118,6 +163,10 @@ export class MockCore implements CoreApi {
   private readonly snapshots = new Map<string, string>();
   /** Last emitted value per net — diffs are computed against this. */
   private nets = new Map<number, WireValue>();
+  /** Behavior layout of the current load; null = generic mode (no behavior). */
+  private layout: BehaviorLayout | null = STANDALONE_LAYOUT;
+  /** Generic mode: every derived net, eternally floating. */
+  private allZNets: Map<number, WireValue> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticksPerInterval = 1;
   private statusEvery = 1;
@@ -142,7 +191,32 @@ export class MockCore implements CoreApi {
     this.clk = false;
     this.busForced = null;
     this.imem.fill(0);
-    this.emitFullState(); // initial paint: one batch with every net
+
+    const doc = tryParseCsx(src.bytes);
+    const circuit = doc?.circuits[0];
+    if (doc !== null && circuit !== undefined) {
+      // Document-driven mode: nets come from the document's own derivation
+      // (same union-find semantics as the engine's netlist builder, B3).
+      const derivation = deriveNets(circuit);
+      const net_map = derivation.nets.map((n) => ({ net: n.id, wires: n.wires }));
+      const named = namedComponents(doc);
+      if (circuit.name === MOCK_DEMO_CIRCUIT) {
+        this.layout = demoLayout(circuit, derivation.wireToNet);
+        this.allZNets = null;
+      } else {
+        // Generic mode: structurally correct load, but no behavior — every
+        // net floats forever. (The mock simulates exactly one circuit.)
+        this.layout = null;
+        this.allZNets = new Map(derivation.nets.map((n) => [n.id, Z_BIT]));
+      }
+      this.emitFullState(); // initial paint: one batch with every net
+      return { ok: true, errors: [], net_map, named };
+    }
+
+    // Standalone mode (legacy; U9 tests): hardcoded internal demo circuit.
+    this.layout = STANDALONE_LAYOUT;
+    this.allZNets = null;
+    this.emitFullState();
 
     return {
       ok: true,
@@ -173,7 +247,8 @@ export class MockCore implements CoreApi {
   // ---- simulation control ----
 
   async play(hz: number): Promise<void> {
-    if (this.timer !== null || hz <= 0) return;
+    if (hz <= 0) return;
+    if (this.timer !== null) clearInterval(this.timer); // re-play = retune speed
     const tickHz = hz * 2; // two ticks per clock cycle
     const periodMs = Math.max(1000 / tickHz, MIN_PERIOD_MS);
     this.ticksPerInterval = Math.max(1, Math.round((tickHz * periodMs) / 1000));
@@ -218,29 +293,33 @@ export class MockCore implements CoreApi {
   // ---- inspection & interaction ----
 
   async poke(compId: CompId, pin: string, value: WireValue): Promise<void> {
-    if (compId === MOCK_COMP.pc && pin === "q") {
+    const layout = this.layout;
+    if (layout === null) {
+      throw new Error("mock poke: this circuit has no pinnable behavior (generic load)");
+    }
+    if (compId === layout.pcComp && pin === "q") {
       this.pc = valueToU32(value);
       this.emitNetDiffs();
       return;
     }
-    if (compId === MOCK_COMP.buffer && pin === "force") {
+    if (compId === layout.bufferComp && pin === "force") {
       this.busForced = value;
       this.emitNetDiffs();
       return;
     }
-    if (compId === MOCK_COMP.buffer && pin === "unforce") {
+    if (compId === layout.bufferComp && pin === "unforce") {
       this.busForced = null;
       this.emitNetDiffs();
       return;
     }
-    if (compId === MOCK_COMP.buffer && pin === "consume") {
+    if (compId === layout.bufferComp && pin === "consume") {
       if (!this.clk && this.busForced === null) {
         // Consuming a floating value halts the simulation (DESIGN.md §4.1).
         this.stopTimer();
         this.events.emit(IpcEvents.SimHalted, {
           cycle: this.cycle,
           reason: "floating-read",
-          details: `comp ${MOCK_COMP.buffer} pin "consume": bus is floating (Z)`,
+          details: `comp ${layout.bufferComp} pin "consume": bus is floating (Z)`,
         });
         this.emitStatus();
       }
@@ -314,14 +393,17 @@ export class MockCore implements CoreApi {
   }
 
   private currentNets(): Map<number, WireValue> {
+    if (this.allZNets !== null) return new Map(this.allZNets);
+    const layout = this.layout ?? STANDALONE_LAYOUT;
     const nets = new Map<number, WireValue>();
-    nets.set(MOCK_NET.clk, bit(this.clk));
-    nets.set(MOCK_NET.pcQ, u32(this.pc));
-    nets.set(MOCK_NET.nextPc, u32((this.pc + 1) >>> 0));
-    nets.set(MOCK_NET.bus, this.busForced ?? (this.clk ? byte(this.pc) : Z_BUS));
+    nets.set(layout.clk, bit(this.clk));
+    nets.set(layout.pcQ, u32(this.pc));
+    nets.set(layout.nextPc, u32((this.pc + 1) >>> 0));
+    nets.set(layout.bus, this.busForced ?? (this.clk ? byte(this.pc) : Z_BUS));
     for (let i = 0; i < MOCK_GATE_COUNT; i++) {
-      nets.set(MOCK_NET.gateBase + i, bit(gateOutput(i, this.pc)));
+      nets.set(layout.gates[i], bit(gateOutput(i, this.pc)));
     }
+    for (const [net, val] of layout.constants) nets.set(net, val);
     return nets;
   }
 
@@ -335,12 +417,13 @@ export class MockCore implements CoreApi {
   /** Emit `net_diffs` for every net whose value changed since the last emission. */
   private emitNetDiffs(): void {
     const next = this.currentNets();
+    const layout = this.layout ?? STANDALONE_LAYOUT;
     const sequential: { net: number; val: WireValue }[] = [];
     const combinational: { net: number; val: WireValue }[] = [];
     for (const [net, val] of next) {
       const prev = this.nets.get(net);
       if (prev !== undefined && sameValue(prev, val)) continue;
-      (net === MOCK_NET.clk || net === MOCK_NET.pcQ ? sequential : combinational).push({
+      (net === layout.clk || net === layout.pcQ ? sequential : combinational).push({
         net,
         val,
       });
@@ -377,13 +460,86 @@ export class MockCore implements CoreApi {
   }
 
   private emitTimingUpdate(): void {
+    const layout = this.layout;
     this.events.emit(IpcEvents.TimingUpdate, {
       t_obs: MOCK_T_OBS_NS,
       est_time: this.cycle * MOCK_T_OBS_NS,
       violations: 0,
-      top_paths: [[MOCK_COMP.pc, MOCK_COMP.adder, MOCK_COMP.pc]],
+      top_paths: layout === null ? [] : [[layout.pcComp, layout.adderComp, layout.pcComp]],
     });
   }
+}
+
+// ---- document-driven loading helpers ----
+
+/** Parse bytes as a `.csx` document; null when not one (standalone mode). */
+function tryParseCsx(bytes: Uint8Array | undefined): CsxDocument | null {
+  if (bytes === undefined) return null;
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytes)) as CsxDocument;
+    if (data.format !== "circuitsim-plus-plus" || !Array.isArray(data.circuits)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Map behavior nets through the demo document's own net derivation. */
+function demoLayout(
+  circuit: CsxDocument["circuits"][number],
+  wireToNet: ReadonlyMap<number, number>,
+): BehaviorLayout {
+  const net = (wire: number): number => {
+    const n = wireToNet.get(wire);
+    if (n === undefined) throw new Error(`mock demo: wire ${wire} not in derivation`);
+    return n;
+  };
+  /** Net of the wire touching `pin` of the component at `compIdx`. */
+  const netOfPin = (compIdx: number, pin: string): number => {
+    const comp = circuit.components[compIdx];
+    if (comp === undefined) throw new Error(`mock demo: no comp at index ${compIdx}`);
+    const w = circuit.wires.findIndex(
+      (wire) =>
+        (isPinEndpoint(wire.a) && wire.a.comp === comp.id && wire.a.pin === pin) ||
+        (isPinEndpoint(wire.b) && wire.b.comp === comp.id && wire.b.pin === pin),
+    );
+    if (w < 0) throw new Error(`mock demo: pin ${comp.id}:${pin} is unwired`);
+    return net(w);
+  };
+  const W = MOCK_DEMO_WIRES;
+  return {
+    clk: net(W.clk),
+    pcQ: net(W.pcQ),
+    nextPc: net(W.nextPc),
+    bus: net(W.bus),
+    gates: Array.from({ length: MOCK_GATE_COUNT }, (_, i) => net(W.gateOut + i)),
+    constants: [
+      [netOfPin(MOCK_DEMO_COMPS.pc, "en"), bit(true)],
+      [netOfPin(MOCK_DEMO_COMPS.adder, "b"), u32(1)],
+    ],
+    pcComp: MOCK_DEMO_COMPS.pc,
+    adderComp: MOCK_DEMO_COMPS.adder,
+    bufferComp: MOCK_DEMO_COMPS.buffer,
+  };
+}
+
+const NAMED_KINDS: Record<string, NamedKind> = {
+  "mem.register": "register",
+  "wiring.probe": "probe",
+  "mem.ram": "ram",
+  "mem.rom": "rom",
+};
+
+/** Watch-addressable components (named, of the four contract kinds). */
+function namedComponents(doc: CsxDocument): NamedComponent[] {
+  const named: NamedComponent[] = [];
+  doc.circuits[0].components.forEach((comp, index) => {
+    const kind = NAMED_KINDS[comp.type];
+    if (comp.name !== undefined && kind !== undefined) {
+      named.push({ name: comp.name, kind, comp_id: index });
+    }
+  });
+  return named;
 }
 
 /** Fresh mock instance (one per app session; tests create their own). */

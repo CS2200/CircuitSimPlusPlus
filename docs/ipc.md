@@ -53,3 +53,13 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 `NetId`s are assigned by the engine at load and are valid for one loaded session. The frontend
 learns the net ↔ wire mapping exclusively from `LoadResult.net_map`. Nets are **never** exposed
 in files (DESIGN.md §5.1: nets are derived, wires are the stored truth).
+
+## 5. Conventions
+
+- **`CompId` = component array index** (format-v2 §5): the component's position in its circuit's
+  `components` array, document order. The frontend maps a `CompId` to a document component by
+  array position; the engine maps it to its flattened netlist the same way.
+- **`sim_halted.details` shape:** for component-attributable halts (floating-read, contention,
+  oscillation, setup/hold), `details` starts with `comp <CompId> pin "<name>": <message>` so
+  the UI can ring the offending component on the canvas (added in U5; the mock already emits
+  this shape). Free-form text remains legal for non-component halts (cycle-limit, error).

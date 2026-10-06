@@ -6,14 +6,16 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import CanvasHost, { type CanvasHostProps } from "./CanvasHost";
 import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
-import { DocScene } from "../editor/docScene";
+import { DocScene, type SimOverlay } from "../editor/docScene";
 import { ToolMachine } from "../editor/tools";
 import { compSize } from "../editor/catalog";
+import type { SimController } from "../sim/controller";
 
 /**
  * EditorCanvas (FRONTEND.md U3): the circuit editor — CanvasHost plumbing
@@ -53,8 +55,10 @@ export default forwardRef<
     themeName: string;
     onStatus?: (s: EditorStatus) => void;
     onEditComponent?: (compId: string) => void;
+    /** Sim session (U5): wire state overlay + halt marker. */
+    sim?: SimController;
   }
->(function EditorCanvas({ doc, themeName, onStatus, onEditComponent }, ref) {
+>(function EditorCanvas({ doc, themeName, onStatus, onEditComponent, sim }, ref) {
   const [tick, setTick] = useState(0);
   const { scene, sel, tool } = useMemo(() => {
     const scene = new DocScene();
@@ -85,12 +89,31 @@ export default forwardRef<
   const bump = useCallback(() => setTick((t) => t + 1), []);
   const cursorRef = useRef<Vec2 | null>(null);
 
+  // Sim frames bump the canvas (the store mutates in place; version signals).
+  const simVersion = useSyncExternalStore(
+    sim?.store.subscribe ?? (() => () => {}),
+    sim ? () => sim.store.getVersion() : () => 0,
+  );
+
   const draw = useCallback<CanvasHostProps["draw"]>(
     (renderer, camera, view, theme) => {
       scene.sync(doc, 0);
-      scene.draw(renderer, theme, camera, view, sel, tool.overlay());
+      let simOverlay: SimOverlay | undefined;
+      if (sim !== undefined && sim.store.loaded) {
+        const store = sim.store;
+        const highlight = sim.haltHighlight();
+        simOverlay = {
+          valueForWire: (i) => {
+            const net = store.wireToNet?.get(i);
+            return net === undefined ? undefined : store.netValues.get(net);
+          },
+          haltCompId:
+            highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
+        };
+      }
+      scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay);
     },
-    [doc, scene, sel, tool],
+    [doc, scene, sel, tool, sim, simVersion],
   );
 
   const report = useCallback(() => {
@@ -187,7 +210,7 @@ export default forwardRef<
   return (
     <CanvasHost
       draw={draw}
-      revision={tick}
+      revision={tick + simVersion}
       themeName={themeName}
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}

@@ -336,3 +336,148 @@ body {
   font-size: 0.85rem;
   color: var(--text-dim);
 }
+
+/* Sim transport bar (U5) */
+.simbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 0.9rem;
+}
+
+.simbar button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.simbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.simbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.simbar .sim-play {
+  min-width: 2.4rem;
+  font-size: 1rem;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sim-runto {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.sim-runto input {
+  width: 6.5rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.sim-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.sim-speed input[type="range"] {
+  width: 9rem;
+  accent-color: var(--accent);
+}
+
+.sim-speed span {
+  min-width: 5.5rem;
+  font-family: ui-monospace, monospace;
+}
+
+.sim-status {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+/* Halt / load-error banner */
+.sim-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 1rem;
+  background: color-mix(in srgb, var(--wire-x) 16%, var(--panel));
+  border-bottom: 1px solid var(--wire-x);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+/* Watch panel (U5) */
+.watch-panel {
+  width: 15rem;
+  overflow-y: auto;
+  padding: 0.6rem;
+  background: var(--panel);
+  border-left: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.watch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.watch-name {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-value {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.watch-unknown {
+  color: var(--text-dim);
+}
+
+.watch-mode {
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  width: 1.5rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.watch-mode:hover {
+  border-color: var(--accent);
+}

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IpcEvents } from "./types";
 import type { NetDiffs, SimHalted, SimStatus, TimingUpdate, WireValue } from "./types";
-import { createMockCore, MOCK_COMP, MOCK_GATE_COUNT, MOCK_NET } from "./mock";
+import { createMockCore, mockCore, MOCK_COMP, MOCK_GATE_COUNT, MOCK_NET } from "./mock";
 import { getCore } from "./index";
 
 type Mock = ReturnType<typeof createMockCore>;
@@ -277,8 +277,12 @@ describe("getCore (selection seam)", () => {
     expect(getCore()).toBe(core); // shared app-session instance
   });
 
-  it("throws a clear error without the mock until U5 lands", () => {
+  it("returns the Tauri adapter without the mock (U5)", () => {
     vi.stubEnv("VITE_MOCK_CORE", "");
-    expect(() => getCore()).toThrow("U5");
+    const core = getCore();
+    expect(core.api).toBeDefined();
+    expect(core.events).toBeDefined();
+    expect(core).not.toBe(mockCore); // the real adapter, not the mock
+    expect(getCore()).toBe(core); // cached session instance
   });
 });

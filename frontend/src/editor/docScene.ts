@@ -13,9 +13,10 @@ import {
   type Vec2,
 } from "../render/geom";
 import { rectPath, roundedPath } from "../render/paths";
-import type { PathCmd, Renderer } from "../render/renderer";
+import type { PathCmd, Renderer, WireState } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
+import type { WireValue } from "../ipc/types";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
 import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
@@ -26,10 +27,30 @@ import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
  * indexes, net derivation) only when (doc revision, circuit index)
  * changes — editing-scale circuits make rebuilds sub-millisecond.
  *
- * Wire coloring pre-integration: everything is "disconnected" (neutral)
- * until U5 streams real net states; selection/hover/net-extent highlights
- * layer on top.
+ * Wire coloring: pre-load everything is "disconnected" (neutral); when a
+ * sim session is loaded (U5) the `sim` draw argument supplies per-wire
+ * values and wires render in state colors (buses keep rainbow hues unless
+ * X/Z). Selection/hover/net-extent highlights layer on top.
  */
+
+/** Sim state overlay for one draw pass (U5). */
+export interface SimOverlay {
+  /** Latest value of the engine net containing this wire, if any. */
+  valueForWire(wireIdx: number): WireValue | undefined;
+  /** Document component id to ring in the error color (halt marker). */
+  haltCompId?: string | null;
+}
+
+/** Collapse a 4-state value to a render state (X dominates, then Z). */
+export function wireValueState(val: WireValue): WireState {
+  if (maskNonzero(val.x)) return "x";
+  if (maskNonzero(val.z) && !maskNonzero(val.v)) return "z";
+  return maskNonzero(val.v) ? "high" : "low";
+}
+
+function maskNonzero(hex: string): boolean {
+  return hex !== "" && BigInt(`0x${hex}`) !== 0n;
+}
 
 export type PinHit = { kind: "pin"; compId: string; pin: string; pos: Vec2 };
 export type WireHit = { kind: "wire"; wireIdx: number; segment: number; point: Vec2 };
@@ -197,6 +218,7 @@ export class DocScene {
     view: ViewSize,
     selection: SelectionModel,
     overlay: SceneOverlay,
+    sim?: SimOverlay,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
@@ -215,18 +237,29 @@ export class DocScene {
     }
 
     // Wires layer: single-bit wires in state colors; buses rainbow-hued
-    // per net + thicker (DLS look, DESIGN.md §7.1 / D8).
+    // per net + thicker (DLS look, DESIGN.md §7.1 / D8). With a sim
+    // loaded, state colors come from the streamed values (buses keep hues
+    // unless X/Z — hue is identity, state color is value).
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
       const isBus = this.wireBits[i] > 1;
       const hue = this.wireNetId[i] ?? i;
-      renderer.drawPath(this.wirePaths[i], {
-        stroke: selected
-          ? theme.accent
-          : isBus
+      const simVal = sim?.valueForWire(i);
+      let stroke: string;
+      if (selected) {
+        stroke = theme.accent;
+      } else if (simVal !== undefined) {
+        const state = wireValueState(simVal);
+        stroke =
+          isBus && state !== "x" && state !== "z"
             ? theme.bus[hue % theme.bus.length]
-            : theme.wire.disconnected,
+            : theme.wire[state];
+      } else {
+        stroke = isBus ? theme.bus[hue % theme.bus.length] : theme.wire.disconnected;
+      }
+      renderer.drawPath(this.wirePaths[i], {
+        stroke,
         lineWidth: selected ? WIRE_W * 1.8 : isBus ? WIRE_BUS : WIRE_W,
       });
     }
@@ -312,6 +345,28 @@ export class DocScene {
 
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);
+
+    // Halt marker (U5): ring the offending component in the error color.
+    if (sim?.haltCompId != null) {
+      const layout = this.layouts.get(sim.haltCompId);
+      if (layout !== undefined) {
+        const pad = 0.6;
+        renderer.drawPath(
+          roundedPath(
+            [
+              { x: layout.rect.x - pad, y: layout.rect.y - pad },
+              { x: layout.rect.x + layout.rect.w + pad, y: layout.rect.y - pad },
+              { x: layout.rect.x + layout.rect.w + pad, y: layout.rect.y + layout.rect.h + pad },
+              { x: layout.rect.x - pad, y: layout.rect.y + layout.rect.h + pad },
+              { x: layout.rect.x - pad, y: layout.rect.y - pad },
+            ],
+            0.5,
+          ),
+          { stroke: theme.wire.x, lineWidth: 0.22 },
+        );
+        renderer.flush();
+      }
+    }
 
     // Tool ghosts.
     if (overlay.wireInProgress !== null && overlay.wireInProgress.length >= 2) {
