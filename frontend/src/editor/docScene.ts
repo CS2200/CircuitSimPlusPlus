@@ -364,18 +364,40 @@ export class DocScene {
         const spec = compSpec(comp.type);
         let caption =
           comp.name !== undefined && comp.name !== "" ? comp.name : spec.caption(comp.attrs ?? {});
-        // Probe value display (U6): with a sim loaded, probes show their
-        // net's value in the configured display mode; the name moves above.
-        if (comp.type === "wiring.probe" && sim !== undefined) {
-          const docNet = this.nets.pinToNet.get(`${comp.id}:in`);
+        // Value display (UX): constants always show their configured value;
+        // probes and registers show the live sim value, with the name moved
+        // above the box and the value repeated next to the wire pin.
+        let valueText: string | null = null;
+        let valuePin: string | null = null;
+        if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
+          valueText = String(comp.attrs.value);
+        } else if (
+          (comp.type === "wiring.probe" || comp.type === "mem.register") &&
+          sim !== undefined
+        ) {
+          valuePin = comp.type === "wiring.probe" ? "in" : "q";
+          const docNet = this.nets.pinToNet.get(`${comp.id}:${valuePin}`);
           const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
           const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
           if (val !== undefined) {
-            caption = formatValue(val, probeDisplayMode(comp.attrs?.display));
-            if (comp.name !== undefined && comp.name !== "") {
-              renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+            valueText = formatValue(val, probeDisplayMode(comp.attrs?.display));
+          }
+        }
+        if (valueText !== null) {
+          caption = valueText;
+          if (comp.name !== undefined && comp.name !== "") {
+            renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+              color: theme.textDim,
+              size: 0.9,
+              align: "center",
+            });
+          }
+          if (valuePin !== null) {
+            const pin = layout.pins.find((p) => p.name === valuePin);
+            if (pin !== undefined) {
+              renderer.drawText(pin.x, pin.y - 0.7, valueText, {
                 color: theme.textDim,
-                size: 0.9,
+                size: 0.7,
                 align: "center",
               });
             }
@@ -497,23 +519,15 @@ export class DocScene {
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
     }
 
-    // Wire info card (shift+click): net bitsize inferred from components + value.
+    // Wire info card (shift+click): just the value on the wire (UX
+    // decision — net metadata was noise). Needs a loaded sim.
     if (overlay.wireInfo !== null) {
-      const netId = this.netOfWire(overlay.wireInfo.wireIdx);
-      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
-      const inference = inferNetBits(net, this.layouts);
-      const bitsLine =
-        inference.conflict.length > 0
-          ? `⚠ bitsize mismatch (${inference.conflict.join(" ≠ ")})`
-          : `${inference.bits ?? 1}-bit net`;
-      const statsLine = `${net?.wires.length ?? 1} wires · ${net?.pins.length ?? 0} pins`;
-      const width = inference.bits ?? 1;
-      const valueLine = width <= 8 ? "Z".repeat(width) : `${"Z".repeat(8)}… (×${width} floating)`;
+      const val = sim?.valueForWire(overlay.wireInfo.wireIdx);
       drawCard(
         renderer,
         theme,
-        { x: overlay.wireInfo.pos.x + 0.7, y: overlay.wireInfo.pos.y - 2.2 },
-        [bitsLine, valueLine, statsLine],
+        { x: overlay.wireInfo.pos.x + 0.7, y: overlay.wireInfo.pos.y - 1.6 },
+        [val !== undefined ? formatValue(val, "hex") : "no sim loaded"],
       );
     }
   }

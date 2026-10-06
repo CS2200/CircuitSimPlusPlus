@@ -36,6 +36,17 @@ function numAttr(attrs: Readonly<Record<string, unknown>>, key: string, fallback
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
+/**
+ * Pin width from attrs.bitsize (1..32, default 1 — format-v2's default).
+ * This is what makes the properties dialog's "Bit size" field real:
+ * thickness ∝ bitsize and sim values both read pin widths from here.
+ */
+export function bitsOf(attrs: Readonly<Record<string, unknown>>, dflt = 1): number {
+  const v = attrs["bitsize"];
+  if (typeof v !== "number" || !Number.isInteger(v)) return dflt;
+  return Math.max(1, Math.min(32, v));
+}
+
 /** Standard n-input gate: inputs on the left, out on the right. */
 function gateSpec(caption: string, minInputs: number): CompSpec {
   return {
@@ -44,22 +55,35 @@ function gateSpec(caption: string, minInputs: number): CompSpec {
     pins: (attrs) => {
       const n = Math.max(minInputs, numAttr(attrs, "inputs", 2));
       const h = Math.max(3, n + 1);
+      const width = bitsOf(attrs); // bitwise multi-bit gates (DLS-style)
       const pins: PinSpec[] = [];
       for (let i = 0; i < n; i++) {
-        pins.push({ name: `in${i}`, dx: 0, dy: ((i + 1) * h) / (n + 1), kind: "in" });
+        pins.push({
+          name: `in${i}`,
+          dx: 0,
+          dy: ((i + 1) * h) / (n + 1),
+          kind: "in",
+          bitsize: width,
+        });
       }
-      pins.push({ name: "out", dx: 5, dy: h / 2, kind: "out" });
+      pins.push({ name: "out", dx: 5, dy: h / 2, kind: "out", bitsize: width });
       return pins;
     },
     caption: () => caption,
   };
 }
 
+/**
+ * Box component with a static pin list. `bitsize: BUS_WIDTH` in the list
+ * marks an attr-driven bus pin (resolved via bitsOf); any other bitsize
+ * is literal.
+ */
 function boxSpec(w: number, h: number, pins: PinSpec[], caption: string): CompSpec {
   return {
     width: () => w,
     height: () => h,
-    pins: () => pins,
+    pins: (attrs) =>
+      pins.map((p) => (p.bitsize === BUS_WIDTH ? { ...p, bitsize: bitsOf(attrs) } : p)),
     caption: () => caption,
   };
 }
@@ -74,6 +98,7 @@ function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSp
     pins: (attrs) => {
       const count = n(attrs);
       const height = h(attrs);
+      const width = bitsOf(attrs);
       const pins: PinSpec[] = [];
       if (flavor === "in") {
         for (let i = 0; i < count; i++) {
@@ -82,13 +107,13 @@ function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSp
             dx: 0,
             dy: ((i + 1) * height) / (count + 1),
             kind: "in",
-            bitsize: BITS,
+            bitsize: width,
           });
         }
-        pins.push({ name: "out", dx: 4, dy: height / 2, kind: "out", bitsize: BITS });
+        pins.push({ name: "out", dx: 4, dy: height / 2, kind: "out", bitsize: width });
       } else {
         if (flavor === "out") {
-          pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: BITS });
+          pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: width });
         }
         for (let i = 0; i < count; i++) {
           pins.push({
@@ -96,7 +121,7 @@ function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSp
             dx: 4,
             dy: ((i + 1) * height) / (count + 1),
             kind: "out",
-            bitsize: flavor === "out" ? BITS : 1,
+            bitsize: flavor === "out" ? width : 1,
           });
         }
       }
@@ -107,7 +132,7 @@ function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSp
   };
 }
 
-const BITS = 32; // course default bus width
+const BUS_WIDTH = 32; // sentinel: attr-driven bus pin (boxSpec resolves via bitsOf)
 
 const REGISTRY: Record<string, CompSpec> = {
   // Gates (DESIGN.md §6)
@@ -121,8 +146,8 @@ const REGISTRY: Record<string, CompSpec> = {
     3,
     2,
     [
-      { name: "in", dx: 0, dy: 1, kind: "in" },
-      { name: "out", dx: 3, dy: 1, kind: "out" },
+      { name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 3, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "NOT",
   ),
@@ -130,8 +155,8 @@ const REGISTRY: Record<string, CompSpec> = {
     3,
     2,
     [
-      { name: "in", dx: 0, dy: 1, kind: "in" },
-      { name: "out", dx: 3, dy: 1, kind: "out" },
+      { name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 3, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "BUF",
   ),
@@ -140,27 +165,27 @@ const REGISTRY: Record<string, CompSpec> = {
   "wiring.pin": boxSpec(
     2,
     1,
-    [{ name: "port", dx: 2, dy: 0.5, kind: "inout", bitsize: BITS }],
+    [{ name: "port", dx: 2, dy: 0.5, kind: "inout", bitsize: BUS_WIDTH }],
     "PIN",
   ),
   "wiring.constant": boxSpec(
     2,
     1,
-    [{ name: "out", dx: 2, dy: 0.5, kind: "out", bitsize: BITS }],
+    [{ name: "out", dx: 2, dy: 0.5, kind: "out", bitsize: BUS_WIDTH }],
     "CONST",
   ),
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
   "wiring.probe": boxSpec(
     2,
     1,
-    [{ name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BITS }],
+    [{ name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BUS_WIDTH }],
     "PROBE",
   ),
   "wiring.splitter": boxSpec(
     2,
     5,
     [
-      { name: "bus", dx: 0, dy: 2.5, kind: "inout", bitsize: BITS },
+      { name: "bus", dx: 0, dy: 2.5, kind: "inout", bitsize: BUS_WIDTH },
       { name: "b0", dx: 2, dy: 0.5, kind: "inout" },
       { name: "b1", dx: 2, dy: 1.5, kind: "inout" },
       { name: "b2", dx: 2, dy: 2.5, kind: "inout" },
@@ -179,10 +204,10 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BITS },
+      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
       { name: "c_in", dx: 3, dy: 0, kind: "in" },
-      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BITS },
+      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
       { name: "c_out", dx: 3, dy: 4, kind: "out" },
     ],
     "ADD",
@@ -191,9 +216,9 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BITS },
-      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BITS },
+      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
     "SUB",
   ),
@@ -201,9 +226,9 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BITS },
-      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BITS },
+      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
     "MUL",
   ),
@@ -211,9 +236,9 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BITS },
-      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BITS },
+      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
     "DIV",
   ),
@@ -221,8 +246,8 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BITS },
+      { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
       { name: "lt", dx: 6, dy: 1, kind: "out" },
       { name: "eq", dx: 6, dy: 2, kind: "out" },
       { name: "gt", dx: 6, dy: 3, kind: "out" },
@@ -233,8 +258,8 @@ const REGISTRY: Record<string, CompSpec> = {
     4,
     2,
     [
-      { name: "in", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "out", dx: 4, dy: 1, kind: "out", bitsize: BITS },
+      { name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 4, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "NEG",
   ),
@@ -242,9 +267,9 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     3,
     [
-      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BITS },
+      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH },
       { name: "amt", dx: 3, dy: 3, kind: "in" },
-      { name: "out", dx: 6, dy: 1.5, kind: "out", bitsize: BITS },
+      { name: "out", dx: 6, dy: 1.5, kind: "out", bitsize: BUS_WIDTH },
     ],
     "SHIFT",
   ),
@@ -253,7 +278,7 @@ const REGISTRY: Record<string, CompSpec> = {
     2,
     [
       { name: "in", dx: 0, dy: 1, kind: "in" },
-      { name: "out", dx: 4, dy: 1, kind: "out", bitsize: BITS },
+      { name: "out", dx: 4, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "EXT",
   ),
@@ -263,10 +288,10 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     4,
     [
-      { name: "d", dx: 0, dy: 1, kind: "in", bitsize: BITS },
+      { name: "d", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "clk", dx: 0, dy: 2, kind: "in" },
       { name: "en", dx: 0, dy: 3, kind: "in" },
-      { name: "q", dx: 6, dy: 1, kind: "out", bitsize: BITS },
+      { name: "q", dx: 6, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "REG",
   ),
@@ -274,11 +299,11 @@ const REGISTRY: Record<string, CompSpec> = {
     10,
     6,
     [
-      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "d", dx: 0, dy: 2, kind: "in", bitsize: BITS },
+      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
+      { name: "d", dx: 0, dy: 2, kind: "in", bitsize: BUS_WIDTH },
       { name: "clk", dx: 0, dy: 3, kind: "in" },
       { name: "we", dx: 0, dy: 4, kind: "in" },
-      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BITS },
+      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "RAM",
   ),
@@ -286,9 +311,9 @@ const REGISTRY: Record<string, CompSpec> = {
     10,
     6,
     [
-      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BITS },
+      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "clk", dx: 0, dy: 2, kind: "in" },
-      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BITS },
+      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "ROM",
   ),
@@ -303,7 +328,7 @@ const REGISTRY: Record<string, CompSpec> = {
   "io.hexdisplay": boxSpec(
     3,
     3,
-    [{ name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BITS }],
+    [{ name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH }],
     "HEX",
   ),
 };

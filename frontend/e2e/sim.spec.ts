@@ -82,9 +82,30 @@ test("U5: consuming a floating bus halts with a banner", async ({ page }) => {
   await expect.poll(() => simState(page)).toMatchObject({ halted: "floating-read" });
 });
 
+test("sim shortcuts: Ctrl+J tick, Ctrl+K run/pause, Ctrl+R reset", async ({ page }) => {
+  await page.goto("/?simdemo=1");
+  // wait for effects (the DEV hook proves the key listeners are attached)
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  // Ctrl+J loads + steps one tick (clk rises, pc latches — still cycle 0)
+  await page.keyboard.press("Control+j");
+  await expect.poll(() => simState(page)).toMatchObject({ loaded: true, cycle: 0 });
+  await page.keyboard.press("Control+j"); // clk falls
+  await expect.poll(() => simState(page)).toMatchObject({ cycle: 1 });
+  // Ctrl+K runs until halted/paused; Ctrl+K again pauses.
+  await page.keyboard.press("Control+k");
+  await expect.poll(() => simState(page)).toMatchObject({ running: true });
+  await page.keyboard.press("Control+k");
+  await expect.poll(() => simState(page)).toMatchObject({ running: false });
+  // Ctrl+R resets to a fresh load (+ autoload toast).
+  await page.keyboard.press("Control+r");
+  await expect.poll(() => simState(page)).toMatchObject({ loaded: true, cycle: 0 });
+  await expect(page.locator(".toast")).toContainText("Reset");
+});
+
 test("U5: wires render in sim state colors (lit-circuit baseline)", async ({ page }) => {
   await page.getByRole("button", { name: "tick", exact: true }).click(); // clk high, bus driven
   await expect.poll(() => simState(page)).toMatchObject({ loaded: true, cycle: 0 });
+  await page.waitForTimeout(600); // let propagation pulses expire (deterministic baseline)
   await page.addStyleTag({ content: ".canvas-overlay { display: none }" });
   await expect(page.locator(".editor-wrap")).toHaveScreenshot("sim-lit.png", {
     maxDiffPixelRatio: 0.02,

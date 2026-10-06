@@ -25,14 +25,28 @@ export function buildDemoDoc(): CircuitDocument {
       ...(type === "gate.nand" ? { attrs: { negateInputs: ["in1"] } } : {}),
     });
   });
-  doc.addComponent(c, { type: "plexers.mux", pos: [4, 24], attrs: { selBits: 2 } });
-  const reg = doc.addComponent(c, { type: "mem.register", pos: [16, 24], name: "acc" });
-  const add = doc.addComponent(c, { type: "arith.adder", pos: [28, 24] });
-  const probe = doc.addComponent(c, { type: "wiring.probe", pos: [38, 25], name: "sum" });
+  doc.addComponent(c, {
+    type: "plexers.mux",
+    pos: [4, 24],
+    attrs: { selBits: 2, bitsize: 32 },
+  });
+  const reg = doc.addComponent(c, {
+    type: "mem.register",
+    pos: [16, 24],
+    name: "acc",
+    attrs: { bitsize: 32 },
+  });
+  const add = doc.addComponent(c, { type: "arith.adder", pos: [28, 24], attrs: { bitsize: 32 } });
+  const probe = doc.addComponent(c, {
+    type: "wiring.probe",
+    pos: [38, 25],
+    name: "sum",
+    attrs: { bitsize: 32 },
+  });
   const konst = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [28, 32],
-    attrs: { value: 1 },
+    attrs: { value: 1, bitsize: 32 },
   });
   // 32-bit bus: acc.q → add.a (with a bend), add.out → probe.in, const → add.b
   doc.addWire(c, {
@@ -65,7 +79,12 @@ export function buildDemoDoc(): CircuitDocument {
     ],
   });
   // a junction: probe bus tapped onto the acc→add bus
-  const tap = doc.addComponent(c, { type: "wiring.probe", pos: [24, 30], name: "acc_tap" });
+  const tap = doc.addComponent(c, {
+    type: "wiring.probe",
+    pos: [24, 30],
+    name: "acc_tap",
+    attrs: { bitsize: 32 },
+  });
   doc.addWire(c, {
     a: { comp: tap, pin: "in" },
     b: { join: { wire: 0, segment: 1 } },

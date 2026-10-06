@@ -226,9 +226,9 @@ export default function App() {
                       key={t}
                       className={`palette-item${status?.placing === t ? " active" : ""}`}
                       draggable
-                      onClick={() => editorRef.current?.startPlacing(t)}
+                      onClick={(e) => editorRef.current?.startPlacing(t, e.shiftKey)}
                       onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
-                      title={`${t} — click, then click the canvas to place (R rotates, Esc cancels)`}
+                      title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
                     >
                       {compSpec(t).caption({})}
                     </button>
@@ -268,7 +268,15 @@ export default function App() {
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
       {editingComp !== null && (
-        <PropertiesDialog doc={doc} compId={editingComp} onClose={() => setEditingComp(null)} />
+        <PropertiesDialog
+          doc={doc}
+          compId={editingComp}
+          onClose={() => {
+            setEditingComp(null);
+            // The dialog mutates the doc out-of-band; repaint the canvas.
+            editorRef.current?.refresh();
+          }}
+        />
       )}
       <div className="toast-stack">
         {toasts.map((t) => (
@@ -328,6 +336,26 @@ export default function App() {
                 <tr>
                   <td>Ctrl+Z / Ctrl+Y</td>
                   <td>undo / redo</td>
+                </tr>
+                <tr>
+                  <td>Ctrl+J</td>
+                  <td>sim: step one tick</td>
+                </tr>
+                <tr>
+                  <td>Ctrl+K</td>
+                  <td>sim: run (until halt) / pause</td>
+                </tr>
+                <tr>
+                  <td>Ctrl+R</td>
+                  <td>sim: reset (autoload re-applies)</td>
+                </tr>
+                <tr>
+                  <td>Shift+click wire</td>
+                  <td>show the value on that wire</td>
+                </tr>
+                <tr>
+                  <td>Shift+click palette</td>
+                  <td>place many (Esc to stop)</td>
                 </tr>
                 <tr>
                   <td>Esc / right-click</td>

@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { SimController } from "../sim/controller";
 import type { CircuitDocument } from "../model/document";
 import type { SimMode } from "../ipc/types";
@@ -45,6 +45,32 @@ export default function SimBar({
     }
     await guard(cmd());
   };
+
+  // Sim keyboard map (UX decision): Ctrl+J step one tick, Ctrl+R reset,
+  // Ctrl+K run (until halt) / pause. Handled here so they work regardless
+  // of canvas focus; text fields are left alone.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const key = e.key.toLowerCase();
+      if (key === "j") {
+        e.preventDefault();
+        void withLoadedDoc(() => ctl.stepTick());
+      } else if (key === "r") {
+        e.preventDefault(); // not the browser reload
+        void onReset();
+      } else if (key === "k") {
+        e.preventDefault();
+        if (ctl.store.status?.running ?? false) void guard(ctl.pause());
+        else void withLoadedDoc(() => ctl.play(hz));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctl, doc, hz, onReset]);
 
   const mode: SimMode = s.status?.mode ?? "delay";
 

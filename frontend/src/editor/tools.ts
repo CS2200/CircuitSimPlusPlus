@@ -18,9 +18,13 @@ import type { DocScene, Hit, SceneOverlay } from "./docScene";
  *  - click empty space         box select (Shift adds); click = clear
  *  - click component/wire      select (Shift toggles)
  *  - drag component body       move selection, wires glued (one undo step)
- *  - click a pin               start wiring: clicks place bends; finish on
- *                              a pin, or drop onto a wire → junction dot;
- *                              Esc / right-click cancels
+ *  - click a pin               start wiring: every further CLICK plants a
+ *                              bend exactly where clicked; finish on a pin,
+ *                              or drop onto a wire → junction dot; Esc /
+ *                              right-click cancels. Dragging from a pin is
+ *                              the same as clicking it — releasing the
+ *                              button never commits anything (click-driven
+ *                              routing only; UX decision).
  *  - drag from a wire          start wiring with a junction at the press point
  *  - R rotate · Del delete · Ctrl+C/V copy-paste · Ctrl+A select all
  *    (undo/redo and key dispatch live in EditorCanvas/App)
@@ -41,8 +45,6 @@ interface WiringState {
   /** Planted anchor points (first = the from-endpoint coordinate). */
   anchors: Vec2[];
   cursor: Vec2;
-  /** Distinguishes "click to start" from "drag from the pin". */
-  movedSinceStart: boolean;
 }
 
 /**
@@ -72,7 +74,13 @@ const PASTE_OFFSET = 1;
 export class ToolMachine {
   private drag: DragState = { kind: "idle" };
   private wiring: WiringState | null = null;
-  private placing: { type: string; pos: Vec2; rot: CsxComponent["rot"] } | null = null;
+  private placing: {
+    type: string;
+    pos: Vec2;
+    rot: CsxComponent["rot"];
+    /** Shift-picked from the palette: keep placing until cancelled. */
+    sticky: boolean;
+  } | null = null;
   private hoverHit: Hit | null = null;
   private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
@@ -91,9 +99,9 @@ export class ToolMachine {
 
   // ---- external triggers ----
 
-  startPlacing(type: string): void {
+  startPlacing(type: string, sticky = false): void {
     this.cancel();
-    this.placing = { type, pos: { x: 0, y: 0 }, rot: "E" };
+    this.placing = { type, pos: { x: 0, y: 0 }, rot: "E", sticky };
     this.changed();
   }
 
@@ -129,7 +137,9 @@ export class ToolMachine {
         pos: [snap(p.pos.x, 1), snap(p.pos.y, 1)],
         rot: p.rot,
       });
-      // stay in placing mode for rapid repeat placement (Esc/right-click exits)
+      // One placement per palette pick; shift-picked (sticky) keeps placing
+      // until Esc/right-click (UX decision).
+      if (!p.sticky) this.placing = null;
       this.changed();
       return;
     }
@@ -145,7 +155,6 @@ export class ToolMachine {
         from: { comp: pin.compId, pin: pin.pin },
         anchors: [pin.pos],
         cursor: pin.pos,
-        movedSinceStart: false,
       };
       this.changed();
       return;
@@ -191,10 +200,6 @@ export class ToolMachine {
   move(world: Vec2): void {
     this.hover(world);
     if (this.wiring !== null) {
-      if (!this.wiring.movedSinceStart) {
-        const d = Math.hypot(world.x - this.wiring.cursor.x, world.y - this.wiring.cursor.y);
-        if (d > DRAG_THRESHOLD) this.wiring.movedSinceStart = true;
-      }
       this.wiring.cursor = world;
       this.changed();
       return;
@@ -210,7 +215,6 @@ export class ToolMachine {
             from: { join: { wire: ws.wireIdx, segment: ws.segment } },
             anchors: [ws.point],
             cursor: world,
-            movedSinceStart: true,
           };
           this.drag = { kind: "idle" };
         } else {
@@ -243,12 +247,13 @@ export class ToolMachine {
     }
   }
 
-  up(world: Vec2, info: PointerInfo): void {
+  up(info: PointerInfo): void {
     if (info.button !== 0) return;
-    // drag-to-wire: releasing on a target finishes; releasing over empty
-    // space plants a bend (but the initial press-release just starts wiring)
-    if (this.wiring !== null && this.wiring.movedSinceStart) {
-      this.finishOrBend(world);
+    // Wiring is click-driven: releasing the button (even after a drag that
+    // started on a pin/wire) commits NOTHING — the next click plants the
+    // bend or finishes the wire.
+    if (this.wiring !== null) {
+      this.drag = { kind: "idle" };
       return;
     }
     if (this.drag.kind === "boxing") {

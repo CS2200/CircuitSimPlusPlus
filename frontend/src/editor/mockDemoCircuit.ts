@@ -43,11 +43,21 @@ export function buildMockDemoDoc(): CircuitDocument {
 
   // --- components, in spec order (indices 0..5 are behavior-relevant) ---
   const clock = doc.addComponent(c, { type: "wiring.clock", pos: [2, 1] });
-  const pc = doc.addComponent(c, { type: "mem.register", pos: [8, 1], name: "pc" });
-  const adder = doc.addComponent(c, { type: "arith.adder", pos: [21, 1] });
-  const nextPc = doc.addComponent(c, { type: "wiring.probe", pos: [31, 2], name: "next_pc" });
+  const pc = doc.addComponent(c, {
+    type: "mem.register",
+    pos: [8, 1],
+    name: "pc",
+    attrs: { bitsize: 32 },
+  });
+  const adder = doc.addComponent(c, { type: "arith.adder", pos: [21, 1], attrs: { bitsize: 32 } });
+  const nextPc = doc.addComponent(c, {
+    type: "wiring.probe",
+    pos: [31, 2],
+    name: "next_pc",
+    attrs: { bitsize: 32 },
+  });
   doc.addComponent(c, { type: "mem.ram", pos: [2, 14], name: "imem" }); // unwired; U6 inspects it
-  const buffer = doc.addComponent(c, { type: "gate.buffer", pos: [2, 5] });
+  const buffer = doc.addComponent(c, { type: "gate.buffer", pos: [2, 5], attrs: { bitsize: 8 } });
 
   const gateType = (i: number) => ["gate.and", "gate.or", "gate.xor"][i % 3];
   const gateAt = (i: number): [number, number] => [COL_X(i % COLS), ROW_Y(Math.floor(i / COLS))];
@@ -59,7 +69,11 @@ export function buildMockDemoDoc(): CircuitDocument {
     const [gx, gy] = gateAt(i);
     doc.addComponent(c, { type: "io.led", pos: [gx + 7, gy + 1] });
   }
-  const busProbe = doc.addComponent(c, { type: "wiring.probe", pos: [9, 5] });
+  const busProbe = doc.addComponent(c, {
+    type: "wiring.probe",
+    pos: [9, 5],
+    attrs: { bitsize: 8 },
+  });
   const constEn = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [4, 4],
@@ -68,7 +82,7 @@ export function buildMockDemoDoc(): CircuitDocument {
   const constOne = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [17, 6],
-    attrs: { value: 1 },
+    attrs: { value: 1, bitsize: 32 },
   });
 
   if (doc.circuit(c).components.length !== MOCK_DEMO_COMPS.ledBase + MOCK_DEMO_GATE_COUNT + 3) {

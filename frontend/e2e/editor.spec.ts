@@ -87,21 +87,11 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
     [10, 1],
   ]);
 
-  // ---- junction: DRAG from NOT.out (13,1), release on wire 0's segment ----
+  // ---- junction: click NOT.out (13,1), then click wire 0's segment ----
   const [ax, ay] = d.circuits[0].wires[0].points[0];
   const [bx, by] = d.circuits[0].wires[0].points[1];
-  const mid = { x: (ax + bx) / 2, y: (ay + by) / 2 };
-  const start = await world(page, 13, 1);
-  const target = await world(page, mid.x, mid.y);
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  for (let i = 1; i <= 5; i++) {
-    await page.mouse.move(
-      start.x + ((target.x - start.x) * i) / 5,
-      start.y + ((target.y - start.y) * i) / 5,
-    );
-  }
-  await page.mouse.up();
+  await clickWorld(page, 13, 1);
+  await clickWorld(page, (ax + bx) / 2, (ay + by) / 2);
   d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(2);
   expect(d.circuits[0].wires[1].a).toEqual({ comp: not, pin: "out" });

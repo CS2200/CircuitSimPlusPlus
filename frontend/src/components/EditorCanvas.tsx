@@ -41,7 +41,9 @@ export interface EditorStatus {
 }
 
 export interface EditorHandle {
-  startPlacing(type: string): void;
+  startPlacing(type: string, sticky?: boolean): void;
+  /** Redraw after an out-of-band doc mutation (properties dialog, …). */
+  refresh(): void;
   placeAt(type: string, world: Vec2): void;
   cancel(): void;
   undo(): void;
@@ -197,10 +199,11 @@ export default forwardRef<
   useImperativeHandle(
     ref,
     (): EditorHandle => ({
-      startPlacing: (type) => {
-        tool.startPlacing(type);
+      startPlacing: (type, sticky = false) => {
+        tool.startPlacing(type, sticky);
         bump();
       },
+      refresh: () => bump(),
       placeAt: (type, world) => {
         doc.addComponent(0, { type, pos: [Math.round(world.x), Math.round(world.y)], rot: "E" });
         bump();
@@ -246,7 +249,7 @@ export default forwardRef<
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}
       onPointerMove={(w) => tool.move(w)}
-      onPointerUp={(w, info) => tool.up(w, info)}
+      onPointerUp={(_w, info) => tool.up(info)}
       onDoubleClick={(w) => tool.doubleClick(w)}
       onHover={(w) => {
         cursorRef.current = w;
