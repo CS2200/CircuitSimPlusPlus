@@ -90,16 +90,19 @@ npm run build          # tsc --noEmit && vite build → frontend/dist
 ```
 
 The browser-based dev flow uses the mock; the **real engine** is exercised
-through the Tauri shell:
+through the Tauri shell. Gotcha: `.env.development` forces the mock in *every*
+dev server, including one launched by `tauri dev` — override it explicitly:
 
 ```bash
-# Tauri dev (real csim-core Session; hot-reloads the frontend)
+# Full desktop app, REAL csim-core Session (native window; hot-reloads the UI)
 cd crates/app
-../../frontend/node_modules/.bin/tauri dev
+VITE_MOCK_CORE=0 ../../frontend/node_modules/.bin/tauri dev
 
-# Packaged desktop app (unsigned dmg/zip/exe — see "Releasing")
+# Packaged desktop app (production builds don't read .env.development, so the
+# real core is the default there; unsigned dmg/zip/exe — see "Releasing")
 cd crates/app
 ../../frontend/node_modules/.bin/tauri build
+./../../target/release/csim-app        # or install the bundle
 ```
 
 `crates/app` needs the Linux webview deps above to compile; it's excluded from
@@ -108,7 +111,10 @@ frontend selects its core at runtime: `VITE_MOCK_CORE=1` → TypeScript mock,
 otherwise the Tauri bridge (`frontend/src/ipc/tauri.ts` → `csim_core::session::Session`).
 Both implement the same `CoreApi` contract (`frontend/src/ipc/types.ts` ⇔
 `crates/core/src/api.rs` — keep them field-for-field identical; `docs/ipc.md`
-is normative and changes there need human sign-off).
+is normative and changes there need human sign-off). Note: `tauri dev`/`build`
+run their before-commands from the *parent of the config directory* (classic
+`src-tauri` layout assumption) — hence `npm --prefix ../frontend …` in
+`tauri.conf.json`.
 
 ## Autograder image (Gradescope)
 
