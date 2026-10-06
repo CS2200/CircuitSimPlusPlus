@@ -133,6 +133,11 @@ export class CircuitDocument {
     this._dirty = false;
   }
 
+  /** Drop undo/redo stacks (e.g. after loading a document from disk). */
+  clearHistory(): void {
+    this.history.clear();
+  }
+
   get canUndo(): boolean {
     return this.history.canUndo;
   }

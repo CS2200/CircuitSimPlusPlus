@@ -273,6 +273,21 @@ export default function CanvasHost({
     };
   }, [bench, sceneBounds]);
 
+  // DEV camera hook (e2e world→screen mapping).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as {
+      __circuitCamera?: () => { x: number; y: number; scale: number };
+    };
+    w.__circuitCamera = () => {
+      const c = cameraRef.current;
+      return { x: c.x, y: c.y, scale: c.scale };
+    };
+    return () => {
+      delete w.__circuitCamera;
+    };
+  }, []);
+
   /** Minimal mouse-ish shape both PointerEvent and MouseEvent satisfy. */
   interface CanvasMouse {
     clientX: number;

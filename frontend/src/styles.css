@@ -22,6 +22,9 @@
   /* Per-bus hues (multi-bit "rainbow buses", DLS-style) */
   --bus-a: #f0b43c;
   --bus-b: #b478e6;
+  --bus-c: #4dd0e1;
+  --bus-d: #f368a0;
+  --bus-e: #b8e34d;
 
   --accent: #5b8def;
 }
@@ -42,6 +45,9 @@
 
   --bus-a: #c88f1e;
   --bus-b: #8a4fc0;
+  --bus-c: #1e9ab0;
+  --bus-d: #c04a78;
+  --bus-e: #6a9a2a;
 
   --accent: #3b6fd4;
 }

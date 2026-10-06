@@ -30,7 +30,15 @@ async function doc(page: Page): Promise<CsxDoc> {
 async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y: number }> {
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
-  return { x: box.x + wx * 16 + box.width / 2, y: box.y + wy * 16 + box.height / 2 };
+  const cam = await page.evaluate(() =>
+    (
+      window as unknown as { __circuitCamera: () => { x: number; y: number; scale: number } }
+    ).__circuitCamera(),
+  );
+  return {
+    x: box.x + (wx - cam.x) * cam.scale + box.width / 2,
+    y: box.y + (wy - cam.y) * cam.scale + box.height / 2,
+  };
 }
 
 async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {

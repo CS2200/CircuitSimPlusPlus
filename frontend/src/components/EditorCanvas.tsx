@@ -76,6 +76,12 @@ export default forwardRef<
     };
   }, [tool, onEditComponent]);
 
+  // Center the camera once per document (never re-center on edits).
+  const initialBounds = useMemo(() => {
+    scene.sync(doc, 0);
+    return scene.bounds;
+  }, [doc, scene]);
+
   const bump = useCallback(() => setTick((t) => t + 1), []);
   const cursorRef = useRef<Vec2 | null>(null);
 
@@ -183,6 +189,7 @@ export default forwardRef<
       draw={draw}
       revision={tick}
       themeName={themeName}
+      sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}
       onPointerMove={(w) => tool.move(w)}
       onPointerUp={(w, info) => tool.up(w, info)}

@@ -5,6 +5,7 @@ import PropertiesDialog from "./components/PropertiesDialog";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
 import { PALETTE, compPins, compSpec } from "./editor/catalog";
+import { buildDemoDoc } from "./editor/demoCircuit";
 
 /**
  * App shell: header + palette + canvas + statusbar. The circuit editor is
@@ -15,8 +16,9 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const stress = useMemo(() => new URLSearchParams(window.location.search).has("stress"), []);
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
+  const demo = useMemo(() => new URLSearchParams(window.location.search).has("demo"), []);
   const [doc] = useState(() => {
-    const d = CircuitDocument.create("untitled");
+    const d = demo ? buildDemoDoc() : CircuitDocument.create("untitled");
     // editor injects pin knowledge so type/attr edits prune dangling wires
     d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
     return d;

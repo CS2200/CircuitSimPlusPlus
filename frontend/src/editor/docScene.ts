@@ -17,7 +17,8 @@ import type { PathCmd, Renderer } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import { compLayout, type CompLayout } from "./layout";
-import { compSpec } from "./catalog";
+import { compSize, compSpec } from "./catalog";
+import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
 
 /**
  * DocScene (FRONTEND.md U3): draws a CircuitDocument circuit and answers
@@ -51,6 +52,7 @@ export interface SceneOverlay {
 const CELL = 8;
 const WIRE_RADIUS = 0.12;
 const WIRE_W = 0.16;
+const WIRE_BUS = 0.3;
 const PIN_R = 0.22;
 const PICK_TOL = 0.45;
 const PIN_TOL = 0.55;
@@ -65,6 +67,8 @@ export class DocScene {
   /** Junction dot positions per wire (at its own join endpoints). */
   private junctionDots: Vec2[] = [];
   private wireIndex = new UniformGrid(CELL);
+  private wireNetId: (number | undefined)[] = [];
+  private wireBits: number[] = [];
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -90,6 +94,13 @@ export class DocScene {
       }
     });
     this.nets = deriveNets(c);
+    this.wireNetId = c.wires.map((_, i) => this.nets.wireToNet.get(i));
+    this.wireBits = c.wires.map((_, i) => {
+      const netId = this.nets.wireToNet.get(i);
+      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
+      const inf = inferNetBits(net, this.layouts);
+      return inf.conflict.length > 0 ? 1 : (inf.bits ?? 1);
+    });
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
       c.wires,
@@ -203,13 +214,20 @@ export class DocScene {
       if (netId !== undefined) highlightWires = new Set(this.wiresInNet(netId));
     }
 
-    // Wires layer.
+    // Wires layer: single-bit wires in state colors; buses rainbow-hued
+    // per net + thicker (DLS look, DESIGN.md §7.1 / D8).
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
+      const isBus = this.wireBits[i] > 1;
+      const hue = this.wireNetId[i] ?? i;
       renderer.drawPath(this.wirePaths[i], {
-        stroke: selected ? theme.accent : theme.wire.disconnected,
-        lineWidth: selected ? WIRE_W * 1.8 : WIRE_W,
+        stroke: selected
+          ? theme.accent
+          : isBus
+            ? theme.bus[hue % theme.bus.length]
+            : theme.wire.disconnected,
+        lineWidth: selected ? WIRE_W * 1.8 : isBus ? WIRE_BUS : WIRE_W,
       });
     }
     renderer.flush();
@@ -227,26 +245,66 @@ export class DocScene {
       const layout = this.layouts.get(comp.id)!;
       if (!rectIntersects(layout.rect, visible)) continue;
       const selected = selection.hasComponent(comp.id);
-      renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
-        fill: theme.panel,
-      });
-      renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+      const strokeStyle = {
         stroke: selected ? theme.accent : theme.panelBorder,
         lineWidth: selected ? 0.22 : 0.12,
-      });
-      const spec = compSpec(comp.type);
-      const caption =
-        comp.name !== undefined && comp.name !== "" ? comp.name : spec.caption(comp.attrs ?? {});
-      renderer.drawText(
-        layout.rect.x + layout.rect.w / 2,
-        layout.rect.y + layout.rect.h / 2,
-        caption,
-        {
-          color: theme.textDim,
-          size: 1.0,
-          align: "center",
-        },
-      );
+      };
+      // Distinctive shape (local EAST frame → rotated about the center), or a box.
+      const local = compSize(comp);
+      const shape = gateShape(comp.type, layout.rect.x, layout.rect.y, local.w, local.h);
+      const rot = comp.rot ?? "E";
+      const cx = layout.rect.x + layout.rect.w / 2;
+      const cy = layout.rect.y + layout.rect.h / 2;
+      if (shape !== null) {
+        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: theme.panel });
+        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), strokeStyle);
+        for (const extra of shape.extra) {
+          renderer.drawPath(rotatePath(extra, cx, cy, rot), strokeStyle);
+        }
+        // output bubble (NAND/NOR/XNOR/NOT) + per-input negation bubbles
+        const bubbles: Vec2[] = [];
+        if (shape.outBubble !== null) {
+          const b = shape.outBubble;
+          const p = rotPt(b.x, b.y, cx, cy, rot);
+          bubbles.push(p);
+        }
+        const negate = comp.attrs?.negateInputs;
+        if (Array.isArray(negate)) {
+          for (const pinName of negate) {
+            const pin = layout.pins.find((p) => p.name === pinName);
+            if (pin !== undefined) bubbles.push({ x: pin.x, y: pin.y });
+          }
+        }
+        for (const b of bubbles) {
+          renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
+          renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), strokeStyle);
+        }
+        // shaped bodies have no caption — a named part shows its name above
+        if (comp.name !== undefined && comp.name !== "") {
+          renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+            color: theme.textDim,
+            size: 0.9,
+            align: "center",
+          });
+        }
+      } else {
+        renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+          fill: theme.panel,
+        });
+        renderer.drawPath(
+          rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h),
+          strokeStyle,
+        );
+        const spec = compSpec(comp.type);
+        const caption =
+          comp.name !== undefined && comp.name !== "" ? comp.name : spec.caption(comp.attrs ?? {});
+        renderer.drawText(
+          layout.rect.x + layout.rect.w / 2,
+          layout.rect.y + layout.rect.h / 2,
+          caption,
+          { color: theme.textDim, size: 1.0, align: "center" },
+        );
+      }
       for (const p of layout.pins) pinDots.push({ x: p.x, y: p.y });
     }
     renderer.flush();
@@ -367,6 +425,22 @@ function p2v(p: [number, number]): Vec2 {
   return { x: p[0], y: p[1] };
 }
 
+/** Rotate one point about a center (same convention as layout.ts). */
+function rotPt(x: number, y: number, cx: number, cy: number, rot: "N" | "E" | "S" | "W"): Vec2 {
+  const ox = x - cx;
+  const oy = y - cy;
+  switch (rot) {
+    case "E":
+      return { x, y };
+    case "S":
+      return { x: cx - oy, y: cy + ox };
+    case "W":
+      return { x: cx - ox, y: cy - oy };
+    case "N":
+      return { x: cx + oy, y: cy - ox };
+  }
+}
+
 function pointRect(p: Vec2): Rect {
   return { x: p.x, y: p.y, w: 0, h: 0 };
 }
@@ -382,10 +456,12 @@ function nearestOnSegment(p: Vec2, a: Vec2, b: Vec2): Vec2 {
 }
 
 function computeBounds(rects: Rect[], wires: CsxWire[]): Rect {
-  let minX = 0;
-  let minY = 0;
-  let maxX = 100;
-  let maxY = 60;
+  // Empty circuit: start at the origin, not some arbitrary offset.
+  if (rects.length === 0 && wires.length === 0) return { x: -25, y: -18, w: 50, h: 36 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const r of rects) {
     minX = Math.min(minX, r.x);
     minY = Math.min(minY, r.y);

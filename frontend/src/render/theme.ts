@@ -35,7 +35,7 @@ export const FALLBACK_THEME: Theme = {
     z: "#8a8a8a",
     disconnected: "#2c2c3a",
   },
-  bus: ["#f0b43c", "#b478e6"],
+  bus: ["#f0b43c", "#b478e6", "#4dd0e1", "#f368a0", "#b8e34d"],
 };
 
 export function resolveTheme(el: Element): Theme {
@@ -59,6 +59,12 @@ export function resolveTheme(el: Element): Theme {
       z: v("--wire-z", FALLBACK_THEME.wire.z),
       disconnected: v("--wire-disconnected", FALLBACK_THEME.wire.disconnected),
     },
-    bus: [v("--bus-a", FALLBACK_THEME.bus[0]), v("--bus-b", FALLBACK_THEME.bus[1])],
+    bus: [
+      v("--bus-a", FALLBACK_THEME.bus[0]),
+      v("--bus-b", FALLBACK_THEME.bus[1]),
+      v("--bus-c", FALLBACK_THEME.bus[2]),
+      v("--bus-d", FALLBACK_THEME.bus[3]),
+      v("--bus-e", FALLBACK_THEME.bus[4]),
+    ],
   };
 }
