@@ -1042,11 +1042,11 @@ mod tests {
         DelayEngine::new(nl, half, &table).expect("test engine builds")
     }
 
-    fn k(width: u32, v: u64) -> Value {
+    pub(super) fn k(width: u32, v: u64) -> Value {
         Value::from_u64(width, v)
     }
 
-    const SETTINGS: &str =
+    pub(super) const SETTINGS: &str =
         r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     /// Two-stage pipeline: r1.q → not → and → r2.d; r1 toggles

@@ -15,6 +15,7 @@
 //! Same file + same mode + same inputs ⇒ identical trace, everywhere.
 
 pub mod api;
+pub mod autograde;
 pub mod behavior;
 pub mod components;
 pub mod delay;
