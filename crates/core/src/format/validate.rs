@@ -189,7 +189,7 @@ fn validate_circuit(doc: &Document, circuit: &super::Circuit, errors: &mut Vec<L
             }
         } else {
             components::validate_component(cname, idx, &comp.id, &comp.type_, &comp.attrs, errors)
-                .map(|v| v.into_iter().collect())
+                .map(|v| v.into_iter().map(|s| s.name).collect())
         };
 
         by_id.entry(comp.id.as_str()).or_insert(CompInfo { pins });

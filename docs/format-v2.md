@@ -89,6 +89,11 @@ target circuit's **named** `wiring.pin` components, referenced by name from wire
 never by position or coordinates (§5.2, App. A). The instantiation hierarchy must be acyclic
 and at most 64 levels deep (§11).
 
+When the hierarchy is flattened for simulation, `wiring.pin` components inside inlined
+subcircuits dissolve (they are pure connectivity bridges); at the root they stay primitive —
+they are the design's external I/O. The **simulation root** is the circuit named `"main"` if
+present, else the first circuit in `circuits`.
+
 ## 4. Component registry (type strings, pins, attrs)
 
 Type strings are pinned by `docs/tasks/README.md` §4. Common optional attr on all types:

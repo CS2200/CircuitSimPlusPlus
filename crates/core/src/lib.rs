@@ -18,4 +18,5 @@ pub mod api;
 pub mod components;
 pub mod format;
 pub mod ids;
+pub mod netlist;
 pub mod value;
