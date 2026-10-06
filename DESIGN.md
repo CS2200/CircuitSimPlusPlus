@@ -1,6 +1,31 @@
 # CircuitSim++ — Design & Specification
 
-**Status:** Draft v0.4 — all design decisions resolved (D13 delay-table values pending staff workshop; engine ships with draft values).
+**Status:** v1.0-draft — integrated. M0–M3 built and merged; contract v1.1 (docs/ipc.md) is the live IPC norm; amendments below are ratified.
+
+**Changelog v0.4 → v1.0-draft (integration amendments, ratified after the parallel build)**
+
+*IPC contract (now normative in docs/ipc.md v1.1):*
+- `timing_update.violations` is a structured list `{circuit, comp_id, kind, detail}[]` (was count-only; count = length). Report keeps a `timing_violations` count field per §8.2.
+- `net_diffs.changes[]` gains optional `at` (ns since run start; delay mode only) — true propagation animation.
+- `NetDiffs.full`: the one initial full-state batch after load/resume/reset — the documented exception to "diffs only."
+- `sim_reset` command added: fresh power-on + autoload re-apply (G6 delivered end-to-end).
+- CompId on the wire = document-order index within the referenced circuit (never post-flatten); hierarchical designs attribute via `circuit` fields; `sim_halted.details` is machine-parseable (`comp <id> pin "<name>": …`).
+- Tick = one clock half-period (delay mode) / one cycle (zero mode). `top_paths` entries carry `{circuit, comps, delay_ns}`; `NamedComponent` gains `circuit`; hierarchical memory addressing is `instance/…/name`.
+
+*Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/delay-table.md, docs/autograder.md):*
+- Resource caps: bitsize ≤ 32; gate inputs ≤ 64; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
+- Power-on state = 0 for registers/RAM (deterministic, not X); zero-delay feedback nets seed 0, splitters seed Z (they carry, never originate).
+- Register reset is synchronous and wins over enable; divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
+- The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters never).
+- `clock_half_period_ns` engine parameter (CLI default 1000 ns).
+- **Boot settle**: the delay engine settles to quiescence before cycle accounting begins — overclocked designs now correctly yield setup/hold violations instead of spurious floating-read halts.
+- **Wire delay is per-path** (driver→sink path length × constant; stubs never inflate other sinks; Manhattan fallback for missing points) — layout cannot unfairly change a student's grade.
+- STA totals include destination setup time; DTA settle is edge-to-settle including clk→Q (convention table in delay-table.md).
+- Exit-code taxonomy, assertion grammar, JSON test-spec schema, snapshot schema: `docs/autograder.md`.
+- `wiring.controlled-buffer` added to the component registry (required by §4.1 tri-state; omitted from the original list).
+- Gate pins are named `in0..inN`/`out` (the §5.2 sketch's `a`/`b` was illustrative).
+
+*Deferred:* **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, draw-wires-first, delete-component-keep-wires). Proposed by the frontend build; needs schema + editor op + engine semantics. Not scheduled.
 **Audience:** CS 2200 TA team, implementers (human or agent).
 **Scope:** Clean-slate rewrite of CircuitSim (Java/JavaFX, `com.ra4king.circuitsim`, format `1.11.2-CE`) as a Rust simulation core with a Tauri + React desktop frontend, a headless autograder CLI, and a new graph-based file format.
 

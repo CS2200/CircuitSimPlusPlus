@@ -1,5 +1,16 @@
 # UI Agent — Task List
 
+> **Status (2026-10-06, human): COMPLETE (mock-verified) + integrated.** U1–U8 all landed
+> and merged to master; contract v1.1 uptake done (structured violations with on-canvas
+> markers, event-timestamped pulses, full-batch initial paint, halt attribution). The
+> mock→real seam is wired: `crates/app` now constructs `csim_core::session::Session` and
+> the IPC surface gained `sim_reset` (reset = engine reset + autoload re-apply).
+> Gates: 182 unit + 16 e2e green, lint/build clean, bench ~3 ms avg render on the stress
+> scene (SwiftShader). Owed to the human: U4/U7 screenshot sign-offs, real-GPU 60 FPS
+> re-check on a packaged build, GITHUB_REPO value, release dry-run (needs the remote).
+> Follow-ups filed: pin/component spatial indexing, hover re-render churn, U4 spec-letter
+> partials (wire-thickness∝bitsize, idle-wire hover), file open/save UI (planned seam).
+
 **Mission:** Build the Tauri + React desktop app per `DESIGN.md` — Milestones M2, M3, the UI side of M4, and M5.
 **Owns:** `frontend/**`, `crates/app/**` (Tauri shell), `docs/ipc.md`, `.github/workflows/frontend.yml`.
 **Never touches:** `crates/core/**`, `crates/cli/**`, `tests/**`, `docs/tasks/**`, `DESIGN.md`, `docs/format-v2.md`, `docs/delay-table.md`. (Exception: may append `crates/app` to the root `Cargo.toml` workspace members — nothing else in that file.)

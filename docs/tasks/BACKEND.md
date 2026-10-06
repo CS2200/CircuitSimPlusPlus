@@ -1,5 +1,14 @@
 # Backend Agent — Task List
 
+> **Status (2026-10-06, human): COMPLETE.** B1–B11 all landed and merged to master,
+> plus the integration fix round (panic-on-input cluster, boot-settle floating semantics,
+> final-cycle T_obs fold, per-path wire delays, Session/api::Sim keystone, CLI fixes,
+> docs/autograder.md + format-v2 §9 + delay-table conventions). Gates: 193 tests green,
+> clippy/fmt/doc clean, Gradescope image verified in a 2 GB container (both CPUs grade
+> in ~0.01 s; ~25× under the M1 time budget, ~3 MB RSS). Remaining known minor items:
+> Q6 (`--timeout` overflow), Q9 (cross-mode resume error message), Q10 (snapshot exit-code
+> mapping) — non-blocking follow-ups.
+
 **Mission:** Build `csim-core` (simulation engine) and `csim-cli` (headless autograder) per `DESIGN.md` — Milestones M0 + M1, plus the engine side of M4.
 **Owns:** `crates/core/**`, `crates/cli/**`, `tests/**`, `docs/format-v2.md`, `docs/delay-table.md`, `crates/core/data/**`, `.github/workflows/backend.yml`, root `Cargo.toml`.
 **Never touches:** `frontend/**`, `crates/app/**`, `docs/tasks/**`, `DESIGN.md`, `docs/ipc.md`.

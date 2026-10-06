@@ -55,6 +55,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 | `sim_step_tick` / `sim_step_cycles` | `{}` / `{ n }` | — |
 | `sim_run_until` | `{ cycle }` | — |
 | `sim_set_mode` | `{ mode: "zero" \| "delay" }` | — |
+| `sim_reset` | `{}` | — |
 | `poke` | `{ comp_id, pin, value }` | — |
 | `mem_read` / `mem_write` | `{ name, addr, len }` / `{ name, addr, values }` | `[{v,x,z}]` / — |
 | `snapshot` / `resume` | `{ path }` | — |
@@ -66,7 +67,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 | `net_diffs` | `{ cycle, changes: [{ net: u32, val: {v,x,z} }] }` | Only changed nets; ≤ 1 batch per animation frame consumed; intermediate frames may be dropped — never queue a backlog |
 | `sim_status` | `{ running, cycle, mode, eff_hz }` | On play/pause and ~1 Hz while running |
 | `sim_halted` | `{ cycle, reason, details }` | `reason`: `breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names component/pin for highlighting |
-| `timing_update` | `{ T_obs, est_time, violations, top_paths: [[comp_id]] }` | After `sim_run_until` / pause |
+| `timing_update` | `{ t_obs, est_time, violations, top_paths }` | After `sim_run_until` / pause |
 
 **LoadError** (collected, never thrown): `{ kind, message, circuit, comp_id? , wire_idx? }`.
 

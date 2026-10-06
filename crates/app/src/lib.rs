@@ -8,8 +8,7 @@
 //! Session model (DESIGN.md §7.2): one `Box<dyn Sim + Send>` per app,
 //! guarded by a mutex in Tauri state; the engine runs on its own thread
 //! and pushes events through a [`TauriSink`]. The concrete `Sim`
-//! implementation lands with BACKEND.md B9; until then session creation
-//! returns a clean error and the UI runs on the mock (`VITE_MOCK_CORE=1`).
+//! implementation is [`csim_core::session::Session`].
 
 use std::sync::Mutex;
 
@@ -17,6 +16,7 @@ use csim_core::api::{
     CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimMode, SimStatus,
     TimingUpdate, WireValue,
 };
+use csim_core::session::Session;
 use tauri::{AppHandle, Emitter, State};
 
 /// Tauri event names (frontend subscribes to these — see `docs/ipc.md`).
@@ -53,21 +53,21 @@ impl EventSink for TauriSink {
 /// The one live simulation session (None before the first load).
 struct SimState(Mutex<Option<Box<dyn Sim + Send>>>);
 
-/// Construct a session over the engine. BACKEND.md B9 lands the concrete
-/// `Sim` implementation in csim-core; swap it in here (one line) when it
-/// exists. Until then the real-core path reports cleanly and the frontend
-/// runs against the TypeScript mock.
-fn new_session(_sink: TauriSink) -> Result<Box<dyn Sim + Send>, String> {
-    Err("csim-core session API not available yet (BACKEND.md B9); run the UI with VITE_MOCK_CORE=1".into())
+/// Construct a session over the real engine (the integration swap point).
+fn new_session(sink: TauriSink) -> Result<Box<dyn Sim + Send>, String> {
+    Ok(Box::new(Session::new(Box::new(sink))))
 }
 
-fn lock<'a>(state: &'a State<SimState>) -> Result<std::sync::MutexGuard<'a, Option<Box<dyn Sim + Send>>>, String> {
-    state.0.lock().map_err(|_| "sim state lock poisoned".to_string())
+fn lock<'a>(
+    state: &'a State<SimState>,
+) -> Result<std::sync::MutexGuard<'a, Option<Box<dyn Sim + Send>>>, String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "sim state lock poisoned".to_string())
 }
 
-fn session<'a>(
-    guard: &'a mut Option<Box<dyn Sim + Send>>,
-) -> Result<&'a mut Box<dyn Sim + Send>, String> {
+fn session(guard: &mut Option<Box<dyn Sim + Send>>) -> Result<&mut Box<dyn Sim + Send>, String> {
     guard
         .as_mut()
         .ok_or_else(|| "no circuit loaded".to_string())
@@ -108,67 +108,101 @@ fn save_circuit(
 #[tauri::command]
 fn sim_play(state: State<SimState>, hz: u64) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.play(hz))
+    session(&mut guard)?.play(hz);
+    Ok(())
 }
 
 #[tauri::command]
 fn sim_pause(state: State<SimState>) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.pause())
+    session(&mut guard)?.pause();
+    Ok(())
 }
 
 #[tauri::command]
 fn sim_step_tick(state: State<SimState>) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.step_tick())
+    session(&mut guard)?.step_tick();
+    Ok(())
 }
 
 #[tauri::command]
 fn sim_step_cycles(state: State<SimState>, n: u64) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.step_cycles(n))
+    session(&mut guard)?.step_cycles(n);
+    Ok(())
 }
 
 #[tauri::command]
 fn sim_run_until(state: State<SimState>, cycle: u64) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.run_until(cycle))
+    session(&mut guard)?.run_until(cycle);
+    Ok(())
 }
 
 #[tauri::command]
 fn sim_set_mode(state: State<SimState>, mode: SimMode) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.set_mode(mode))
+    session(&mut guard)?.set_mode(mode);
+    Ok(())
 }
 
+/// Fresh power-on state; every memory's autoload image re-applies
+/// (DESIGN.md §5.2 / G6).
 #[tauri::command]
-fn poke(state: State<SimState>, comp_id: CompId, pin: String, value: WireValue) -> Result<(), String> {
+fn sim_reset(state: State<SimState>) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.poke(comp_id, &pin, value))
+    session(&mut guard)?.reset();
+    Ok(())
 }
 
 #[tauri::command]
-fn mem_read(state: State<SimState>, name: String, addr: u64, len: u64) -> Result<Vec<WireValue>, String> {
+fn poke(
+    state: State<SimState>,
+    comp_id: CompId,
+    pin: String,
+    value: WireValue,
+) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    session(&mut guard)?.poke(comp_id, &pin, value);
+    Ok(())
+}
+
+#[tauri::command]
+fn mem_read(
+    state: State<SimState>,
+    name: String,
+    addr: u64,
+    len: u64,
+) -> Result<Vec<WireValue>, String> {
     let mut guard = lock(&state)?;
     Ok(session(&mut guard)?.mem_read(&name, addr, len))
 }
 
 #[tauri::command]
-fn mem_write(state: State<SimState>, name: String, addr: u64, values: Vec<WireValue>) -> Result<(), String> {
+fn mem_write(
+    state: State<SimState>,
+    name: String,
+    addr: u64,
+    values: Vec<WireValue>,
+) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.mem_write(&name, addr, &values))
+    session(&mut guard)?.mem_write(&name, addr, &values);
+    Ok(())
 }
 
 #[tauri::command]
 fn snapshot(state: State<SimState>, path: String) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.snapshot(&path))
+    session(&mut guard)?.snapshot(&path);
+    Ok(())
 }
 
 #[tauri::command]
 fn resume(state: State<SimState>, path: String) -> Result<(), String> {
     let mut guard = lock(&state)?;
-    Ok(session(&mut guard)?.resume(&path))
+    session(&mut guard)?.resume(&path);
+    Ok(())
 }
 
 pub fn run() {
@@ -183,6 +217,7 @@ pub fn run() {
             sim_step_cycles,
             sim_run_until,
             sim_set_mode,
+            sim_reset,
             poke,
             mem_read,
             mem_write,
