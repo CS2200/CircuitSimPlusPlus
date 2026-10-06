@@ -1,0 +1,22 @@
+# CircuitSim++ workspace — see DESIGN.md (normative spec) and docs/tasks/ (execution).
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli", "crates/app"]
+# The Tauri shell (crates/app) needs system webview deps; day-to-day backend
+# work uses the default members only. Frontend CI builds crates/app explicitly.
+default-members = ["crates/core", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+indexmap = "2"
+clap = { version = "4", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+csim-core = { path = "crates/core" }

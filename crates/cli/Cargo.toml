@@ -1,0 +1,15 @@
+[package]
+name = "csim"
+description = "CircuitSim++ headless CLI / autograder runner — see DESIGN.md §8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "csim"
+path = "src/main.rs"
+
+[dependencies]
+csim-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,139 @@
+/* CircuitSim++ theme system (DESIGN.md §7.1, decision D8).
+ * Palettes are data: a future colorblind-accessibility pass ships as a new
+ * theme block, not a refactor.
+ */
+
+:root,
+[data-theme="dark"] {
+  --bg: #16161f;
+  --panel: #22222e;
+  --panel-border: #34344a;
+  --text: #e6e6f0;
+  --text-dim: #9a9ab0;
+
+  /* Wire states (per-bit) */
+  --wire-low: #3a6ea5;
+  --wire-high: #40dc82;
+  --wire-x: #e5534b;
+  --wire-z: #8a8a8a;
+  --wire-disconnected: #2c2c3a;
+
+  /* Per-bus hues (multi-bit "rainbow buses", DLS-style) */
+  --bus-a: #f0b43c;
+  --bus-b: #b478e6;
+
+  --accent: #5b8def;
+}
+
+[data-theme="light"] {
+  --bg: #f4f4f8;
+  --panel: #ffffff;
+  --panel-border: #d4d4e0;
+  --text: #1c1c26;
+  --text-dim: #5a5a6e;
+
+  --wire-low: #6a9ecf;
+  --wire-high: #1faa53;
+  --wire-x: #d43a32;
+  --wire-z: #909090;
+  --wire-disconnected: #c8c8d4;
+
+  --bus-a: #c88f1e;
+  --bus-b: #8a4fc0;
+
+  --accent: #3b6fd4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.app-header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.header-actions button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+
+.app-canvas-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: var(--text-dim);
+}
+
+.app-statusbar {
+  padding: 0.3rem 1rem;
+  background: var(--panel);
+  border-top: 1px solid var(--panel-border);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+/* Wire color demo swatches (placeholder body; real wires are canvas-rendered). */
+.wire-demo {
+  display: flex;
+  gap: 1rem;
+}
+
+.wire {
+  display: inline-block;
+  width: 64px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.wire-low {
+  background: var(--wire-low);
+}
+.wire-high {
+  background: var(--wire-high);
+}
+.wire-bus-a {
+  background: var(--bus-a);
+}
+.wire-bus-b {
+  background: var(--bus-b);
+}
