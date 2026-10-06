@@ -838,6 +838,101 @@ impl Behavior {
             _ => None,
         }
     }
+
+    /// Which eval inputs combinationally affect the outputs (the zero-delay
+    /// engine's levelization, task B5). Indices are positions in the eval
+    /// `ins` slice (input pins in pin-signature order). Default: all inputs.
+    pub fn comb_input_deps(&self, n_inputs: usize) -> Vec<usize> {
+        match &self.kind {
+            // q comes from internal state only.
+            BehaviorKind::Register { .. } => Vec::new(),
+            // dout = f(state, addr) — din/we/clk only matter at the edge.
+            BehaviorKind::Ram { .. } => vec![0],
+            _ => (0..n_inputs).collect(),
+        }
+    }
+
+    /// Snapshot of internal state (task B5 savestates). JSON-encoded via
+    /// the IPC `WireValue` hex masks — deterministic by construction.
+    pub fn save_state(&self) -> Json {
+        match &self.kind {
+            BehaviorKind::Register { state } => value_to_json(state),
+            BehaviorKind::Ram { words, .. } | BehaviorKind::Rom { words, .. } => {
+                Json::Array(words.iter().map(value_to_json).collect())
+            }
+            BehaviorKind::Pin {
+                is_output: false,
+                value,
+            } => value_to_json(value),
+            BehaviorKind::Button { pressed } => Json::Bool(*pressed),
+            BehaviorKind::Clock { phase } => Json::Bool(*phase),
+            _ => Json::Null,
+        }
+    }
+
+    /// Restore a snapshot produced by [`Behavior::save_state`]. Returns
+    /// `false` on shape/width mismatch (snapshot from a different circuit).
+    pub fn load_state(&mut self, state: &Json) -> bool {
+        match &mut self.kind {
+            BehaviorKind::Register { state: s } => {
+                let Some(v) = value_from_json(state, s.width()) else {
+                    return false;
+                };
+                *s = v;
+                true
+            }
+            BehaviorKind::Ram { words, .. } | BehaviorKind::Rom { words, .. } => {
+                let Json::Array(items) = state else {
+                    return false;
+                };
+                if items.len() != words.len() {
+                    return false;
+                }
+                for (w, item) in words.iter_mut().zip(items) {
+                    let Some(v) = value_from_json(item, w.width()) else {
+                        return false;
+                    };
+                    *w = v;
+                }
+                true
+            }
+            BehaviorKind::Pin {
+                is_output: false,
+                value,
+            } => {
+                let Some(v) = value_from_json(state, value.width()) else {
+                    return false;
+                };
+                *value = v;
+                true
+            }
+            BehaviorKind::Button { pressed } => {
+                let Some(b) = state.as_bool() else {
+                    return false;
+                };
+                *pressed = b;
+                true
+            }
+            BehaviorKind::Clock { phase } => {
+                let Some(b) = state.as_bool() else {
+                    return false;
+                };
+                *phase = b;
+                true
+            }
+            // Stateless kinds accept (and ignore) the null placeholder.
+            _ => state.is_null(),
+        }
+    }
+}
+
+fn value_to_json(v: &Value) -> Json {
+    serde_json::to_value(v.to_wire_value()).expect("WireValue serializes")
+}
+
+fn value_from_json(j: &Json, width: u32) -> Option<Value> {
+    let wv: crate::api::WireValue = serde_json::from_value(j.clone()).ok()?;
+    Value::from_wire_value(&wv, width).ok()
 }
 
 /// One bit of the splitter's per-bit resolution: two candidate drives

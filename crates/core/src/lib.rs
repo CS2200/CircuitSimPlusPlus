@@ -21,3 +21,4 @@ pub mod format;
 pub mod ids;
 pub mod netlist;
 pub mod value;
+pub mod zero;
