@@ -91,9 +91,13 @@ impl FloatingRead {
 /// instance's `attrs.delay` overrides `prop`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Timing {
+    /// Combinational propagation delay; clk→Q for state elements.
     pub prop: u64,
+    /// Setup time: data must be stable this long before the clock edge.
     pub setup: u64,
+    /// Hold time: data must remain stable this long after the clock edge.
     pub hold: u64,
+    /// RAM/ROM asynchronous read settling time.
     pub access: u64,
 }
 

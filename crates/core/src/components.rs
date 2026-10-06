@@ -4,7 +4,7 @@
 //!
 //! This table is the single source of truth for component *interfaces* —
 //! the pins a component instance exposes, as a function of its `attrs`.
-//! One code path ([`analyze`]) feeds both load-time validation (task B2,
+//! One code path (`analyze`) feeds both load-time validation (task B2,
 //! strict, errors collected) and netlist construction (task B3, lenient,
 //! defaults substituted), so the two can never drift apart.
 //!
@@ -25,9 +25,14 @@ use crate::value::Value;
 /// enough that a max-depth RAM's state fits comfortably in the 2 GB
 /// grader container (a `Value` is ~100 bytes of struct + heap).
 pub const MAX_BITSIZE: u32 = 32;
+/// Max inputs on a multi-input gate (`inputs` attr).
 pub const MAX_GATE_INPUTS: u32 = 64;
+/// Max select bits on mux/demux (`selectBits`) and input bits on decoder
+/// (`inputBits`).
 pub const MAX_SELECT_BITS: u32 = 8;
+/// Max memory depth in words (`depth` attr on RAM/ROM).
 pub const MAX_MEM_DEPTH: u32 = 1 << 20;
+/// Max split pins on a splitter.
 pub const MAX_SPLIT_PINS: u32 = 64;
 
 /// Every component type string the registry knows (sorted). Delay-table
@@ -70,7 +75,9 @@ pub const KNOWN_TYPES: &[&str] = &[
 /// Electrical direction of a pin (used for net driver/sink accounting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinDir {
+    /// Input: consumes (sinks) the value of its net.
     In,
+    /// Output: drives its net.
     Out,
     /// Bidirectional (splitter pins): may drive or consume depending on
     /// which side is driven — resolved dynamically by the engine.
@@ -88,11 +95,17 @@ pub enum PinDir {
 /// Gate function. `Nand`/`Nor`/`Xnor` are the base op with inverted output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateOp {
+    /// AND.
     And,
+    /// OR.
     Or,
+    /// XOR (odd parity).
     Xor,
+    /// AND with inverted output.
     Nand,
+    /// OR with inverted output.
     Nor,
+    /// XOR with inverted output.
     Xnor,
 }
 
@@ -111,119 +124,196 @@ impl GateOp {
 /// Shifter mode (`attrs.shift`, DESIGN.md §6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShiftMode {
+    /// Logical left shift (`ll`).
     LogicalLeft,
+    /// Logical right shift (`lr`).
     LogicalRight,
+    /// Arithmetic (sign-preserving) right shift (`ar`).
     ArithRight,
+    /// Rotate left (`rl`).
     RotateLeft,
+    /// Rotate right (`rr`).
     RotateRight,
 }
 
 /// Bit-extender fill mode (`attrs.mode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtendMode {
+    /// Zero-fill the new upper bits (`zero`).
     Zero,
+    /// Replicate the input's top bit (`sign`).
     Sign,
 }
 
-/// A component's typed configuration, parsed from `attrs` by [`analyze`]
+/// A component's typed configuration, parsed from `attrs` by `analyze`
 /// (leniently: invalid values fall back to the same defaults the pin
 /// signatures use, since netlisting runs only after validation passed).
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompKind {
+    /// NOT gate (`gate.not`).
     Not {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Buffer (`gate.buffer`).
     Buffer {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Multi-input gate (`gate.and`/`or`/`xor`/`nand`/`nor`/`xnor`).
     Gate {
+        /// Gate function.
         op: GateOp,
+        /// Data width in bits.
         bitsize: u32,
+        /// Number of inputs (`inputs` attr, ≥ 2).
         inputs: u32,
+        /// Names of input pins to invert (`negateInputs` attr).
         negate_inputs: Vec<String>,
     },
+    /// Tri-state controlled buffer (`wiring.controlled-buffer`).
     ControlledBuffer {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// I/O pin (`wiring.pin`) — part of the containing circuit's interface.
     Pin {
+        /// Width in bits.
         bitsize: u32,
+        /// True when this pin is an output of its circuit (`isOutput` attr).
         is_output: bool,
     },
+    /// Constant driver (`wiring.constant`).
     Constant {
+        /// Width in bits.
         bitsize: u32,
+        /// Driven value (`value` attr, parsed; invalid values were already
+        /// reported by validation).
         value: Value,
     },
+    /// Clock source (`wiring.clock`); single 1-bit output.
     Clock,
     /// Split pin name → bus bit indices (array position = split-pin bit),
     /// sorted by pin name; `bus_width` covers the highest mapped bit + 1.
     Splitter {
+        /// Per split pin: (pin name, bus bit indices), sorted by pin name.
         splits: Vec<(String, Vec<u32>)>,
+        /// Bus width in bits (highest mapped bit index + 1).
         bus_width: u32,
     },
+    /// Probe (`wiring.probe`).
     Probe {
+        /// Width in bits.
         bitsize: u32,
     },
+    /// Multiplexer (`plexers.mux`).
     Mux {
+        /// Data width in bits.
         bitsize: u32,
+        /// Select width in bits (`selectBits` attr); 2^select data inputs.
         select_bits: u32,
     },
+    /// Demultiplexer (`plexers.demux`).
     Demux {
+        /// Data width in bits.
         bitsize: u32,
+        /// Select width in bits (`selectBits` attr); 2^select data outputs.
         select_bits: u32,
     },
+    /// Decoder (`plexers.decoder`).
     Decoder {
+        /// Input width in bits (`inputBits` attr); 2^n one-hot outputs.
         input_bits: u32,
     },
+    /// Adder (`arith.adder`); `a` + `b` + `cin` → `out`, `cout`.
     Adder {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Subtractor (`arith.subtractor`); `a` − `b` − `bin` → `out`, `bout`.
     Subtractor {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Multiplier (`arith.multiplier`); the output pin is double-width.
     Multiplier {
+        /// Input width in bits (output is `2 × bitsize`).
         bitsize: u32,
     },
+    /// Divider (`arith.divider`); quotient and remainder outputs.
     Divider {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Comparator (`arith.comparator`); `lt`/`eq`/`gt` outputs.
     Comparator {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Negator (two's complement, `arith.negator`).
     Negator {
+        /// Data width in bits.
         bitsize: u32,
     },
+    /// Shifter (`arith.shifter`).
     Shifter {
+        /// Data width in bits.
         bitsize: u32,
+        /// Shift mode (`shift` attr).
         mode: ShiftMode,
     },
+    /// Bit extender (`arith.bit-extender`).
     BitExtender {
+        /// Input width in bits (`inBits` attr).
         in_bits: u32,
+        /// Output width in bits (`outBits` attr; must exceed `in_bits`).
         out_bits: u32,
+        /// Fill mode for the new upper bits (`mode` attr).
         mode: ExtendMode,
     },
+    /// Register (`mem.register`); `d`/`clk`/`en`/`rst` in, `q` out.
     Register {
+        /// Width in bits.
         bitsize: u32,
     },
+    /// RAM (`mem.ram`).
     Ram {
+        /// Word width in bits.
         bitsize: u32,
+        /// Depth in words (`depth` attr; power of two).
         depth: u32,
+        /// Optional autoload file path (`autoload` attr; resolved by the loader).
         autoload: Option<String>,
+        /// Optional inline `rle-hex-v1` image (`contents` attr).
         contents: Option<String>,
     },
+    /// ROM (`mem.rom`).
     Rom {
+        /// Word width in bits.
         bitsize: u32,
+        /// Depth in words (`depth` attr; power of two).
         depth: u32,
+        /// Optional autoload file path (`autoload` attr; resolved by the loader).
         autoload: Option<String>,
+        /// Optional inline `rle-hex-v1` image (`contents` attr).
         contents: Option<String>,
     },
+    /// Subcircuit instance (`subcircuit`); its pins come from the referenced
+    /// circuit's `wiring.pin` components.
     Subcircuit {
+        /// Name of the referenced circuit (`circuit` attr).
         circuit: String,
     },
+    /// Button (`io.button`); single 1-bit output.
     Button,
+    /// LED (`io.led`).
     Led {
+        /// Width in bits.
         bitsize: u32,
     },
+    /// Hex display (`io.hexdisplay`).
     HexDisplay {
+        /// Input width in bits (default 4).
         bitsize: u32,
     },
 }
@@ -232,15 +322,21 @@ pub enum CompKind {
 /// (`attrs.delay`, DESIGN.md §4.3 — `None` = use the delay table, task B7).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompConfig {
+    /// Typed component kind plus its attr-derived parameters.
     pub kind: CompKind,
+    /// Per-instance delay override in ticks (`delay` attr); `None` = use the
+    /// delay table (task B7).
     pub delay: Option<u64>,
 }
 
 /// A component pin's interface: name, direction, and width in bits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinSig {
+    /// Pin name (e.g. `in0`, `out`, `bus`).
     pub name: String,
+    /// Electrical direction (driver/sink accounting).
     pub dir: PinDir,
+    /// Width in bits.
     pub width: u32,
 }
 

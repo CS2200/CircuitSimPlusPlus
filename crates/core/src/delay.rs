@@ -85,7 +85,9 @@ const TOP_K: usize = 10;
 /// A setup/hold warning (DESIGN.md §4.3): recorded, never corrupts state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimingViolation {
+    /// Component whose input changed too close to its clock edge.
     pub comp: CompId,
+    /// Which discipline was violated (setup or hold).
     pub kind: ViolationKind,
     /// Simulation time of the offending edge.
     pub time: u64,
@@ -93,6 +95,7 @@ pub struct TimingViolation {
     pub cycle: u64,
 }
 
+/// Which timing discipline a [`TimingViolation`] records (§4.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ViolationKind {
     /// Data changed within `t_setup` before the edge.
@@ -116,6 +119,7 @@ pub struct RunReport {
     pub top_paths: Vec<(u64, Vec<CompId>)>,
     /// FNV-1a over every applied event — determinism tripwire (§4.6).
     pub trace_hash: u64,
+    /// Total events applied over the run.
     pub events_processed: u64,
 }
 
@@ -570,6 +574,7 @@ impl DelayEngine {
         Ok(eng)
     }
 
+    /// The flattened design under simulation.
     pub fn netlist(&self) -> &Netlist {
         &self.netlist
     }
@@ -584,14 +589,17 @@ impl DelayEngine {
         self.rising_seen
     }
 
+    /// Max observed per-cycle settle time so far (§4.4).
     pub fn t_obs(&self) -> u64 {
         self.t_obs
     }
 
+    /// Setup/hold warnings recorded so far.
     pub fn violations(&self) -> &[TimingViolation] {
         &self.violations
     }
 
+    /// FNV-1a hash over every applied event so far (§4.6).
     pub fn trace_hash(&self) -> u64 {
         self.trace_hash
     }

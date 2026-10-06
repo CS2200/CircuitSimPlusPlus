@@ -47,8 +47,11 @@ use crate::timing_table::TimingTable;
 /// driver first, source last — same convention as DTA's top paths.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaPath {
+    /// Structural arrival time at the endpoint.
     pub delay: u64,
+    /// Component at whose input the path ends.
     pub endpoint: CompId,
+    /// Driver chain, endpoint's driver first, source last.
     pub comps: Vec<CompId>,
 }
 
@@ -56,7 +59,10 @@ pub struct StaPath {
 /// all endpoint arrivals).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaResult {
+    /// Structural clock-period bound (max over all endpoint arrivals).
     pub t_sta: u64,
+    /// Top-k longest structural paths, longest first (deterministic
+    /// tie-break, §4.6).
     pub top_paths: Vec<StaPath>,
 }
 

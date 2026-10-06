@@ -42,9 +42,13 @@ const LIMB_BITS: u32 = 64;
 /// A single four-state bit (DESIGN.md §4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bit {
+    /// Logic 0.
     Zero,
+    /// Logic 1.
     One,
+    /// Unknown / contention.
     X,
+    /// Undriven / floating (high-impedance).
     Z,
 }
 
@@ -65,10 +69,21 @@ impl fmt::Display for Bit {
 /// panics instead — that is a bug in csim-core, not bad user input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ValueError {
+    /// A mask string contains a non-hex-digit character.
     #[error("invalid hex digit in mask {mask:?}")]
-    InvalidHex { mask: String },
+    InvalidHex {
+        /// The offending mask string.
+        mask: String,
+    },
+    /// A mask's value does not fit in the requested bit width.
     #[error("mask {mask:?} does not fit in {width} bits")]
-    MaskTooWide { mask: String, width: u32 },
+    MaskTooWide {
+        /// The offending mask string.
+        mask: String,
+        /// The width (bits) the mask was parsed into.
+        width: u32,
+    },
+    /// The v/x/z masks set the same bit in more than one mask.
     #[error("value masks overlap: a bit is set in more than one of v/x/z")]
     OverlappingMasks,
 }
@@ -387,6 +402,7 @@ impl Value {
         self.zs[last] &= m;
     }
 
+    /// Number of bits in the vector.
     pub fn width(&self) -> u32 {
         self.width
     }

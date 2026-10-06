@@ -104,12 +104,16 @@ impl Uf {
 /// A primitive component instance in the flattened design.
 #[derive(Debug, Clone)]
 pub struct FlatComp {
+    /// Unique instance id; index into [`Netlist::comps`].
     pub id: CompId,
+    /// Component type string (e.g. `"gate.and"`, `"mem.register"`).
     pub type_: String,
     /// Hierarchical autograder name (see module docs), if the component is
     /// named.
     pub name: Option<String>,
+    /// Instance attributes, as given in the document.
     pub attrs: Map<String, Json>,
+    /// Pin connections, in the component's pin-signature order.
     pub pins: Vec<PinConn>,
     /// Circuit (by name) whose definition this instance came from.
     pub def_circuit: CircuitName,
@@ -138,16 +142,22 @@ impl FlatComp {
 /// One pin's net connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinConn {
+    /// Pin name (from the component's pin signature).
     pub pin: String,
+    /// Pin direction (In / Out / InOut).
     pub dir: PinDir,
+    /// Pin width in bits.
     pub width: u32,
+    /// Net this pin connects to.
     pub net: NetId,
 }
 
 /// A derived net (§5.1 — internal only, never stored in files).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Net {
+    /// Unique net id; index into [`Netlist::nets`].
     pub id: NetId,
+    /// Net width in bits (all attached pins must agree, checked at build).
     pub width: u32,
     /// No driving pin (Out or InOut) at all — the net floats (`Z`).
     pub floating: bool,
@@ -168,10 +178,16 @@ pub struct Net {
 /// The flattened design: primitive instances + derived nets + named access.
 #[derive(Debug, Clone)]
 pub struct Netlist {
+    /// Primitive instances, in expansion order; indexed by `CompId`.
     pub comps: Vec<FlatComp>,
+    /// Derived nets; indexed by `NetId`.
     pub nets: Vec<Net>,
+    /// Autograder-visible named components (RAM/ROM/register/probe); §8.2.
     pub named: Vec<NamedComponent>,
+    /// Root-circuit wire segments per net, for UI net highlighting.
     pub net_map: Vec<NetMapEntry>,
+    /// Index of the root circuit in the document's `circuits` array (see
+    /// [`root_circuit`]).
     pub root: usize,
 }
 

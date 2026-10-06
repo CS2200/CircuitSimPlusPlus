@@ -27,10 +27,15 @@ pub const FORMAT_VERSION: u32 = 2;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
+    /// Format identifier; must equal [`FORMAT_NAME`].
     pub format: String,
+    /// Format version; must equal [`FORMAT_VERSION`].
     pub version: u32,
+    /// Document name.
     pub name: String,
+    /// Document-wide settings.
     pub settings: Settings,
+    /// The `main` circuit plus any subcircuits.
     pub circuits: Vec<Circuit>,
 }
 
@@ -39,8 +44,12 @@ pub struct Document {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    /// Interactive delay model (`delayModel`); the autograder pins `Delay`
+    /// regardless (§4.4).
     pub delay_model: SimMode,
+    /// Interactive clock rate in Hz (`clockHz`).
     pub clock_hz: u64,
+    /// Delay table id (`delayTable`), e.g. `cs2200-74ls-v1` (task B7).
     pub delay_table: String,
 }
 
@@ -48,9 +57,12 @@ pub struct Settings {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Circuit {
+    /// Circuit name (unique within the document).
     pub name: String,
+    /// Placed component instances.
     #[serde(default)]
     pub components: Vec<Component>,
+    /// Wires (explicit edges between endpoints).
     #[serde(default)]
     pub wires: Vec<Wire>,
 }
@@ -62,16 +74,20 @@ pub struct Circuit {
 pub struct Component {
     /// Author-assigned id, unique within its circuit (e.g. `"c17"`).
     pub id: String,
+    /// Component type string (`type`), e.g. `gate.and`; see the registry in
+    /// [`crate::components`].
     #[serde(rename = "type")]
     pub type_: String,
     /// Grid position of the component origin.
     pub pos: [i32; 2],
+    /// Orientation; default east.
     #[serde(default)]
     pub rot: Rotation,
     /// Optional; REQUIRED on autograder-exposed parts (§5.2) and on
     /// `wiring.pin` components (they are the subcircuit interface).
     #[serde(default)]
     pub name: String,
+    /// Type-specific attributes, validated against the component registry.
     #[serde(default)]
     pub attrs: Map<String, Json>,
 }
@@ -79,10 +95,14 @@ pub struct Component {
 /// Component orientation (default east).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Rotation {
+    /// North.
     N,
+    /// East (default).
     #[default]
     E,
+    /// South.
     S,
+    /// West.
     W,
 }
 
@@ -90,7 +110,9 @@ pub enum Rotation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Wire {
+    /// First endpoint.
     pub a: Endpoint,
+    /// Second endpoint.
     pub b: Endpoint,
     /// Drawn polyline from endpoint `a` to endpoint `b` (absolute grid
     /// coordinates, endpoints' attachment points included). Empty means a
@@ -113,7 +135,9 @@ impl Wire {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Endpoint {
+    /// Endpoint attached to a component pin.
     Pin(PinEndpoint),
+    /// Endpoint junctioned onto a segment of another wire.
     Join(JoinEndpoint),
 }
 
@@ -135,16 +159,21 @@ impl Endpoint {
     }
 }
 
+/// Wire endpoint attached to a component pin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PinEndpoint {
+    /// Component id (unique within its circuit).
     pub comp: String,
+    /// Pin name on that component.
     pub pin: String,
 }
 
+/// Wire endpoint junctioned onto a segment of another wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinEndpoint {
+    /// Junction target (wire index + segment).
     pub join: JoinRef,
 }
 
@@ -153,7 +182,9 @@ pub struct JoinEndpoint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JoinRef {
+    /// Index of the target wire within its circuit.
     pub wire: u32,
+    /// 0-based segment index of the target wire's polyline.
     pub segment: u32,
 }
 

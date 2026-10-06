@@ -58,8 +58,11 @@ use crate::value::{Bit, Value};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[error("cycle {cycle}: {reason:?}: {details}")]
 pub struct Halt {
+    /// Why the simulation stopped.
     pub reason: HaltReason,
+    /// Cycle at which the halt occurred.
     pub cycle: u64,
+    /// Human-readable context (e.g. the offending component and pin).
     pub details: String,
 }
 
@@ -261,10 +264,12 @@ impl ZeroEngine {
         })
     }
 
+    /// The flattened design under simulation.
     pub fn netlist(&self) -> &Netlist {
         &self.netlist
     }
 
+    /// Rising clock edges processed so far (the cycle count).
     pub fn cycle(&self) -> u64 {
         self.cycle
     }

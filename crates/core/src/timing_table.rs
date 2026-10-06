@@ -18,7 +18,7 @@
 //! - `wire` — net transport delay = `wire_len × num / den` grid units.
 //! - An instance's `attrs.delay` overrides the *effective* `prop`.
 //!
-//! A table must define every kind in [`REQUIRED_KINDS`]; zero-timing
+//! A table must define every kind in `REQUIRED_KINDS`; zero-timing
 //! kinds (wiring/io) may be listed explicitly for documentation. Unknown
 //! component keys are errors — a misspelled entry must not silently zero
 //! a delay.
@@ -68,15 +68,25 @@ const PER_BIT_KINDS: &[&str] = &["arith.adder", "arith.subtractor"];
 /// Why a table name or table body was rejected.
 #[derive(Debug, Error)]
 pub enum TableError {
+    /// The named table does not exist.
     #[error("unknown delay table '{name}' (available: {})", available.join(", "))]
     Unknown {
+        /// The requested table name.
         name: String,
+        /// The table names that do exist.
         available: Vec<&'static str>,
     },
+    /// The table file is not valid JSON.
     #[error("delay table: JSON parse error: {0}")]
     Json(String),
+    /// The table parsed but failed semantic validation.
     #[error("delay table '{name}' is invalid:\n- {}", issues.join("\n- "))]
-    Invalid { name: String, issues: Vec<String> },
+    Invalid {
+        /// Name of the offending table.
+        name: String,
+        /// The validation failures, one per string.
+        issues: Vec<String>,
+    },
 }
 
 /// One component kind's timing parameters (absent fields default to 0).

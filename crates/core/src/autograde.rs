@@ -57,29 +57,45 @@ use crate::zero::{Halt, ZeroEngine};
 // Exit codes
 // ---------------------------------------------------------------------------
 
+/// Exit 0 — all assertions passed.
 pub const EXIT_OK: i32 = 0;
+/// Exit 1 — assertion failure (also contention/other abnormal halts).
 pub const EXIT_ASSERTION_FAILED: i32 = 1;
+/// Exit 2 — cycle budget consumed while `expect_halt` was set.
 pub const EXIT_CYCLE_LIMIT: i32 = 2;
+/// Exit 3 — timeout / RSS guard tripped.
 pub const EXIT_TIMEOUT: i32 = 3;
+/// Exit 4 — oscillation halt.
 pub const EXIT_OSCILLATION: i32 = 4;
+/// Exit 5 — floating-read halt.
 pub const EXIT_FLOATING_READ: i32 = 5;
+/// Exit 6 — malformed file (load/validation/preload errors).
 pub const EXIT_MALFORMED_FILE: i32 = 6;
 
 /// Grading outcome → exit code (table in module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradeOutcome {
+    /// All assertions passed (exit 0).
     Passed,
+    /// An assertion evaluated false (exit 1).
     AssertionFailed,
+    /// Budget consumed without a natural halt while `expect_halt` was set
+    /// (exit 2).
     CycleLimit,
+    /// Timeout / RSS guard tripped (exit 3).
     Timeout,
+    /// Oscillation halt (exit 4).
     Oscillation,
+    /// Floating-read halt (exit 5).
     FloatingRead,
+    /// Load/validation/preload errors (exit 6).
     MalformedFile,
     /// Contention or another abnormal halt not in the taxonomy.
     OtherHalt,
 }
 
 impl GradeOutcome {
+    /// Map to the process exit code (table in module docs).
     pub fn exit_code(self) -> i32 {
         match self {
             GradeOutcome::Passed => EXIT_OK,
@@ -100,11 +116,17 @@ impl GradeOutcome {
 /// Comparison operators (full set — TA decision).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CmpOp {
+    /// `==`
     Eq,
+    /// `!=`
     Ne,
+    /// `<`
     Lt,
+    /// `<=`
     Le,
+    /// `>`
     Gt,
+    /// `>=`
     Ge,
 }
 
@@ -135,19 +157,31 @@ impl CmpOp {
 /// A parsed assertion (see module docs for the grammar).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Assertion {
+    /// `probe('<name>') <op> <value>` — named probe/register value.
     Probe {
+        /// Name of the probe or register.
         name: String,
+        /// Comparison operator.
         op: CmpOp,
+        /// Literal to compare against.
         value: u64,
     },
+    /// `mem('<name>')[<addr>] <op> <value>` — named RAM/ROM word.
     Mem {
+        /// Name of the RAM or ROM.
         name: String,
+        /// Word address.
         addr: u64,
+        /// Comparison operator.
         op: CmpOp,
+        /// Literal to compare against.
         value: u64,
     },
+    /// `violations <op> <value>` — setup/hold warning count.
     Violations {
+        /// Comparison operator.
         op: CmpOp,
+        /// Literal to compare against.
         value: u64,
     },
 }
@@ -313,8 +347,11 @@ pub fn parse_assertion(text: &str) -> Result<Assertion, AssertError> {
 /// Caps on a grading run (§11). `None` = uncapped.
 #[derive(Debug, Clone, Default)]
 pub struct RunLimits {
+    /// Cycle budget for the run.
     pub max_cycles: u64,
+    /// Wall-clock deadline.
     pub timeout: Option<Duration>,
+    /// Peak-RSS guard, in bytes.
     pub rss_cap_bytes: Option<u64>,
 }
 
@@ -332,18 +369,26 @@ pub enum LoadSource {
 /// schedules it at time `at` (ns); zero mode applies it before the run.
 #[derive(Debug, Clone)]
 pub struct Poke {
+    /// Name of the `wiring.pin` input to drive.
     pub target: String,
+    /// Value to drive.
     pub value: u64,
+    /// Time (ns) to drive at — delay mode; ignored by zero mode.
     pub at: u64,
 }
 
 /// Everything a grading run needs that isn't the circuit file.
 #[derive(Debug, Clone)]
 pub struct GradeConfig {
+    /// Engine mode; grading pins `Delay` (DTA, §4.4).
     pub mode: SimMode,
+    /// Run caps (§11).
     pub limits: RunLimits,
+    /// Assertions to evaluate after the run (grammar in module docs).
     pub assertions: Vec<Assertion>,
+    /// Memory preloads: `(name, source)` pairs (`--load name=file`, §8.1).
     pub loads: Vec<(String, LoadSource)>,
+    /// Testbench pokes (§8.3 setup).
     pub pokes: Vec<Poke>,
     /// Global clock half-period in ns (delay mode; §8.3 clock config).
     /// Runtime is event-count-driven, so this only affects violation and
@@ -385,32 +430,49 @@ impl Default for GradeConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct TestSpec {
+    /// Sim mode override.
     pub mode: Option<SimMode>,
+    /// Cycle budget → `RunLimits::max_cycles`.
     pub cycles: Option<u64>,
+    /// Wall-clock timeout, in milliseconds.
     pub timeout_ms: Option<u64>,
+    /// RSS guard, in bytes.
     pub rss_cap_bytes: Option<u64>,
+    /// Course baseline processor's `est_time` for `speedup_vs_baseline`.
     pub baseline_est_time: Option<u64>,
+    /// Require a natural halt within the cycle budget (exit 2 otherwise).
     pub expect_halt: Option<bool>,
+    /// Top-k observed critical paths in the report.
     pub top_paths: Option<usize>,
+    /// Include informational STA (`t_sta`, §4.4 — clearly labeled).
     pub include_sta: Option<bool>,
+    /// §8.3 rubric hook: full credit when `est_time` is below this.
     pub rubric_full_credit_below: Option<u64>,
+    /// Memory preloads.
     pub loads: Vec<SpecLoad>,
+    /// Testbench pokes.
     pub pokes: Vec<SpecPoke>,
+    /// Global clock half-period in ns (delay mode).
     pub clock_half_period_ns: Option<u64>,
+    /// Assertion strings (grammar in module docs).
     pub assertions: Vec<String>,
 }
 
+/// One spec-file memory preload (a `loads` entry).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpecLoad {
+    /// Name of the target memory.
     pub memory: String,
     /// rle-hex-v1 image, resolved relative to the spec file (§11).
     pub file: String,
 }
 
+/// One spec-file poke (a `pokes` entry).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpecPoke {
+    /// Name of the `wiring.pin` input to drive.
     pub target: String,
     /// Literal value (`0x…`/`0b…`/decimal, same syntax as assertions).
     pub value: String,
@@ -420,6 +482,7 @@ pub struct SpecPoke {
 }
 
 impl TestSpec {
+    /// Parse a spec file from raw JSON bytes.
     pub fn from_json(bytes: &[u8]) -> Result<TestSpec, String> {
         serde_json::from_slice(bytes).map_err(|e| format!("test spec: {e}"))
     }
@@ -476,16 +539,22 @@ impl TestSpec {
 /// One setup/hold warning, with the component identified for the report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ViolationEntry {
+    /// Component identity (hierarchical name, else `circuit:def_id`).
     pub comp: String,
+    /// `"setup"` or `"hold"`.
     pub kind: String,
+    /// Time (ns) of the offending input change.
     pub time: u64,
+    /// Cycle in which the violation occurred.
     pub cycle: u64,
 }
 
 /// Per-assertion outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AssertionResult {
+    /// Canonical rendering of the assertion (e.g. `probe('result') == 0x2A`).
     pub assertion: String,
+    /// Whether the assertion held.
     pub passed: bool,
     /// Rendered observed value (hex, or X/Z masks).
     pub actual: String,
@@ -496,7 +565,9 @@ pub struct AssertionResult {
 /// An observed critical path with component identities for UI highlight.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReportPath {
+    /// Observed settle time (ns) of the path.
     pub settle: u64,
+    /// Component identities along the path, for UI highlight.
     pub comps: Vec<String>,
 }
 
@@ -504,37 +575,54 @@ pub struct ReportPath {
 /// across runs/machines; `wall_time_ms`/`peak_rss_bytes` are telemetry.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Report {
+    /// Cycles executed.
     pub cycles: u64,
     /// "completed" | "cycle-limit" | "oscillation" | "floating-read" |
     /// "contention" | "error" | "malformed-file" (+ "-detail" in
     /// `halt_details`).
     pub halt_reason: String,
+    /// Names the component/pin involved in the halt, when any.
     pub halt_details: String,
+    /// Max observed per-cycle settle time, delay-table units (ns); 0 in
+    /// zero mode.
     pub t_obs: u64,
+    /// `cycles × t_obs` (saturating); 0 in zero mode.
     pub est_time: u64,
+    /// `baseline_est_time / est_time`; `None` without a baseline or when
+    /// `est_time == 0`.
     pub speedup_vs_baseline: Option<f64>,
+    /// Setup/hold warnings (§4.3).
     pub timing_violations: Vec<ViolationEntry>,
+    /// Per-assertion outcomes.
     pub assertions: Vec<AssertionResult>,
+    /// Top-k observed critical paths (§4.4).
     pub top_paths: Vec<ReportPath>,
     /// Informational structural bound (§4.4) — may include paths the
     /// design never sensitizes. `None` when not requested or when STA
     /// failed (see `sta_note`).
     pub t_sta: Option<u64>,
+    /// Labeling/provenance note for `t_sta` (§4.4), or the STA error.
     pub sta_note: Option<String>,
     /// DRAFT-table provenance (`cs2200-74ls-v1 (DRAFT)`).
     pub delay_table: String,
+    /// Determinism hash of the event trace (§4.6); delay mode only.
     pub trace_hash: Option<u64>,
     /// §8.3 rubric hook; `None` when no threshold was given.
     pub rubric_full_credit: Option<bool>,
+    /// Load/validation errors when `halt_reason` is `"malformed-file"`.
     pub load_errors: Vec<LoadError>,
+    /// Peak resident set, in bytes (telemetry — varies by machine).
     pub peak_rss_bytes: Option<u64>,
+    /// Wall-clock duration of the run (telemetry — varies by machine).
     pub wall_time_ms: u64,
 }
 
 /// What came back from a grading run.
 #[derive(Debug, Clone)]
 pub struct GradeOutput {
+    /// The JSON report (§8.2).
     pub report: Report,
+    /// Grading outcome — drives the CLI exit code.
     pub outcome: GradeOutcome,
 }
 

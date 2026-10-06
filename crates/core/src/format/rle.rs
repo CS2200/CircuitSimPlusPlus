@@ -18,12 +18,22 @@
 /// RLE-hex parse error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RleError {
+    /// Token has an invalid run count (empty, leading zero, non-decimal, or
+    /// overflowing `u64`). Carries the offending token.
     #[error("invalid count in token '{0}'")]
     BadCount(String),
+    /// Token has an invalid hex value (empty, >16 digits, or non-hex).
+    /// Carries the offending token.
     #[error("invalid hex value in token '{0}' (expected 1-16 hex digits)")]
     BadValue(String),
+    /// The image would expand past the caller's word cap.
     #[error("image has {have} words, exceeding the limit of {max}")]
-    TooManyWords { have: u64, max: u64 },
+    TooManyWords {
+        /// Words the image expands to (at least) once the cap is crossed.
+        have: u64,
+        /// The `max_words` limit passed to [`parse`].
+        max: u64,
+    },
 }
 
 /// Decode an RLE-hex image into words. `max_words` bounds the expansion
