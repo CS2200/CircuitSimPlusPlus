@@ -208,14 +208,24 @@ enum BehaviorKind {
 }
 
 /// Initialize memory words from an optional embedded `rle-hex-v1` image;
-/// missing words are zero. (Post-validation, a malformed image is
-/// impossible; the lenient fallback is zeros.)
+/// missing words are zero. Never panics: post-validation a malformed
+/// image is impossible, and oversized words are masked (validation flags
+/// them first — see components.rs's contents check).
 fn init_words(bitsize: u32, depth: u32, contents: &Option<String>) -> Vec<Value> {
     let mut words = Vec::with_capacity(depth as usize);
     if let Some(image) = contents {
         if let Ok(raw) = crate::format::rle::parse(image, depth as usize) {
             for w in raw {
-                words.push(Value::from_u64(bitsize, w));
+                // Mask, never panic: `from_u64` asserts fit, and an
+                // unvalidated path (engine built by hand) must not crash.
+                words.push(Value::from_u64(
+                    bitsize,
+                    if bitsize >= 64 {
+                        w
+                    } else {
+                        w & ((1u64 << bitsize) - 1)
+                    },
+                ));
             }
         }
     }

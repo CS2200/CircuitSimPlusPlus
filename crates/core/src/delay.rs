@@ -534,9 +534,14 @@ impl DelayEngine {
         };
         // Power-on for combinational loops: seed loop nets to 0 (same
         // deterministic rule as the zero-delay engine) so feedback logic
-        // starts from a defined state.
+        // starts from a defined state. Splitters are excepted: they carry
+        // values but never originate them (B11 — a 0 seed phantom-contends
+        // with the other side of a splitter chain).
         let (_, residue) = crate::zero::levelize(&eng.netlist, &eng.comps);
         for c in residue {
+            if eng.comps[c as usize].is_splitter() {
+                continue;
+            }
             for (_, net) in &eng.cdata[c as usize].out_pins {
                 let width = eng.netlist.nets[net.idx()].width;
                 eng.net_values[net.idx()] = Value::zero(width);

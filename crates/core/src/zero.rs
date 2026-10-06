@@ -149,7 +149,11 @@ fn eval_comp(
 /// that has a driver other than themselves (their direction is dynamic;
 /// static other-driver presence is the best DAG approximation — genuine
 /// both-ways usage lands in the residue and iterates to fixpoint).
-/// Self-loops are kept, which forces self-fed components into the residue.
+/// Self-loops force self-fed components into the residue — EXCEPT a
+/// splitter's own driver listing (splitter pins are InOut, so a splitter
+/// is always nominally a driver of its own nets; that pseudo-loop is not
+/// feedback — its direction is resolved at evaluation, and treating it
+/// as one wrongly seeded static splitter cones to 0, B11).
 pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
     let n = netlist.comps.len();
     let mut indeg = vec![0usize; n];
@@ -184,8 +188,17 @@ pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<
                 .map(|dep| fc.pins[in_positions[dep]].net)
                 .collect()
         };
+        let splitter = beh.is_splitter();
         for net in consumed_nets {
             for (drv, _) in &netlist.nets[net.idx()].drivers {
+                // A splitter's pins are InOut, so it is always listed as a
+                // driver of its own nets — a *pseudo* self-loop that is
+                // not feedback (its drive direction is dynamic, resolved
+                // at evaluation). Real self-loops (a gate feeding itself)
+                // still force the residue.
+                if splitter && drv.idx() == ci {
+                    continue;
+                }
                 add_edge(drv.0, ci as u32);
             }
         }
@@ -222,9 +235,12 @@ impl ZeroEngine {
         let n_comps = comps.len();
         // Drive slots start fully floating (Z); residue (feedback) outputs
         // are seeded to 0 — deterministic power-on for cyclic logic.
+        // Splitters are excepted: they carry values but never originate
+        // them, so a 0 seed would phantom-contend with the other side of
+        // a splitter chain (B11).
         let mut drives = crate::engine_common::drive_slots(&netlist);
         for (ci, fc) in netlist.comps.iter().enumerate() {
-            if residue.contains(&(ci as u32)) {
+            if residue.contains(&(ci as u32)) && !comps[ci].is_splitter() {
                 for (slot, p) in fc.pins.iter().enumerate() {
                     if p.dir != PinDir::In {
                         drives[ci][slot] = Value::zero(p.width);
@@ -401,7 +417,7 @@ impl ZeroEngine {
         // Re-derive drive slots from state (same seeding as power-on),
         // then settle without latching.
         for (ci, fc) in self.netlist.comps.iter().enumerate() {
-            let seeded = self.residue.contains(&(ci as u32));
+            let seeded = self.residue.contains(&(ci as u32)) && !self.comps[ci].is_splitter();
             for (slot, p) in fc.pins.iter().enumerate() {
                 self.drives[ci][slot] = if seeded && p.dir != PinDir::In {
                     Value::zero(p.width)
@@ -516,7 +532,7 @@ mod tests {
     use crate::netlist;
 
     /// Build an engine straight from a document string.
-    fn engine(json: &str) -> ZeroEngine {
+    pub(crate) fn engine(json: &str) -> ZeroEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
         ZeroEngine::new(nl).expect("test doc builds")

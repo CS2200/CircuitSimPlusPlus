@@ -852,8 +852,22 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
             }
             if let Some(contents) = &contents {
-                if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
-                    c_issue(&mut c, format!("attr 'contents': {e}"));
+                match crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
+                    Err(e) => c_issue(&mut c, format!("attr 'contents': {e}")),
+                    Ok(words) => {
+                        if b < 64 {
+                            if let Some((i, w)) =
+                                words.iter().enumerate().find(|(_, w)| **w >> b != 0)
+                            {
+                                c_issue(
+                                    &mut c,
+                                    format!(
+                                        "attr 'contents': word {i} ({w:#x}) does not fit in {b} bits"
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             (
@@ -888,8 +902,22 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
             }
             if let Some(contents) = &contents {
-                if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
-                    c_issue(&mut c, format!("attr 'contents': {e}"));
+                match crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
+                    Err(e) => c_issue(&mut c, format!("attr 'contents': {e}")),
+                    Ok(words) => {
+                        if b < 64 {
+                            if let Some((i, w)) =
+                                words.iter().enumerate().find(|(_, w)| **w >> b != 0)
+                            {
+                                c_issue(
+                                    &mut c,
+                                    format!(
+                                        "attr 'contents': word {i} ({w:#x}) does not fit in {b} bits"
+                                    ),
+                                );
+                            }
+                        }
+                    }
                 }
             }
             (
@@ -1093,8 +1121,13 @@ mod tests {
 
     #[test]
     fn memory_contents_checked() {
+        let (_, e) = pins("mem.ram", json!({"bitsize": 8, "contents": "3-0f 12"}));
+        assert!(e.is_empty(), "{e:?}");
+        // Words must fit the memory's bitsize (B11; an oversized word was
+        // previously accepted and could panic engine construction).
         let (_, e) = pins("mem.ram", json!({"contents": "3-0f 12"}));
-        assert!(e.is_empty());
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].message.contains("does not fit"), "{e:?}");
         let (_, e) = pins("mem.ram", json!({"contents": "3-0f-2"}));
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("contents"));

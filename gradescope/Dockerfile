@@ -32,6 +32,7 @@ RUN mkdir -p crates/core/src crates/cli/src crates/app/src \
 # cargo skip the real rebuild and ship the stub binary.
 COPY crates crates
 COPY docs docs
+COPY tests tests
 RUN find crates -name '*.rs' -exec touch {} + \
     && cargo test -p csim-core -p csim --release \
     && cargo build --release -p csim --target x86_64-unknown-linux-musl \

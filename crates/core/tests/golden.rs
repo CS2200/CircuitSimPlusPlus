@@ -52,9 +52,157 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x39f2_6b14_4c38_8a10,
+        trace_hash: 0xbee4_a589_d613_ae50,
+    },
+    Scenario {
+        fixture: "multicycle.csx",
+        half: 500,
+        cycles: 100,
+        pokes: &[],
+        t_obs: 205,
+        trace_hash: 0x658f_d0eb_f391_7584,
+    },
+    Scenario {
+        fixture: "pipeline5.csx",
+        half: 500,
+        cycles: 100,
+        pokes: &[],
+        t_obs: 205,
+        trace_hash: 0x3947_49ab_4e0d_bbdc,
     },
 ];
+
+/// Both CPU fixtures run the same program to the same architectural
+/// state, in both engines (the course's CPI lesson is in the timing
+/// numbers, not the values).
+#[test]
+fn cpu_fixtures_compute_the_program() {
+    for fixture in ["multicycle.csx", "pipeline5.csx"] {
+        for mode in [
+            csim_core::api::SimMode::Zero,
+            csim_core::api::SimMode::Delay,
+        ] {
+            let doc = load(fixture);
+            let mut cfg = autograde::GradeConfig {
+                mode,
+                ..autograde::GradeConfig::default()
+            };
+            cfg.limits.max_cycles = 100;
+            cfg.assertions = [
+                "probe('sum') == 10",
+                "probe('r4') == 10",
+                "probe('r5') == 20",
+                "mem('dmem')[0] == 10",
+                "violations == 0",
+            ]
+            .iter()
+            .map(|a| autograde::parse_assertion(a).unwrap())
+            .collect();
+            let out = autograde::grade(&doc, &cfg).unwrap();
+            assert_eq!(
+                out.outcome,
+                autograde::GradeOutcome::Passed,
+                "{fixture} {mode:?}: {:?}",
+                out.report.assertions
+            );
+        }
+    }
+}
+
+/// Regression (B11): a static cone fed by a splitter (register →
+/// splitter → decoder → gates) must settle to the correct values in the
+/// delay engine even when its inputs never change after power-on. A
+/// splitter's InOut driver listing used to fake a self-loop in
+/// levelization, seeding the cone to 0 and freezing it there.
+#[test]
+fn delay_power_on_static_splitter_cone() {
+    let json = r##"{
+        "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+        "settings": {"delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "circuits": [{ "name": "main", "components": [
+            {"id": "clk", "type": "wiring.clock", "pos": [0, 0]},
+            {"id": "z", "type": "wiring.constant", "pos": [0, 0]},
+            {"id": "z32", "type": "wiring.constant", "pos": [0, 0], "attrs": {"bitsize": 32}},
+            {"id": "ir", "type": "mem.register", "pos": [0, 0], "name": "ir", "attrs": {"bitsize": 32}},
+            {"id": "v", "type": "mem.register", "pos": [0, 0], "name": "v"},
+            {"id": "sp", "type": "wiring.splitter", "pos": [0, 0],
+             "attrs": {"splits": {"op": [29, 30, 31], "rest": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]}}},
+            {"id": "dec", "type": "plexers.decoder", "pos": [0, 0], "attrs": {"inputBits": 3}},
+            {"id": "a", "type": "gate.and", "pos": [0, 0]},
+            {"id": "n", "type": "gate.not", "pos": [0, 0]},
+            {"id": "p", "type": "wiring.probe", "pos": [0, 0], "name": "p"}
+        ], "wires": [
+            {"a": {"comp": "clk", "pin": "out"}, "b": {"comp": "ir", "pin": "clk"}},
+            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "ir", "pin": "rst"}},
+            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "ir", "pin": "en"}},
+            {"a": {"comp": "z32", "pin": "out"}, "b": {"comp": "ir", "pin": "d"}},
+            {"a": {"comp": "clk", "pin": "out"}, "b": {"comp": "v", "pin": "clk"}},
+            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "rst"}},
+            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "en"}},
+            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "d"}},
+            {"a": {"comp": "ir", "pin": "q"}, "b": {"comp": "sp", "pin": "bus"}},
+            {"a": {"comp": "sp", "pin": "op"}, "b": {"comp": "dec", "pin": "in"}},
+            {"a": {"comp": "dec", "pin": "out6"}, "b": {"comp": "a", "pin": "in0"}},
+            {"a": {"comp": "v", "pin": "q"}, "b": {"comp": "a", "pin": "in1"}},
+            {"a": {"comp": "a", "pin": "out"}, "b": {"comp": "n", "pin": "in"}},
+            {"a": {"comp": "n", "pin": "out"}, "b": {"comp": "p", "pin": "in"}}
+        ]}]
+    }"##;
+    let doc = load_document(json.as_bytes()).unwrap();
+    let nl = csim_core::netlist::build(&doc).unwrap();
+    let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+    let mut eng = DelayEngine::new(nl, 1000, &table).unwrap();
+    eng.run(1).unwrap();
+    assert_eq!(eng.named_value("p"), Some(Value::from_u64(1, 1)));
+}
+
+/// Regression (B11): chained splitters (split → split on one net) carry
+/// the value in both engines.
+#[test]
+fn chained_splitters_carry_values() {
+    let json = r##"{
+        "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+        "settings": {"delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "circuits": [{ "name": "main", "components": [
+            {"id": "src", "type": "wiring.constant", "pos": [0, 0], "attrs": {"value": "d", "bitsize": 4}},
+            {"id": "s1", "type": "wiring.splitter", "pos": [0, 0],
+             "attrs": {"splits": {"lo": [0, 1], "hi": [2, 3]}}},
+            {"id": "s2", "type": "wiring.splitter", "pos": [0, 0],
+             "attrs": {"splits": {"b0": [0], "b1": [1]}}},
+            {"id": "p0", "type": "wiring.probe", "pos": [0, 0], "name": "p0"},
+            {"id": "p1", "type": "wiring.probe", "pos": [0, 0], "name": "p1"},
+            {"id": "ph", "type": "wiring.probe", "pos": [0, 0], "name": "ph", "attrs": {"bitsize": 2}}
+        ], "wires": [
+            {"a": {"comp": "src", "pin": "out"}, "b": {"comp": "s1", "pin": "bus"}},
+            {"a": {"comp": "s1", "pin": "lo"}, "b": {"comp": "s2", "pin": "bus"}},
+            {"a": {"comp": "s2", "pin": "b0"}, "b": {"comp": "p0", "pin": "in"}},
+            {"a": {"comp": "s2", "pin": "b1"}, "b": {"comp": "p1", "pin": "in"}},
+            {"a": {"comp": "s1", "pin": "hi"}, "b": {"comp": "ph", "pin": "in"}}
+        ]}]
+    }"##;
+    for mode in [
+        csim_core::api::SimMode::Zero,
+        csim_core::api::SimMode::Delay,
+    ] {
+        let doc = load_document(json.as_bytes()).unwrap();
+        let mut cfg = autograde::GradeConfig {
+            mode,
+            ..autograde::GradeConfig::default()
+        };
+        cfg.limits.max_cycles = 1;
+        cfg.assertions = ["probe('p0') == 1", "probe('p1') == 0", "probe('ph') == 3"]
+            .iter()
+            .map(|a| autograde::parse_assertion(a).unwrap())
+            .collect();
+        let out = autograde::grade(&doc, &cfg).unwrap();
+        assert_eq!(
+            out.outcome,
+            autograde::GradeOutcome::Passed,
+            "{mode:?}: {:?}",
+            out.report.assertions
+        );
+    }
+}
 
 fn load(fixture: &str) -> csim_core::format::Document {
     let bytes = std::fs::read(format!("{FIXTURES}/{fixture}")).expect("fixture readable");
@@ -99,7 +247,11 @@ fn golden_traces_are_pinned() {
             continue;
         }
         assert_eq!(t_obs, s.t_obs, "{}: T_obs drifted", s.fixture);
-        assert_eq!(hash, s.trace_hash, "{}: trace hash drifted (§4.6)", s.fixture);
+        assert_eq!(
+            hash, s.trace_hash,
+            "{}: trace hash drifted (§4.6)",
+            s.fixture
+        );
     }
     if bless {
         eprintln!("\n{table}\n");
@@ -121,24 +273,36 @@ fn golden_traces_are_repeatable() {
 #[test]
 fn fixture_alu_computes() {
     let checks: &[(u64, u64, u64, u64)] = &[
-        (7, 3, 0, 10),          // add
-        (7, 3, 1, 0xFFFF_FFFC), // nand
-        (7, 3, 2, 56),          // sll
-        (7, 3, 3, 0),           // srl
+        (7, 3, 0, 10),                    // add
+        (7, 3, 1, 0xFFFF_FFFC),           // nand
+        (7, 3, 2, 56),                    // sll
+        (7, 3, 3, 0),                     // srl
         (0xDEAD_BEEF, 0, 4, 0xDEAD_BEEF), // pass A
-        (0xF0F0_F0F0, 0, 5, 0), // pass B
+        (0xF0F0_F0F0, 0, 5, 0),           // pass B
     ];
     for &(a, b, op, y) in checks {
         let doc = load("alu.csx");
         let mut cfg = autograde::GradeConfig {
             mode: csim_core::api::SimMode::Zero,
-            ..GradeConfig_default()
+            ..autograde::GradeConfig::default()
         };
         cfg.limits.max_cycles = 1;
         cfg.pokes = vec![
-            autograde::Poke { target: "a".into(), value: a, at: 0 },
-            autograde::Poke { target: "b".into(), value: b, at: 0 },
-            autograde::Poke { target: "op".into(), value: op, at: 0 },
+            autograde::Poke {
+                target: "a".into(),
+                value: a,
+                at: 0,
+            },
+            autograde::Poke {
+                target: "b".into(),
+                value: b,
+                at: 0,
+            },
+            autograde::Poke {
+                target: "op".into(),
+                value: op,
+                at: 0,
+            },
         ];
         cfg.assertions = vec![autograde::parse_assertion(&format!("probe('y') == {y}")).unwrap()];
         let out = autograde::grade(&doc, &cfg).unwrap();
@@ -150,11 +314,6 @@ fn fixture_alu_computes() {
     }
 }
 
-#[allow(clippy::redundant_clone)]
-fn GradeConfig_default() -> autograde::GradeConfig {
-    autograde::GradeConfig::default()
-}
-
 #[test]
 fn fixture_fsm_alternates() {
     // car held 1: (ns, ew) = (1,0), (0,1), (1,0), (0,1) over cycles 1-4.
@@ -162,7 +321,11 @@ fn fixture_fsm_alternates() {
         let doc = load("fsm.csx");
         let mut cfg = autograde::GradeConfig::default();
         cfg.limits.max_cycles = n;
-        cfg.pokes = vec![autograde::Poke { target: "car".into(), value: 1, at: 0 }];
+        cfg.pokes = vec![autograde::Poke {
+            target: "car".into(),
+            value: 1,
+            at: 0,
+        }];
         let (ns, ew) = (n % 2, 1 - n % 2);
         cfg.assertions = vec![
             autograde::parse_assertion(&format!("probe('ns_green') == {ns}")).unwrap(),
@@ -170,7 +333,11 @@ fn fixture_fsm_alternates() {
             autograde::parse_assertion("violations == 0").unwrap(),
         ];
         let out = autograde::grade(&doc, &cfg).unwrap();
-        assert_eq!(out.outcome, autograde::GradeOutcome::Passed, "fsm cycle {n}");
+        assert_eq!(
+            out.outcome,
+            autograde::GradeOutcome::Passed,
+            "fsm cycle {n}"
+        );
     }
 }
 
@@ -211,7 +378,11 @@ fn negative_fixtures_halt_as_advertised() {
         ..autograde::GradeConfig::default()
     };
     cfg.limits.max_cycles = 2;
-    cfg.pokes = vec![autograde::Poke { target: "d".into(), value: 1, at: 3990 }];
+    cfg.pokes = vec![autograde::Poke {
+        target: "d".into(),
+        value: 1,
+        at: 3990,
+    }];
     cfg.assertions = vec![autograde::parse_assertion("violations == 1").unwrap()];
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Passed);
