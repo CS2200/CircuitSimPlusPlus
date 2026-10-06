@@ -78,12 +78,53 @@ struct RunArgs {
     json: Option<PathBuf>,
 }
 
+/// Exit codes (DESIGN.md §8.2 — distinct non-zero per failure class).
+/// 0 = success / all assertions passed. Only `MALFORMED_FILE` is used
+/// until B10 wires up `run`.
+#[allow(dead_code)]
+mod exit {
+    pub const ASSERTION_FAILED: u8 = 1;
+    pub const CYCLE_LIMIT: u8 = 2;
+    pub const TIMEOUT: u8 = 3;
+    pub const OSCILLATION: u8 = 4;
+    pub const FLOATING_READ: u8 = 5;
+    pub const MALFORMED_FILE: u8 = 6;
+}
+
+/// `csim validate <file>`: parse + validate, print the complete error list
+/// as JSON. Exit 0 when valid, `MALFORMED_FILE` otherwise.
+fn validate(file: &std::path::Path) -> ExitCode {
+    let errors = match std::fs::read(file) {
+        Ok(bytes) => match csim_core::format::load_document(&bytes) {
+            Ok(_) => Vec::new(),
+            Err(errors) => errors,
+        },
+        Err(e) => vec![csim_core::api::LoadError {
+            kind: csim_core::api::LoadErrorKind::Io,
+            message: format!("{}: {e}", file.display()),
+            circuit: String::new(),
+            comp_id: None,
+            wire_idx: None,
+        }],
+    };
+    let report = serde_json::json!({ "ok": errors.is_empty(), "errors": errors });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).expect("JSON serialization cannot fail")
+    );
+    if errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(exit::MALFORMED_FILE)
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     // BACKEND.md tasks B9/B10 implement these against csim_core::api::Sim.
     match &cli.cmd {
         Cmd::Run(_) => unimplemented!("csim run — BACKEND.md task B10"),
-        Cmd::Validate { .. } => unimplemented!("csim validate — BACKEND.md task B2"),
+        Cmd::Validate { file } => validate(file),
         Cmd::Timing { .. } => unimplemented!("csim timing — BACKEND.md tasks B6/B8"),
         Cmd::Snapshot { .. } => unimplemented!("csim snapshot — BACKEND.md task B5"),
         Cmd::Resume { .. } => unimplemented!("csim resume — BACKEND.md task B5"),
@@ -100,6 +141,37 @@ mod tests {
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    /// `csim validate`: valid file exits 0, invalid exits MALFORMED_FILE
+    /// with the full error list, unreadable file exits MALFORMED_FILE with
+    /// an Io error.
+    #[test]
+    fn validate_subcommand() {
+        let dir = std::env::temp_dir();
+        let valid = dir.join("csim-test-valid.csx");
+        let invalid = dir.join("csim-test-invalid.csx");
+
+        std::fs::write(
+            &valid,
+            r#"{"format":"circuitsim-plus-plus","version":2,"name":"t",
+                "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+                "circuits":[{"name":"main","components":[
+                    {"id":"c0","type":"wiring.clock","pos":[0,0]}
+                ]}]}"#,
+        )
+        .unwrap();
+        std::fs::write(&invalid, r#"{"version":2}"#).unwrap();
+
+        assert_eq!(validate(&valid), ExitCode::SUCCESS);
+        assert_eq!(validate(&invalid), ExitCode::from(exit::MALFORMED_FILE));
+        assert_eq!(
+            validate(&dir.join("csim-test-does-not-exist.csx")),
+            ExitCode::from(exit::MALFORMED_FILE)
+        );
+
+        let _ = std::fs::remove_file(&valid);
+        let _ = std::fs::remove_file(&invalid);
     }
 
     /// The §8.1 invocation shape must parse.

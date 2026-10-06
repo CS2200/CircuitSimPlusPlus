@@ -15,5 +15,7 @@
 //! Same file + same mode + same inputs ⇒ identical trace, everywhere.
 
 pub mod api;
+pub mod components;
+pub mod format;
 pub mod ids;
 pub mod value;
