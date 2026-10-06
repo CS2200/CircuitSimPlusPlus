@@ -53,7 +53,48 @@ describe("SimController", () => {
     ctl.unload();
     expect(ctl.store.loaded).toBe(false);
     expect(ctl.store.netValues.size).toBe(0);
-    expect(ctl.watchValue({ name: "pc", kind: "register", comp_id: 1 })).toBeUndefined();
+    expect(
+      ctl.watchValue({ name: "pc", kind: "register", comp_id: 1, circuit: "main" }),
+    ).toBeUndefined();
+  });
+
+  it("the initial full-state batch paints values but spawns no pulses (v1.1)", async () => {
+    const ctl = makeController();
+    await ctl.load(buildMockDemoDoc());
+    expect(ctl.store.netValues.size).toBeGreaterThan(0); // painted
+    expect(ctl.store.lastChanged).toEqual([]); // but nothing "changed"
+    await ctl.stepTick();
+    expect(ctl.store.lastChanged.length).toBeGreaterThan(0); // real changes do
+    // Delay mode: changes carry engine event times for the pulses.
+    expect(ctl.store.lastChanged.every((e) => e.at !== undefined)).toBe(true);
+  });
+
+  it("violationMarkers resolves current-sheet violations to document comp ids", async () => {
+    const ctl = makeController();
+    await ctl.load(buildMockDemoDoc());
+    expect(ctl.violationMarkers()).toEqual([]); // no timing yet
+    await ctl.runUntil(3); // timing_update on run_until
+    const doc = buildMockDemoDoc();
+    const pcId = doc.circuit(0).components[MOCK_DEMO_COMPS.pc].id;
+    expect(ctl.violationMarkers()).toEqual([
+      { compId: pcId, kind: "setup", detail: "D changed 6 ns before the edge; t_setup = 15 ns" },
+    ]);
+  });
+
+  it("violationMarkers/topPathIds drop entries for other circuits (v1.1 filter)", async () => {
+    const ctl = makeController();
+    await ctl.load(buildMockDemoDoc());
+    await ctl.runUntil(3);
+    expect(ctl.topPathIds()).toHaveLength(3); // demo sheet matches
+    // Rewrite the timing event as belonging to a different circuit.
+    const foreign = ctl.store.timing!;
+    ctl.store.onTiming({
+      ...foreign,
+      violations: [{ circuit: "alu", comp_id: 0, kind: "hold", detail: "elsewhere" }],
+      top_paths: [{ circuit: "alu", comps: [0, 1], delay_ns: 9 }],
+    });
+    expect(ctl.violationMarkers()).toEqual([]); // filtered out
+    expect(ctl.topPathIds()).toBeNull(); // filtered out
   });
 });
 

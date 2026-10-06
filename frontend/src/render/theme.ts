@@ -18,6 +18,8 @@ export interface Theme {
   readonly wire: Readonly<Record<WireState, string>>;
   /** Per-bus rainbow hues (multi-bit wires), indexed by bus id. */
   readonly bus: readonly string[];
+  /** Setup/hold violation markers (U7) — distinct from halt red and accent. */
+  readonly violation: string;
 }
 
 export const FALLBACK_THEME: Theme = {
@@ -36,6 +38,7 @@ export const FALLBACK_THEME: Theme = {
     disconnected: "#2c2c3a",
   },
   bus: ["#f0b43c", "#b478e6", "#4dd0e1", "#f368a0", "#b8e34d"],
+  violation: "#ff9e3d",
 };
 
 export function resolveTheme(el: Element): Theme {
@@ -66,5 +69,6 @@ export function resolveTheme(el: Element): Theme {
       v("--bus-d", FALLBACK_THEME.bus[3]),
       v("--bus-e", FALLBACK_THEME.bus[4]),
     ],
+    violation: v("--violation", FALLBACK_THEME.violation),
   };
 }

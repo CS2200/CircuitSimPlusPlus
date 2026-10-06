@@ -16,7 +16,7 @@ import { rectPath, roundedPath } from "../render/paths";
 import type { PathCmd, Renderer, WireState } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
-import type { WireValue } from "../ipc/types";
+import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
@@ -34,6 +34,13 @@ import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
  * X/Z). Selection/hover/net-extent highlights layer on top.
  */
 
+/** A setup/hold violation marker on one component of the open sheet (U7). */
+export interface ViolationMarker {
+  compId: string;
+  kind: ViolationKind;
+  detail: string;
+}
+
 /** Sim state overlay for one draw pass (U5/U7). */
 export interface SimOverlay {
   /** Latest value of the engine net containing this wire, if any. */
@@ -42,6 +49,8 @@ export interface SimOverlay {
   haltCompId?: string | null;
   /** Ordered component ids of the observed critical path (U7 highlight). */
   path?: readonly string[] | null;
+  /** Setup/hold violation markers on the open sheet (U7, contract v1.1). */
+  violations?: readonly ViolationMarker[] | null;
   /** Signal-travel pulses: wire index + phase ∈ [0,1) (U7). */
   pulses?: readonly { wireIdx: number; phase: number }[] | null;
 }
@@ -467,6 +476,45 @@ export class DocScene {
           { stroke: theme.wire.x, lineWidth: 0.22 },
         );
         renderer.flush();
+      }
+    }
+
+    // Setup/hold violation markers (U7, contract v1.1): same ring idiom as
+    // the halt marker but in the theme's violation color, with a ⚠<kind>
+    // tag. Hovering a marked component shows the engine's detail text.
+    if (sim?.violations != null && sim.violations.length > 0) {
+      const hoverId = overlay.hoverHit?.kind === "component" ? overlay.hoverHit.compId : null;
+      for (const v of sim.violations) {
+        const layout = this.layouts.get(v.compId);
+        if (layout === undefined) continue;
+        const pad = 0.45;
+        renderer.drawPath(
+          roundedPath(
+            [
+              { x: layout.rect.x - pad, y: layout.rect.y - pad },
+              { x: layout.rect.x + layout.rect.w + pad, y: layout.rect.y - pad },
+              { x: layout.rect.x + layout.rect.w + pad, y: layout.rect.y + layout.rect.h + pad },
+              { x: layout.rect.x - pad, y: layout.rect.y + layout.rect.h + pad },
+              { x: layout.rect.x - pad, y: layout.rect.y - pad },
+            ],
+            0.5,
+          ),
+          { stroke: theme.violation, lineWidth: 0.2 },
+        );
+        renderer.drawText(layout.rect.x + layout.rect.w + pad, layout.rect.y - pad, `⚠ ${v.kind}`, {
+          color: theme.violation,
+          size: 0.9,
+          align: "left",
+        });
+        renderer.flush();
+        if (v.compId === hoverId) {
+          drawCard(
+            renderer,
+            theme,
+            { x: layout.rect.x, y: layout.rect.y + layout.rect.h + pad + 0.4 },
+            [`${v.kind} violation`, v.detail],
+          );
+        }
       }
     }
 

@@ -4,15 +4,29 @@
  *
  * Batches pushed between frames are MERGED into one pending map (latest
  * value per net wins — that *is* the dropping), then flushed once per frame
- * via an injectable scheduler (rAF in the app, synchronous in tests).
+ * via an injectable scheduler (rAF in the app, synchronous in tests). Each
+ * change keeps its v1.1 `at` timestamp (latest batch's, like the value) so
+ * U7 pulses can spawn from engine event times. `full` is OR-ed across the
+ * merged batches: a full (initial-paint) frame never spawns pulses.
  */
 
 import type { NetDiffs, NetId, WireValue } from "../ipc/types";
 
-export type FlushHandler = (changes: ReadonlyMap<NetId, WireValue>, cycle: number) => void;
+/** A flushed change: the value plus its delay-mode event time (if any). */
+export interface StampedChange {
+  val: WireValue;
+  at?: number;
+}
+
+export type FlushHandler = (
+  changes: ReadonlyMap<NetId, StampedChange>,
+  cycle: number,
+  full: boolean,
+) => void;
 
 export class DiffPump {
-  private pending = new Map<NetId, WireValue>();
+  private pending = new Map<NetId, StampedChange>();
+  private pendingFull = false;
   private latestCycle = 0;
   private scheduled = false;
 
@@ -23,7 +37,8 @@ export class DiffPump {
 
   /** Merge one engine batch into the pending frame. */
   push(diffs: NetDiffs): void {
-    for (const c of diffs.changes) this.pending.set(c.net, c.val);
+    for (const c of diffs.changes) this.pending.set(c.net, { val: c.val, at: c.at });
+    this.pendingFull ||= diffs.full;
     this.latestCycle = diffs.cycle;
     if (!this.scheduled) {
       this.scheduled = true;
@@ -34,14 +49,17 @@ export class DiffPump {
   /** Apply the merged frame exactly once. */
   private flush(): void {
     this.scheduled = false;
-    if (this.pending.size === 0) return;
+    if (this.pending.size === 0 && !this.pendingFull) return;
     const changes = this.pending;
+    const full = this.pendingFull;
     this.pending = new Map();
-    this.onFlush(changes, this.latestCycle);
+    this.pendingFull = false;
+    this.onFlush(changes, this.latestCycle, full);
   }
 
   /** Drop unflushed state (circuit unload). */
   clear(): void {
     this.pending.clear();
+    this.pendingFull = false;
   }
 }

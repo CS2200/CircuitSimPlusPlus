@@ -12,7 +12,7 @@ import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
-import type { CompId, WireValue } from "./ipc/types";
+import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
 
 /**
  * App shell: header + sim transport + palette + canvas + watch panel +
@@ -48,15 +48,20 @@ export default function App() {
   const [pathOn, setPathOn] = useState(false);
   const simVersion = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
 
-  // U7: the observed critical path (top-1) as document component ids.
+  // U7: the observed critical path (top-1) as document component ids —
+  // only when its circuit is the current sheet (contract v1.1 filter).
   const pathIds = useMemo(() => {
     if (!pathOn || !sim.store.loaded) return null;
-    const top = sim.store.timing?.top_paths[0];
-    if (top === undefined || top.length === 0) return null;
-    return top
-      .map((idx) => doc.circuit(0).components[idx]?.id)
-      .filter((id): id is string => id !== undefined);
-  }, [pathOn, sim.store, doc, simVersion]);
+    return sim.topPathIds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
+  }, [pathOn, sim, doc, simVersion]);
+
+  // U7: setup/hold violation markers for the current sheet.
+  const violationMarkers = useMemo(() => {
+    if (!sim.store.loaded || sim.store.timing === null) return null;
+    return sim.violationMarkers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
+  }, [sim, doc, simVersion]);
 
   // A fresh load invalidates any path highlight.
   useEffect(() => {
@@ -84,13 +89,15 @@ export default function App() {
           typeof c.attrs?.autoload === "string" &&
           c.attrs.autoload !== "",
       );
-    const ok = await sim.load(doc);
-    if (ok) {
+    try {
+      await sim.reset();
       toast(
         mems.length > 0
           ? `Reset — reloaded ${mems.map((m) => `${m.name} from ${String(m.attrs?.autoload)}`).join(", ")}`
-          : "Reset — circuit reloaded (no autoload memories)",
+          : "Reset — fresh power-on state (no autoload memories)",
       );
+    } catch (err) {
+      toast(`Reset failed: ${String(err)}`);
     }
   }, [doc, sim, toast]);
 
@@ -122,6 +129,8 @@ export default function App() {
         poke: (comp: CompId, pin: string, val: WireValue) => Promise<void>;
         memRead: (name: string, addr: number, len: number) => Promise<WireValue[]>;
         memWrite: (name: string, addr: number, values: WireValue[]) => Promise<void>;
+        timing: () => TimingUpdate | null;
+        violationMarkers: () => { compId: string; kind: ViolationKind; detail: string }[];
       };
     };
     w.__sim = {
@@ -136,6 +145,8 @@ export default function App() {
       poke: (comp, pin, val) => sim.poke(comp, pin, val),
       memRead: (name, addr, len) => sim.memRead(name, addr, len),
       memWrite: (name, addr, values) => sim.memWrite(name, addr, values),
+      timing: () => sim.store.timing,
+      violationMarkers: () => sim.violationMarkers(),
     };
     return () => {
       delete w.__sim;
@@ -245,6 +256,7 @@ export default function App() {
                 onEditComponent={setEditingComp}
                 sim={sim}
                 pathIds={pathIds}
+                violations={violationMarkers}
               />
             </div>
             <WatchPanel ctl={sim} />

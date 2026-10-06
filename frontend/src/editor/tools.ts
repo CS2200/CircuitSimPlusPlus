@@ -279,9 +279,14 @@ export class ToolMachine {
       this.changed();
       return;
     }
-    // While wiring, pins + wires are live targets (junction preview);
-    // idle hover is pins only — hovering a wire does nothing.
-    const hit = this.wiring !== null ? this.scene.pick(world) : (this.scene.pickPin(world) ?? null);
+    // While wiring, pins + wires are live targets (junction preview); idle
+    // hover is pins first (net-extent highlight) then component bodies (so
+    // violation markers can show their detail card) — hovering a wire
+    // still does nothing.
+    const hit =
+      this.wiring !== null
+        ? this.scene.pick(world)
+        : (this.scene.pickPin(world) ?? this.scene.pickComponent(world) ?? null);
     if (JSON.stringify(hit ?? null) !== JSON.stringify(this.hoverHit ?? null)) {
       this.hoverHit = hit;
       this.changed();

@@ -1,12 +1,22 @@
 /**
  * IPC contract types — the single source of truth the frontend compiles
- * against. Mirrors `docs/tasks/README.md` §3, `docs/ipc.md`, and
+ * against. Mirrors `docs/tasks/README.md` §3, `docs/ipc.md` (v1.1), and
  * `crates/core/src/api.rs` field-for-field. Do not deviate.
  */
 
 /** Opaque net identifier, assigned by the engine at load (internal only). */
 export type NetId = number;
-/** Opaque component identifier (stable within a loaded document). */
+/**
+ * Opaque component identifier (stable within a loaded document).
+ *
+ * Contract v1.1: a CompId on the wire is the **document-order index into
+ * the referenced circuit's `components` array** — never a post-flatten
+ * engine index. Messages that can reference non-root circuits carry an
+ * explicit `circuit` field (`TimingViolation`, `TimingPath`,
+ * `NamedComponent`); `LoadError.comp_id` is document-order within
+ * `LoadError.circuit`. `LoadResult.net_map` remains root-circuit-only in
+ * v1 (the UI edits one sheet at a time).
+ */
 export type CompId = number;
 /** Index of a wire within its circuit's `wires` array. */
 export type WireIdx = number;
@@ -55,6 +65,8 @@ export interface NamedComponent {
   name: string;
   kind: NamedKind;
   comp_id: CompId;
+  /** Circuit the component lives in (v1.1); `comp_id` is document-order within it. */
+  circuit: string;
 }
 
 export interface LoadResult {
@@ -75,11 +87,24 @@ export type SimMode = "zero" | "delay";
 export interface NetChange {
   net: NetId;
   val: WireValue;
+  /**
+   * Event timestamp (v1.1): ns since run start. Present in `delay` mode,
+   * absent in `zero` mode. Powers the U7 propagation pulses; presentation
+   * only, never the evaluation path.
+   */
+  at?: number;
 }
 
-/** Diffs only, never full state (DESIGN.md §7.2). ≤ 1 batch per frame. */
+/**
+ * Diffs only, never full state (DESIGN.md §7.2) — with ONE exception
+ * (v1.1): the initial batch after load/resume carries `full: true` and
+ * contains ALL nets, so the UI can paint without a special-case command.
+ * Every other batch is changed-nets-only with `full: false`.
+ * ≤ 1 batch per animation frame consumed; intermediates may be dropped.
+ */
 export interface NetDiffs {
   cycle: number;
+  full: boolean;
   changes: NetChange[];
 }
 
@@ -96,16 +121,45 @@ export type HaltReason =
 export interface SimHalted {
   cycle: number;
   reason: HaltReason;
-  /** Names the component/pin for UI highlighting. */
+  /**
+   * Names the component/pin for UI highlighting. Convention (v1.1): for
+   * component-attributable halts (floating-read, contention, oscillation),
+   * `details` starts with `comp <CompId> pin "<pin>": <message>`; CompId
+   * is the root-sheet document-order id — when the culprit is inside a
+   * subcircuit, the engine reports the enclosing subcircuit INSTANCE's
+   * root-sheet id (v1 UI highlights the root sheet only). Free-form text
+   * remains legal for non-component halts (cycle-limit, error).
+   */
   details: string;
+}
+
+/** Setup/hold violation classification (DESIGN.md §4.3). */
+export type ViolationKind = "setup" | "hold";
+
+/** One timed-register violation warning (v1.1 — replaces the bare count). */
+export interface TimingViolation {
+  /** Circuit the offending register lives in; `comp_id` is document-order within it. */
+  circuit: string;
+  comp_id: CompId;
+  kind: ViolationKind;
+  /** Human-readable explanation (e.g. "D changed 3 ns before the edge; t_setup = 15 ns"). */
+  detail: string;
+}
+
+/** One observed critical path (DTA, DESIGN.md §4.4). */
+export interface TimingPath {
+  /** Circuit the path's components live in; `comps` are document-order within it. */
+  circuit: string;
+  comps: CompId[];
+  delay_ns: number;
 }
 
 /** DTA timing results (DESIGN.md §4.4). */
 export interface TimingUpdate {
   t_obs: number;
   est_time: number;
-  violations: number;
-  top_paths: CompId[][];
+  violations: TimingViolation[];
+  top_paths: TimingPath[];
 }
 
 /** Tauri event names (Rust → frontend). */
@@ -127,10 +181,21 @@ export interface CoreApi {
 
   play(hz: number): Promise<void>;
   pause(): Promise<void>;
+  /**
+   * Advance one tick (v1.1 semantics): in `delay` mode a tick is one clock
+   * half-period (posedge/negedge); in `zero` mode a tick is one full cycle
+   * (the only granularity that mode has).
+   */
   stepTick(): Promise<void>;
   stepCycles(n: number): Promise<void>;
   runUntil(cycle: number): Promise<void>;
   setMode(mode: SimMode): Promise<void>;
+
+  /**
+   * Reset to fresh power-on state and re-apply every memory's autoload
+   * image (DESIGN.md §5.2 / G6). Emits a fresh `full: true` batch.
+   */
+  reset(): Promise<void>;
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void>;
   memRead(name: string, addr: number, len: number): Promise<WireValue[]>;

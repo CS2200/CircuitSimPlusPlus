@@ -46,9 +46,9 @@ describe("mock core (U9)", () => {
         expect(res.ok).toBe(true);
         expect(res.errors).toEqual([]);
         expect(res.named).toEqual([
-          { name: "pc", kind: "register", comp_id: MOCK_COMP.pc },
-          { name: "next_pc", kind: "probe", comp_id: MOCK_COMP.nextPcProbe },
-          { name: "imem", kind: "ram", comp_id: MOCK_COMP.imem },
+          { name: "pc", kind: "register", comp_id: MOCK_COMP.pc, circuit: "main" },
+          { name: "next_pc", kind: "probe", comp_id: MOCK_COMP.nextPcProbe, circuit: "main" },
+          { name: "imem", kind: "ram", comp_id: MOCK_COMP.imem, circuit: "main" },
         ]);
         expect(res.net_map).toHaveLength(4 + MOCK_GATE_COUNT);
       });
@@ -58,9 +58,10 @@ describe("mock core (U9)", () => {
       await expect(mock.api.loadCircuit({})).rejects.toThrow("path or bytes");
     });
 
-    it("emits an initial full-state batch so the UI can paint", () => {
+    it("emits an initial full-state batch so the UI can paint (v1.1: full: true)", () => {
       expect(diffs).toHaveLength(1);
       expect(diffs[0].cycle).toBe(0);
+      expect(diffs[0].full).toBe(true); // THE one full batch, at load
       const nets = diffs[0].changes.map((c) => c.net);
       expect(nets).toContain(MOCK_NET.clk);
       expect(nets).toContain(MOCK_NET.pcQ);
@@ -69,6 +70,13 @@ describe("mock core (U9)", () => {
       expect(nets).toHaveLength(4 + MOCK_GATE_COUNT);
       // clk is low before the first tick, so the demo bus floats.
       expect(lastVal(diffs, MOCK_NET.bus)).toEqual({ v: "00", x: "00", z: "ff" });
+    });
+
+    it("every batch after the initial paint is changed-only (full: false)", async () => {
+      diffs.length = 0;
+      await mock.api.stepCycles(3);
+      expect(diffs.length).toBeGreaterThan(0);
+      expect(diffs.every((d) => !d.full)).toBe(true);
     });
   });
 
@@ -113,7 +121,21 @@ describe("mock core (U9)", () => {
       expect(diffs[1].changes.map((c) => c.net)).not.toContain(MOCK_NET.clk);
     });
 
-    it("zero mode emits one merged batch per tick", async () => {
+    it("delay mode stamps every change with `at` (ns since run start, v1.1)", async () => {
+      diffs.length = 0;
+      await mock.api.setMode("delay");
+      await mock.api.stepTick(); // tick 1: posedge
+      const seq = diffs[0].changes;
+      const comb = diffs[1].changes;
+      // Sequential settles at clk→Q (20 ns) into tick 1; the cloud at t_obs.
+      expect(seq.every((c) => c.at === 1 * 50 + 20)).toBe(true);
+      expect(comb.every((c) => c.at === 1 * 50 + 42.5)).toBe(true);
+      await mock.api.stepTick(); // tick 2: negedge — timestamps advance with the run
+      const later = diffs.at(-1)!.changes;
+      expect(later.every((c) => c.at !== undefined && c.at >= 2 * 50)).toBe(true);
+    });
+
+    it("zero mode emits one merged batch per tick, with NO `at` stamps (v1.1)", async () => {
       diffs.length = 0;
       await mock.api.setMode("zero");
       await mock.api.stepTick();
@@ -121,6 +143,7 @@ describe("mock core (U9)", () => {
       const nets = diffs[0].changes.map((c) => c.net);
       expect(nets).toContain(MOCK_NET.clk);
       expect(nets).toContain(MOCK_NET.nextPc);
+      expect(diffs[0].changes.every((c) => c.at === undefined)).toBe(true);
     });
   });
 
@@ -166,14 +189,27 @@ describe("mock core (U9)", () => {
   });
 
   describe("runUntil", () => {
-    it("advances to the target cycle and emits a timing update", async () => {
+    it("advances to the target cycle and emits a timing update (v1.1 shapes)", async () => {
       await mock.api.runUntil(5);
       expect(timings).toHaveLength(1);
       expect(timings[0]).toEqual({
         t_obs: 42.5,
         est_time: 5 * 42.5,
-        violations: 0,
-        top_paths: [[MOCK_COMP.pc, MOCK_COMP.adder, MOCK_COMP.pc]],
+        violations: [
+          {
+            circuit: "main",
+            comp_id: MOCK_COMP.pc,
+            kind: "setup",
+            detail: "D changed 6 ns before the edge; t_setup = 15 ns",
+          },
+        ],
+        top_paths: [
+          {
+            circuit: "main",
+            comps: [MOCK_COMP.pc, MOCK_COMP.adder, MOCK_COMP.pc],
+            delay_ns: 42.5,
+          },
+        ],
       });
       expect(lastVal(diffs, MOCK_NET.pcQ)).toMatchObject({ v: "00000005" });
     });
@@ -249,6 +285,15 @@ describe("mock core (U9)", () => {
       diffs.length = 0;
       await mock.api.stepCycles(3);
       expect(lastVal(diffs, MOCK_NET.pcQ)).toMatchObject({ v: "00000008" });
+    });
+
+    it("resume repaints with a full batch (v1.1)", async () => {
+      await mock.api.snapshot("slot-b");
+      diffs.length = 0;
+      await mock.api.resume("slot-b");
+      expect(diffs).toHaveLength(1);
+      expect(diffs[0].full).toBe(true);
+      expect(diffs[0].changes).toHaveLength(4 + MOCK_GATE_COUNT);
     });
 
     it("resume of an unknown path rejects", async () => {

@@ -26,6 +26,9 @@
   --bus-d: #f368a0;
   --bus-e: #b8e34d;
 
+  /* Setup/hold violation markers (U7) */
+  --violation: #ff9e3d;
+
   --accent: #5b8def;
 }
 
@@ -48,6 +51,8 @@
   --bus-c: #1e9ab0;
   --bus-d: #c04a78;
   --bus-e: #6a9a2a;
+
+  --violation: #c86a1e;
 
   --accent: #3b6fd4;
 }

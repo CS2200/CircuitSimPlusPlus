@@ -19,13 +19,18 @@ import type { CompId, LoadResult, SaveResult, SimMode, WireValue } from "./types
 class TauriEvents implements CoreEvents {
   on<E extends CoreEventName>(event: E, handler: CoreEventHandler<E>): Unlisten {
     let unlisten: Unlisten | null = null;
+    let cancelled = false;
     // listen() resolves asynchronously; handlers installed slightly late is
     // fine because the engine cannot emit before a command is issued, and
-    // every command follows subscription setup.
+    // every command follows subscription setup. If the subscriber unlistens
+    // BEFORE the promise resolves, the freshly-installed listener would
+    // leak — resolve-then-immediately-unlisten in that case.
     void listen<Parameters<CoreEventHandler<E>>[0]>(event, (e) => handler(e.payload)).then((u) => {
-      unlisten = u;
+      if (cancelled) u();
+      else unlisten = u;
     });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }
@@ -65,6 +70,10 @@ class TauriCore implements CoreApi {
 
   setMode(mode: SimMode): Promise<void> {
     return invoke("sim_set_mode", { mode });
+  }
+
+  reset(): Promise<void> {
+    return invoke("sim_reset");
   }
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void> {

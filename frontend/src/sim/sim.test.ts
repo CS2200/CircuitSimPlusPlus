@@ -1,45 +1,76 @@
 import { describe, expect, it } from "vitest";
-import { DiffPump } from "./diffPump";
+import { DiffPump, type StampedChange } from "./diffPump";
 import { SimStore } from "./simStore";
 import type { NetId, WireValue } from "../ipc/types";
 
 const val = (v: string): WireValue => ({ v, x: "0", z: "0" });
+const stamped = (v: string, at?: number): StampedChange => ({ val: val(v), at });
 
 /** Synchronous scheduler: flushes run immediately on push. */
 const sync = (cb: () => void): void => cb();
 
 describe("DiffPump (§7.2: ≤1 batch per frame, drop intermediates)", () => {
   it("merges a burst of batches into ONE flush, latest value per net wins", () => {
-    const flushes: [ReadonlyMap<NetId, WireValue>, number][] = [];
+    const flushes: [ReadonlyMap<NetId, StampedChange>, number, boolean][] = [];
     const queue: (() => void)[] = [];
     const pump = new DiffPump(
-      (changes, cycle) => flushes.push([changes, cycle]),
+      (changes, cycle, full) => flushes.push([changes, cycle, full]),
       (cb) => queue.push(cb),
     );
-    pump.push({ cycle: 1, changes: [{ net: 0, val: val("1") }] });
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1"), at: 10 }] });
     pump.push({
       cycle: 2,
+      full: false,
       changes: [
-        { net: 0, val: val("0") },
-        { net: 1, val: val("f") },
+        { net: 0, val: val("0"), at: 20 },
+        { net: 1, val: val("f"), at: 25 },
       ],
     });
-    pump.push({ cycle: 3, changes: [{ net: 0, val: val("1") }] });
+    pump.push({ cycle: 3, full: false, changes: [{ net: 0, val: val("1"), at: 30 }] });
     expect(flushes).toHaveLength(0); // nothing until the frame boundary
     expect(queue).toHaveLength(1); // one scheduled flush, not three
     queue.forEach((cb) => cb());
     expect(flushes).toHaveLength(1);
-    const [changes, cycle] = flushes[0];
-    expect(changes.get(0)).toEqual(val("1")); // latest, not a backlog of 3
-    expect(changes.get(1)).toEqual(val("f"));
+    const [changes, cycle, full] = flushes[0];
+    expect(changes.get(0)).toEqual(stamped("1", 30)); // latest, not a backlog of 3
+    expect(changes.get(1)).toEqual(stamped("f", 25));
     expect(cycle).toBe(3); // newest batch's cycle
+    expect(full).toBe(false);
+  });
+
+  it("carries each change's `at` timestamp through the merge (v1.1)", () => {
+    const flushes: ReadonlyMap<NetId, StampedChange>[] = [];
+    const queue: (() => void)[] = [];
+    const pump = new DiffPump(
+      (changes) => flushes.push(changes),
+      (cb) => queue.push(cb),
+    );
+    pump.push({ cycle: 1, full: false, changes: [{ net: 5, val: val("a"), at: 142.5 }] });
+    pump.push({ cycle: 1, full: false, changes: [{ net: 6, val: val("b") }] });
+    queue.forEach((cb) => cb());
+    expect(flushes).toHaveLength(1);
+    expect(flushes[0].get(5)).toEqual(stamped("a", 142.5));
+    expect(flushes[0].get(6)).toEqual(stamped("b", undefined));
+  });
+
+  it("a full batch flags the whole merged frame (v1.1 initial paint)", () => {
+    const flushes: boolean[] = [];
+    const queue: (() => void)[] = [];
+    const pump = new DiffPump(
+      (_c, _cycle, full) => flushes.push(full),
+      (cb) => queue.push(cb),
+    );
+    pump.push({ cycle: 0, full: true, changes: [{ net: 0, val: val("0") }] });
+    pump.push({ cycle: 0, full: false, changes: [{ net: 1, val: val("1") }] });
+    queue.forEach((cb) => cb());
+    expect(flushes).toEqual([true]); // one frame, marked full
   });
 
   it("flushes once per frame boundary under a synchronous scheduler", () => {
     const flushes: number[] = [];
     const pump = new DiffPump((_c, cycle) => flushes.push(cycle), sync);
-    pump.push({ cycle: 1, changes: [{ net: 0, val: val("1") }] });
-    pump.push({ cycle: 2, changes: [{ net: 0, val: val("0") }] });
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1") }] });
+    pump.push({ cycle: 2, full: false, changes: [{ net: 0, val: val("0") }] });
     expect(flushes).toEqual([1, 2]);
   });
 
@@ -50,7 +81,7 @@ describe("DiffPump (§7.2: ≤1 batch per frame, drop intermediates)", () => {
       () => flushes.push(1),
       (cb) => queue.push(cb),
     );
-    pump.push({ cycle: 1, changes: [{ net: 0, val: val("1") }] });
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1") }] });
     pump.clear();
     queue.forEach((cb) => cb());
     expect(flushes).toHaveLength(0);
@@ -66,16 +97,27 @@ describe("SimStore", () => {
     expect(store.loaded).toBe(true);
     expect(store.wireToNet?.get(0)).toBe(7);
     const v0 = store.getVersion();
-    store.applyDiffs(new Map([[7, val("ff")]]), 5);
+    store.applyDiffs(new Map([[7, stamped("ff", 42)]]), 5);
     expect(store.cycle).toBe(5);
     expect(store.netValues.get(7)).toEqual(val("ff"));
+    expect(store.lastChanged).toEqual([{ net: 7, at: 42 }]);
     expect(store.getVersion()).toBeGreaterThan(v0);
     expect(seen).toBe(2);
   });
 
+  it("a full (initial-paint) frame updates values but spawns no pulses", () => {
+    const store = new SimStore();
+    store.onLoaded(new Map([[0, 7]]), []);
+    store.applyDiffs(new Map([[7, stamped("00", 0)]]), 0, /* full */ true);
+    expect(store.netValues.get(7)).toEqual(val("00"));
+    expect(store.lastChanged).toEqual([]); // nothing "changed" — no U7 pulses
+  });
+
   it("onLoadFailed surfaces errors and clears the loaded state", () => {
     const store = new SimStore();
-    store.onLoaded(new Map([[0, 7]]), [{ name: "pc", kind: "register", comp_id: 1 }]);
+    store.onLoaded(new Map([[0, 7]]), [
+      { name: "pc", kind: "register", comp_id: 1, circuit: "main" },
+    ]);
     store.onLoadFailed([{ kind: "parse", message: "bad json", circuit: "main", wire_idx: 3 }]);
     expect(store.loaded).toBe(false);
     expect(store.wireToNet).toBeNull();

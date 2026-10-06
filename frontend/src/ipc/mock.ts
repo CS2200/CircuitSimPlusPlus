@@ -14,11 +14,14 @@
  *   and a controlled buffer (6) drives an 8-bit demo bus that floats (Z)
  *   while clk is low. RAM "imem" (5) is 256×32 for mem_read/mem_write.
  *
- * Timing model: a *tick* is one clock half-period; odd ticks are posedges
- * (clk rises, pc latches), even ticks fall. cycle = tick / 2. In "delay" mode
- * each tick emits two `net_diffs` batches (state elements settle, then the
- * combinational cloud — like the real engine's clk→Q propagation); "zero"
- * mode emits one merged batch per tick.
+ * Timing model (contract v1.1): a *tick* is one clock half-period; odd
+ * ticks are posedges (clk rises, pc latches), even ticks fall.
+ * cycle = tick / 2. In "delay" mode each tick emits two `net_diffs`
+ * batches (state elements settle, then the combinational cloud — like the
+ * real engine's clk→Q propagation) and every change carries an `at`
+ * timestamp (ns since run start); "zero" mode emits one merged batch per
+ * tick with no `at`. The initial batch after load/resume has `full: true`
+ * and contains all nets; every other batch is changed-only.
  *
  * Poke affordances for UI development:
  *  - poke(MOCK_COMP.pc, "q", value)        force the register's state
@@ -74,6 +77,10 @@ export const MOCK_GATE_COUNT = 24;
 const IMEM_WORDS = 256;
 /** Plausible 74LS-ish observed critical path (ns); feeds `timing_update`. */
 const MOCK_T_OBS_NS = 42.5;
+/** One mock tick (clock half-period) in delay-model ns (draft table, §4.4). */
+const TICK_NS = 50;
+/** Register clk→Q (ns, draft 74LS table): the sequential batch's `at` offset. */
+const CLK_TO_Q_NS = 20;
 /** setInterval clamps at ~4 ms in practice; don't schedule tighter than that. */
 const MIN_PERIOD_MS = 4;
 /** Safety valve so a fat-fingered run_until can't hang the dev session. */
@@ -171,6 +178,8 @@ export class MockCore implements CoreApi {
   private layout: BehaviorLayout | null = STANDALONE_LAYOUT;
   /** Generic mode: every derived net, eternally floating. */
   private allZNets: Map<number, WireValue> | null = null;
+  /** Name of the loaded top circuit (the `circuit` field of v1.1 messages). */
+  private circuitName = "main";
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticksPerInterval = 1;
   private statusEvery = 1;
@@ -203,6 +212,7 @@ export class MockCore implements CoreApi {
     if (doc !== null && circuit !== undefined) {
       // Document-driven mode: nets come from the document's own derivation
       // (same union-find semantics as the engine's netlist builder, B3).
+      this.circuitName = circuit.name;
       const derivation = deriveNets(circuit);
       const net_map = derivation.nets.map((n) => ({ net: n.id, wires: n.wires }));
       const named = namedComponents(doc);
@@ -228,6 +238,7 @@ export class MockCore implements CoreApi {
     }
 
     // Standalone mode (legacy; U9 tests): hardcoded internal demo circuit.
+    this.circuitName = "main";
     this.layout = STANDALONE_LAYOUT;
     this.allZNets = null;
     this.emitFullState();
@@ -246,9 +257,14 @@ export class MockCore implements CoreApi {
         })),
       ],
       named: [
-        { name: "pc", kind: "register", comp_id: MOCK_COMP.pc },
-        { name: "next_pc", kind: "probe", comp_id: MOCK_COMP.nextPcProbe },
-        { name: "imem", kind: "ram", comp_id: MOCK_COMP.imem },
+        { name: "pc", kind: "register", comp_id: MOCK_COMP.pc, circuit: this.circuitName },
+        {
+          name: "next_pc",
+          kind: "probe",
+          comp_id: MOCK_COMP.nextPcProbe,
+          circuit: this.circuitName,
+        },
+        { name: "imem", kind: "ram", comp_id: MOCK_COMP.imem, circuit: this.circuitName },
       ],
     };
   }
@@ -398,6 +414,21 @@ export class MockCore implements CoreApi {
     this.emitStatus();
   }
 
+  /** Fresh power-on state; every autoload image re-applies (§5.2 / G6). */
+  async reset(): Promise<void> {
+    this.stopTimer();
+    this.tick = 0;
+    this.pc = 0;
+    this.clk = false;
+    this.busForced = null;
+    this.imem.fill(0);
+    for (const [name, image] of this.autoloads) {
+      this.mems.set(name, new Uint32Array(image));
+    }
+    this.emitFullState(); // reset repaints: fresh full batch
+    this.emitStatus();
+  }
+
   // ---- internals ----
 
   private stopTimer(): void {
@@ -426,31 +457,42 @@ export class MockCore implements CoreApi {
   /** Emit every net's value in one batch (initial paint / snapshot restore). */
   private emitFullState(): void {
     this.nets = this.currentNets();
-    const changes = [...this.nets].map(([net, val]) => ({ net, val }));
-    this.events.emit(IpcEvents.NetDiffs, { cycle: this.cycle, changes });
+    const changes = [...this.nets].map(([net, val]) => ({ net, val, ...this.stamp(0) }));
+    this.events.emit(IpcEvents.NetDiffs, { cycle: this.cycle, full: true, changes });
+  }
+
+  /**
+   * `at` timestamp for a change settling `settleNs` into the current tick.
+   * Contract v1.1: present in delay mode, ABSENT in zero mode.
+   */
+  private stamp(settleNs: number): { at?: number } {
+    return this.mode === "delay" ? { at: this.tick * TICK_NS + settleNs } : {};
   }
 
   /** Emit `net_diffs` for every net whose value changed since the last emission. */
   private emitNetDiffs(): void {
     const next = this.currentNets();
     const layout = this.layout ?? STANDALONE_LAYOUT;
-    const sequential: { net: number; val: WireValue }[] = [];
-    const combinational: { net: number; val: WireValue }[] = [];
+    const sequential: { net: number; val: WireValue; at?: number }[] = [];
+    const combinational: { net: number; val: WireValue; at?: number }[] = [];
     for (const [net, val] of next) {
       const prev = this.nets.get(net);
       if (prev !== undefined && sameValue(prev, val)) continue;
-      (net === layout.clk || net === layout.pcQ ? sequential : combinational).push({
-        net,
-        val,
-      });
+      // Sequential nets settle at clk→Q; the combinational cloud at t_obs.
+      const target = net === layout.clk || net === layout.pcQ ? sequential : combinational;
+      target.push({ net, val, ...this.stamp(target === sequential ? CLK_TO_Q_NS : MOCK_T_OBS_NS) });
     }
     this.nets = next;
     const cycle = this.cycle;
     if (this.mode === "delay" && sequential.length > 0 && combinational.length > 0) {
-      this.events.emit(IpcEvents.NetDiffs, { cycle, changes: sequential });
-      this.events.emit(IpcEvents.NetDiffs, { cycle, changes: combinational });
+      this.events.emit(IpcEvents.NetDiffs, { cycle, full: false, changes: sequential });
+      this.events.emit(IpcEvents.NetDiffs, { cycle, full: false, changes: combinational });
     } else if (sequential.length + combinational.length > 0) {
-      this.events.emit(IpcEvents.NetDiffs, { cycle, changes: [...sequential, ...combinational] });
+      this.events.emit(IpcEvents.NetDiffs, {
+        cycle,
+        full: false,
+        changes: [...sequential, ...combinational],
+      });
     }
   }
 
@@ -480,8 +522,29 @@ export class MockCore implements CoreApi {
     this.events.emit(IpcEvents.TimingUpdate, {
       t_obs: MOCK_T_OBS_NS,
       est_time: this.cycle * MOCK_T_OBS_NS,
-      violations: 0,
-      top_paths: layout === null ? [] : [[layout.pcComp, layout.adderComp, layout.pcComp]],
+      // Synthetic setup violation on the demo register so the UI's U7
+      // marker path is exercised against the mock (contract v1.1 list).
+      violations:
+        layout === null
+          ? []
+          : [
+              {
+                circuit: this.circuitName,
+                comp_id: layout.pcComp,
+                kind: "setup" as const,
+                detail: `D changed 6 ns before the edge; t_setup = 15 ns`,
+              },
+            ],
+      top_paths:
+        layout === null
+          ? []
+          : [
+              {
+                circuit: this.circuitName,
+                comps: [layout.pcComp, layout.adderComp, layout.pcComp],
+                delay_ns: MOCK_T_OBS_NS,
+              },
+            ],
     });
   }
 }
@@ -580,7 +643,7 @@ function namedComponents(doc: CsxDocument): NamedComponent[] {
   doc.circuits[0].components.forEach((comp, index) => {
     const kind = NAMED_KINDS[comp.type];
     if (comp.name !== undefined && kind !== undefined) {
-      named.push({ name: comp.name, kind, comp_id: index });
+      named.push({ name: comp.name, kind, comp_id: index, circuit: doc.circuits[0].name });
     }
   });
   return named;

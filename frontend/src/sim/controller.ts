@@ -15,6 +15,7 @@ import type {
   NamedComponent,
   NetId,
   SimMode,
+  ViolationKind,
   WireIdx,
   WireValue,
 } from "../ipc/types";
@@ -47,7 +48,10 @@ export class SimController {
     /** Frame scheduler for the diff pump (rAF in the app, sync in tests). */
     schedule?: (cb: () => void) => void,
   ) {
-    this.pump = new DiffPump((changes, cycle) => this.store.applyDiffs(changes, cycle), schedule);
+    this.pump = new DiffPump(
+      (changes, cycle, full) => this.store.applyDiffs(changes, cycle, full),
+      schedule,
+    );
     this.unlisteners.push(
       this.core.events.on(IpcEvents.NetDiffs, (d) => this.pump.push(d)),
       this.core.events.on(IpcEvents.SimStatus, (s) => this.store.onStatus(s)),
@@ -91,6 +95,17 @@ export class SimController {
     this.pump.clear();
     this.store.reset();
     this.doc = null;
+  }
+
+  /**
+   * Engine reset (DESIGN.md §5.2): fresh power-on state; autoload images
+   * re-apply. The engine answers with a `full: true` batch that repaints
+   * the store, so clear first like a load.
+   */
+  async reset(): Promise<void> {
+    this.pump.clear();
+    this.store.resetRunState();
+    return this.core.api.reset();
   }
 
   // ---- commands (delegate; errors propagate to the caller's UI) ----
@@ -156,8 +171,10 @@ export class SimController {
   haltHighlight(): CompId | null {
     const halted = this.store.halted;
     if (halted === null || this.doc === null) return null;
-    // Convention used by the mock (and requested of the engine): details
-    // carries "comp <id>" for the offending component.
+    // Convention (contract v1.1, docs/ipc.md §5): details starts with
+    // `comp <CompId> pin "<pin>":` for component-attributable halts; the id
+    // is root-sheet document-order (subcircuit culprits report their
+    // enclosing instance).
     const byId = /comp (\d+)/.exec(halted.details);
     if (byId !== null) {
       const idx = Number(byId[1]);
@@ -165,6 +182,40 @@ export class SimController {
     }
     const byName = this.store.named.find((n) => halted.details.includes(n.name));
     return byName !== undefined ? byName.comp_id : null;
+  }
+
+  /**
+   * Setup/hold violation markers for the CURRENT sheet (U7): violations
+   * whose `circuit` matches the open circuit, resolved to document comp
+   * ids. Violations in other circuits are filtered out (v1 UI highlights
+   * the root sheet only, contract v1.1).
+   */
+  violationMarkers(): { compId: string; kind: ViolationKind; detail: string }[] {
+    const timing = this.store.timing;
+    if (timing === null || this.doc === null) return [];
+    const sheet = this.doc.circuit(0);
+    const out: { compId: string; kind: ViolationKind; detail: string }[] = [];
+    for (const v of timing.violations) {
+      if (v.circuit !== sheet.name) continue;
+      const comp = sheet.components[v.comp_id];
+      if (comp !== undefined) out.push({ compId: comp.id, kind: v.kind, detail: v.detail });
+    }
+    return out;
+  }
+
+  /**
+   * The top observed critical path as document comp ids — only when the
+   * path's `circuit` is the current sheet (contract v1.1 filter).
+   */
+  topPathIds(): string[] | null {
+    const timing = this.store.timing;
+    if (timing === null || this.doc === null) return null;
+    const top = timing.top_paths[0];
+    if (top === undefined || top.comps.length === 0) return null;
+    if (top.circuit !== this.doc.circuit(0).name) return null;
+    return top.comps
+      .map((idx) => this.doc!.circuit(0).components[idx]?.id)
+      .filter((id): id is string => id !== undefined);
   }
 }
 

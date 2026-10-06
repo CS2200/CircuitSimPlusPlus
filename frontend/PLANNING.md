@@ -31,21 +31,31 @@ to build at integration:
 - Save flow: doc → `save_circuit` (engine canonicalizes; byte-identical
   re-saves, §5.1).
 
-## 3. Contract gaps to raise with Backend (docs/ipc.md owners: us)
+## 3. Contract gaps → RESOLVED by contract v1.1 (docs/ipc.md, human-ratified)
 
-- **`timing_update.violations` is only a count.** U7's setup/hold register
-  markers need the offending components. Proposal:
-  `violations: [{ comp_id, kind: "setup"|"hold", detail }]`, keep the count
-  as `violations.len()`. Mock emits `[]` meanwhile.
-- **Event timestamps for pulses:** exact propagation animation (U7 full
-  acceptance) needs transport-delay event times in `net_diffs` (e.g.
-  `changes: [{ net, val, at }]` in delay mode). v1 pulses trigger on batch
-  arrival; the PulseTracker API already speaks spawn-at-time, so the swap
-  is local.
-- **Free wire endpoints** (proposal already sent to the human): endpoint
-  kind `{ free: [x,y] }` — dangling wires, draw-wires-first,
-  delete-component-keep-wires. Needs DESIGN.md §5.2 + B2/B3 semantics +
-  editor op `rewireEndpoint`. Floating stub reads `Z`.
+- ~~**`timing_update.violations` is only a count.**~~ RESOLVED: v1.1
+  `violations: TimingViolation[]` = `{ circuit, comp_id, kind, detail }`;
+  the count is `violations.length`. U7 register markers are implemented
+  (canvas ring + ⚠kind tag + hover detail card, current-sheet filter).
+- ~~**Event timestamps for pulses.**~~ RESOLVED: v1.1 `NetChange.at?` (ns
+  since run start; delay mode only). Pulses stagger spawns from `at` within
+  a flushed frame (`sim/pulses.ts`); zero mode falls back to batch arrival.
+- ~~**Halt attribution convention**~~ (was our unratified docs/ipc.md §5
+  amendment). RESOLVED + tightened in v1.1: `details` starts with
+  `comp <CompId> pin "<pin>": <message>`; CompId = root-sheet
+  document-order; subcircuit culprits report the enclosing INSTANCE's
+  root-sheet id.
+- ~~**Tick semantics.**~~ RESOLVED: tick = one clock half-period in delay
+  mode; one full cycle in zero mode (documented at `sim_step_tick`).
+- ~~**Initial full-state batch.**~~ RESOLVED: v1.1 `NetDiffs.full` — true
+  exactly for the ONE initial batch after load/resume; the "never full
+  state" rule carries this exception. Full frames spawn no pulses.
+- **CompId redefinition (v1.1):** document-order index into the REFERENCED
+  circuit's components array; messages that can reference non-root circuits
+  carry `circuit` (`TimingViolation`/`TimingPath`/`NamedComponent`).
+  `net_map` stays root-circuit-only for v1 (documented limitation).
+- **Free wire endpoints** — still DEFERRED. The human holds this as
+  amendment P1 (not scheduled). No editor/schema work until ratified.
 
 ## 4. Mock conventions to retire at integration
 
@@ -69,7 +79,8 @@ to build at integration:
 ## 6. Sign-offs owed to the human
 
 - **U4 look:** `e2e/visual.spec.ts-snapshots/demo-*.png` vs DLS reference.
-- **U7 clarity:** `e2e/timing.spec.ts-snapshots/timing-path-*.png`.
+- **U7 clarity:** `e2e/timing.spec.ts-snapshots/timing-path-*.png` (baseline
+  regenerated for v1.1: the synthetic setup-violation marker now renders).
 - **60 FPS re-verify on the final packaged build** (the bench runs in every
   e2e pass; currently ~3 ms avg render on the stress scene).
 

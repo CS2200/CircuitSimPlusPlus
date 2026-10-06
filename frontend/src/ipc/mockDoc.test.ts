@@ -7,10 +7,10 @@
 
 import { describe, expect, it } from "vitest";
 import { createMockCore } from "./mock";
-import { IpcEvents, type NetDiffs, type SimHalted } from "./types";
+import { IpcEvents, type NetDiffs, type SimHalted, type TimingUpdate } from "./types";
 import { buildMockDemoDoc } from "../editor/mockDemoCircuit";
 import { buildDemoDoc } from "../editor/demoCircuit";
-import { MOCK_DEMO_COMPS } from "./mockDemoSpec";
+import { MOCK_DEMO_CIRCUIT, MOCK_DEMO_COMPS } from "./mockDemoSpec";
 
 function bytesOf(text: string): Uint8Array {
   return new TextEncoder().encode(text);
@@ -45,15 +45,44 @@ describe("mock core: demo document mode (U5)", () => {
   it("reports named components by component-array index (CompId convention)", async () => {
     const { res } = await loadDemo();
     expect(res.named).toEqual([
-      { name: "pc", kind: "register", comp_id: MOCK_DEMO_COMPS.pc },
-      { name: "next_pc", kind: "probe", comp_id: MOCK_DEMO_COMPS.nextPcProbe },
-      { name: "imem", kind: "ram", comp_id: MOCK_DEMO_COMPS.imem },
+      { name: "pc", kind: "register", comp_id: MOCK_DEMO_COMPS.pc, circuit: MOCK_DEMO_CIRCUIT },
+      {
+        name: "next_pc",
+        kind: "probe",
+        comp_id: MOCK_DEMO_COMPS.nextPcProbe,
+        circuit: MOCK_DEMO_CIRCUIT,
+      },
+      { name: "imem", kind: "ram", comp_id: MOCK_DEMO_COMPS.imem, circuit: MOCK_DEMO_CIRCUIT },
+    ]);
+  });
+
+  it("timing messages name the document's own circuit (v1.1)", async () => {
+    const { core } = await loadDemo();
+    const timings: TimingUpdate[] = [];
+    core.events.on(IpcEvents.TimingUpdate, (t) => timings.push(t));
+    await core.api.runUntil(2);
+    expect(timings).toHaveLength(1);
+    expect(timings[0].violations).toEqual([
+      {
+        circuit: MOCK_DEMO_CIRCUIT,
+        comp_id: MOCK_DEMO_COMPS.pc,
+        kind: "setup",
+        detail: expect.stringContaining("t_setup"),
+      },
+    ]);
+    expect(timings[0].top_paths).toEqual([
+      {
+        circuit: MOCK_DEMO_CIRCUIT,
+        comps: [MOCK_DEMO_COMPS.pc, MOCK_DEMO_COMPS.adder, MOCK_DEMO_COMPS.pc],
+        delay_ns: 42.5,
+      },
     ]);
   });
 
   it("paints initial state and animates: clk, pc counter, floating bus", async () => {
     const { core, batches, res } = await loadDemo();
     expect(batches).toHaveLength(1); // initial full-state
+    expect(batches[0].full).toBe(true); // v1.1: THE one full batch
     const initial = new Map(batches[0].changes.map((c) => [c.net, c.val]));
     const netOfWire = (w: number) => res.net_map.find((e) => e.wires.includes(w))!.net;
     const clk = netOfWire(0);

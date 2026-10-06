@@ -1,8 +1,14 @@
 # IPC Contract — `csim-core` ↔ Tauri shell ↔ React frontend
 
-**Status:** Pinned (U0/B0). Normative. Mirrors `docs/tasks/README.md` §3; implemented in Rust by
-`crates/core/src/api.rs` and in TypeScript by `frontend/src/ipc/types.ts`. Changes require human
-sign-off and a DESIGN.md note.
+**Status:** Pinned (U0/B0), **v1.1** (human-ratified 2026-10-06). Normative. Mirrors
+`docs/tasks/README.md` §3; implemented in Rust by `crates/core/src/api.rs` and in TypeScript by
+`frontend/src/ipc/types.ts`. Changes require human sign-off and a DESIGN.md note.
+
+**Changelog v1.0 → v1.1:** `NetChange.at?` (delay-mode event timestamps); `NetDiffs.full`
+(initial full-state batch exception); structured `TimingViolation[]`/`TimingPath[]` in
+`timing_update` (replaces the bare count + bare id lists); `NamedComponent.circuit`;
+CompId redefined as document-order within the referenced circuit (net_map stays
+root-circuit-only for v1); halt attribution tightened for subcircuits; tick semantics pinned.
 
 Transport: Tauri **commands** (frontend → Rust) and Tauri **events** (Rust → frontend).
 `crates/app` is a thin adapter over `csim_core::api`; the shell owns no semantics.
@@ -25,10 +31,11 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` |
 | `sim_play` | `{ hz: number }` | — |
 | `sim_pause` | `{}` | — |
-| `sim_step_tick` | `{}` | — |
+| `sim_step_tick` | `{}` | — one **tick**: in `delay` mode a clock half-period (posedge/negedge); in `zero` mode one full cycle (its only granularity) |
 | `sim_step_cycles` | `{ n: number }` | — |
 | `sim_run_until` | `{ cycle: number }` | — |
 | `sim_set_mode` | `{ mode: "zero" \| "delay" }` | — |
+| `sim_reset` | `{}` | — fresh power-on state; every memory's autoload image re-applies (DESIGN.md §5.2 / G6); answered with a `full: true` `net_diffs` batch |
 | `poke` | `{ comp_id: CompId, pin: string, value: WireValue }` | — |
 | `mem_read` | `{ name: string, addr: number, len: number }` | `WireValue[]` |
 | `mem_write` | `{ name: string, addr: number, values: WireValue[] }` | — |
@@ -43,10 +50,10 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 
 | Event | Payload | Semantics |
 |---|---|---|
-| `net_diffs` | `{ cycle, changes: [{ net, val }] }` | Only changed nets, never full state (DESIGN.md §7.2). The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. |
+| `net_diffs` | `{ cycle, full, changes: [{ net, val, at? }] }` | Only changed nets, never full state (DESIGN.md §7.2) — **one exception (v1.1):** the single initial batch after load/resume has `full: true` and contains ALL nets (the UI's initial paint); every later batch is changed-nets-only with `full: false`. `at` = ns since run start; present in `delay` mode, absent in `zero` mode. The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. |
 | `sim_status` | `{ running, cycle, mode, eff_hz }` | On play/pause and ~1 Hz while running. |
-| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting. |
-| `timing_update` | `{ t_obs, est_time, violations, top_paths }` | DTA results (DESIGN.md §4.4), after `sim_run_until` / pause. |
+| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting (shape pinned in §5). |
+| `timing_update` | `{ t_obs, est_time, violations, top_paths }` | DTA results (DESIGN.md §4.4), after `sim_run_until` / pause. `violations: TimingViolation[]` = `{ circuit, comp_id, kind: "setup" \| "hold", detail }` (the count is `violations.length`). `top_paths: TimingPath[]` = `{ circuit, comps: [comp_id], delay_ns }`. |
 
 ## 4. Net identifiers
 
@@ -56,10 +63,15 @@ in files (DESIGN.md §5.1: nets are derived, wires are the stored truth).
 
 ## 5. Conventions
 
-- **`CompId` = component array index** (format-v2 §5): the component's position in its circuit's
-  `components` array, document order. The frontend maps a `CompId` to a document component by
-  array position; the engine maps it to its flattened netlist the same way.
+- **`CompId` = document-order component array index** (format-v2 §5): the component's position
+  in the **referenced circuit's** `components` array — never a post-flatten engine index.
+  Messages that can reference non-root circuits carry an explicit `circuit` field
+  (`TimingViolation`, `TimingPath`, `NamedComponent`); `LoadError.comp_id` is document-order
+  within `LoadError.circuit`. **v1 limitation:** `LoadResult.net_map` covers the root circuit
+  only (the UI edits one sheet at a time).
 - **`sim_halted.details` shape:** for component-attributable halts (floating-read, contention,
   oscillation, setup/hold), `details` starts with `comp <CompId> pin "<name>": <message>` so
-  the UI can ring the offending component on the canvas (added in U5; the mock already emits
-  this shape). Free-form text remains legal for non-component halts (cycle-limit, error).
+  the UI can ring the offending component on the canvas. The CompId is the **root-sheet**
+  document-order id: when the culprit is inside a subcircuit, the engine reports the enclosing
+  subcircuit INSTANCE's root-sheet id (v1 UI highlights the root sheet only). Free-form text
+  remains legal for non-component halts (cycle-limit, error).

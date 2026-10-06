@@ -12,7 +12,7 @@ import CanvasHost, { type CanvasHostProps } from "./CanvasHost";
 import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
-import { DocScene, type SimOverlay } from "../editor/docScene";
+import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docScene";
 import { ToolMachine } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
@@ -65,9 +65,16 @@ export default forwardRef<
     sim?: SimController;
     /** Observed critical path to highlight (U7), as document comp ids. */
     pathIds?: readonly string[] | null;
+    /** Setup/hold violation markers for the current sheet (U7). */
+    violations?: readonly ViolationMarker[] | null;
   }
->(function EditorCanvas({ doc, themeName, onStatus, onEditComponent, sim, pathIds }, ref) {
+>(function EditorCanvas(
+  { doc, themeName, onStatus, onEditComponent, sim, pathIds, violations },
+  ref,
+) {
   const [tick, setTick] = useState(0);
+  // One tracker per document (fresh pulse state per circuit).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- doc identity is the reset signal
   const pulses = useMemo(() => new PulseTracker(), [doc]);
   const [pulsesLive, setPulsesLive] = useState(false);
   const lastPulseChanges = useRef<readonly unknown[] | null>(null);
@@ -135,6 +142,7 @@ export default forwardRef<
           haltCompId:
             highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
           path: pathIds ?? null,
+          violations: violations ?? null,
           pulses: activePulses?.flatMap((p) =>
             (store.netToWires?.get(p.net) ?? []).map((wireIdx) => ({
               wireIdx,
@@ -145,7 +153,8 @@ export default forwardRef<
       }
       scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay);
     },
-    [doc, scene, sel, tool, sim, simVersion, pathIds, pulses, pulsesLive],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
+    [doc, scene, sel, tool, sim, simVersion, pathIds, violations, pulses, pulsesLive],
   );
 
   const report = useCallback(() => {

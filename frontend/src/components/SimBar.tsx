@@ -160,12 +160,22 @@ export default function SimBar({
         {s.timing !== null && (
           <button
             className={`sim-tobs${pathOn ? " active" : ""}`}
-            title="Observed critical path (DTA) — click to highlight it on the canvas"
+            title={
+              s.timing.violations.length > 0
+                ? `Observed critical path (DTA) — click to highlight. Setup/hold: ${s.timing.violations
+                    .map((v) => `${v.kind} @ comp ${v.comp_id} (${v.circuit})`)
+                    .join(", ")}`
+                : "Observed critical path (DTA) — click to highlight it on the canvas"
+            }
             onClick={onTogglePath}
           >
             T_obs {s.timing.t_obs} ns
-            {s.timing.violations > 0 && (
-              <span className="sim-violations"> · ⚠ {s.timing.violations} violations</span>
+            {s.timing.violations.length > 0 && (
+              <span className="sim-violations">
+                {" "}
+                · ⚠ {s.timing.violations.length} violation
+                {s.timing.violations.length === 1 ? "" : "s"}
+              </span>
             )}
           </button>
         )}

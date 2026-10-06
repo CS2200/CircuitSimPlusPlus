@@ -19,6 +19,14 @@ import type {
   WireIdx,
   WireValue,
 } from "../ipc/types";
+import type { StampedChange } from "./diffPump";
+
+/** One net change in the latest flushed frame (U7 pulse spawn input). */
+export interface NetChangeEvent {
+  net: NetId;
+  /** Delay-mode event time (ns since run start), when the engine sent one. */
+  at?: number;
+}
 
 export class SimStore {
   /** Latest value per engine net. Mutated in place; `version` signals. */
@@ -34,7 +42,7 @@ export class SimStore {
   timing: TimingUpdate | null = null;
 
   /** Nets changed by the latest flushed frame (U7 pulse animations). */
-  lastChanged: readonly NetId[] = [];
+  lastChanged: readonly NetChangeEvent[] = [];
 
   private _loaded = false;
   private _version = 0;
@@ -96,10 +104,14 @@ export class SimStore {
     this.bump();
   }
 
-  /** One flushed frame of merged diffs (from DiffPump). */
-  applyDiffs(changes: ReadonlyMap<NetId, WireValue>, cycle: number): void {
-    for (const [net, val] of changes) this.netValues.set(net, val);
-    this.lastChanged = [...changes.keys()];
+  /**
+   * One flushed frame of merged diffs (from DiffPump). A `full` frame is
+   * the v1.1 initial paint after load/resume: it updates values but spawns
+   * NO pulses (nothing "changed" — everything simply is).
+   */
+  applyDiffs(changes: ReadonlyMap<NetId, StampedChange>, cycle: number, full = false): void {
+    for (const [net, change] of changes) this.netValues.set(net, change.val);
+    this.lastChanged = full ? [] : [...changes].map(([net, change]) => ({ net, at: change.at }));
     this._cycle = cycle;
     this.bump();
   }
@@ -122,6 +134,21 @@ export class SimStore {
 
   onTiming(timing: TimingUpdate): void {
     this.timing = timing;
+    this.bump();
+  }
+
+  /**
+   * Engine reset (same circuit stays loaded): keep the load-derived
+   * topology (net maps, named components); clear run state only. The
+   * engine answers with a `full: true` batch that repaints values.
+   */
+  resetRunState(): void {
+    this.netValues.clear();
+    this.lastChanged = [];
+    this.status = null;
+    this.halted = null;
+    this.timing = null;
+    this._cycle = 0;
     this.bump();
   }
 
