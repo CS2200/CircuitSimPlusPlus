@@ -4,3 +4,4 @@ frontend/dist
 frontend/playwright-report
 frontend/test-results
 *.log
+__pycache__/
