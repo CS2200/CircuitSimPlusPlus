@@ -22,7 +22,7 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
   "settings": {
     "delayModel": "delay",            // "zero" | "delay" — interactive default; the autograder pins "delay" (§4.4)
     "clockHz": 1,                     // UI clock speed at load time
-    "delayTable": "cs2200-74ls-v1"    // published, versioned delay table (§4.4)
+    "delayTable": "cs2200-74ls-v1"    // published, versioned delay table (§4.4, docs/delay-table.md); unknown name = load error
   },
   "circuits": [ /* ... */ ]
 }

@@ -22,5 +22,6 @@ mod engine_common;
 pub mod format;
 pub mod ids;
 pub mod netlist;
+pub mod timing_table;
 pub mod value;
 pub mod zero;

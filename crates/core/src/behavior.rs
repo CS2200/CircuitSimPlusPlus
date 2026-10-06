@@ -86,9 +86,9 @@ impl FloatingRead {
 /// - `setup` / `hold`: register and RAM write discipline (§4.3).
 /// - `access`: RAM/ROM read settling time.
 ///
-/// **DRAFT:** the defaults below are the DESIGN.md §4.4 (D13) anchors; task
-/// B7 replaces the default source with the published delay table
-/// (`cs2200-74ls-v1`). `attrs.delay` always overrides `prop` per instance.
+/// Values come from the published delay table named by
+/// `settings.delayTable` (task B7, [`crate::timing_table`]); an
+/// instance's `attrs.delay` overrides `prop`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Timing {
     pub prop: u64,
@@ -96,17 +96,6 @@ pub struct Timing {
     pub hold: u64,
     pub access: u64,
 }
-
-// DRAFT 74LS anchors (DESIGN.md §4.4) — B7 moves these into the table.
-pub const T_PD_NOT: u64 = 9;
-pub const T_PD_GATE: u64 = 10;
-pub const T_PD_XOR: u64 = 12;
-pub const T_PD_MUX: u64 = 12;
-pub const T_PD_ARITH: u64 = 15;
-pub const T_CLK_TO_Q: u64 = 20;
-pub const T_SETUP: u64 = 15;
-pub const T_HOLD: u64 = 5;
-pub const T_ACCESS: u64 = 50;
 
 /// Consume check: a pin that requires a driven value (module docs).
 fn consume(v: &Value, pin: impl Into<String>) -> Result<(), FloatingRead> {
@@ -704,50 +693,49 @@ impl Behavior {
         out
     }
 
-    /// Timing parameters (see [`Timing`]). DRAFT defaults until task B7.
-    pub fn timing(&self) -> Timing {
-        let prop = match &self.kind {
-            BehaviorKind::Not | BehaviorKind::Buffer => T_PD_NOT,
-            BehaviorKind::Gate { op, .. } => match op.base().0 {
-                GateOp::Xor => T_PD_XOR,
-                _ => T_PD_GATE,
-            },
-            BehaviorKind::ControlledBuffer { .. } => T_PD_GATE,
-            BehaviorKind::Mux { .. }
-            | BehaviorKind::Demux { .. }
-            | BehaviorKind::Decoder { .. } => T_PD_MUX,
-            BehaviorKind::Adder { .. }
-            | BehaviorKind::Subtractor { .. }
-            | BehaviorKind::Multiplier { .. }
-            | BehaviorKind::Divider { .. }
-            | BehaviorKind::Comparator
-            | BehaviorKind::Negator
-            | BehaviorKind::Shifter { .. } => T_PD_ARITH,
-            BehaviorKind::Register { .. } => T_CLK_TO_Q,
-            // Ideal/pure-wiring parts.
-            _ => 0,
+    /// Timing parameters (see [`Timing`]) from the delay table in force
+    /// (task B7); the instance's `attrs.delay` overrides `prop`.
+    pub fn timing(&self, table: &crate::timing_table::TimingTable) -> Timing {
+        use crate::components::GateOp as G;
+        let (type_, bitsize) = match &self.kind {
+            BehaviorKind::Not => ("gate.not", 1),
+            BehaviorKind::Buffer => ("gate.buffer", 1),
+            BehaviorKind::Gate { op, bitsize, .. } => (
+                match op {
+                    G::And => "gate.and",
+                    G::Or => "gate.or",
+                    G::Xor => "gate.xor",
+                    G::Nand => "gate.nand",
+                    G::Nor => "gate.nor",
+                    G::Xnor => "gate.xnor",
+                },
+                *bitsize,
+            ),
+            BehaviorKind::ControlledBuffer { bitsize } => ("wiring.controlled-buffer", *bitsize),
+            BehaviorKind::Pin { .. } => ("wiring.pin", 1),
+            BehaviorKind::Constant { .. } => ("wiring.constant", 1),
+            BehaviorKind::Clock { .. } => ("wiring.clock", 1),
+            BehaviorKind::Splitter { .. } => ("wiring.splitter", 1),
+            BehaviorKind::Probe => ("wiring.probe", 1),
+            BehaviorKind::Mux { bitsize, .. } => ("plexers.mux", *bitsize),
+            BehaviorKind::Demux { bitsize, .. } => ("plexers.demux", *bitsize),
+            BehaviorKind::Decoder { .. } => ("plexers.decoder", 1),
+            BehaviorKind::Adder { bitsize } => ("arith.adder", *bitsize),
+            BehaviorKind::Subtractor { bitsize } => ("arith.subtractor", *bitsize),
+            BehaviorKind::Multiplier { bitsize } => ("arith.multiplier", *bitsize),
+            BehaviorKind::Divider { bitsize } => ("arith.divider", *bitsize),
+            BehaviorKind::Comparator => ("arith.comparator", 1),
+            BehaviorKind::Negator => ("arith.negator", 1),
+            BehaviorKind::Shifter { .. } => ("arith.shifter", 1),
+            BehaviorKind::BitExtender { .. } => ("arith.bit-extender", 1),
+            BehaviorKind::Register { .. } => ("mem.register", 1),
+            BehaviorKind::Ram { bitsize, .. } => ("mem.ram", *bitsize),
+            BehaviorKind::Rom { bitsize, .. } => ("mem.rom", *bitsize),
+            BehaviorKind::Button { .. } => ("io.button", 1),
+            BehaviorKind::Led => ("io.led", 1),
+            BehaviorKind::HexDisplay => ("io.hexdisplay", 1),
         };
-        let mut t = Timing {
-            prop,
-            ..Timing::default()
-        };
-        match &self.kind {
-            BehaviorKind::Register { .. } => {
-                t.setup = T_SETUP;
-                t.hold = T_HOLD;
-            }
-            BehaviorKind::Ram { .. } => {
-                t.access = T_ACCESS;
-                t.setup = T_SETUP;
-                t.hold = T_HOLD;
-            }
-            BehaviorKind::Rom { .. } => t.access = T_ACCESS,
-            _ => {}
-        }
-        if let Some(d) = self.delay {
-            t.prop = d; // per-instance override (DESIGN.md §4.3)
-        }
-        t
+        table.timing(type_, bitsize, self.delay)
     }
 
     // -- Engine/poke/autograder accessors ---------------------------------
@@ -1630,28 +1618,36 @@ mod tests {
 
     #[test]
     fn timing_params_and_override() {
+        let table = crate::timing_table::TimingTable::builtin("cs2200-74ls-v1").unwrap();
         let reg = mk("mem.register", json!({"bitsize": 32}));
         assert_eq!(
-            reg.timing(),
+            reg.timing(&table),
             Timing {
-                prop: T_CLK_TO_Q,
-                setup: T_SETUP,
-                hold: T_HOLD,
+                prop: 20,
+                setup: 15,
+                hold: 5,
                 access: 0
             }
         );
         let ram = mk("mem.ram", json!({}));
-        assert_eq!(ram.timing().access, T_ACCESS);
-        assert_eq!(ram.timing().setup, T_SETUP);
+        assert_eq!(ram.timing(&table).access, 50);
+        assert_eq!(ram.timing(&table).setup, 15);
         let gate = mk("gate.and", json!({}));
-        assert_eq!(gate.timing().prop, T_PD_GATE);
+        assert_eq!(gate.timing(&table).prop, 10);
+        let nand = mk("gate.nand", json!({}));
+        assert_eq!(nand.timing(&table).prop, 10);
         let xor = mk("gate.xor", json!({}));
-        assert_eq!(xor.timing().prop, T_PD_XOR);
+        assert_eq!(xor.timing(&table).prop, 12);
+        // Adders scale per bit beyond the first (ripple, §4.4).
+        let add1 = mk("arith.adder", json!({}));
+        assert_eq!(add1.timing(&table).prop, 15);
+        let add32 = mk("arith.adder", json!({"bitsize": 32}));
+        assert_eq!(add32.timing(&table).prop, 15 + 31 * 4);
         // Per-instance override replaces prop (§4.3).
         let gate = mk("gate.and", json!({"delay": 42}));
-        assert_eq!(gate.timing().prop, 42);
+        assert_eq!(gate.timing(&table).prop, 42);
         // Ideal parts have zero delay.
         let sp = mk("wiring.splitter", json!({"splits": {"a": [0]}}));
-        assert_eq!(sp.timing().prop, 0);
+        assert_eq!(sp.timing(&table).prop, 0);
     }
 }

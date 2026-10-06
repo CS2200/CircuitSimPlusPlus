@@ -30,6 +30,43 @@ pub const MAX_SELECT_BITS: u32 = 8;
 pub const MAX_MEM_DEPTH: u32 = 1 << 20;
 pub const MAX_SPLIT_PINS: u32 = 64;
 
+/// Every component type string the registry knows (sorted). Delay-table
+/// validation (task B7) rejects table keys outside this list.
+pub const KNOWN_TYPES: &[&str] = &[
+    "arith.adder",
+    "arith.bit-extender",
+    "arith.comparator",
+    "arith.divider",
+    "arith.multiplier",
+    "arith.negator",
+    "arith.shifter",
+    "arith.subtractor",
+    "gate.and",
+    "gate.buffer",
+    "gate.nand",
+    "gate.nor",
+    "gate.not",
+    "gate.or",
+    "gate.xnor",
+    "gate.xor",
+    "io.button",
+    "io.hexdisplay",
+    "io.led",
+    "mem.ram",
+    "mem.register",
+    "mem.rom",
+    "plexers.decoder",
+    "plexers.demux",
+    "plexers.mux",
+    "subcircuit",
+    "wiring.clock",
+    "wiring.constant",
+    "wiring.controlled-buffer",
+    "wiring.pin",
+    "wiring.probe",
+    "wiring.splitter",
+];
+
 /// Electrical direction of a pin (used for net driver/sink accounting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinDir {

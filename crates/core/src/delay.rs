@@ -9,9 +9,9 @@
 //! ## The delay model (resolved D1)
 //!
 //! - **Wires — transport delay.** Each net delays every transition of its
-//!   resolved value by `d_net = wire_len × wire-delay constant` (DRAFT:
-//!   1 ns per 10 grid units; task B7 moves the constant into the delay
-//!   table). Every transition is reproduced, however narrow the pulse.
+//!   resolved value by `d_net = wire_len × wire-delay constant` from the
+//!   delay table (task B7; 0 disables wire delay). Every transition is
+//!   reproduced, however narrow the pulse.
 //! - **Gates — inertial delay.** Each component carries a `(generation,
 //!   pending outputs)` pair; an input change recomputes the outputs and
 //!   re-schedules the pending commit at `now + t_pd`, cancelling the
@@ -72,13 +72,9 @@ use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId}
 use crate::behavior::{Behavior, FloatingRead, Timing};
 use crate::engine_common as ec;
 use crate::netlist::Netlist;
+use crate::timing_table::TimingTable;
 use crate::value::{Bit, Value};
 pub use crate::zero::Halt;
-
-/// DRAFT wire-delay constant (task B7 moves it into the delay table):
-/// `d_net = wire_len × NUM / DEN` ns (floor).
-pub const WIRE_DELAY_NUM: u64 = 1;
-pub const WIRE_DELAY_DEN: u64 = 10;
 
 /// Default cap on applied events per cycle before declaring an event
 /// storm (§4.5).
@@ -297,8 +293,13 @@ pub struct DelayEngine {
 impl DelayEngine {
     /// Build the engine. `clock_half_period` is in delay-table units
     /// (ns); it must exceed the design's true critical path or setup
-    /// violations pile up (that's the lesson, §4.3).
-    pub fn new(netlist: Netlist, clock_half_period: u64) -> Result<DelayEngine, Vec<LoadError>> {
+    /// violations pile up (that's the lesson, §4.3). All delays come from
+    /// `table` (the published table named by `settings.delayTable`, B7).
+    pub fn new(
+        netlist: Netlist,
+        clock_half_period: u64,
+        table: &TimingTable,
+    ) -> Result<DelayEngine, Vec<LoadError>> {
         let comps = ec::build_behaviors(&netlist)?;
         let n = comps.len();
         let mut cdata = Vec::with_capacity(n);
@@ -343,7 +344,7 @@ impl DelayEngine {
                 class,
                 in_pins,
                 out_pins,
-                timing: beh.timing(),
+                timing: beh.timing(table),
             });
         }
         // RAM/ROM addresses are Z-watched too (a floating address is an
@@ -361,7 +362,7 @@ impl DelayEngine {
         let net_delay: Vec<u64> = netlist
             .nets
             .iter()
-            .map(|n| u64::from(n.wire_len) * WIRE_DELAY_NUM / WIRE_DELAY_DEN)
+            .map(|n| table.wire_delay(n.wire_len))
             .collect();
         let z_nets: BTreeSet<u32> = z_watched_net
             .iter()
@@ -1037,7 +1038,8 @@ mod tests {
     pub(super) fn engine(json: &str, half: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        DelayEngine::new(nl, half).expect("test engine builds")
+        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        DelayEngine::new(nl, half, &table).expect("test engine builds")
     }
 
     fn k(width: u32, v: u64) -> Value {
@@ -1048,7 +1050,7 @@ mod tests {
         r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     /// Two-stage pipeline: r1.q → not → and → r2.d; r1 toggles
-    /// (r1.d ← not(r1.q)). Delays (DRAFT): clk→Q 20, not 9, and 10 →
+    /// (r1.d ← not(r1.q)). Table delays: clk→Q 20, not 9, and 10 →
     /// after a toggle, r2.d settles at 20+9+10 = 39.
     pub(super) fn pipeline_json() -> String {
         format!(
@@ -1158,6 +1160,37 @@ mod tests {
         assert_eq!(eng.named_value("d"), Some(k(1, 1)));
         eng.run_until_time(126).unwrap();
         assert_eq!(eng.named_value("d"), Some(k(1, 0))); // trailing edge @125
+    }
+
+    #[test]
+    fn wire_delay_constant_comes_from_the_table() {
+        // Same 200-grid-unit wire as the transport test; a table with
+        // wire {num:1, den:1} makes the net delay 200 ns (vs 20 with the
+        // reference table's 1/10) — the constant is data, not code (B7).
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"d"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"p","pin":"in"}},
+                 "points":[[0,0],[100,0],[100,100]]}}
+            ]}}]
+        }}"##
+        );
+        let doc = load_document(json.as_bytes()).unwrap();
+        let nl = netlist::build(&doc).unwrap();
+        let mut custom: serde_json::Value =
+            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        custom["wire"]["den"] = serde_json::json!(1);
+        let table = TimingTable::from_json(&custom.to_string()).unwrap();
+        let mut eng = DelayEngine::new(nl, 5000, &table).unwrap();
+        assert!(eng.poke_at("src", k(1, 1), 100));
+        eng.run_until_time(300).unwrap();
+        assert_eq!(eng.named_value("d"), Some(k(1, 0)));
+        eng.run_until_time(301).unwrap();
+        assert_eq!(eng.named_value("d"), Some(k(1, 1))); // edge @100+200
     }
 
     #[test]

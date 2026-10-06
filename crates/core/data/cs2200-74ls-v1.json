@@ -1,0 +1,30 @@
+{
+  "name": "cs2200-74ls-v1",
+  "status": "DRAFT",
+  "units": "ns",
+  "wire": { "num": 1, "den": 10 },
+  "components": {
+    "gate.not": { "prop": 9 },
+    "gate.buffer": { "prop": 9 },
+    "gate.and": { "prop": 10 },
+    "gate.or": { "prop": 10 },
+    "gate.nand": { "prop": 10 },
+    "gate.nor": { "prop": 10 },
+    "gate.xor": { "prop": 12 },
+    "gate.xnor": { "prop": 12 },
+    "wiring.controlled-buffer": { "prop": 10 },
+    "plexers.mux": { "prop": 12 },
+    "plexers.demux": { "prop": 12 },
+    "plexers.decoder": { "prop": 12 },
+    "arith.adder": { "prop": 15, "perBit": 4 },
+    "arith.subtractor": { "prop": 15, "perBit": 4 },
+    "arith.multiplier": { "prop": 15 },
+    "arith.divider": { "prop": 15 },
+    "arith.comparator": { "prop": 15 },
+    "arith.negator": { "prop": 15 },
+    "arith.shifter": { "prop": 15 },
+    "mem.register": { "prop": 20, "setup": 15, "hold": 5 },
+    "mem.ram": { "access": 50, "setup": 15, "hold": 5 },
+    "mem.rom": { "access": 50 }
+  }
+}

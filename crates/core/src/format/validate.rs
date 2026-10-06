@@ -39,6 +39,7 @@ pub const MAX_HIERARCHY_DEPTH: usize = 64;
 pub fn validate(doc: &Document) -> Vec<LoadError> {
     let mut errors = Vec::new();
     check_header(doc, &mut errors);
+    check_settings(doc, &mut errors);
     check_circuit_names(doc, &mut errors);
     for circuit in &doc.circuits {
         validate_circuit(doc, circuit, &mut errors);
@@ -75,6 +76,19 @@ fn check_header(doc: &Document, errors: &mut Vec<LoadError>) {
                 "unsupported format version {} (this build understands {FORMAT_VERSION})",
                 doc.version
             ),
+        );
+    }
+}
+
+/// `settings.delayTable` must name a published delay table (task B7) —
+/// an unknown name is a clean load error, never a silent default.
+fn check_settings(doc: &Document, errors: &mut Vec<LoadError>) {
+    if let Err(e) = crate::timing_table::TimingTable::builtin(&doc.settings.delay_table) {
+        err(
+            errors,
+            LoadErrorKind::Other,
+            "",
+            format!("settings.delayTable: {e}"),
         );
     }
 }
@@ -403,6 +417,15 @@ mod tests {
     fn minimal_valid_document() {
         let json = header(AND2);
         assert_eq!(check(&json), Vec::new());
+    }
+
+    #[test]
+    fn unknown_delay_table_name_is_a_clean_error() {
+        let json = header(AND2).replace("cs2200-74ls-v1", "cs2200-ecl-v9");
+        let errors = check(&json);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].message.contains("cs2200-ecl-v9"), "{errors:?}");
+        assert!(errors[0].message.contains("cs2200-74ls-v1"), "{errors:?}");
     }
 
     #[test]
