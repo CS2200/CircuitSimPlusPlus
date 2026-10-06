@@ -625,3 +625,21 @@ body {
 .sim-violations {
   color: var(--wire-x);
 }
+
+/* Update nudge + About (U8) */
+.update-nudge p {
+  margin: 0.4rem 0;
+}
+
+.update-link {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.update-link:hover {
+  filter: brightness(1.15);
+}

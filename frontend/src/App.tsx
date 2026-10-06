@@ -4,6 +4,7 @@ import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components
 import PropertiesDialog from "./components/PropertiesDialog";
 import SimBar from "./components/SimBar";
 import WatchPanel from "./components/WatchPanel";
+import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
 import { PALETTE, compPins, compSpec } from "./editor/catalog";
@@ -40,6 +41,7 @@ export default function App() {
   const editorRef = useRef<EditorHandle>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [editingComp, setEditingComp] = useState<string | null>(null);
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
@@ -191,6 +193,9 @@ export default function App() {
           <button className="secondary" onClick={() => setShowHelp(true)}>
             ?
           </button>
+          <button className="secondary" onClick={() => setShowAbout(true)}>
+            About
+          </button>
           <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "Light" : "Dark"} theme
           </button>
@@ -272,6 +277,8 @@ export default function App() {
           </div>
         ))}
       </div>
+      {showAbout && <AboutCard onClose={() => setShowAbout(false)} />}
+      <UpdateNudge />
       {showHelp && (
         <div className="help-overlay" onClick={() => setShowHelp(false)}>
           <div className="help-card" onClick={(e) => e.stopPropagation()}>
