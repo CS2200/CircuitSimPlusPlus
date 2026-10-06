@@ -811,6 +811,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let contents = c.opt_string("contents");
             c.delay();
             c.finish();
+            if !depth.is_power_of_two() {
+                c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
+            }
             if let Some(contents) = &contents {
                 if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
                     c_issue(&mut c, format!("attr 'contents': {e}"));
@@ -844,6 +847,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let contents = c.opt_string("contents");
             c.delay();
             c.finish();
+            if !depth.is_power_of_two() {
+                c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
+            }
             if let Some(contents) = &contents {
                 if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
                     c_issue(&mut c, format!("attr 'contents': {e}"));
@@ -1055,6 +1061,19 @@ mod tests {
         let (_, e) = pins("mem.ram", json!({"contents": "3-0f-2"}));
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("contents"));
+    }
+
+    #[test]
+    fn memory_depth_must_be_power_of_two() {
+        for t in ["mem.ram", "mem.rom"] {
+            let (_, e) = pins(t, json!({"depth": 3}));
+            assert_eq!(e.len(), 1);
+            assert!(e[0].message.contains("power of two"));
+            let (_, e) = pins(t, json!({"depth": 1024}));
+            assert!(e.is_empty());
+            let (_, e) = pins(t, json!({"depth": 1}));
+            assert!(e.is_empty()); // 2^0 is a power of two
+        }
     }
 
     #[test]

@@ -47,9 +47,12 @@
 //!   timing model assumes it).
 //! - **Registers and RAM power on at 0** (contents/autoload aside), not X
 //!   — matches legacy CircuitSim and keeps grading deterministic.
-//! - **RAM addressing:** `addr` wider than `depth` (non-power-of-2 depths)
-//!   can address past the end: reads return `X`, writes are dropped.
-//!   A write with `X` in the address is dropped (target unknown).
+//! - **RAM addressing:** `depth` is required to be a power of two at load
+//!   (validation), so the `addr` pin's width exactly covers `0..depth`.
+//!   The defensive past-end path (reads `X`, writes drop) remains for the
+//!   `depth = 1` corner (a 1-bit address can still name word 1) and the
+//!   lenient post-validation path. A write with `X` in the address is
+//!   dropped (target unknown).
 //! - **Divide by zero** → quotient and remainder are `X` (honest
 //!   "unknown", and it cannot corrupt state — it propagates).
 //! - **Mux with X select** outputs the data value if all data inputs are
@@ -1437,7 +1440,9 @@ mod tests {
 
     #[test]
     fn ram_past_end_address() {
-        // depth 3 → addr width 2 can address word 3, which does not exist.
+        // depth 3 is rejected by validation (not a power of two); this
+        // exercises the defensive path through the lenient constructor —
+        // addr width 2 can address word 3, which does not exist.
         let mut ram = mk("mem.ram", json!({"bitsize": 8, "depth": 3}));
         assert_eq!(
             ram.eval(&refs(&[k(2, 3), k(8, 0), k(1, 0), k(1, 0)]))
