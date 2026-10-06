@@ -1,0 +1,1124 @@
+//! Arbitrary-width four-state logic values (DESIGN.md §4.1; BACKEND.md task B1).
+//!
+//! A [`Value`] is `width` bits, each in one of four states: `0`, `1`,
+//! `X` (unknown/contention), or `Z` (undriven/floating). The representation
+//! is three machine-word masks — `ones`, `xs`, `zs` — exactly matching the
+//! `{v, x, z}` hex-mask encoding pinned in `docs/ipc.md` §1: a bit set in
+//! `ones` is a logic 1, in `xs` an X, in `zs` a Z, and clear in all three a
+//! logic 0.
+//!
+//! Two invariants hold for every `Value`:
+//!
+//! * **Disjointness** — at most one mask has a given bit set.
+//! * **Canonical form** — bits beyond `width` are always clear.
+//!
+//! Every constructor and operation maintains both, so `==` is meaningful.
+//!
+//! ## Semantics notes
+//!
+//! * Gate operations ([`Value::and`], [`Value::or`], [`Value::xor`],
+//!   [`Value::not`], [`Value::mux`]) treat an input `Z` as `X`. This is
+//!   purely defensive: per DESIGN.md §4.1, *consuming* a floating value is a
+//!   simulation-halting error, and the engines halt before a `Z` ever
+//!   reaches a gate input (task B4). Gate outputs are always driven, so
+//!   gate ops never produce `Z`.
+//! * [`Value::contention_merge`] is the net-resolution function: it resolves
+//!   any number of drivers onto one net per §4.1 (no enabled drivers → `Z`;
+//!   disagreement → `X`).
+//!
+//! Internally a value is `Vec<u64>` limbs, little-endian (limb 0 holds bits
+//! 0..64). Widths ≤ 64 bits — the overwhelming majority at course scale —
+//! are single-limb; if M5 profiling justifies it, an inline-small-limb
+//! representation can replace `Vec` behind this API without touching
+//! callers.
+
+use std::fmt;
+
+use crate::api::WireValue;
+
+const LIMB_BITS: u32 = 64;
+
+/// A single four-state bit (DESIGN.md §4.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bit {
+    Zero,
+    One,
+    X,
+    Z,
+}
+
+impl fmt::Display for Bit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let c = match self {
+            Bit::Zero => '0',
+            Bit::One => '1',
+            Bit::X => 'x',
+            Bit::Z => 'z',
+        };
+        write!(f, "{c}")
+    }
+}
+
+/// Errors produced when parsing external value representations (hex masks
+/// from the frontend / CLI). Engine-internal misuse (width mismatches)
+/// panics instead — that is a bug in csim-core, not bad user input.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ValueError {
+    #[error("invalid hex digit in mask {mask:?}")]
+    InvalidHex { mask: String },
+    #[error("mask {mask:?} does not fit in {width} bits")]
+    MaskTooWide { mask: String, width: u32 },
+    #[error("value masks overlap: a bit is set in more than one of v/x/z")]
+    OverlappingMasks,
+}
+
+/// An arbitrary-width four-state logic vector. See module docs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Value {
+    width: u32,
+    ones: Vec<u64>,
+    xs: Vec<u64>,
+    zs: Vec<u64>,
+}
+
+fn n_limbs(width: u32) -> usize {
+    (width as usize).div_ceil(LIMB_BITS as usize)
+}
+
+/// Mask of the valid bits in the most significant limb of a `width`-bit
+/// value (`u64::MAX` when `width` is a whole number of limbs).
+fn top_mask(width: u32) -> u64 {
+    match width % LIMB_BITS {
+        0 => u64::MAX,
+        r => (1u64 << r) - 1,
+    }
+}
+
+/// Mask of the valid bits in limb `i` of a `width`-bit value.
+fn limb_mask(width: u32, i: usize) -> u64 {
+    if i + 1 == n_limbs(width) {
+        top_mask(width)
+    } else {
+        u64::MAX
+    }
+}
+
+/// `src >> n`, keeping `dst_limbs` limbs of the result.
+fn shr_bits(src: &[u64], n: u32, dst_limbs: usize) -> Vec<u64> {
+    let limb_shift = (n / LIMB_BITS) as usize;
+    let bit_shift = n % LIMB_BITS;
+    let mut out = vec![0u64; dst_limbs];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let s = i + limb_shift;
+        if s >= src.len() {
+            break;
+        }
+        *slot = src[s] >> bit_shift;
+        if bit_shift > 0 && s + 1 < src.len() {
+            *slot |= src[s + 1] << (LIMB_BITS - bit_shift);
+        }
+    }
+    out
+}
+
+/// `src << n`, keeping `dst_limbs` limbs of the result.
+fn shl_bits(src: &[u64], n: u32, dst_limbs: usize) -> Vec<u64> {
+    let limb_shift = (n / LIMB_BITS) as usize;
+    let bit_shift = n % LIMB_BITS;
+    let mut out = vec![0u64; dst_limbs];
+    for (i, &limb) in src.iter().enumerate() {
+        let d = i + limb_shift;
+        if d >= dst_limbs {
+            break;
+        }
+        out[d] |= limb << bit_shift;
+        if bit_shift > 0 && d + 1 < dst_limbs {
+            out[d + 1] |= limb >> (LIMB_BITS - bit_shift);
+        }
+    }
+    out
+}
+
+/// Canonical hex rendering of a mask: empty string when zero (per
+/// `docs/ipc.md` §1), otherwise lowercase hex with no leading zeros.
+fn mask_to_hex(mask: &[u64]) -> String {
+    match mask.iter().rposition(|&l| l != 0) {
+        None => String::new(),
+        Some(top) => {
+            let mut s = format!("{:x}", mask[top]);
+            for i in (0..top).rev() {
+                s.push_str(&format!("{:016x}", mask[i]));
+            }
+            s
+        }
+    }
+}
+
+fn hex_digit(c: u8) -> Option<u64> {
+    match c {
+        b'0'..=b'9' => Some(u64::from(c - b'0')),
+        b'a'..=b'f' => Some(u64::from(c - b'a' + 10)),
+        b'A'..=b'F' => Some(u64::from(c - b'A' + 10)),
+        _ => None,
+    }
+}
+
+/// Parse a big-endian hex mask into `n_limbs(width)` limbs. Leading zeros
+/// are tolerated; a *nonzero* bit at or beyond `width` is an error.
+fn parse_hex_mask(s: &str, width: u32) -> Result<Vec<u64>, ValueError> {
+    let n = n_limbs(width);
+    let mut limbs = vec![0u64; n];
+    let mut limb = 0usize;
+    let mut shift = 0u32;
+    for &c in s.as_bytes().iter().rev() {
+        let d = hex_digit(c).ok_or_else(|| ValueError::InvalidHex { mask: s.to_owned() })?;
+        if limb >= n {
+            // Past capacity: only insignificant leading zeros are allowed.
+            if d != 0 {
+                return Err(ValueError::MaskTooWide {
+                    mask: s.to_owned(),
+                    width,
+                });
+            }
+            continue;
+        }
+        limbs[limb] |= d << shift;
+        shift += 4;
+        if shift == LIMB_BITS {
+            shift = 0;
+            limb += 1;
+        }
+    }
+    if n > 0 && limbs[n - 1] & !top_mask(width) != 0 {
+        return Err(ValueError::MaskTooWide {
+            mask: s.to_owned(),
+            width,
+        });
+    }
+    Ok(limbs)
+}
+
+impl Value {
+    /// All bits logic 0.
+    pub fn zero(width: u32) -> Self {
+        Value {
+            width,
+            ones: vec![0; n_limbs(width)],
+            xs: vec![0; n_limbs(width)],
+            zs: vec![0; n_limbs(width)],
+        }
+    }
+
+    /// All bits logic 1.
+    pub fn all_ones(width: u32) -> Self {
+        let mut v = Self::zero(width);
+        v.ones.fill(u64::MAX);
+        v.normalize();
+        v
+    }
+
+    /// All bits X.
+    pub fn x(width: u32) -> Self {
+        let mut v = Self::zero(width);
+        v.xs.fill(u64::MAX);
+        v.normalize();
+        v
+    }
+
+    /// All bits Z (fully undriven).
+    pub fn z(width: u32) -> Self {
+        let mut v = Self::zero(width);
+        v.zs.fill(u64::MAX);
+        v.normalize();
+        v
+    }
+
+    /// A known constant. Panics if `v` does not fit in `width` bits.
+    pub fn from_u64(width: u32, v: u64) -> Self {
+        if width < LIMB_BITS {
+            assert!(
+                v >> width == 0,
+                "from_u64: {v:#x} does not fit in {width} bits"
+            );
+        }
+        let mut val = Self::zero(width);
+        if let Some(first) = val.ones.first_mut() {
+            *first = v;
+        }
+        val.normalize();
+        val
+    }
+
+    /// Build from per-bit states, `bits[0]` = least significant.
+    pub fn from_bits(bits: &[Bit]) -> Self {
+        let mut v = Self::zero(bits.len() as u32);
+        for (i, b) in bits.iter().enumerate() {
+            let m = 1u64 << (i as u32 % LIMB_BITS);
+            let limb = i / LIMB_BITS as usize;
+            match b {
+                Bit::One => v.ones[limb] |= m,
+                Bit::X => v.xs[limb] |= m,
+                Bit::Z => v.zs[limb] |= m,
+                Bit::Zero => {}
+            }
+        }
+        v
+    }
+
+    /// Re-mask the top limb (restore canonical form after raw writes).
+    fn normalize(&mut self) {
+        if self.ones.is_empty() {
+            return;
+        }
+        let m = top_mask(self.width);
+        let last = self.ones.len() - 1;
+        self.ones[last] &= m;
+        self.xs[last] &= m;
+        self.zs[last] &= m;
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Any bit X?
+    pub fn has_x(&self) -> bool {
+        self.xs.iter().any(|&l| l != 0)
+    }
+
+    /// Any bit Z?
+    pub fn has_z(&self) -> bool {
+        self.zs.iter().any(|&l| l != 0)
+    }
+
+    /// Every bit a known 0 or 1 (no X, no Z)?
+    pub fn is_fully_known(&self) -> bool {
+        !self.has_x() && !self.has_z()
+    }
+
+    /// Every bit Z (nothing driven at all)?
+    pub fn is_fully_z(&self) -> bool {
+        self.zs
+            .iter()
+            .enumerate()
+            .all(|(i, &l)| l == limb_mask(self.width, i))
+    }
+
+    /// State of bit `i` (0 = least significant).
+    pub fn bit(&self, i: u32) -> Bit {
+        assert!(i < self.width, "bit: index {i} out of width {}", self.width);
+        let limb = (i / LIMB_BITS) as usize;
+        let m = 1u64 << (i % LIMB_BITS);
+        if self.ones[limb] & m != 0 {
+            Bit::One
+        } else if self.xs[limb] & m != 0 {
+            Bit::X
+        } else if self.zs[limb] & m != 0 {
+            Bit::Z
+        } else {
+            Bit::Zero
+        }
+    }
+
+    /// The value as a `u64`, if it fits and is fully known.
+    pub fn to_u64(&self) -> Option<u64> {
+        if self.width > LIMB_BITS || !self.is_fully_known() {
+            return None;
+        }
+        Some(if self.ones.is_empty() {
+            0
+        } else {
+            self.ones[0] & top_mask(self.width)
+        })
+    }
+
+    // ---- Gate operations (4-state; input Z treated as X; never output Z)
+
+    /// Shared limb loop for two-input gates. `f` maps
+    /// `(ones_a, bad_a, ones_b, bad_b, mask)` → `(ones_out, xs_out)`, where
+    /// `bad` = `xs | zs` (unknown-or-floating input bits, both treated as
+    /// unknown at a gate input).
+    fn gate_binop(
+        &self,
+        rhs: &Value,
+        op: &str,
+        f: impl Fn(u64, u64, u64, u64, u64) -> (u64, u64),
+    ) -> Value {
+        assert_eq!(
+            self.width, rhs.width,
+            "{op}: width mismatch ({} vs {})",
+            self.width, rhs.width
+        );
+        let n = n_limbs(self.width);
+        let mut ones = vec![0u64; n];
+        let mut xs = vec![0u64; n];
+        for i in 0..n {
+            let bad_a = self.xs[i] | self.zs[i];
+            let bad_b = rhs.xs[i] | rhs.zs[i];
+            let mask = limb_mask(self.width, i);
+            let (o, x) = f(self.ones[i], bad_a, rhs.ones[i], bad_b, mask);
+            ones[i] = o;
+            xs[i] = x;
+        }
+        Value {
+            width: self.width,
+            ones,
+            xs,
+            zs: vec![0; n],
+        }
+    }
+
+    /// 4-state AND: `0 ∧ _ = 0`; `1 ∧ 1 = 1`; otherwise X.
+    pub fn and(&self, rhs: &Value) -> Value {
+        self.gate_binop(rhs, "and", |oa, ba, ob, bb, mask| {
+            let zero_a = !(oa | ba) & mask;
+            let zero_b = !(ob | bb) & mask;
+            let o = oa & ob;
+            let x = mask & !(o | zero_a | zero_b);
+            (o, x)
+        })
+    }
+
+    /// 4-state OR: `1 ∨ _ = 1`; `0 ∨ 0 = 0`; otherwise X.
+    pub fn or(&self, rhs: &Value) -> Value {
+        self.gate_binop(rhs, "or", |oa, ba, ob, bb, mask| {
+            let zero_a = !(oa | ba) & mask;
+            let zero_b = !(ob | bb) & mask;
+            let o = oa | ob;
+            let x = mask & !(o | (zero_a & zero_b));
+            (o, x)
+        })
+    }
+
+    /// 4-state XOR: X if either input unknown, else bitwise xor.
+    pub fn xor(&self, rhs: &Value) -> Value {
+        self.gate_binop(rhs, "xor", |oa, ba, ob, bb, mask| {
+            let bad = (ba | bb) & mask;
+            ((oa ^ ob) & !bad & mask, bad)
+        })
+    }
+
+    /// 4-state NOT: `¬0 = 1`; `¬1 = 0`; `¬X = ¬Z = X`.
+    pub fn not(&self) -> Value {
+        let n = n_limbs(self.width);
+        let mut ones = vec![0u64; n];
+        let mut xs = vec![0u64; n];
+        for i in 0..n {
+            let bad = self.xs[i] | self.zs[i];
+            let mask = limb_mask(self.width, i);
+            ones[i] = !self.ones[i] & !bad & mask;
+            xs[i] = bad & mask;
+        }
+        Value {
+            width: self.width,
+            ones,
+            xs,
+            zs: vec![0; n],
+        }
+    }
+
+    /// Two-input mux: `sel` = 1 selects `d1`, `sel` = 0 selects `d0`.
+    /// If `sel` is unknown, bits where `d1` and `d0` agree pass through
+    /// (preserving strength — two agreeing Z inputs stay Z) and disagreeing
+    /// bits become X.
+    pub fn mux(sel: &Value, d1: &Value, d0: &Value) -> Value {
+        assert_eq!(sel.width, 1, "mux: select must be 1 bit, got {}", sel.width);
+        assert_eq!(
+            d1.width, d0.width,
+            "mux: data width mismatch ({} vs {})",
+            d1.width, d0.width
+        );
+        match sel.bit(0) {
+            Bit::One => d1.clone(),
+            Bit::Zero => d0.clone(),
+            Bit::X | Bit::Z => {
+                let n = n_limbs(d1.width);
+                let mut ones = vec![0u64; n];
+                let mut xs = vec![0u64; n];
+                let mut zs = vec![0u64; n];
+                for i in 0..n {
+                    let mask = limb_mask(d1.width, i);
+                    let zero1 = !(d1.ones[i] | d1.xs[i] | d1.zs[i]) & mask;
+                    let zero0 = !(d0.ones[i] | d0.xs[i] | d0.zs[i]) & mask;
+                    let agree = (d1.ones[i] & d0.ones[i])
+                        | (zero1 & zero0)
+                        | (d1.xs[i] & d0.xs[i])
+                        | (d1.zs[i] & d0.zs[i]);
+                    ones[i] = d1.ones[i] & d0.ones[i];
+                    xs[i] = (d1.xs[i] & d0.xs[i]) | (!agree & mask);
+                    zs[i] = d1.zs[i] & d0.zs[i];
+                }
+                Value {
+                    width: d1.width,
+                    ones,
+                    xs,
+                    zs,
+                }
+            }
+        }
+    }
+
+    /// Net resolution (DESIGN.md §4.1): combine every driver of one net.
+    ///
+    /// Per bit, over all drivers: no driving driver → Z; one state
+    /// unanimously → that state; any disagreement (or any driven X) → X.
+    /// A driver bit that is Z is *not driving* that bit.
+    pub fn contention_merge(width: u32, drivers: &[Value]) -> Value {
+        for d in drivers {
+            assert_eq!(
+                d.width, width,
+                "contention_merge: driver width {} != net width {width}",
+                d.width
+            );
+        }
+        if drivers.is_empty() {
+            return Value::z(width);
+        }
+        let n = n_limbs(width);
+        let mut ones = vec![0u64; n];
+        let mut xs = vec![0u64; n];
+        let mut zs = vec![0u64; n];
+        for i in 0..n {
+            let mask = limb_mask(width, i);
+            let mut any_driven = 0u64; // some driver drives this bit (0/1/X)
+            let mut any_one = 0u64; // some driver drives it to 1
+            let mut all_one_or_z = u64::MAX; // every driver says 1 or Z
+            let mut any_x = 0u64; // some driver drives X
+            for d in drivers {
+                any_driven |= !d.zs[i];
+                any_one |= d.ones[i];
+                any_x |= d.xs[i];
+                all_one_or_z &= d.ones[i] | d.zs[i];
+            }
+            let disagree = any_one & !all_one_or_z;
+            let x = (any_x | disagree) & mask;
+            ones[i] = all_one_or_z & any_driven & !x & mask;
+            xs[i] = x;
+            zs[i] = !any_driven & mask;
+        }
+        Value {
+            width,
+            ones,
+            xs,
+            zs,
+        }
+    }
+
+    // ---- Width operations
+
+    /// Bits `offset .. offset+width` as a new value.
+    pub fn extract(&self, offset: u32, width: u32) -> Value {
+        assert!(
+            u64::from(offset) + u64::from(width) <= u64::from(self.width),
+            "extract: [{offset}..+{width}] out of {}-bit value",
+            self.width
+        );
+        let n = n_limbs(width);
+        let mut v = Value {
+            width,
+            ones: shr_bits(&self.ones, offset, n),
+            xs: shr_bits(&self.xs, offset, n),
+            zs: shr_bits(&self.zs, offset, n),
+        };
+        v.normalize();
+        v
+    }
+
+    /// `upper` in the high bits, `lower` in the low bits.
+    pub fn concat(upper: &Value, lower: &Value) -> Value {
+        let width = upper.width + lower.width;
+        let n = n_limbs(width);
+        let shift = lower.width;
+        let mut ones = shl_bits(&upper.ones, shift, n);
+        let mut xs = shl_bits(&upper.xs, shift, n);
+        let mut zs = shl_bits(&upper.zs, shift, n);
+        for (i, &l) in lower.ones.iter().enumerate() {
+            ones[i] |= l;
+        }
+        for (i, &l) in lower.xs.iter().enumerate() {
+            xs[i] |= l;
+        }
+        for (i, &l) in lower.zs.iter().enumerate() {
+            zs[i] |= l;
+        }
+        let mut v = Value {
+            width,
+            ones,
+            xs,
+            zs,
+        };
+        v.normalize();
+        v
+    }
+
+    /// Grow to `width` bits, filling with 0.
+    pub fn zero_extend(&self, width: u32) -> Value {
+        assert!(
+            width >= self.width,
+            "zero_extend: {} -> {width} shrinks",
+            self.width
+        );
+        let n = n_limbs(width);
+        let grow = |m: &[u64]| {
+            let mut v = m.to_vec();
+            v.resize(n, 0);
+            v
+        };
+        Value {
+            width,
+            ones: grow(&self.ones),
+            xs: grow(&self.xs),
+            zs: grow(&self.zs),
+        }
+    }
+
+    /// Grow to `width` bits, replicating the sign bit's state (a sign bit of
+    /// X extends with X, Z with Z).
+    pub fn sign_extend(&self, width: u32) -> Value {
+        assert!(
+            width >= self.width,
+            "sign_extend: {} -> {width} shrinks",
+            self.width
+        );
+        assert!(self.width >= 1, "sign_extend: 0-bit value has no sign");
+        if width == self.width {
+            return self.clone();
+        }
+        let ext = width - self.width;
+        let fill = match self.bit(self.width - 1) {
+            Bit::One => Value::all_ones(ext),
+            Bit::Zero => Value::zero(ext),
+            Bit::X => Value::x(ext),
+            Bit::Z => Value::z(ext),
+        };
+        Value::concat(&fill, self)
+    }
+
+    /// Keep the low `width` bits.
+    pub fn truncate(&self, width: u32) -> Value {
+        assert!(width <= self.width, "truncate: {width} > {}", self.width);
+        self.extract(0, width)
+    }
+
+    // ---- External representations
+
+    /// Encode as the IPC `{v, x, z}` hex masks (`docs/ipc.md` §1).
+    pub fn to_wire_value(&self) -> WireValue {
+        WireValue {
+            v: mask_to_hex(&self.ones),
+            x: mask_to_hex(&self.xs),
+            z: mask_to_hex(&self.zs),
+        }
+    }
+
+    /// Decode IPC hex masks for a `width`-bit value. Validates hex syntax,
+    /// fit-in-width, and mask disjointness.
+    pub fn from_wire_value(wv: &WireValue, width: u32) -> Result<Value, ValueError> {
+        Self::from_hex_masks(width, &wv.v, &wv.x, &wv.z)
+    }
+
+    /// Decode raw hex masks (same rules as [`Value::from_wire_value`]).
+    pub fn from_hex_masks(width: u32, v: &str, x: &str, z: &str) -> Result<Value, ValueError> {
+        let ones = parse_hex_mask(v, width)?;
+        let xs = parse_hex_mask(x, width)?;
+        let zs = parse_hex_mask(z, width)?;
+        for i in 0..n_limbs(width) {
+            if (ones[i] & xs[i]) | (ones[i] & zs[i]) | (xs[i] & zs[i]) != 0 {
+                return Err(ValueError::OverlappingMasks);
+            }
+        }
+        Ok(Value {
+            width,
+            ones,
+            xs,
+            zs,
+        })
+    }
+}
+
+impl fmt::Display for Value {
+    /// Fully known values render as hex (`0x1fa3`); anything containing X
+    /// or Z renders as an MSB-first bit string (`0b1x0z`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_fully_known() {
+            let h = mask_to_hex(&self.ones);
+            write!(f, "0x{}", if h.is_empty() { "0" } else { &h })
+        } else {
+            write!(f, "0b")?;
+            for i in (0..self.width).rev() {
+                write!(f, "{}", self.bit(i))?;
+            }
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL: [Bit; 4] = [Bit::Zero, Bit::One, Bit::X, Bit::Z];
+
+    fn v1(b: Bit) -> Value {
+        Value::from_bits(&[b])
+    }
+
+    fn bits(v: &Value) -> Vec<Bit> {
+        (0..v.width()).map(|i| v.bit(i)).collect()
+    }
+
+    /// Both invariants, checked on everything the tests produce.
+    fn assert_canonical(v: &Value) {
+        assert_eq!(v.ones.len(), n_limbs(v.width), "limb count");
+        assert_eq!(v.xs.len(), n_limbs(v.width), "limb count");
+        assert_eq!(v.zs.len(), n_limbs(v.width), "limb count");
+        for i in 0..v.ones.len() {
+            assert_eq!(
+                (v.ones[i] & v.xs[i]) | (v.ones[i] & v.zs[i]) | (v.xs[i] & v.zs[i]),
+                0,
+                "disjointness violated in limb {i}"
+            );
+        }
+        if !v.ones.is_empty() {
+            let m = top_mask(v.width);
+            let last = v.ones.len() - 1;
+            assert_eq!(v.ones[last] & !m, 0, "high ones bits set");
+            assert_eq!(v.xs[last] & !m, 0, "high xs bits set");
+            assert_eq!(v.zs[last] & !m, 0, "high zs bits set");
+        }
+    }
+
+    // ---- Reference 4-state truth tables (gate inputs treat Z as X)
+
+    fn and_ref(a: Bit, b: Bit) -> Bit {
+        if a == Bit::Zero || b == Bit::Zero {
+            Bit::Zero
+        } else if a == Bit::One && b == Bit::One {
+            Bit::One
+        } else {
+            Bit::X
+        }
+    }
+
+    fn or_ref(a: Bit, b: Bit) -> Bit {
+        if a == Bit::One || b == Bit::One {
+            Bit::One
+        } else if a == Bit::Zero && b == Bit::Zero {
+            Bit::Zero
+        } else {
+            Bit::X
+        }
+    }
+
+    fn xor_ref(a: Bit, b: Bit) -> Bit {
+        match (a, b) {
+            (Bit::Zero, Bit::Zero) | (Bit::One, Bit::One) => Bit::Zero,
+            (Bit::Zero, Bit::One) | (Bit::One, Bit::Zero) => Bit::One,
+            _ => Bit::X,
+        }
+    }
+
+    fn not_ref(a: Bit) -> Bit {
+        match a {
+            Bit::Zero => Bit::One,
+            Bit::One => Bit::Zero,
+            _ => Bit::X,
+        }
+    }
+
+    #[test]
+    fn gate_truth_tables() {
+        for a in ALL {
+            assert_eq!(bits(&v1(a).not()), vec![not_ref(a)], "not {a:?}");
+            for b in ALL {
+                let and = v1(a).and(&v1(b));
+                let or = v1(a).or(&v1(b));
+                let xor = v1(a).xor(&v1(b));
+                assert_eq!(bits(&and), vec![and_ref(a, b)], "{a:?} and {b:?}");
+                assert_eq!(bits(&or), vec![or_ref(a, b)], "{a:?} or {b:?}");
+                assert_eq!(bits(&xor), vec![xor_ref(a, b)], "{a:?} xor {b:?}");
+                assert_canonical(&and);
+                assert_canonical(&or);
+                assert_canonical(&xor);
+                // Gate outputs are always driven: never Z.
+                assert!(!and.has_z() && !or.has_z() && !xor.has_z());
+            }
+        }
+    }
+
+    /// Gate ops must be limb-parallel: same truth tables at any width,
+    /// including across limb boundaries.
+    #[test]
+    fn gate_ops_multibit_and_cross_limb() {
+        let pat_a = [
+            Bit::Zero,
+            Bit::One,
+            Bit::X,
+            Bit::Z,
+            Bit::One,
+            Bit::Zero,
+            Bit::Z,
+            Bit::X,
+        ];
+        let pat_b = [
+            Bit::One,
+            Bit::X,
+            Bit::Z,
+            Bit::Zero,
+            Bit::Zero,
+            Bit::One,
+            Bit::X,
+            Bit::Z,
+        ];
+        // Repeat the 8-bit patterns to fill 1, 2, and 3 limbs (width 130).
+        for width in [8usize, 64, 65, 130] {
+            let a = Value::from_bits(
+                &pat_a
+                    .iter()
+                    .cycle()
+                    .take(width)
+                    .copied()
+                    .collect::<Vec<_>>(),
+            );
+            let b = Value::from_bits(
+                &pat_b
+                    .iter()
+                    .cycle()
+                    .take(width)
+                    .copied()
+                    .collect::<Vec<_>>(),
+            );
+            let and = a.and(&b);
+            let or = a.or(&b);
+            let xor = a.xor(&b);
+            let not = a.not();
+            for i in 0..width as u32 {
+                let (ba, bb) = (a.bit(i), b.bit(i));
+                assert_eq!(and.bit(i), and_ref(ba, bb), "and bit {i} width {width}");
+                assert_eq!(or.bit(i), or_ref(ba, bb), "or bit {i} width {width}");
+                assert_eq!(xor.bit(i), xor_ref(ba, bb), "xor bit {i} width {width}");
+                assert_eq!(not.bit(i), not_ref(ba), "not bit {i} width {width}");
+            }
+            assert_canonical(&and);
+            assert_canonical(&or);
+            assert_canonical(&xor);
+            assert_canonical(&not);
+        }
+    }
+
+    #[test]
+    fn mux_select() {
+        let d1 = v1(Bit::One);
+        let d0 = v1(Bit::Zero);
+        assert_eq!(Value::mux(&v1(Bit::One), &d1, &d0), v1(Bit::One));
+        assert_eq!(Value::mux(&v1(Bit::Zero), &d1, &d0), v1(Bit::Zero));
+
+        // Unknown select: agreement passes through, disagreement -> X.
+        for sel in [Bit::X, Bit::Z] {
+            let s = v1(sel);
+            assert_eq!(Value::mux(&s, &v1(Bit::One), &v1(Bit::Zero)), v1(Bit::X));
+            assert_eq!(Value::mux(&s, &v1(Bit::One), &v1(Bit::One)), v1(Bit::One));
+            assert_eq!(
+                Value::mux(&s, &v1(Bit::Zero), &v1(Bit::Zero)),
+                v1(Bit::Zero)
+            );
+            assert_eq!(Value::mux(&s, &v1(Bit::X), &v1(Bit::X)), v1(Bit::X));
+            assert_eq!(Value::mux(&s, &v1(Bit::Z), &v1(Bit::Z)), v1(Bit::Z));
+            assert_eq!(Value::mux(&s, &v1(Bit::X), &v1(Bit::One)), v1(Bit::X));
+            assert_eq!(Value::mux(&s, &v1(Bit::Z), &v1(Bit::Zero)), v1(Bit::X));
+        }
+
+        // Multi-bit data under unknown select.
+        let d1 = Value::from_bits(&[Bit::One, Bit::Zero, Bit::X, Bit::Z]);
+        let d0 = Value::from_bits(&[Bit::Zero, Bit::Zero, Bit::X, Bit::One]);
+        let m = Value::mux(&v1(Bit::X), &d1, &d0);
+        assert_eq!(bits(&m), vec![Bit::X, Bit::Zero, Bit::X, Bit::X]);
+        assert_canonical(&m);
+    }
+
+    #[test]
+    fn contention_merge_resolution() {
+        // No drivers -> floating.
+        assert_eq!(Value::contention_merge(4, &[]), Value::z(4));
+
+        // Single driver passes through, whatever its state.
+        for b in ALL {
+            assert_eq!(Value::contention_merge(1, &[v1(b)]), v1(b));
+        }
+
+        // Agreement (including X with X) passes; disagreement -> X.
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::One), v1(Bit::One)]),
+            v1(Bit::One)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::Zero), v1(Bit::Zero)]),
+            v1(Bit::Zero)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::X), v1(Bit::X)]),
+            v1(Bit::X)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::One), v1(Bit::Zero)]),
+            v1(Bit::X)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::X), v1(Bit::One)]),
+            v1(Bit::X)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::X), v1(Bit::Z)]),
+            v1(Bit::X)
+        );
+
+        // Tri-state bus: a disabled (Z) driver yields to the enabled one.
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::Z), v1(Bit::One)]),
+            v1(Bit::One)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::Z), v1(Bit::One), v1(Bit::One)]),
+            v1(Bit::One)
+        );
+        assert_eq!(
+            Value::contention_merge(1, &[v1(Bit::Z), v1(Bit::One), v1(Bit::Zero)]),
+            v1(Bit::X)
+        );
+
+        // Per-bit resolution: bit 0 contends, bit 1 has one driver.
+        let a = Value::from_bits(&[Bit::One, Bit::Z]);
+        let b = Value::from_bits(&[Bit::Zero, Bit::One]);
+        let m = Value::contention_merge(2, &[a, b]);
+        assert_eq!(bits(&m), vec![Bit::X, Bit::One]);
+        assert_canonical(&m);
+
+        // Wide: two full 100-bit buses contending on every bit.
+        let a = Value::all_ones(100);
+        let b = Value::zero(100);
+        let m = Value::contention_merge(100, &[a, b]);
+        assert_eq!(m, Value::x(100));
+        assert_canonical(&m);
+    }
+
+    #[test]
+    fn width_ops() {
+        // zero_extend grows with known zeros; same width is a clone.
+        let v = Value::from_u64(4, 0xB);
+        assert_eq!(v.zero_extend(4), v);
+        let e = v.zero_extend(64);
+        assert_eq!(e.width(), 64);
+        assert_eq!(e.to_u64(), Some(0xB));
+        let e = v.zero_extend(130);
+        assert_eq!(e.width(), 130);
+        for i in 0..130 {
+            assert_eq!(e.bit(i), if i < 4 { v.bit(i) } else { Bit::Zero });
+        }
+        assert_canonical(&e);
+
+        // sign_extend replicates the sign bit's state.
+        let neg = Value::from_u64(4, 0xB); // 0b1011, sign = 1
+        assert_eq!(neg.sign_extend(8).to_u64(), Some(0xFB));
+        let pos = Value::from_u64(4, 0x3); // 0b0011, sign = 0
+        assert_eq!(pos.sign_extend(8).to_u64(), Some(0x03));
+        let sx = Value::from_bits(&[Bit::One, Bit::X]).sign_extend(4);
+        assert_eq!(bits(&sx), vec![Bit::One, Bit::X, Bit::X, Bit::X]);
+        let sz = Value::from_bits(&[Bit::One, Bit::Z]).sign_extend(4);
+        assert_eq!(bits(&sz), vec![Bit::One, Bit::Z, Bit::Z, Bit::Z]);
+        assert_canonical(&sx);
+
+        // truncate keeps the low bits.
+        let v = Value::from_u64(8, 0xAB);
+        assert_eq!(v.truncate(4).to_u64(), Some(0xB));
+        assert_eq!(v.truncate(8), v);
+
+        // extract, including across limb boundaries.
+        let mut pat = vec![Bit::Zero; 100];
+        pat[50] = Bit::One;
+        pat[63] = Bit::X;
+        pat[64] = Bit::Z;
+        pat[89] = Bit::One;
+        let v = Value::from_bits(&pat);
+        let e = v.extract(50, 40);
+        assert_eq!(e.width(), 40);
+        assert_eq!(e.bit(0), Bit::One);
+        assert_eq!(e.bit(13), Bit::X);
+        assert_eq!(e.bit(14), Bit::Z);
+        assert_eq!(e.bit(39), Bit::One);
+        assert_eq!(e.bit(20), Bit::Zero);
+        assert_canonical(&e);
+        assert_eq!(v.extract(0, 100), v);
+        assert_eq!(v.extract(99, 1), Value::zero(1));
+
+        // concat: states preserved, high/low placement, cross-limb.
+        let hi = Value::from_u64(8, 0xAB);
+        let lo = Value::from_u64(4, 0xC);
+        assert_eq!(Value::concat(&hi, &lo).to_u64(), Some(0xABC));
+        let hi = Value::from_bits(&[Bit::X]);
+        let lo = Value::from_bits(&[Bit::Z]);
+        assert_eq!(bits(&Value::concat(&hi, &lo)), vec![Bit::Z, Bit::X]);
+        let hi = Value::all_ones(70);
+        let lo = Value::zero(60);
+        let c = Value::concat(&hi, &lo);
+        assert_eq!(c.width(), 130);
+        for i in 0..130 {
+            assert_eq!(
+                c.bit(i),
+                if i < 60 { Bit::Zero } else { Bit::One },
+                "bit {i}"
+            );
+        }
+        assert_canonical(&c);
+        // Round trip through extract.
+        assert_eq!(c.extract(60, 70), Value::all_ones(70));
+        assert_eq!(c.extract(0, 60), Value::zero(60));
+    }
+
+    #[test]
+    fn from_u64_and_to_u64() {
+        assert_eq!(Value::from_u64(1, 1).to_u64(), Some(1));
+        assert_eq!(Value::from_u64(64, u64::MAX).to_u64(), Some(u64::MAX));
+        assert_eq!(Value::zero(0).to_u64(), Some(0));
+        assert_eq!(Value::x(8).to_u64(), None);
+        assert_eq!(Value::z(8).to_u64(), None);
+        assert_eq!(Value::zero(65).to_u64(), None); // too wide
+    }
+
+    #[test]
+    #[should_panic(expected = "does not fit")]
+    fn from_u64_rejects_overflow() {
+        let _ = Value::from_u64(4, 0x1F);
+    }
+
+    #[test]
+    fn hex_mask_canonical_rendering() {
+        assert_eq!(mask_to_hex(&[]), "");
+        assert_eq!(mask_to_hex(&[0]), "");
+        assert_eq!(mask_to_hex(&[0x1fa3]), "1fa3");
+        assert_eq!(mask_to_hex(&[0, 0x2]), "20000000000000000");
+        assert_eq!(
+            mask_to_hex(&[u64::MAX, u64::MAX]),
+            "ffffffffffffffffffffffffffffffff"
+        );
+    }
+
+    #[test]
+    fn hex_mask_parsing() {
+        // Basic + leading zeros tolerated.
+        assert_eq!(parse_hex_mask("1fa3", 16).unwrap(), vec![0x1fa3]);
+        assert_eq!(parse_hex_mask("00001fa3", 16).unwrap(), vec![0x1fa3]);
+        assert_eq!(parse_hex_mask("", 16).unwrap(), vec![0]);
+        assert_eq!(parse_hex_mask("", 0).unwrap(), Vec::<u64>::new());
+        // Uppercase accepted.
+        assert_eq!(parse_hex_mask("FF", 8).unwrap(), vec![0xFF]);
+        // Longer than one limb.
+        let s = format!("1{}", "0".repeat(16));
+        assert_eq!(parse_hex_mask(&s, 65).unwrap(), vec![0, 1]);
+        // Errors: bad digit, nonzero bits beyond width.
+        assert_eq!(
+            parse_hex_mask("1fg3", 16),
+            Err(ValueError::InvalidHex {
+                mask: "1fg3".into()
+            })
+        );
+        assert_eq!(
+            parse_hex_mask("1fa30", 16),
+            Err(ValueError::MaskTooWide {
+                mask: "1fa30".into(),
+                width: 16
+            })
+        );
+        assert_eq!(
+            parse_hex_mask("ff", 4),
+            Err(ValueError::MaskTooWide {
+                mask: "ff".into(),
+                width: 4
+            })
+        );
+        // Leading zeros beyond capacity are fine.
+        assert_eq!(
+            parse_hex_mask("0000000000000000001fa3", 16).unwrap(),
+            vec![0x1fa3]
+        );
+    }
+
+    #[test]
+    fn wire_value_roundtrip() {
+        // Fully known.
+        let v = Value::from_u64(16, 0x1FA3);
+        let wv = v.to_wire_value();
+        assert_eq!(
+            wv,
+            WireValue {
+                v: "1fa3".into(),
+                x: String::new(),
+                z: String::new()
+            }
+        );
+        assert_eq!(Value::from_wire_value(&wv, 16).unwrap(), v);
+
+        // Mixed states, crossing a limb boundary.
+        let mut pat = vec![Bit::Zero; 70];
+        pat[0] = Bit::One;
+        pat[1] = Bit::X;
+        pat[2] = Bit::Z;
+        pat[69] = Bit::One;
+        let v = Value::from_bits(&pat);
+        let wv = v.to_wire_value();
+        assert_eq!(wv.v, "200000000000000001");
+        assert_eq!(wv.x, "2");
+        assert_eq!(wv.z, "4");
+        assert_eq!(Value::from_wire_value(&wv, 70).unwrap(), v);
+
+        // All-zero renders as empty masks and parses back.
+        let v = Value::zero(32);
+        let wv = v.to_wire_value();
+        assert_eq!(wv, WireValue::default());
+        assert_eq!(Value::from_wire_value(&wv, 32).unwrap(), v);
+
+        // Overlapping masks rejected.
+        let bad = WireValue {
+            v: "1".into(),
+            x: "1".into(),
+            z: String::new(),
+        };
+        assert_eq!(
+            Value::from_wire_value(&bad, 4),
+            Err(ValueError::OverlappingMasks)
+        );
+        // Mask wider than the value rejected.
+        let wide = WireValue {
+            v: "10".into(),
+            x: String::new(),
+            z: String::new(),
+        };
+        assert_eq!(
+            Value::from_wire_value(&wide, 4),
+            Err(ValueError::MaskTooWide {
+                mask: "10".into(),
+                width: 4
+            })
+        );
+    }
+
+    #[test]
+    fn display_rendering() {
+        assert_eq!(Value::from_u64(16, 0x1FA3).to_string(), "0x1fa3");
+        assert_eq!(Value::zero(8).to_string(), "0x0");
+        assert_eq!(
+            Value::from_bits(&[Bit::One, Bit::X, Bit::Zero, Bit::Z]).to_string(),
+            "0bz0x1"
+        );
+    }
+
+    #[test]
+    fn predicates() {
+        assert!(Value::x(3).has_x());
+        assert!(!Value::x(3).has_z());
+        assert!(Value::z(3).is_fully_z());
+        assert!(!Value::from_bits(&[Bit::Z, Bit::One]).is_fully_z());
+        assert!(Value::zero(0).is_fully_z()); // degenerate width
+        assert!(Value::from_u64(32, 7).is_fully_known());
+        assert!(!Value::from_bits(&[Bit::One, Bit::X]).is_fully_known());
+    }
+}

@@ -12,16 +12,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Opaque net identifier, assigned by the engine at load time.
-///
-/// Internal only — nets are derived, never stored in files (DESIGN.md §5.1).
-/// The frontend learns the net ↔ wire mapping from [`LoadResult::net_map`]
-/// and uses `NetId`s in [`NetDiffs`] for state highlighting.
-pub type NetId = u32;
-/// Opaque component identifier (stable within a loaded document).
-pub type CompId = u32;
-/// Index of a wire within its circuit's `wires` array.
-pub type WireIdx = u32;
+// Identifiers are newtypes (task B1) that serialize transparently as bare
+// `u32`s — the wire format pinned in `docs/ipc.md` is unchanged.
+pub use crate::ids::{CompId, NetId, WireIdx};
 
 /// A 4-state logic value on the wire: three hex masks (DESIGN.md §4.1,
 /// README §3). Bit set in `v` = logic 1; bit set in `x` = X (contention);
@@ -272,7 +265,7 @@ mod tests {
         let diffs = NetDiffs {
             cycle: 42,
             changes: vec![NetChange {
-                net: 7,
+                net: NetId(7),
                 val: WireValue {
                     v: "1".into(),
                     x: String::new(),
