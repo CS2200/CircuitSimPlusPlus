@@ -155,6 +155,14 @@ pub struct Net {
     pub drivers: Vec<(CompId, String)>,
     /// Pins that consume this net (In and InOut), in comp order.
     pub sinks: Vec<(CompId, String)>,
+    /// Total drawn wire length on this net, in grid units (sum of the
+    /// polylines of every wire merged into the net, across all inlined
+    /// expansions). The delay-aware engine turns this into a transport
+    /// delay via the delay table's wire constant (§4.3); wires without
+    /// drawn `points` contribute the Manhattan distance between their
+    /// endpoint components' positions (a coarse approximation — the
+    /// frontend always saves drawn paths).
+    pub wire_len: u32,
 }
 
 /// The flattened design: primitive instances + derived nets + named access.
@@ -195,6 +203,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         mut uf,
         insts,
         root_wire_nodes,
+        wire_len_nodes,
         ..
     } = ex;
 
@@ -216,6 +225,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
                     floating: false,
                     drivers: Vec::new(),
                     sinks: Vec::new(),
+                    wire_len: 0,
                 });
                 pin_widths.push(Vec::new());
                 NetId(nets.len() as u32 - 1)
@@ -248,6 +258,14 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
             def_idx: inst.def_idx,
             inst_path: inst.inst_path.clone(),
         });
+    }
+
+    // ---- Attribute drawn wire lengths to nets (transport delays, §4.3).
+    for (node, len) in &wire_len_nodes {
+        let class = uf.find(*node);
+        if let Some(net) = net_of_root.get(&class) {
+            nets[net.idx()].wire_len += len;
+        }
     }
 
     // ---- Checks: bitsize agreement, floating.
@@ -353,6 +371,9 @@ struct Expander<'a> {
     cap_hit: bool,
     errors: Vec<LoadError>,
     root_wire_nodes: Vec<Option<u32>>,
+    /// (UF node, drawn length) per processed wire, for per-net transport
+    /// delays (§4.3) — attributed to nets after union-find completes.
+    wire_len_nodes: Vec<(u32, u32)>,
 }
 
 impl<'a> Expander<'a> {
@@ -370,6 +391,7 @@ impl<'a> Expander<'a> {
             cap_hit: false,
             errors: Vec::new(),
             root_wire_nodes: Vec::new(),
+            wire_len_nodes: Vec::new(),
         }
     }
 
@@ -488,12 +510,46 @@ impl<'a> Expander<'a> {
             if let (Some(a), Some(b)) = (na, nb) {
                 self.uf.union(a, b);
             }
+            if let Some(node) = na.or(nb) {
+                let len = wire_length(circuit, &comp_idx_by_id, wire);
+                if len > 0 {
+                    self.wire_len_nodes.push((node, len));
+                }
+            }
             if is_root {
                 self.root_wire_nodes.push(na.or(nb));
             }
         }
 
         pin_terminals
+    }
+}
+
+/// Drawn length of a wire in grid units: polyline Manhattan length when
+/// `points` are present; otherwise the Manhattan distance between the two
+/// endpoint components' positions (0 when unresolvable, e.g. a bare join
+/// with no drawn path).
+fn wire_length(
+    circuit: &Circuit,
+    by_id: &BTreeMap<&str, usize>,
+    wire: &crate::format::Wire,
+) -> u32 {
+    let manhattan = |pts: &[[i32; 2]]| -> u32 {
+        pts.windows(2)
+            .map(|w| w[0][0].abs_diff(w[1][0]) + w[0][1].abs_diff(w[1][1]))
+            .sum()
+    };
+    if wire.points.len() >= 2 {
+        return manhattan(&wire.points);
+    }
+    let pos = |ep: &Endpoint| -> Option<[i32; 2]> {
+        let p = ep.as_pin()?;
+        let idx = *by_id.get(p.0)?;
+        Some(circuit.components[idx].pos)
+    };
+    match (pos(&wire.a), pos(&wire.b)) {
+        (Some(a), Some(b)) => a[0].abs_diff(b[0]) + a[1].abs_diff(b[1]),
+        _ => 0,
     }
 }
 
@@ -549,6 +605,41 @@ fn resolve_join(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wire_length_accumulates_per_net() {
+        // One 200-unit wire (polyline) + one 30-unit wire (endpoint
+        // distance, no drawn points) on the same net → 230.
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
+                {"id":"m","type":"wiring.pin","pos":[10,0],"name":"b","attrs":{"isOutput":true}},
+                {"id":"p","type":"wiring.probe","pos":[40,0]}
+            ], "wires": [
+                {"a":{"comp":"src","pin":"pin"},"b":{"comp":"m","pin":"pin"},
+                 "points":[[0,0],[100,0],[100,100]]},
+                {"a":{"comp":"m","pin":"pin"},"b":{"comp":"p","pin":"in"}}
+            ]}]
+        }"##;
+        let nl = build_json(json).unwrap();
+        assert_eq!(nl.nets.len(), 1);
+        assert_eq!(nl.nets[0].wire_len, 200 + 30);
+        // No drawn points and no resolvable geometry → 0.
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
+                {"id":"p","type":"wiring.probe","pos":[0,0]}
+            ], "wires": [
+                {"a":{"comp":"src","pin":"pin"},"b":{"comp":"p","pin":"in"},"points":[[0,0]]}
+            ]}]
+        }"##;
+        let nl = build_json(json).unwrap();
+        assert_eq!(nl.nets[0].wire_len, 0);
+    }
+
     use super::*;
 
     fn build_json(json: &str) -> Result<Netlist, Vec<LoadError>> {

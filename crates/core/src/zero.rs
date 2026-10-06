@@ -48,7 +48,7 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
+use crate::api::{HaltReason, LoadError, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead};
 use crate::components::PinDir;
 use crate::netlist::Netlist;
@@ -85,50 +85,7 @@ pub struct ZeroEngine {
     cycle: u64,
 }
 
-/// Resolve a net's current value by merging its drivers' pin slots.
-fn resolve(
-    netlist: &Netlist,
-    net_drivers: &[Vec<(u32, usize)>],
-    drives: &[Vec<Value>],
-    net: NetId,
-) -> Value {
-    let n = &netlist.nets[net.idx()];
-    let drivers = &net_drivers[net.idx()];
-    match drivers.as_slice() {
-        [] => Value::z(n.width),
-        [(c, slot)] => drives[*c as usize][*slot].clone(),
-        many => {
-            let vals: Vec<Value> = many
-                .iter()
-                .map(|&(c, s)| drives[c as usize][s].clone())
-                .collect();
-            Value::contention_merge(n.width, &vals)
-        }
-    }
-}
-
-/// As [`resolve`], but skipping one component's contribution (splitters
-/// read *other* drivers' contributions on their pins' nets).
-fn resolve_except(
-    netlist: &Netlist,
-    net_drivers: &[Vec<(u32, usize)>],
-    drives: &[Vec<Value>],
-    net: NetId,
-    except: u32,
-) -> Value {
-    let n = &netlist.nets[net.idx()];
-    let mut acc: Vec<Value> = Vec::new();
-    for &(c, slot) in &net_drivers[net.idx()] {
-        if c != except {
-            acc.push(drives[c as usize][slot].clone());
-        }
-    }
-    match acc.as_slice() {
-        [] => Value::z(n.width),
-        [v] => v.clone(),
-        _ => Value::contention_merge(n.width, &acc),
-    }
-}
+use crate::engine_common::{resolve, resolve_except};
 
 /// Evaluate one component and publish its outputs into the drive slots.
 /// Returns `true` if any driven value changed.
@@ -193,7 +150,7 @@ fn eval_comp(
 /// static other-driver presence is the best DAG approximation — genuine
 /// both-ways usage lands in the residue and iterates to fixpoint).
 /// Self-loops are kept, which forces self-fed components into the residue.
-fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
+pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
     let n = netlist.comps.len();
     let mut indeg = vec![0usize; n];
     let mut edges: Vec<Vec<u32>> = vec![Vec::new(); n];
@@ -259,64 +216,22 @@ impl ZeroEngine {
     /// a component has no behavior — impossible for a validated document
     /// (subcircuits are inlined; unknown types are rejected at load).
     pub fn new(netlist: Netlist) -> Result<ZeroEngine, Vec<LoadError>> {
-        let mut comps = Vec::with_capacity(netlist.comps.len());
-        for fc in &netlist.comps {
-            match crate::behavior::from_type_attrs(&fc.type_, &fc.attrs) {
-                Some(b) => comps.push(b),
-                None => {
-                    return Err(vec![LoadError {
-                        kind: LoadErrorKind::Other,
-                        message: format!(
-                            "component '{}' has no behavior (type '{}')",
-                            fc.origin(),
-                            fc.type_
-                        ),
-                        circuit: fc.def_circuit.clone(),
-                        comp_id: Some(CompId(fc.def_idx as u32)),
-                        wire_idx: None,
-                    }]);
-                }
-            }
-        }
-        let net_drivers: Vec<Vec<(u32, usize)>> = netlist
-            .nets
-            .iter()
-            .map(|n| {
-                n.drivers
-                    .iter()
-                    .map(|(c, pin)| {
-                        let slot = netlist.comps[c.idx()]
-                            .pins
-                            .iter()
-                            .position(|p| &p.pin == pin)
-                            .expect("driver pin exists");
-                        (c.0, slot)
-                    })
-                    .collect()
-            })
-            .collect();
+        let comps = crate::engine_common::build_behaviors(&netlist)?;
+        let net_drivers = crate::engine_common::net_drivers(&netlist);
         let (order, residue) = levelize(&netlist, &comps);
         let n_comps = comps.len();
         // Drive slots start fully floating (Z); residue (feedback) outputs
         // are seeded to 0 — deterministic power-on for cyclic logic.
-        let drives: Vec<Vec<Value>> = netlist
-            .comps
-            .iter()
-            .enumerate()
-            .map(|(ci, fc)| {
-                let seeded = residue.contains(&(ci as u32));
-                fc.pins
-                    .iter()
-                    .map(|p| {
-                        if seeded && p.dir != PinDir::In {
-                            Value::zero(p.width)
-                        } else {
-                            Value::z(p.width)
-                        }
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut drives = crate::engine_common::drive_slots(&netlist);
+        for (ci, fc) in netlist.comps.iter().enumerate() {
+            if residue.contains(&(ci as u32)) {
+                for (slot, p) in fc.pins.iter().enumerate() {
+                    if p.dir != PinDir::In {
+                        drives[ci][slot] = Value::zero(p.width);
+                    }
+                }
+            }
+        }
         Ok(ZeroEngine {
             netlist,
             comps,
