@@ -5,9 +5,9 @@ name: backend
 
 on:
   push:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
   pull_request:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,3 +39,12 @@ jobs:
         with:
           name: csim-linux-x86_64-musl
           path: target/x86_64-unknown-linux-musl/release/csim
+
+  # The Gradescope image: builds the musl binary, runs the release test
+  # suite in-build, and the fixture sanity self-test inside the runtime
+  # image (M1 container acceptance, BACKEND.md task B10).
+  gradescope-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t csim-autograder -f gradescope/Dockerfile .
