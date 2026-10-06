@@ -122,6 +122,98 @@ describe("component ops", () => {
   });
 });
 
+describe("updateComponent", () => {
+  function withResolver(doc: CircuitDocument): CircuitDocument {
+    doc.pinResolver = (comp) => {
+      // mirror of the editor's catalog: and/or have in0..in{n-1}+out; not has in+out
+      if (comp.type === "gate.not") return ["in", "out"];
+      const n = typeof comp.attrs?.inputs === "number" ? comp.attrs.inputs : 2;
+      return [...Array.from({ length: n }, (_, i) => `in${i}`), "out"];
+    };
+    return doc;
+  }
+
+  it("edits name/rot/attrs as one undoable command", () => {
+    const doc = CircuitDocument.create();
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const before = doc.toJson();
+    doc.updateComponent(0, a, { name: "my-and", rot: "S", attrs: { bitsize: 8, inputs: 3 } });
+    const comp = doc.circuit(0).components[0];
+    expect(comp).toMatchObject({ name: "my-and", rot: "S", attrs: { bitsize: 8, inputs: 3 } });
+    expect(doc.historyDepth).toBe(2); // place + edit
+    doc.undo();
+    expect(doc.toJson()).toBe(before);
+  });
+
+  it("type swap and→or keeps wires (same pin names)", () => {
+    const doc = withResolver(CircuitDocument.create());
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const b = doc.addComponent(0, { type: "gate.not", pos: [6, 0] });
+    doc.addWire(0, {
+      a: { comp: a, pin: "out" },
+      b: { comp: b, pin: "in" },
+      points: [
+        [5, 1],
+        [6, 1],
+      ],
+    });
+    doc.updateComponent(0, a, { type: "gate.or" });
+    expect(doc.circuit(0).components[0].type).toBe("gate.or");
+    expect(doc.circuit(0).wires).toHaveLength(1);
+  });
+
+  it("shrinking inputs prunes wires to removed pins (with cascade), one undo step", () => {
+    const doc = withResolver(CircuitDocument.create());
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0], attrs: { inputs: 3 } });
+    const b = doc.addComponent(0, { type: "gate.not", pos: [8, 0] });
+    const c = doc.addComponent(0, { type: "gate.not", pos: [8, 4] });
+    doc.addWire(0, {
+      a: { comp: a, pin: "in2" },
+      b: { comp: b, pin: "out" },
+      points: [
+        [0, 1],
+        [8, 1],
+      ],
+    });
+    doc.addWire(0, {
+      a: { comp: c, pin: "in" },
+      b: { join: { wire: 0, segment: 0 } },
+      points: [
+        [8, 5],
+        [4, 1],
+      ],
+    });
+    const depth = doc.historyDepth;
+    doc.updateComponent(0, a, { attrs: { inputs: 2 } }); // in2 disappears
+    expect(doc.circuit(0).wires).toHaveLength(0); // wire to in2 + its junction child
+    expect(doc.historyDepth).toBe(depth + 1);
+    doc.undo();
+    expect(doc.circuit(0).wires).toHaveLength(2);
+    expect(doc.circuit(0).components[0].attrs).toEqual({ inputs: 3 });
+  });
+
+  it("without a pinResolver, wires are left untouched", () => {
+    const doc = CircuitDocument.create(); // no resolver
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0], attrs: { inputs: 3 } });
+    const b = doc.addComponent(0, { type: "gate.not", pos: [8, 0] });
+    doc.addWire(0, {
+      a: { comp: a, pin: "in2" },
+      b: { comp: b, pin: "out" },
+      points: [
+        [0, 1],
+        [8, 1],
+      ],
+    });
+    doc.updateComponent(0, a, { attrs: { inputs: 2 } });
+    expect(doc.circuit(0).wires).toHaveLength(1); // still there (backend validation would flag it)
+  });
+
+  it("throws on unknown component id", () => {
+    const doc = CircuitDocument.create();
+    expect(() => doc.updateComponent(0, "nope", { name: "x" })).toThrow('no component "nope"');
+  });
+});
+
 describe("wire ops", () => {
   it("rejects invalid wires", () => {
     const doc = CircuitDocument.create();

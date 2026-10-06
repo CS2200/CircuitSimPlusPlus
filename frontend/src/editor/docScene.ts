@@ -1,7 +1,7 @@
 import type { CircuitDocument } from "../model/document";
 import type { CsxComponent, CsxWire } from "../model/csx";
 import { isPinEndpoint } from "../model/csx";
-import { deriveNets, type NetDerivation } from "../model/nets";
+import { deriveNets, type NetDerivation, type NetInfo } from "../model/nets";
 import type { SelectionModel } from "../model/selection";
 import type { Camera, ViewSize } from "../render/camera";
 import {
@@ -44,6 +44,8 @@ export interface SceneOverlay {
   placing: { type: string; pos: Vec2; rot: CsxComponent["rot"] } | null;
   /** Box-select rectangle in progress. */
   boxRect: Rect | null;
+  /** Shift-click wire info card: which wire + where to anchor the card. */
+  wireInfo: { wireIdx: number; pos: Vec2 } | null;
 }
 
 const CELL = 8;
@@ -187,14 +189,16 @@ export class DocScene {
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
-    // net-extent highlight set
+    // Net-extent highlight: on PIN hover (the no-tunnels navigability
+    // feature, DESIGN.md §7.1) and for the wire info card. Idle wire hover
+    // does nothing (UX decision).
     let highlightWires: Set<number> | null = null;
-    if (overlay.hoverHit !== null) {
+    {
       const netId =
-        overlay.hoverHit.kind === "wire"
-          ? this.netOfWire(overlay.hoverHit.wireIdx)
-          : overlay.hoverHit.kind === "pin"
-            ? this.netOfPin(overlay.hoverHit.compId, overlay.hoverHit.pin)
+        overlay.hoverHit?.kind === "pin"
+          ? this.netOfPin(overlay.hoverHit.compId, overlay.hoverHit.pin)
+          : overlay.wireInfo !== null
+            ? this.netOfWire(overlay.wireInfo.wireIdx)
             : undefined;
       if (netId !== undefined) highlightWires = new Set(this.wiresInNet(netId));
     }
@@ -247,10 +251,6 @@ export class DocScene {
     }
     renderer.flush();
     renderer.drawDots(pinDots, PIN_R, theme.textDim);
-    // Hovered pin gets an accent ring-dot.
-    if (overlay.hoverHit?.kind === "pin") {
-      renderer.drawDots([overlay.hoverHit.pos], PIN_R * 1.5, theme.accent);
-    }
 
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);
@@ -289,11 +289,78 @@ export class DocScene {
       renderer.flush();
     }
 
-    // Junction marker on the wire the cursor is over (junction-on-drop preview).
-    if (overlay.hoverHit?.kind === "wire") {
-      renderer.drawDots([overlay.hoverHit.point], PIN_R * 1.3, theme.accent);
+    // Hover feedback (pins only — idle wire hover does nothing):
+    const hit = overlay.hoverHit;
+    if (hit?.kind === "pin") {
+      // accent ring + name tooltip
+      renderer.drawDots([hit.pos], PIN_R * 1.5, theme.accent);
+      const spec = this.layouts.get(hit.compId)?.pins.find((p) => p.name === hit.pin);
+      drawCard(renderer, theme, { x: hit.pos.x + 0.7, y: hit.pos.y - 1.4 }, [
+        hit.pin,
+        spec !== undefined ? `${spec.kind} · ${spec.bitsize}b` : "",
+      ]);
+    } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
+      // junction-on-drop preview (only while routing a wire)
+      renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
+    }
+
+    // Wire info card (shift+click): net bitsize inferred from components + value.
+    if (overlay.wireInfo !== null) {
+      const netId = this.netOfWire(overlay.wireInfo.wireIdx);
+      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
+      const inference = inferNetBits(net, this.layouts);
+      const bitsLine =
+        inference.conflict.length > 0
+          ? `⚠ bitsize mismatch (${inference.conflict.join(" ≠ ")})`
+          : `${inference.bits ?? 1}-bit net`;
+      const statsLine = `${net?.wires.length ?? 1} wires · ${net?.pins.length ?? 0} pins`;
+      const width = inference.bits ?? 1;
+      const valueLine = width <= 8 ? "Z".repeat(width) : `${"Z".repeat(8)}… (×${width} floating)`;
+      drawCard(
+        renderer,
+        theme,
+        { x: overlay.wireInfo.pos.x + 0.7, y: overlay.wireInfo.pos.y - 2.2 },
+        [bitsLine, valueLine, statsLine],
+      );
     }
   }
+}
+
+/** Small floating card (tooltip / info popup) drawn near a world point. */
+function drawCard(renderer: Renderer, theme: Theme, pos: Vec2, lines: string[]): void {
+  const size = 0.9;
+  const lineH = 1.3;
+  const padX = 0.5;
+  const padY = 0.4;
+  const w = Math.max(...lines.map((l) => l.length)) * size * 0.62 + 2 * padX;
+  const h = lines.length * lineH + 2 * padY;
+  renderer.drawPath(rectPath(pos.x, pos.y, w, h), { fill: theme.panel });
+  renderer.drawPath(rectPath(pos.x, pos.y, w, h), { stroke: theme.panelBorder, lineWidth: 0.08 });
+  renderer.flush();
+  lines.forEach((line, i) => {
+    renderer.drawText(pos.x + padX, pos.y + padY + lineH * (i + 0.5), line, {
+      color: i === 0 ? theme.text : theme.textDim,
+      size,
+      align: "left",
+    });
+  });
+  renderer.flush();
+}
+
+/** Infer a net's bit width from the pin metadata of its member components. */
+function inferNetBits(
+  net: NetInfo | undefined,
+  layouts: ReadonlyMap<string, CompLayout>,
+): { bits: number | null; conflict: number[] } {
+  if (net === undefined) return { bits: null, conflict: [] };
+  const sizes = new Set<number>();
+  for (const key of net.pins) {
+    const [compId, pinName] = key.split(":");
+    const pin = layouts.get(compId)?.pins.find((p) => p.name === pinName);
+    if (pin !== undefined) sizes.add(pin.bitsize);
+  }
+  const arr = [...sizes].sort((a, b) => a - b);
+  return arr.length <= 1 ? { bits: arr[0] ?? null, conflict: [] } : { bits: null, conflict: arr };
 }
 
 function p2v(p: [number, number]): Vec2 {

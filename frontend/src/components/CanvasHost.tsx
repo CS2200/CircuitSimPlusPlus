@@ -48,6 +48,7 @@ export interface CanvasHostProps {
   onPointerDown?: (world: Vec2, info: PointerInfo) => void;
   onPointerMove?: (world: Vec2, info: PointerInfo) => void;
   onPointerUp?: (world: Vec2, info: PointerInfo) => void;
+  onDoubleClick?: (world: Vec2, info: PointerInfo) => void;
   /** Pointer moved with no buttons pressed (ghost tracking, cursor readout). */
   onHover?: (world: Vec2) => void;
   /** HTML5 drop (palette drag-in), translated to world coords. */
@@ -96,6 +97,7 @@ export default function CanvasHost({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onDoubleClick,
   onHover,
   onDropWorld,
   overlayExtra,
@@ -271,7 +273,18 @@ export default function CanvasHost({
     };
   }, [bench, sceneBounds]);
 
-  const worldOf = (e: React.PointerEvent): Vec2 => {
+  /** Minimal mouse-ish shape both PointerEvent and MouseEvent satisfy. */
+  interface CanvasMouse {
+    clientX: number;
+    clientY: number;
+    button: number;
+    buttons: number;
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    altKey: boolean;
+  }
+
+  const worldOf = (e: CanvasMouse): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
     return cameraRef.current.screenToWorld(
       { x: e.clientX - rect.left, y: e.clientY - rect.top },
@@ -279,7 +292,7 @@ export default function CanvasHost({
     );
   };
 
-  const infoOf = (e: React.PointerEvent): PointerInfo => ({
+  const infoOf = (e: CanvasMouse): PointerInfo => ({
     button: e.button,
     buttons: e.buttons,
     shiftKey: e.shiftKey,
@@ -338,6 +351,9 @@ export default function CanvasHost({
             return;
           }
           onPointerUp?.(worldOf(e), infoOf(e));
+        }}
+        onDoubleClick={(e) => {
+          onDoubleClick?.(worldOf(e), infoOf(e));
         }}
       />
       <div className="canvas-overlay">

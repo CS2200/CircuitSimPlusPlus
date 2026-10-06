@@ -3,7 +3,7 @@ import { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { PointerInfo } from "../components/CanvasHost";
 import { DocScene } from "./docScene";
-import { copySelection, ToolMachine } from "./tools";
+import { copySelection, manhattanRoute, ToolMachine } from "./tools";
 
 const PI = (over: Partial<PointerInfo> = {}): PointerInfo => ({
   button: 0,
@@ -58,25 +58,69 @@ describe("placing", () => {
 });
 
 describe("wiring", () => {
-  it("routes pin → pin with a click-placed bend", () => {
-    const { doc, tool, sync, and, not } = setup();
+  it("routes pin → pin orthogonally (no diagonals)", () => {
+    const { doc, tool, and, not } = setup();
     tool.down({ x: 15, y: 11.5 }, PI()); // and.out
     tool.up({ x: 15, y: 11.5 }, PI());
-    tool.move({ x: 17, y: 11 });
-    tool.down({ x: 17, y: 8 }, PI()); // bend
-    tool.up({ x: 17, y: 8 }, PI());
     tool.down({ x: 20, y: 11 }, PI()); // not.in
     tool.up({ x: 20, y: 11 }, PI());
     const wires = doc.circuit(0).wires;
     expect(wires).toHaveLength(1);
     expect(wires[0].a).toEqual({ comp: and, pin: "out" });
     expect(wires[0].b).toEqual({ comp: not, pin: "in" });
+    // manhattan: |dx|>|dy| → horizontal first, then vertical
     expect(wires[0].points).toEqual([
       [15, 11.5],
-      [17, 8],
+      [20, 11.5],
       [20, 11],
     ]);
-    void sync;
+  });
+
+  it("plants bends with clicks, each segment orthogonally routed", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up({ x: 15, y: 11.5 }, PI());
+    tool.move({ x: 17, y: 11 });
+    tool.down({ x: 17, y: 8 }, PI()); // bend: V-first (|dy|>|dx|)
+    tool.up({ x: 17, y: 8 }, PI());
+    tool.down({ x: 20, y: 11 }, PI()); // finish on not.in
+    tool.up({ x: 20, y: 11 }, PI());
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [15, 11.5],
+      [15, 8],
+      [17, 8],
+      [20, 8],
+      [20, 11],
+    ]);
+  });
+
+  it("DRAG from a pin, release on the target: one gesture, no double-tap", () => {
+    const { doc, tool, and, not } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI()); // press on and.out
+    tool.move({ x: 17, y: 9 }); // drag out
+    tool.move({ x: 20, y: 11 }); // over not.in
+    tool.up({ x: 20, y: 11 }, PI()); // release → commit
+    const wires = doc.circuit(0).wires;
+    expect(wires).toHaveLength(1);
+    expect(wires[0].a).toEqual({ comp: and, pin: "out" });
+    expect(wires[0].b).toEqual({ comp: not, pin: "in" });
+    expect(tool.isWiring).toBe(false);
+  });
+
+  it("drag-release over empty space plants a bend and keeps routing", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.move({ x: 15, y: 6 });
+    tool.up({ x: 15, y: 6 }, PI()); // bend at (15,6), still wiring
+    expect(tool.isWiring).toBe(true);
+    tool.down({ x: 20, y: 11 }, PI()); // finish
+    tool.up({ x: 20, y: 11 }, PI());
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [15, 11.5],
+      [15, 6],
+      [20, 6],
+      [20, 11],
+    ]);
   });
 
   it("dropping onto a wire creates a junction (dot) onto the right segment", () => {
@@ -95,10 +139,10 @@ describe("wiring", () => {
     expect(wires).toHaveLength(2);
     expect(wires[1].a).toEqual({ comp: not, pin: "out" });
     expect(wires[1].b).toEqual({ join: { wire: 0, segment: 0 } });
-    // the junction coordinate lies ON the parent segment
+    // the junction coordinate (last point of the child wire) lies ON the parent segment
     const [ax, ay] = wires[0].points[0];
     const [bx, by] = wires[0].points[1];
-    const [jx, jy] = wires[1].points[1];
+    const [jx, jy] = wires[1].points.at(-1)!;
     const cross = (bx - ax) * (jy - ay) - (by - ay) * (jx - ax);
     expect(Math.abs(cross)).toBeLessThan(1e-9);
   });
@@ -130,6 +174,56 @@ describe("wiring", () => {
     tool.cancel();
     expect(doc.circuit(0).wires).toHaveLength(0);
     expect(tool.isBusy).toBe(false);
+  });
+});
+
+describe("manhattanRoute", () => {
+  it("returns no corner when already aligned", () => {
+    expect(manhattanRoute({ x: 0, y: 0 }, { x: 5, y: 0 })).toEqual([]);
+    expect(manhattanRoute({ x: 0, y: 0 }, { x: 0, y: 5 })).toEqual([]);
+  });
+
+  it("goes horizontal-first when |dx| ≥ |dy|, vertical-first otherwise", () => {
+    expect(manhattanRoute({ x: 0, y: 0 }, { x: 5, y: 2 })).toEqual([{ x: 5, y: 0 }]);
+    expect(manhattanRoute({ x: 0, y: 0 }, { x: 2, y: 5 })).toEqual([{ x: 0, y: 5 }]);
+  });
+});
+
+describe("hover + info + double-click", () => {
+  it("idle hover over a wire does nothing", () => {
+    const { tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up({ x: 20, y: 11 }, PI());
+    tool.hover({ x: 17, y: 11.3 }); // over wire 0
+    expect(tool.overlay().hoverHit).toBeNull();
+    tool.hover({ x: 15, y: 11.5 }); // over and.out pin
+    expect(tool.overlay().hoverHit).toMatchObject({ kind: "pin", pin: "out" });
+  });
+
+  it("shift+click a wire shows its info card; any click dismisses it", () => {
+    const { tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up({ x: 20, y: 11 }, PI());
+    tool.down({ x: 17, y: 11.4 }, PI({ shiftKey: true }));
+    expect(tool.overlay().wireInfo).toMatchObject({ wireIdx: 0 });
+    tool.down({ x: 40, y: 30 }, PI()); // click empty space
+    expect(tool.overlay().wireInfo).toBeNull();
+  });
+
+  it("double-click on a component fires onEditComponent", () => {
+    const { tool } = setup();
+    let edited: string | null = null;
+    tool.onEditComponent = (id) => {
+      edited = id;
+    };
+    tool.doubleClick({ x: 12, y: 11 }); // AND body
+    expect(edited).toBe("c1");
+    tool.doubleClick({ x: 50, y: 40 }); // empty
+    expect(edited).toBe("c1"); // unchanged
   });
 });
 

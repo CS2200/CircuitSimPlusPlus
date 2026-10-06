@@ -226,6 +226,69 @@ body {
   color: var(--text-dim);
 }
 
+.prop-dialog {
+  min-width: 320px;
+}
+
+.prop-dialog .prop-type {
+  color: var(--text-dim);
+  font-weight: normal;
+  font-size: 0.85rem;
+  font-family: ui-monospace, monospace;
+}
+
+.prop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+
+.prop-row span {
+  color: var(--text-dim);
+}
+
+.prop-row input,
+.prop-row select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  min-width: 140px;
+}
+
+.prop-row input:focus,
+.prop-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prop-actions button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.prop-actions button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+}
+
 .canvas-host {
   position: relative;
   width: 100%;

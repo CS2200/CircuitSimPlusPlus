@@ -38,8 +38,32 @@ type DragState =
 
 interface WiringState {
   from: CsxEndpoint;
-  points: Vec2[]; // first point = the from-endpoint coordinate
+  /** Planted anchor points (first = the from-endpoint coordinate). */
+  anchors: Vec2[];
   cursor: Vec2;
+  /** Distinguishes "click to start" from "drag from the pin". */
+  movedSinceStart: boolean;
+}
+
+/**
+ * Orthogonal route between two anchors: zero points when already aligned,
+ * else one corner — horizontal-first when |dx| ≥ |dy| (wires look
+ * circuit-like, never diagonal).
+ */
+export function manhattanRoute(a: Vec2, b: Vec2): Vec2[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  if (dx === 0 || dy === 0) return [];
+  return Math.abs(dx) >= Math.abs(dy) ? [{ x: b.x, y: a.y }] : [{ x: a.x, y: b.y }];
+}
+
+function dedupPoints(points: Vec2[]): Vec2[] {
+  const out: Vec2[] = [];
+  for (const p of points) {
+    const last = out.at(-1);
+    if (last === undefined || last.x !== p.x || last.y !== p.y) out.push(p);
+  }
+  return out;
 }
 
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
@@ -50,7 +74,10 @@ export class ToolMachine {
   private wiring: WiringState | null = null;
   private placing: { type: string; pos: Vec2; rot: CsxComponent["rot"] } | null = null;
   private hoverHit: Hit | null = null;
+  private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
+  /** Fired when a component is double-clicked (properties dialog). */
+  onEditComponent?: (compId: string) => void;
   /** Bumped on every state change so the host re-renders. */
   version = 0;
 
@@ -72,10 +99,15 @@ export class ToolMachine {
 
   /** Esc / right-click: abort wiring, placement, or any in-progress gesture. */
   cancel(): void {
-    const any = this.wiring !== null || this.placing !== null || this.drag.kind !== "idle";
+    const any =
+      this.wiring !== null ||
+      this.placing !== null ||
+      this.drag.kind !== "idle" ||
+      this.wireInfo !== null;
     this.wiring = null;
     this.placing = null;
     this.drag = { kind: "idle" };
+    this.wireInfo = null;
     if (any) this.changed();
   }
 
@@ -87,6 +119,8 @@ export class ToolMachine {
       return;
     }
     if (info.button !== 0) return;
+    // any fresh gesture dismisses the wire info card
+    this.wireInfo = null;
 
     if (this.placing !== null) {
       const p = this.placing;
@@ -109,8 +143,9 @@ export class ToolMachine {
     if (pin !== null) {
       this.wiring = {
         from: { comp: pin.compId, pin: pin.pin },
-        points: [pin.pos],
+        anchors: [pin.pos],
         cursor: pin.pos,
+        movedSinceStart: false,
       };
       this.changed();
       return;
@@ -119,7 +154,8 @@ export class ToolMachine {
     const wire = this.scene.pickWire(world);
     if (wire !== null) {
       if (info.shiftKey) {
-        this.selection.toggleWire(wire.wireIdx);
+        // shift+click a wire → what's on it (net info card)
+        this.wireInfo = { wireIdx: wire.wireIdx, pos: world };
         this.changed();
         return;
       }
@@ -155,6 +191,10 @@ export class ToolMachine {
   move(world: Vec2): void {
     this.hover(world);
     if (this.wiring !== null) {
+      if (!this.wiring.movedSinceStart) {
+        const d = Math.hypot(world.x - this.wiring.cursor.x, world.y - this.wiring.cursor.y);
+        if (d > DRAG_THRESHOLD) this.wiring.movedSinceStart = true;
+      }
       this.wiring.cursor = world;
       this.changed();
       return;
@@ -168,8 +208,9 @@ export class ToolMachine {
           const ws = this.drag.wireStart;
           this.wiring = {
             from: { join: { wire: ws.wireIdx, segment: ws.segment } },
-            points: [ws.point],
+            anchors: [ws.point],
             cursor: world,
+            movedSinceStart: true,
           };
           this.drag = { kind: "idle" };
         } else {
@@ -202,8 +243,14 @@ export class ToolMachine {
     }
   }
 
-  up(_world: Vec2, info: PointerInfo): void {
+  up(world: Vec2, info: PointerInfo): void {
     if (info.button !== 0) return;
+    // drag-to-wire: releasing on a target finishes; releasing over empty
+    // space plants a bend (but the initial press-release just starts wiring)
+    if (this.wiring !== null && this.wiring.movedSinceStart) {
+      this.finishOrBend(world);
+      return;
+    }
     if (this.drag.kind === "boxing") {
       const rect = normRect(this.drag.start, this.drag.current);
       const found = this.scene.pickRect(rect);
@@ -227,11 +274,19 @@ export class ToolMachine {
       this.changed();
       return;
     }
-    const hit = this.scene.pick(world);
+    // While wiring, pins + wires are live targets (junction preview);
+    // idle hover is pins only — hovering a wire does nothing.
+    const hit = this.wiring !== null ? this.scene.pick(world) : (this.scene.pickPin(world) ?? null);
     if (JSON.stringify(hit ?? null) !== JSON.stringify(this.hoverHit ?? null)) {
       this.hoverHit = hit;
       this.changed();
     }
+  }
+
+  /** Double-click: edit a component's properties. */
+  doubleClick(world: Vec2): void {
+    const comp = this.scene.pickComponent(world);
+    if (comp !== null) this.onEditComponent?.(comp.compId);
   }
 
   // ---- commands (keyboard/menu) ----
@@ -286,10 +341,10 @@ export class ToolMachine {
   overlay(): SceneOverlay {
     return {
       hoverHit: this.hoverHit,
-      wireInProgress:
-        this.wiring !== null ? [...this.wiring.points, snapPoint(this.wiring.cursor, 1)] : null,
+      wireInProgress: this.wiring !== null ? this.routePreview() : null,
       placing: this.placing,
       boxRect: this.drag.kind === "boxing" ? normRect(this.drag.start, this.drag.current) : null,
+      wireInfo: this.wireInfo,
     };
   }
 
@@ -307,7 +362,24 @@ export class ToolMachine {
 
   // ---- internals ----
 
+  /** The ghost route: planted anchors + manhattan-routed segment to the cursor. */
+  private routePreview(): Vec2[] {
+    const w = this.wiring!;
+    const last = w.anchors.at(-1)!;
+    const cursor = snapPoint(w.cursor, 1);
+    return dedupPoints([...w.anchors, ...manhattanRoute(last, cursor), cursor]);
+  }
+
+  /** Click while wiring: finish on a pin/wire, else plant a bend. */
   private wiringClick(world: Vec2): void {
+    this.finishOrBend(world);
+  }
+
+  /**
+   * Finish the wire when `world` is on a valid target (a pin that isn't the
+   * start pin, or a wire → junction); otherwise plant a bend.
+   */
+  private finishOrBend(world: Vec2): void {
     const w = this.wiring!;
     // finish on a pin (but never the pin we started from)?
     const pin = this.scene.pickPin(world);
@@ -324,13 +396,20 @@ export class ToolMachine {
       this.commitWire(w, { join: { wire: wire.wireIdx, segment: wire.segment } }, wire.point);
       return;
     }
-    // otherwise place a bend
-    w.points.push(snapPoint(world, 1));
+    // otherwise plant a bend (the full manhattan-routed segment)
+    const last = w.anchors.at(-1)!;
+    const cursor = snapPoint(world, 1);
+    w.anchors.push(...manhattanRoute(last, cursor), cursor);
     this.changed();
   }
 
   private commitWire(w: WiringState, b: CsxEndpoint, endPos: Vec2): void {
-    const points: [number, number][] = [...w.points, endPos].map((p) => [p.x, p.y]);
+    const last = w.anchors.at(-1)!;
+    const points: [number, number][] = dedupPoints([
+      ...w.anchors,
+      ...manhattanRoute(last, endPos),
+      endPos,
+    ]).map((p) => [p.x, p.y]);
     if (points.length >= 2) {
       try {
         this.doc.addWire(this.circuitIdx(), { a: w.from, b, points });

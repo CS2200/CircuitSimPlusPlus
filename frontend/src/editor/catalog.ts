@@ -64,6 +64,49 @@ function boxSpec(w: number, h: number, pins: PinSpec[], caption: string): CompSp
   };
 }
 
+/** mux/demux/decoder with attrs.selBits-driven pin sets (n = 2^selBits data lines). */
+function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSpec {
+  const n = (attrs: Readonly<Record<string, unknown>>) => 2 ** numAttr(attrs, "selBits", 1);
+  const h = (attrs: Readonly<Record<string, unknown>>) => Math.max(4, n(attrs) + 1);
+  return {
+    width: () => 4,
+    height: h,
+    pins: (attrs) => {
+      const count = n(attrs);
+      const height = h(attrs);
+      const pins: PinSpec[] = [];
+      if (flavor === "in") {
+        for (let i = 0; i < count; i++) {
+          pins.push({
+            name: `in${i}`,
+            dx: 0,
+            dy: ((i + 1) * height) / (count + 1),
+            kind: "in",
+            bitsize: BITS,
+          });
+        }
+        pins.push({ name: "out", dx: 4, dy: height / 2, kind: "out", bitsize: BITS });
+      } else {
+        if (flavor === "out") {
+          pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: BITS });
+        }
+        for (let i = 0; i < count; i++) {
+          pins.push({
+            name: `out${i}`,
+            dx: 4,
+            dy: ((i + 1) * height) / (count + 1),
+            kind: "out",
+            bitsize: flavor === "out" ? BITS : 1,
+          });
+        }
+      }
+      pins.push({ name: "sel", dx: 2, dy: height, kind: "in" });
+      return pins;
+    },
+    caption: () => caption,
+  };
+}
+
 const BITS = 32; // course default bus width
 
 const REGISTRY: Record<string, CompSpec> = {
@@ -126,39 +169,10 @@ const REGISTRY: Record<string, CompSpec> = {
     "SPLIT",
   ),
 
-  // Plexers
-  "plexers.mux": boxSpec(
-    4,
-    4,
-    [
-      { name: "in0", dx: 0, dy: 1, kind: "in", bitsize: BITS },
-      { name: "in1", dx: 0, dy: 3, kind: "in", bitsize: BITS },
-      { name: "sel", dx: 2, dy: 4, kind: "in" },
-      { name: "out", dx: 4, dy: 2, kind: "out", bitsize: BITS },
-    ],
-    "MUX",
-  ),
-  "plexers.demux": boxSpec(
-    4,
-    4,
-    [
-      { name: "in", dx: 0, dy: 2, kind: "in", bitsize: BITS },
-      { name: "sel", dx: 2, dy: 4, kind: "in" },
-      { name: "out0", dx: 4, dy: 1, kind: "out", bitsize: BITS },
-      { name: "out1", dx: 4, dy: 3, kind: "out", bitsize: BITS },
-    ],
-    "DEMUX",
-  ),
-  "plexers.decoder": boxSpec(
-    4,
-    4,
-    [
-      { name: "sel", dx: 0, dy: 2, kind: "in" },
-      { name: "out0", dx: 4, dy: 1, kind: "out" },
-      { name: "out1", dx: 4, dy: 3, kind: "out" },
-    ],
-    "DEC",
-  ),
+  // Plexers (pin sets scale with attrs.selBits: n = 2^selBits data lines)
+  "plexers.mux": plexerSpec("MUX", "in"),
+  "plexers.demux": plexerSpec("DEMUX", "out"),
+  "plexers.decoder": plexerSpec("DEC", "out-no-in"),
 
   // Arithmetic
   "arith.adder": boxSpec(
@@ -340,6 +354,93 @@ export const PALETTE: { group: string; types: string[] }[] = [
 export function isKnownType(type: string): boolean {
   return type in REGISTRY;
 }
+
+// ---- property editing (double-click dialog, FRONTEND.md U3 UX) ----
+
+export type AttrField =
+  | { key: string; label: string; kind: "number"; min: number; max: number }
+  | { key: string; label: string; kind: "text" }
+  | { key: string; label: string; kind: "select"; options: { value: string; label: string }[] };
+
+const BITSIZE_FIELD: AttrField = {
+  key: "bitsize",
+  label: "Bit size",
+  kind: "number",
+  min: 1,
+  max: 32,
+};
+
+/** Attr fields the properties dialog shows per type (attrs.* in the .csx schema). */
+export function editableAttrs(type: string): AttrField[] {
+  if (type.startsWith("gate.")) {
+    const fields = [BITSIZE_FIELD];
+    if (type !== "gate.not" && type !== "gate.buffer") {
+      fields.push({ key: "inputs", label: "Inputs", kind: "number", min: 2, max: 8 });
+    }
+    return fields;
+  }
+  if (type.startsWith("arith.")) return [BITSIZE_FIELD];
+  switch (type) {
+    case "wiring.pin":
+      return [BITSIZE_FIELD];
+    case "wiring.constant":
+      return [
+        BITSIZE_FIELD,
+        { key: "value", label: "Value", kind: "number", min: 0, max: 4294967295 },
+      ];
+    case "wiring.probe":
+      return [
+        BITSIZE_FIELD,
+        {
+          key: "display",
+          label: "Display",
+          kind: "select",
+          options: [
+            { value: "unsigned", label: "Unsigned" },
+            { value: "signed", label: "Signed" },
+            { value: "hex", label: "Hex" },
+          ],
+        },
+      ];
+    case "wiring.splitter":
+      return [BITSIZE_FIELD];
+    case "plexers.mux":
+    case "plexers.demux":
+    case "plexers.decoder":
+      return [
+        BITSIZE_FIELD,
+        { key: "selBits", label: "Select bits", kind: "number", min: 1, max: 4 },
+      ];
+    case "mem.register":
+      return [BITSIZE_FIELD];
+    case "mem.ram":
+    case "mem.rom":
+      return [
+        BITSIZE_FIELD,
+        { key: "depth", label: "Depth (words)", kind: "number", min: 1, max: 65536 },
+        { key: "autoload", label: "Autoload file", kind: "text" },
+      ];
+    case "subcircuit":
+      return [{ key: "circuit", label: "Circuit", kind: "text" }];
+    case "io.led":
+    case "io.hexdisplay":
+      return [BITSIZE_FIELD];
+    default:
+      return [];
+  }
+}
+
+/** Gate types the dialog's type swapper offers (same pin names, De Morgan family). */
+export const GATE_TYPE_OPTIONS = [
+  "gate.and",
+  "gate.or",
+  "gate.xor",
+  "gate.nand",
+  "gate.nor",
+  "gate.xnor",
+  "gate.not",
+  "gate.buffer",
+] as const;
 
 export function compSize(comp: Pick<CsxComponent, "type" | "attrs">): { w: number; h: number } {
   const spec = compSpec(comp.type);

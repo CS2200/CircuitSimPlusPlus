@@ -24,6 +24,16 @@ describe("catalog", () => {
     expect(four.filter((p) => p.kind === "in")).toHaveLength(4);
     expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(5);
   });
+
+  it("plexer pin sets scale with selBits (2^selBits data lines)", () => {
+    expect(compPins({ type: "plexers.mux" }).filter((p) => p.name.startsWith("in"))).toHaveLength(
+      2,
+    );
+    const mux4 = compPins({ type: "plexers.mux", attrs: { selBits: 2 } });
+    expect(mux4.filter((p) => p.name.startsWith("in"))).toHaveLength(4);
+    const dec3 = compPins({ type: "plexers.decoder", attrs: { selBits: 3 } });
+    expect(dec3.filter((p) => p.name.startsWith("out"))).toHaveLength(8);
+  });
 });
 
 describe("compLayout", () => {

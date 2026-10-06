@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
+import PropertiesDialog from "./components/PropertiesDialog";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
-import { PALETTE, compSpec } from "./editor/catalog";
+import { PALETTE, compPins, compSpec } from "./editor/catalog";
 
 /**
  * App shell: header + palette + canvas + statusbar. The circuit editor is
@@ -14,10 +15,16 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const stress = useMemo(() => new URLSearchParams(window.location.search).has("stress"), []);
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
-  const [doc] = useState(() => CircuitDocument.create("untitled"));
+  const [doc] = useState(() => {
+    const d = CircuitDocument.create("untitled");
+    // editor injects pin knowledge so type/attr edits prune dangling wires
+    d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
+    return d;
+  });
   const editorRef = useRef<EditorHandle>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [editingComp, setEditingComp] = useState<string | null>(null);
   const [animate, setAnimate] = useState(true);
 
   const onStatus = useCallback((s: EditorStatus) => setStatus(s), []);
@@ -115,7 +122,13 @@ export default function App() {
               ))}
             </aside>
             <div className="editor-wrap">
-              <EditorCanvas ref={editorRef} doc={doc} themeName={theme} onStatus={onStatus} />
+              <EditorCanvas
+                ref={editorRef}
+                doc={doc}
+                themeName={theme}
+                onStatus={onStatus}
+                onEditComponent={setEditingComp}
+              />
             </div>
           </>
         )}
@@ -136,6 +149,9 @@ export default function App() {
         )}
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
+      {editingComp !== null && (
+        <PropertiesDialog doc={doc} compId={editingComp} onClose={() => setEditingComp(null)} />
+      )}
       {showHelp && (
         <div className="help-overlay" onClick={() => setShowHelp(false)}>
           <div className="help-card" onClick={(e) => e.stopPropagation()}>

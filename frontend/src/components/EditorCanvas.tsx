@@ -48,8 +48,13 @@ export interface EditorHandle {
 
 export default forwardRef<
   EditorHandle,
-  { doc: CircuitDocument; themeName: string; onStatus?: (s: EditorStatus) => void }
->(function EditorCanvas({ doc, themeName, onStatus }, ref) {
+  {
+    doc: CircuitDocument;
+    themeName: string;
+    onStatus?: (s: EditorStatus) => void;
+    onEditComponent?: (compId: string) => void;
+  }
+>(function EditorCanvas({ doc, themeName, onStatus, onEditComponent }, ref) {
   const [tick, setTick] = useState(0);
   const { scene, sel, tool } = useMemo(() => {
     const scene = new DocScene();
@@ -63,6 +68,13 @@ export default forwardRef<
     );
     return { scene, sel, tool };
   }, [doc]);
+
+  useEffect(() => {
+    tool.onEditComponent = onEditComponent;
+    return () => {
+      tool.onEditComponent = undefined;
+    };
+  }, [tool, onEditComponent]);
 
   const bump = useCallback(() => setTick((t) => t + 1), []);
   const cursorRef = useRef<Vec2 | null>(null);
@@ -174,6 +186,7 @@ export default forwardRef<
       onPointerDown={(w, info) => tool.down(w, info)}
       onPointerMove={(w) => tool.move(w)}
       onPointerUp={(w, info) => tool.up(w, info)}
+      onDoubleClick={(w) => tool.doubleClick(w)}
       onHover={(w) => {
         cursorRef.current = w;
         tool.hover(w);

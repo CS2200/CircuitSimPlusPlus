@@ -74,6 +74,14 @@ export class CircuitDocument {
   /** Coarse edit-event stream — the post-MVP provenance journal hook (DESIGN.md §10). */
   onHistoryEvent?: (e: HistoryEvent) => void;
 
+  /**
+   * Editor-injected pin knowledge: given a component, return its current
+   * pin names. The model treats pin names as opaque (Backend owns
+   * semantics); the editor layer sets this so `updateComponent` can prune
+   * wires whose pins disappear after a type/attr change.
+   */
+  pinResolver?: (comp: CsxComponent) => string[];
+
   static create(name = "untitled"): CircuitDocument {
     return new CircuitDocument({
       format: CSX_FORMAT,
@@ -347,6 +355,56 @@ export class CircuitDocument {
       }),
     );
     return moved.map((x) => x.id);
+  }
+
+  /**
+   * Edit a component's type/rotation/name/attrs as one undoable command.
+   * If the edit removes pins (e.g. fewer gate inputs, type swap), wires
+   * referencing the vanished pins are removed too (with junction cascade)
+   * — requires `pinResolver` to be set (editor layer); without it, wires
+   * are left untouched.
+   */
+  updateComponent(
+    circuitIdx: number,
+    id: string,
+    patch: {
+      type?: string;
+      rot?: CsxComponent["rot"];
+      name?: string;
+      attrs?: Record<string, unknown>;
+    },
+  ): void {
+    const c = this.circuit(circuitIdx);
+    const comp = c.components.find((x) => x.id === id);
+    if (comp === undefined) throw new Error(`no component "${id}" in circuit "${c.name}"`);
+    const updated: CsxComponent = {
+      ...comp,
+      ...(patch.type !== undefined && { type: patch.type }),
+      ...(patch.rot !== undefined && { rot: patch.rot }),
+      ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.attrs !== undefined && { attrs: patch.attrs }),
+    };
+    const components = c.components.map((x) => (x.id === id ? updated : x));
+
+    let wires = c.wires;
+    if (this.pinResolver !== undefined) {
+      const pins = new Set(this.pinResolver(updated));
+      const dangling = new Set<number>();
+      wires.forEach((w, i) => {
+        for (const e of [w.a, w.b]) {
+          if (isPinEndpoint(e) && e.comp === id && !pins.has(e.pin)) {
+            dangling.add(i);
+            break;
+          }
+        }
+      });
+      if (dangling.size > 0) wires = removeWiresCascade(wires, dangling);
+    }
+    this.exec(
+      `edit ${id}`,
+      undefined,
+      this.replaceCircuit(circuitIdx, { ...c, components, wires }),
+    );
   }
 
   /** Delete components and every wire touching them (with junction cascades). */

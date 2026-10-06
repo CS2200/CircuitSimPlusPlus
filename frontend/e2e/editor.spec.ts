@@ -56,20 +56,44 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].components[1]).toMatchObject({ type: "gate.not", pos: [10, 0] });
   const [and, not] = d.circuits[0].components.map((c) => c.id);
 
-  // ---- wire: AND.out (5,1.5) → NOT.in (10,1) ----
+  // ---- double-click the AND → properties dialog → rename + bitsize ----
+  const body = await world(page, 2.5, 1.5);
+  await page.mouse.dblclick(body.x, body.y);
+  await expect(page.getByRole("heading", { name: /c1/ })).toBeVisible();
+  await page.getByLabel("Name").fill("my-and");
+  await page.getByLabel("Bit size").fill("8");
+  await page.getByRole("button", { name: "Apply" }).click();
+  d = await doc(page);
+  expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
+
+  // ---- wire: AND.out (5,1.5) → NOT.in (10,1), orthogonally routed ----
   await clickWorld(page, 5, 1.5);
   await clickWorld(page, 10, 1);
   d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(1);
   expect(d.circuits[0].wires[0].a).toEqual({ comp: and, pin: "out" });
   expect(d.circuits[0].wires[0].b).toEqual({ comp: not, pin: "in" });
+  expect(d.circuits[0].wires[0].points).toEqual([
+    [5, 1.5],
+    [10, 1.5],
+    [10, 1],
+  ]);
 
-  // ---- junction: wire from NOT.out (13,1) dropped onto wire 0's segment ----
+  // ---- junction: DRAG from NOT.out (13,1), release on wire 0's segment ----
   const [ax, ay] = d.circuits[0].wires[0].points[0];
   const [bx, by] = d.circuits[0].wires[0].points[1];
   const mid = { x: (ax + bx) / 2, y: (ay + by) / 2 };
-  await clickWorld(page, 13, 1);
-  await clickWorld(page, mid.x, mid.y);
+  const start = await world(page, 13, 1);
+  const target = await world(page, mid.x, mid.y);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) {
+    await page.mouse.move(
+      start.x + ((target.x - start.x) * i) / 5,
+      start.y + ((target.y - start.y) * i) / 5,
+    );
+  }
+  await page.mouse.up();
   d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(2);
   expect(d.circuits[0].wires[1].a).toEqual({ comp: not, pin: "out" });
