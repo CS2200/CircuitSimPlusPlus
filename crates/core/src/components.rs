@@ -18,11 +18,16 @@ use crate::api::{CompId, LoadError, LoadErrorKind};
 use crate::value::Value;
 
 /// Hard sanity caps (DESIGN.md §11 — corrupt files must not be able to
-/// OOM the grader). Generous enough that no real course circuit hits them.
-pub const MAX_BITSIZE: u32 = 1024;
+/// OOM the grader). Bitsize is capped at the course's word size (32;
+/// nothing in the course is wider — the 64-bit multiplier *output* is a
+/// derived pin width, not a `bitsize` attr). Memory depth is capped at
+/// 2²⁰ words — far beyond the course's 64K address space, and small
+/// enough that a max-depth RAM's state fits comfortably in the 2 GB
+/// grader container (a `Value` is ~100 bytes of struct + heap).
+pub const MAX_BITSIZE: u32 = 32;
 pub const MAX_GATE_INPUTS: u32 = 64;
 pub const MAX_SELECT_BITS: u32 = 8;
-pub const MAX_MEM_DEPTH: u32 = 1 << 24;
+pub const MAX_MEM_DEPTH: u32 = 1 << 20;
 pub const MAX_SPLIT_PINS: u32 = 64;
 
 /// Electrical direction of a pin (used for net driver/sink accounting).

@@ -186,8 +186,10 @@ enforced by the loader that owns file access, task B4/B9).
 
 ## 8. Implementation limits (§11)
 
-`bitsize` ≤ 1024; gate `inputs` ≤ 64; `selectBits`/`inputBits` ≤ 8; memory `depth` ≤ 2²⁴;
-split pins ≤ 64; splitter bus bits < 1024; hierarchy depth ≤ 64; post-flatten instance cap
+`bitsize` ≤ 32 (the course word size; derived pin widths may exceed it — a 32-bit
+multiplier's `out` is 64 bits); gate `inputs` ≤ 64; `selectBits`/`inputBits` ≤ 8;
+memory `depth` ≤ 2²⁰;
+split pins ≤ 64; splitter bus bits < 32; hierarchy depth ≤ 64; post-flatten instance cap
 ~1M (enforced in B3). These bound corrupt files, not students — no real course circuit comes
 close.
 

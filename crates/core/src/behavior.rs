@@ -1134,10 +1134,11 @@ mod tests {
             add.eval(&refs(&ins)).unwrap(),
             vec![k(32, 0xFFFF_FFFF), k(1, 1)]
         );
-        // Wide adder (multi-limb).
-        let add128 = mk("arith.adder", json!({"bitsize": 128}));
-        let ins = [Value::all_ones(128), k(128, 1), k(1, 0)];
-        assert_eq!(add128.eval(&refs(&ins)).unwrap(), vec![k(128, 0), k(1, 1)]);
+        // Full-width (32-bit) adder with carry in/out chain.
+        let ins = [k(32, 1), k(32, 0xFFFF_FFFF), k(1, 1)];
+        assert_eq!(add.eval(&refs(&ins)).unwrap(), vec![k(32, 1), k(1, 1)]);
+        // (Multi-limb arithmetic is exercised by the Value tests and by
+        // the 32×32→64 multiplier; no component attr exceeds 32 bits.)
         // X propagation, Z consumption.
         let ins = [Value::x(32), k(32, 1), k(1, 0)];
         assert_eq!(
