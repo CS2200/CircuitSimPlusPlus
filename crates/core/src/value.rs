@@ -77,9 +77,61 @@ pub enum ValueError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Value {
     width: u32,
-    ones: Vec<u64>,
-    xs: Vec<u64>,
-    zs: Vec<u64>,
+    ones: Limbs,
+    xs: Limbs,
+    zs: Limbs,
+}
+
+/// Limb storage: one inline limb for width ≤ 64 (the universal case —
+/// `MAX_BITSIZE` is 32 and multiplier outputs are 64), heap Vec beyond
+/// (the API stays arbitrary-width). Engine hot paths clone `Value`s
+/// constantly; the inline case makes those clones allocation-free
+/// (callgrind on the delay engine showed malloc+free ≈ 30% of runtime,
+/// task B10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Limbs {
+    Inline(u64),
+    Heap(Vec<u64>),
+}
+
+impl Limbs {
+    /// `n` zero limbs, inline when possible. (`Inline` is exactly one
+    /// limb — a 0-limb slice, for 0-width values, must stay a Vec.)
+    fn zeroed(n: usize) -> Limbs {
+        if n == 1 {
+            Limbs::Inline(0)
+        } else {
+            Limbs::Heap(vec![0; n])
+        }
+    }
+
+    /// Wrap an existing limb vector (inline when it fits).
+    fn from_vec(v: Vec<u64>) -> Limbs {
+        if v.len() == 1 {
+            Limbs::Inline(v[0])
+        } else {
+            Limbs::Heap(v)
+        }
+    }
+}
+
+impl std::ops::Deref for Limbs {
+    type Target = [u64];
+    fn deref(&self) -> &[u64] {
+        match self {
+            Limbs::Inline(limb) => std::slice::from_ref(limb),
+            Limbs::Heap(v) => v,
+        }
+    }
+}
+
+impl std::ops::DerefMut for Limbs {
+    fn deref_mut(&mut self) -> &mut [u64] {
+        match self {
+            Limbs::Inline(limb) => std::slice::from_mut(limb),
+            Limbs::Heap(v) => v,
+        }
+    }
 }
 
 fn n_limbs(width: u32) -> usize {
@@ -246,9 +298,9 @@ impl Value {
     pub fn zero(width: u32) -> Self {
         Value {
             width,
-            ones: vec![0; n_limbs(width)],
-            xs: vec![0; n_limbs(width)],
-            zs: vec![0; n_limbs(width)],
+            ones: Limbs::zeroed(n_limbs(width)),
+            xs: Limbs::zeroed(n_limbs(width)),
+            zs: Limbs::zeroed(n_limbs(width)),
         }
     }
 
@@ -315,9 +367,9 @@ impl Value {
         ones.truncate(n_limbs(width));
         let mut v = Value {
             width,
-            ones,
-            xs: vec![0; n_limbs(width)],
-            zs: vec![0; n_limbs(width)],
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::zeroed(n_limbs(width)),
+            zs: Limbs::zeroed(n_limbs(width)),
         };
         v.normalize();
         v
@@ -420,9 +472,9 @@ impl Value {
         }
         Value {
             width: self.width,
-            ones,
-            xs,
-            zs: vec![0; n],
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::from_vec(xs),
+            zs: Limbs::zeroed(n),
         }
     }
 
@@ -469,9 +521,9 @@ impl Value {
         }
         Value {
             width: self.width,
-            ones,
-            xs,
-            zs: vec![0; n],
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::from_vec(xs),
+            zs: Limbs::zeroed(n),
         }
     }
 
@@ -508,9 +560,9 @@ impl Value {
                 }
                 Value {
                     width: d1.width,
-                    ones,
-                    xs,
-                    zs,
+                    ones: Limbs::from_vec(ones),
+                    xs: Limbs::from_vec(xs),
+                    zs: Limbs::from_vec(zs),
                 }
             }
         }
@@ -556,9 +608,9 @@ impl Value {
         }
         Value {
             width,
-            ones,
-            xs,
-            zs,
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::from_vec(xs),
+            zs: Limbs::from_vec(zs),
         }
     }
 
@@ -574,9 +626,9 @@ impl Value {
         let n = n_limbs(width);
         let mut v = Value {
             width,
-            ones: shr_bits(&self.ones, offset, n),
-            xs: shr_bits(&self.xs, offset, n),
-            zs: shr_bits(&self.zs, offset, n),
+            ones: Limbs::from_vec(shr_bits(&self.ones, offset, n)),
+            xs: Limbs::from_vec(shr_bits(&self.xs, offset, n)),
+            zs: Limbs::from_vec(shr_bits(&self.zs, offset, n)),
         };
         v.normalize();
         v
@@ -601,9 +653,9 @@ impl Value {
         }
         let mut v = Value {
             width,
-            ones,
-            xs,
-            zs,
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::from_vec(xs),
+            zs: Limbs::from_vec(zs),
         };
         v.normalize();
         v
@@ -624,9 +676,9 @@ impl Value {
         };
         Value {
             width,
-            ones: grow(&self.ones),
-            xs: grow(&self.xs),
-            zs: grow(&self.zs),
+            ones: Limbs::from_vec(grow(&self.ones)),
+            xs: Limbs::from_vec(grow(&self.xs)),
+            zs: Limbs::from_vec(grow(&self.zs)),
         }
     }
 
@@ -676,7 +728,7 @@ impl Value {
         // *value* width (not the limb width) is observable: the full sum
         // is < 2^(width+1), so bit `width` of the result is the carry.
         let n = n_limbs(self.width + 1);
-        let (mut a, mut b) = (self.ones.clone(), rhs.ones.clone());
+        let (mut a, mut b) = (self.ones.to_vec(), rhs.ones.to_vec());
         a.resize(n, 0);
         b.resize(n, 0);
         let (sum, _) = limbs_add(&a, &b, cin);
@@ -696,7 +748,7 @@ impl Value {
         // Same headroom trick as `add`: bit `width` of the full
         // difference (mod 2^(width+1)) is the borrow-out.
         let n = n_limbs(self.width + 1);
-        let (mut a, mut b) = (self.ones.clone(), rhs.ones.clone());
+        let (mut a, mut b) = (self.ones.to_vec(), rhs.ones.to_vec());
         a.resize(n, 0);
         b.resize(n, 0);
         let (diff, _) = limbs_sub(&a, &b, bin);
@@ -820,7 +872,11 @@ impl Value {
         let (l, r) = (self.shl(n), self.shr(self.width - n));
         Value::from_limbs(
             self.width,
-            l.ones.iter().zip(&r.ones).map(|(a, b)| a | b).collect(),
+            l.ones
+                .iter()
+                .zip(r.ones.iter())
+                .map(|(a, b)| a | b)
+                .collect(),
         )
     }
 
@@ -833,7 +889,11 @@ impl Value {
         let (l, r) = (self.shr(n), self.shl(self.width - n));
         Value::from_limbs(
             self.width,
-            l.ones.iter().zip(&r.ones).map(|(a, b)| a | b).collect(),
+            l.ones
+                .iter()
+                .zip(r.ones.iter())
+                .map(|(a, b)| a | b)
+                .collect(),
         )
     }
 
@@ -866,9 +926,9 @@ impl Value {
         }
         Ok(Value {
             width,
-            ones,
-            xs,
-            zs,
+            ones: Limbs::from_vec(ones),
+            xs: Limbs::from_vec(xs),
+            zs: Limbs::from_vec(zs),
         })
     }
 }

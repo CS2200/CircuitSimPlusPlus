@@ -83,7 +83,7 @@ pub const DEFAULT_EVENTS_PER_CYCLE_CAP: u64 = 1_000_000;
 const TOP_K: usize = 10;
 
 /// A setup/hold warning (DESIGN.md §4.3): recorded, never corrupts state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimingViolation {
     pub comp: CompId,
     pub kind: ViolationKind,
@@ -93,7 +93,7 @@ pub struct TimingViolation {
     pub cycle: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ViolationKind {
     /// Data changed within `t_setup` before the edge.
     Setup,
@@ -152,6 +152,115 @@ impl PartialOrd for Ev {
     }
 }
 
+/// Serializable snapshot form (`snapshot`/`restore`, §8.1).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DelaySnap {
+    version: u32,
+    half_period: u64,
+    now: u64,
+    seq: u64,
+    next_rising: bool,
+    rising_seen: u64,
+    next_boundary: u64,
+    cycle_settle: u64,
+    cycle_settle_net: Option<u32>,
+    t_obs: u64,
+    top_paths: Vec<(u64, Vec<CompId>)>,
+    violations: Vec<TimingViolation>,
+    events_this_cycle: u64,
+    events_processed: u64,
+    trace_hash: u64,
+    halted: Option<Halt>,
+    comps: Vec<serde_json::Value>,
+    drives: Vec<Vec<crate::api::WireValue>>,
+    net_values: Vec<crate::api::WireValue>,
+    net_scheduled: Vec<crate::api::WireValue>,
+    net_cause: Vec<Option<(u32, Option<u32>)>>,
+    z_nets: Vec<u32>,
+    pending_gen: Vec<u64>,
+    pending_val: Vec<Vec<crate::api::WireValue>>,
+    pending_cause: Vec<Option<u32>>,
+    pending_net_cause: Vec<(u32, (u32, Option<u32>))>,
+    clk_track: Vec<ClockTrack>,
+    queue: Vec<SnapEv>,
+}
+
+/// Flat event encoding (kind tag + the one relevant payload slot).
+/// Values serialize as width-less masks; `restore` re-decodes them with
+/// the netlist's widths.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SnapEv {
+    time: u64,
+    seq: u64,
+    kind: String,
+    #[serde(default)]
+    comp: u32,
+    #[serde(default)]
+    gen: u64,
+    #[serde(default)]
+    net: u32,
+    #[serde(default)]
+    phase: bool,
+    #[serde(default)]
+    value: Option<crate::api::WireValue>,
+}
+
+impl SnapEv {
+    fn from_ev(e: &Ev) -> SnapEv {
+        let (kind, comp, gen, net, phase, value) = match &e.kind {
+            EvKind::Clock { phase } => ("clock", 0, 0, 0, *phase, None),
+            EvKind::Fire { comp, gen } => ("fire", *comp, *gen, 0, false, None),
+            EvKind::Net { net, value } => ("net", 0, 0, *net, false, Some(value.to_wire_value())),
+            EvKind::Poke { comp, value } => {
+                ("poke", *comp, 0, 0, false, Some(value.to_wire_value()))
+            }
+        };
+        SnapEv {
+            time: e.time,
+            seq: e.seq,
+            kind: kind.to_string(),
+            comp,
+            gen,
+            net,
+            phase,
+            value,
+        }
+    }
+
+    /// Rebuild the event; `width_of` resolves payload widths (net events
+    /// from the net, poke events from the pin).
+    fn to_ev(&self, width_of: impl Fn(&SnapEv) -> Result<u32, String>) -> Result<Ev, String> {
+        let value = |w: u32| -> Result<Value, String> {
+            let wv = self
+                .value
+                .as_ref()
+                .ok_or_else(|| format!("{} event without value", self.kind))?;
+            Value::from_wire_value(wv, w).map_err(|e| e.to_string())
+        };
+        let kind = match self.kind.as_str() {
+            "clock" => EvKind::Clock { phase: self.phase },
+            "fire" => EvKind::Fire {
+                comp: self.comp,
+                gen: self.gen,
+            },
+            "net" => EvKind::Net {
+                net: self.net,
+                value: value(width_of(self)?)?,
+            },
+            "poke" => EvKind::Poke {
+                comp: self.comp,
+                value: value(width_of(self)?)?,
+            },
+            other => return Err(format!("bad snapshot event kind '{other}'")),
+        };
+        Ok(Ev {
+            time: self.time,
+            seq: self.seq,
+            kind,
+        })
+    }
+}
+
 /// Static per-component data precomputed at engine build.
 #[derive(Debug)]
 struct CompData {
@@ -190,7 +299,7 @@ fn class_of(type_: &str, has_inputs: bool, has_outputs: bool) -> Class {
 }
 
 /// Per-clocked-component setup/hold tracking.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 struct ClockTrack {
     last_edge: Option<u64>,
     last_d: Option<u64>,
@@ -480,6 +589,169 @@ impl DelayEngine {
 
     pub fn trace_hash(&self) -> u64 {
         self.trace_hash
+    }
+
+    // -- Snapshot/restore (§8.1) ------------------------------------------
+
+    /// Full engine state as deterministic JSON (savestate; §8.1). The
+    /// queue is serialized in (time, seq) order; restoring into an engine
+    /// built from the same circuit + table continues bit-identically
+    /// (§4.6 — see the test).
+    pub fn snapshot(&self) -> String {
+        let mut queue: Vec<&Ev> = self.queue.iter().collect();
+        queue.sort_by_key(|e| (e.time, e.seq));
+        let snap = DelaySnap {
+            version: 1,
+            half_period: self.half_period,
+            now: self.now,
+            seq: self.seq,
+            next_rising: self.next_rising,
+            rising_seen: self.rising_seen,
+            next_boundary: self.next_boundary,
+            cycle_settle: self.cycle_settle,
+            cycle_settle_net: self.cycle_settle_net,
+            t_obs: self.t_obs,
+            top_paths: self.top_paths.clone(),
+            violations: self.violations.clone(),
+            events_this_cycle: self.events_this_cycle,
+            events_processed: self.events_processed,
+            trace_hash: self.trace_hash,
+            halted: self.halted.clone(),
+            comps: self.comps.iter().map(Behavior::save_state).collect(),
+            drives: self
+                .drives
+                .iter()
+                .map(|slots| slots.iter().map(Value::to_wire_value).collect())
+                .collect(),
+            net_values: self.net_values.iter().map(Value::to_wire_value).collect(),
+            net_scheduled: self
+                .net_scheduled
+                .iter()
+                .map(Value::to_wire_value)
+                .collect(),
+            net_cause: self.net_cause.clone(),
+            z_nets: self.z_nets.iter().copied().collect(),
+            pending_gen: self.pending_gen.clone(),
+            pending_val: self
+                .pending_val
+                .iter()
+                .map(|outs| outs.iter().map(Value::to_wire_value).collect())
+                .collect(),
+            pending_cause: self.pending_cause.clone(),
+            pending_net_cause: self.pending_net_cause.clone(),
+            clk_track: self.clk_track.clone(),
+            queue: queue.iter().map(|e| SnapEv::from_ev(e)).collect(),
+        };
+        serde_json::to_string(&snap).expect("snapshot serializes")
+    }
+
+    /// Restore a snapshot into an engine built from the same circuit and
+    /// delay table. Errors (never panics) on shape/version mismatch.
+    pub fn restore(&mut self, json: &str) -> Result<(), String> {
+        let snap: DelaySnap =
+            serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
+        if snap.version != 1 {
+            return Err(format!("unsupported snapshot version {}", snap.version));
+        }
+        if snap.half_period != self.half_period {
+            return Err("snapshot clock half-period does not match".to_string());
+        }
+        let n_comps = self.comps.len();
+        let n_nets = self.netlist.nets.len();
+        let shape_ok = snap.comps.len() == n_comps
+            && snap.drives.len() == n_comps
+            && snap.pending_gen.len() == n_comps
+            && snap.pending_val.len() == n_comps
+            && snap.pending_cause.len() == n_comps
+            && snap.clk_track.len() == n_comps
+            && snap.net_values.len() == n_nets
+            && snap.net_scheduled.len() == n_nets
+            && snap.net_cause.len() == n_nets;
+        if !shape_ok {
+            return Err("snapshot does not match this circuit".to_string());
+        }
+        let values = |wv: &crate::api::WireValue, width: u32| {
+            Value::from_wire_value(wv, width).map_err(|e| e.to_string())
+        };
+        for (b, s) in self.comps.iter_mut().zip(&snap.comps) {
+            if !b.load_state(s) {
+                return Err("snapshot state does not match component kinds".to_string());
+            }
+        }
+        for (ci, slots) in snap.drives.iter().enumerate() {
+            let fc = &self.netlist.comps[ci];
+            if slots.len() != fc.pins.len() {
+                return Err("snapshot drive slots do not match".to_string());
+            }
+            for (slot, wv) in slots.iter().enumerate() {
+                self.drives[ci][slot] = values(wv, fc.pins[slot].width)?;
+            }
+        }
+        for (i, wv) in snap.net_values.iter().enumerate() {
+            self.net_values[i] = values(wv, self.netlist.nets[i].width)?;
+        }
+        for (i, wv) in snap.net_scheduled.iter().enumerate() {
+            self.net_scheduled[i] = values(wv, self.netlist.nets[i].width)?;
+        }
+        for (ci, outs) in snap.pending_val.iter().enumerate() {
+            // pending_val slots are lazily sized (empty until first eval).
+            if outs.is_empty() {
+                self.pending_val[ci] = Vec::new();
+                continue;
+            }
+            let out_pins: Vec<usize> = self.cdata[ci].out_pins.iter().map(|(s, _)| *s).collect();
+            if outs.len() != out_pins.len() {
+                return Err("snapshot pending outputs do not match".to_string());
+            }
+            let mut rebuilt = Vec::with_capacity(outs.len());
+            for (j, wv) in outs.iter().enumerate() {
+                rebuilt.push(values(wv, self.netlist.comps[ci].pins[out_pins[j]].width)?);
+            }
+            self.pending_val[ci] = rebuilt;
+        }
+        self.net_cause = snap.net_cause;
+        self.z_nets = snap.z_nets.into_iter().collect();
+        self.pending_gen = snap.pending_gen;
+        self.pending_cause = snap.pending_cause;
+        self.pending_net_cause = snap.pending_net_cause;
+        self.clk_track = snap.clk_track;
+        self.queue = snap
+            .queue
+            .iter()
+            .map(|se| {
+                se.to_ev(|se| match se.kind.as_str() {
+                    "net" => self
+                        .netlist
+                        .nets
+                        .get(se.net as usize)
+                        .map(|n| n.width)
+                        .ok_or_else(|| format!("net event for unknown net {}", se.net)),
+                    "poke" => self
+                        .netlist
+                        .comps
+                        .get(se.comp as usize)
+                        .and_then(|c| c.pins.first())
+                        .map(|p| p.width)
+                        .ok_or_else(|| format!("poke event for unknown comp {}", se.comp)),
+                    other => Err(format!("bad snapshot event kind '{other}'")),
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        self.now = snap.now;
+        self.seq = snap.seq;
+        self.next_rising = snap.next_rising;
+        self.rising_seen = snap.rising_seen;
+        self.next_boundary = snap.next_boundary;
+        self.cycle_settle = snap.cycle_settle;
+        self.cycle_settle_net = snap.cycle_settle_net;
+        self.t_obs = snap.t_obs;
+        self.top_paths = snap.top_paths;
+        self.violations = snap.violations;
+        self.events_this_cycle = snap.events_this_cycle;
+        self.events_processed = snap.events_processed;
+        self.trace_hash = snap.trace_hash;
+        self.halted = snap.halted;
+        Ok(())
     }
 
     /// Current resolved value of a net.
@@ -1227,6 +1499,51 @@ mod tests {
         assert_eq!(eng.violations().len(), 2);
         assert_eq!(eng.violations()[1].kind, ViolationKind::Hold);
         assert_eq!(eng.violations()[1].comp.0, eng.violations()[0].comp.0);
+    }
+
+    #[test]
+    fn snapshot_restore_continues_bit_identically() {
+        // A: 3 cycles, snapshot, 3 more. B: 6 straight. C: restore A's
+        // snapshot, 3 more. All three must agree on everything observable.
+        let mut a = engine(&pipeline_json(), 500);
+        a.run(3).unwrap();
+        let snap = a.snapshot();
+        a.run(3).unwrap();
+
+        let mut b = engine(&pipeline_json(), 500);
+        b.run(6).unwrap();
+
+        let mut c = engine(&pipeline_json(), 500);
+        c.restore(&snap).unwrap();
+        c.run(3).unwrap();
+
+        for (name, eng) in [("b", &b), ("c", &c)] {
+            assert_eq!(a.trace_hash(), eng.trace_hash(), "{name} trace_hash");
+            assert_eq!(a.t_obs(), eng.t_obs(), "{name} t_obs");
+            assert_eq!(a.cycle(), eng.cycle(), "{name} cycle");
+            assert_eq!(a.named_value("r1"), eng.named_value("r1"), "{name} r1");
+            assert_eq!(a.named_value("r2"), eng.named_value("r2"), "{name} r2");
+            assert_eq!(a.violations(), eng.violations(), "{name} violations");
+        }
+    }
+
+    #[test]
+    fn restore_rejects_mismatched_snapshots() {
+        let mut eng = engine(&pipeline_json(), 500);
+        eng.run(1).unwrap();
+        let snap = eng.snapshot();
+        assert!(eng.restore("{garbage").is_err());
+        // Different circuit (the setup/hold fixture's 5 comps) → shape error.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}}
+            ], "wires": []}}]
+        }}"##
+        );
+        let mut other = engine(&json, 500);
+        assert!(other.restore(&snap).is_err());
     }
 
     #[test]

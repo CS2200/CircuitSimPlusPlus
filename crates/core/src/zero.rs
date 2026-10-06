@@ -55,7 +55,7 @@ use crate::netlist::Netlist;
 use crate::value::{Bit, Value};
 
 /// A simulation stop with context (task B9 maps reasons to exit codes).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
 #[error("cycle {cycle}: {reason:?}: {details}")]
 pub struct Halt {
     pub reason: HaltReason,
