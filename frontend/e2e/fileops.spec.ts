@@ -187,6 +187,57 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   expect(d.circuits[0].components.filter((c) => c.type === "subcircuit")).toHaveLength(2);
 });
 
+test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+
+  // PIN body top-left at (c.x-100, c.y-8) → terminal dot at (c.x-68, c.y)
+  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.mouse.click(c.x - 100, c.y - 8);
+  await page.keyboard.press("Escape");
+  // AND body top-left at (c.x+20, c.y-24) → in0 dot at (c.x+20, c.y-8)
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  await page.mouse.click(c.x + 20, c.y - 24);
+  await page.keyboard.press("Escape");
+
+  // wire: pin terminal → gate in0 (click-click)
+  await page.mouse.click(c.x - 68, c.y);
+  await page.mouse.click(c.x + 20, c.y - 8);
+
+  const d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(1);
+  const w = d.circuits[0].wires[0] as { a: { pin?: string }; b: { pin?: string } };
+  expect(w.a.pin).toBe("pin"); // the wiring.pin terminal — engine-valid
+  expect(w.b.pin).toBe("in0");
+});
+
+test("Subcircuits: right-click an instance jumps to its definition tab", async ({ page }) => {
+  await page.goto("/");
+  await openMenu(page, "Subcircuits");
+  await page.getByRole("menuitem", { name: "New subcircuit…" }).click();
+  const dialog = page.locator(".name-dialog");
+  await dialog.getByRole("textbox").fill("alu");
+  await dialog.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
+
+  // place an instance on main, then right-click it
+  await page.getByRole("tab", { name: "main" }).click();
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await page.mouse.click(c.x - 64, c.y - 32); // body top-left; center at c
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");
+
+  await page.mouse.click(c.x, c.y, { button: "right" });
+  await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
+});
+
 test("Simulation menu: mode radio + speed preset + run-to dialog", async ({ page }) => {
   await page.goto("/?simdemo=1");
 

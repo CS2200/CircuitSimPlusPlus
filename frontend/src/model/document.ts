@@ -108,6 +108,7 @@ export class CircuitDocument {
     if (!Array.isArray(data.circuits)) {
       throw new Error("malformed .csx: circuits is not an array");
     }
+    migratePinTerminals(data);
     return new CircuitDocument(data);
   }
 
@@ -541,6 +542,25 @@ export class CircuitDocument {
 }
 
 // ---- pure structural helpers (exported for tests) ----
+
+/**
+ * Backward compatibility: early frontend builds called the `wiring.pin`
+ * terminal "port"; the backend registry has always named it "pin". Files
+ * saved (browser download) during that window carry "port" endpoints that
+ * fail engine validation (unresolved-pin) — rename them on load.
+ */
+function migratePinTerminals(data: CsxDocument): void {
+  for (const c of data.circuits) {
+    const pinComps = new Set(c.components.filter((x) => x.type === "wiring.pin").map((x) => x.id));
+    for (const w of c.wires) {
+      for (const e of [w.a, w.b]) {
+        if (isPinEndpoint(e) && e.pin === "port" && pinComps.has(e.comp)) {
+          e.pin = "pin";
+        }
+      }
+    }
+  }
+}
 
 /** Allocate the next unique component id within a circuit: c1, c2, … */
 export function allocComponentId(c: CsxCircuit): string {

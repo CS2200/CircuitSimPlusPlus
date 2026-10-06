@@ -59,6 +59,41 @@ describe("CircuitDocument.create/fromJson", () => {
     const bad = { format: CSX_FORMAT, version: 99, circuits: [] };
     expect(() => CircuitDocument.fromJson(JSON.stringify(bad))).toThrow("version");
   });
+
+  it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
+    // Early frontend builds called the wiring.pin terminal "port"; files
+    // from that window fail engine validation — rename on load.
+    const legacy = {
+      format: CSX_FORMAT,
+      version: CSX_VERSION,
+      name: "legacy",
+      settings: { delayModel: "delay", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [
+            { id: "p1", type: "wiring.pin", pos: [0, 0], name: "a" },
+            { id: "g1", type: "gate.not", pos: [4, 0] },
+          ],
+          wires: [
+            {
+              a: { comp: "p1", pin: "port" },
+              b: { comp: "g1", pin: "in" },
+              points: [
+                [2, 0],
+                [4, 1],
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const doc = CircuitDocument.fromJson(JSON.stringify(legacy));
+    const w = doc.circuit(0).wires[0];
+    expect(w.a).toEqual({ comp: "p1", pin: "pin" });
+    // gate endpoints are untouched
+    expect(w.b).toEqual({ comp: "g1", pin: "in" });
+  });
 });
 
 describe("component ops", () => {

@@ -104,7 +104,9 @@ export default function App() {
   }, [toasts]);
 
   // Reset (U6, DESIGN.md §5.2): fresh engine state; autoload images
-  // re-apply — confirmed with a toast naming each reloaded memory.
+  // re-apply — confirmed with a toast naming each reloaded memory. With
+  // nothing loaded yet, "reset" IS the first load (a fresh power-on) —
+  // never surface the backend's "no circuit loaded" error to the user.
   const onReset = useCallback(async () => {
     const mems = doc
       .circuit(0)
@@ -116,6 +118,11 @@ export default function App() {
           c.attrs.autoload !== "",
       );
     try {
+      if (!sim.store.loaded) {
+        const ok = await sim.load(doc);
+        if (ok) toast("Loaded — fresh power-on state");
+        return; // load errors already surface in the sim banner
+      }
       await sim.reset();
       toast(
         mems.length > 0
@@ -226,6 +233,16 @@ export default function App() {
   }, [filePath, doSave, onSaveAs]);
 
   // ---- sheet (subcircuit) operations (Subcircuits menu) ----
+
+  /** Right-click a subcircuit instance → jump to its definition tab. */
+  const onOpenSubcircuit = useCallback(
+    (circuit: string) => {
+      const idx = doc.circuitIdxByName(circuit);
+      if (idx >= 0) setSheet(idx);
+      else toast(`Subcircuit "${circuit}" is not in this file`);
+    },
+    [doc, toast],
+  );
 
   const onNewSheet = useCallback(() => {
     setNameDialog({
@@ -595,6 +612,7 @@ export default function App() {
                 sheetIdx={sheet}
                 onStatus={onStatus}
                 onEditComponent={setEditingComp}
+                onOpenSubcircuit={onOpenSubcircuit}
                 sim={sim}
                 pathIds={pathIds}
                 violations={violationMarkers}
@@ -732,6 +750,10 @@ export default function App() {
                 <tr>
                   <td>Esc / right-click</td>
                   <td>cancel wiring / placement / gesture</td>
+                </tr>
+                <tr>
+                  <td>Right-click a subcircuit</td>
+                  <td>jump to its definition tab</td>
                 </tr>
                 <tr>
                   <td>Wheel</td>

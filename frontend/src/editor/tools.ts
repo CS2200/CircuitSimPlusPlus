@@ -88,6 +88,8 @@ export class ToolMachine {
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
   /** Fired when a component is double-clicked (properties dialog). */
   onEditComponent?: (compId: string) => void;
+  /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
+  onOpenSubcircuit?: (circuit: string) => void;
   /** Bumped on every state change so the host re-renders. */
   version = 0;
 
@@ -125,6 +127,21 @@ export class ToolMachine {
 
   down(world: Vec2, info: PointerInfo): void {
     if (info.button === 2) {
+      // Idle right-click on a subcircuit instance opens its definition;
+      // otherwise right-click is the universal cancel.
+      if (this.placing === null && this.wiring === null && this.drag.kind === "idle") {
+        const hit = this.scene.pickComponent(world);
+        if (hit !== null) {
+          const comp = this.doc
+            .circuit(this.circuitIdx())
+            .components.find((c) => c.id === hit.compId);
+          const target = comp?.type === "subcircuit" ? comp.attrs?.circuit : undefined;
+          if (typeof target === "string" && target !== "") {
+            this.onOpenSubcircuit?.(target);
+            return;
+          }
+        }
+      }
       this.cancel();
       return;
     }

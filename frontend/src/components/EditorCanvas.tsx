@@ -63,6 +63,8 @@ export default forwardRef<
     sheetIdx?: number;
     onStatus?: (s: EditorStatus) => void;
     onEditComponent?: (compId: string) => void;
+    /** Right-click a subcircuit instance: jump to its definition tab. */
+    onOpenSubcircuit?: (circuit: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
     sim?: SimController;
     /** Observed critical path to highlight (U7), as document comp ids. */
@@ -71,7 +73,17 @@ export default forwardRef<
     violations?: readonly ViolationMarker[] | null;
   }
 >(function EditorCanvas(
-  { doc, themeName, sheetIdx = 0, onStatus, onEditComponent, sim, pathIds, violations },
+  {
+    doc,
+    themeName,
+    sheetIdx = 0,
+    onStatus,
+    onEditComponent,
+    onOpenSubcircuit,
+    sim,
+    pathIds,
+    violations,
+  },
   ref,
 ) {
   const [tick, setTick] = useState(0);
@@ -99,10 +111,12 @@ export default forwardRef<
 
   useEffect(() => {
     tool.onEditComponent = onEditComponent;
+    tool.onOpenSubcircuit = onOpenSubcircuit;
     return () => {
       tool.onEditComponent = undefined;
+      tool.onOpenSubcircuit = undefined;
     };
-  }, [tool, onEditComponent]);
+  }, [tool, onEditComponent, onOpenSubcircuit]);
 
   // Center the camera once per document (never re-center on edits).
   const initialBounds = useMemo(() => {
