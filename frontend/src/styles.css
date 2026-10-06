@@ -603,3 +603,25 @@ body {
   color: var(--text);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
+
+/* T_obs / critical-path button (U7) */
+.sim-tobs {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.sim-tobs:hover,
+.sim-tobs.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sim-violations {
+  color: var(--wire-x);
+}

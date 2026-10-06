@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import PropertiesDialog from "./components/PropertiesDialog";
@@ -43,6 +43,23 @@ export default function App() {
   const [editingComp, setEditingComp] = useState<string | null>(null);
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+  const [pathOn, setPathOn] = useState(false);
+  const simVersion = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
+
+  // U7: the observed critical path (top-1) as document component ids.
+  const pathIds = useMemo(() => {
+    if (!pathOn || !sim.store.loaded) return null;
+    const top = sim.store.timing?.top_paths[0];
+    if (top === undefined || top.length === 0) return null;
+    return top
+      .map((idx) => doc.circuit(0).components[idx]?.id)
+      .filter((id): id is string => id !== undefined);
+  }, [pathOn, sim.store, doc, simVersion]);
+
+  // A fresh load invalidates any path highlight.
+  useEffect(() => {
+    if (!sim.store.loaded && pathOn) setPathOn(false);
+  }, [sim.store, pathOn, simVersion]);
 
   const toast = useCallback((text: string) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
@@ -179,7 +196,15 @@ export default function App() {
           </button>
         </div>
       </header>
-      {!stress && <SimBar ctl={sim} doc={doc} onReset={onReset} />}
+      {!stress && (
+        <SimBar
+          ctl={sim}
+          doc={doc}
+          onReset={onReset}
+          pathOn={pathOn}
+          onTogglePath={() => setPathOn((v) => !v)}
+        />
+      )}
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -214,6 +239,7 @@ export default function App() {
                 onStatus={onStatus}
                 onEditComponent={setEditingComp}
                 sim={sim}
+                pathIds={pathIds}
               />
             </div>
             <WatchPanel ctl={sim} />

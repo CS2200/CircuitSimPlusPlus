@@ -16,6 +16,10 @@ import { DocScene, type SimOverlay } from "../editor/docScene";
 import { ToolMachine } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
+import { PulseTracker } from "../sim/pulses";
+
+/** Pulses animate in delay mode up to this effective speed (U7). */
+const PULSE_MAX_EFF_HZ = 120;
 
 /**
  * EditorCanvas (FRONTEND.md U3): the circuit editor — CanvasHost plumbing
@@ -57,9 +61,14 @@ export default forwardRef<
     onEditComponent?: (compId: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
     sim?: SimController;
+    /** Observed critical path to highlight (U7), as document comp ids. */
+    pathIds?: readonly string[] | null;
   }
->(function EditorCanvas({ doc, themeName, onStatus, onEditComponent, sim }, ref) {
+>(function EditorCanvas({ doc, themeName, onStatus, onEditComponent, sim, pathIds }, ref) {
   const [tick, setTick] = useState(0);
+  const pulses = useMemo(() => new PulseTracker(), [doc]);
+  const [pulsesLive, setPulsesLive] = useState(false);
+  const lastPulseChanges = useRef<readonly unknown[] | null>(null);
   const { scene, sel, tool } = useMemo(() => {
     const scene = new DocScene();
     const sel = new SelectionModel();
@@ -96,12 +105,26 @@ export default forwardRef<
   );
 
   const draw = useCallback<CanvasHostProps["draw"]>(
-    (renderer, camera, view, theme) => {
+    (renderer, camera, view, theme, tMs) => {
       scene.sync(doc, 0);
       let simOverlay: SimOverlay | undefined;
       if (sim !== undefined && sim.store.loaded) {
         const store = sim.store;
         const highlight = sim.haltHighlight();
+        // Pulse spawn: once per flushed frame, in delay mode at low speed
+        // (manual steps always qualify — that's the teaching view).
+        const st = store.status;
+        const pulseOk =
+          st?.mode !== "zero" && (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
+        if (pulseOk && store.lastChanged !== lastPulseChanges.current) {
+          lastPulseChanges.current = store.lastChanged;
+          if (store.lastChanged.length > 0) {
+            pulses.spawn(store.lastChanged, tMs);
+            setPulsesLive(true);
+          }
+        }
+        const activePulses = pulses.active(tMs);
+        if (activePulses === null && pulsesLive) setPulsesLive(false);
         simOverlay = {
           valueForWire: (i) => {
             const net = store.wireToNet?.get(i);
@@ -109,11 +132,18 @@ export default forwardRef<
           },
           haltCompId:
             highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
+          path: pathIds ?? null,
+          pulses: activePulses?.flatMap((p) =>
+            (store.netToWires?.get(p.net) ?? []).map((wireIdx) => ({
+              wireIdx,
+              phase: p.phase,
+            })),
+          ),
         };
       }
       scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay);
     },
-    [doc, scene, sel, tool, sim, simVersion],
+    [doc, scene, sel, tool, sim, simVersion, pathIds, pulses, pulsesLive],
   );
 
   const report = useCallback(() => {
@@ -211,6 +241,7 @@ export default forwardRef<
     <CanvasHost
       draw={draw}
       revision={tick + simVersion}
+      animate={pulsesLive}
       themeName={themeName}
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}

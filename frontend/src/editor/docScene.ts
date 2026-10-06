@@ -34,12 +34,16 @@ import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
  * X/Z). Selection/hover/net-extent highlights layer on top.
  */
 
-/** Sim state overlay for one draw pass (U5). */
+/** Sim state overlay for one draw pass (U5/U7). */
 export interface SimOverlay {
   /** Latest value of the engine net containing this wire, if any. */
   valueForWire(wireIdx: number): WireValue | undefined;
   /** Document component id to ring in the error color (halt marker). */
   haltCompId?: string | null;
+  /** Ordered component ids of the observed critical path (U7 highlight). */
+  path?: readonly string[] | null;
+  /** Signal-travel pulses: wire index + phase ∈ [0,1) (U7). */
+  pulses?: readonly { wireIdx: number; phase: number }[] | null;
 }
 
 /** Collapse a 4-state value to a render state (X dominates, then Z). */
@@ -56,6 +60,29 @@ function maskNonzero(hex: string): boolean {
 /** Probe `display` attr → watch value mode (default hex). */
 function probeDisplayMode(attr: unknown): ValueMode {
   return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
+}
+
+/** Point at arc-length fraction t ∈ [0,1] along a polyline. */
+function pointAlong(points: [number, number][], t: number): Vec2 {
+  const first = points[0];
+  if (points.length === 1 || t <= 0) return { x: first[0], y: first[1] };
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+  }
+  let target = total * Math.min(1, t);
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i][0] - points[i - 1][0];
+    const dy = points[i][1] - points[i - 1][1];
+    const len = Math.hypot(dx, dy);
+    if (target <= len && len > 0) {
+      const f = target / len;
+      return { x: points[i - 1][0] + dx * f, y: points[i - 1][1] + dy * f };
+    }
+    target -= len;
+  }
+  const last = points[points.length - 1];
+  return { x: last[0], y: last[1] };
 }
 
 export type PinHit = { kind: "pin"; compId: string; pin: string; pos: Vec2 };
@@ -368,6 +395,36 @@ export class DocScene {
 
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);
+
+    // Propagation pulses (U7): a dot traveling each changed wire.
+    if (sim?.pulses != null && sim.pulses.length > 0) {
+      for (const pulse of sim.pulses) {
+        const w = this.wires[pulse.wireIdx];
+        if (w === undefined) continue;
+        const p = pointAlong(w.points, pulse.phase);
+        renderer.drawPath(circlePath(p.x, p.y, PIN_R * 1.3), { fill: theme.accent });
+      }
+      renderer.flush();
+    }
+
+    // Observed critical path (U7): accent route through the path's
+    // components in order, each ringed.
+    if (sim?.path != null && sim.path.length > 0) {
+      const centers = sim.path
+        .map((id) => this.layouts.get(id))
+        .filter((l): l is CompLayout => l !== undefined)
+        .map((l) => ({ x: l.rect.x + l.rect.w / 2, y: l.rect.y + l.rect.h / 2 }));
+      if (centers.length > 1) {
+        renderer.drawPath(roundedPath(centers, 0.4), {
+          stroke: theme.accent,
+          lineWidth: WIRE_W * 1.6,
+        });
+      }
+      for (const c of centers) {
+        renderer.drawPath(circlePath(c.x, c.y, 0.5), { stroke: theme.accent, lineWidth: 0.18 });
+      }
+      renderer.flush();
+    }
 
     // Halt marker (U5): ring the offending component in the error color.
     if (sim?.haltCompId != null) {

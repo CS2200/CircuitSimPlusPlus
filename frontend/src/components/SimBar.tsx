@@ -16,11 +16,16 @@ export default function SimBar({
   ctl,
   doc,
   onReset,
+  pathOn,
+  onTogglePath,
 }: {
   ctl: SimController;
   doc: CircuitDocument;
   /** Reset = engine reset + autoload re-applies (DESIGN.md §5.2). */
   onReset: () => Promise<void>;
+  /** Critical-path highlight toggle state (U7). */
+  pathOn: boolean;
+  onTogglePath: () => void;
 }) {
   useSyncExternalStore(ctl.store.subscribe, ctl.store.getVersion.bind(ctl.store));
   const s = ctl.store;
@@ -121,12 +126,23 @@ export default function SimBar({
             <>
               cycle {s.cycle}
               {running && s.status !== null && ` · ${s.status.eff_hz.toLocaleString()} Hz eff.`}
-              {s.timing !== null && ` · T_obs ${s.timing.t_obs} ns`}
             </>
           ) : (
             "not loaded — any command loads the circuit"
           )}
         </span>
+        {s.timing !== null && (
+          <button
+            className={`sim-tobs${pathOn ? " active" : ""}`}
+            title="Observed critical path (DTA) — click to highlight it on the canvas"
+            onClick={onTogglePath}
+          >
+            T_obs {s.timing.t_obs} ns
+            {s.timing.violations > 0 && (
+              <span className="sim-violations"> · ⚠ {s.timing.violations} violations</span>
+            )}
+          </button>
+        )}
       </div>
       {(s.halted !== null || s.loadErrors.length > 0 || cmdError !== null) && (
         <div className="sim-banner" role="alert">

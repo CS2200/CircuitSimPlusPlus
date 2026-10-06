@@ -62,8 +62,8 @@ test("U5: full sim control loop over the mock core", async ({ page }) => {
   const frozen = (await simState(page)).cycle;
   await page.waitForTimeout(300);
   expect((await simState(page)).cycle).toBe(frozen);
-  // Timing update arrives on pause (T_obs banner in the status line).
-  await expect(page.locator(".sim-status")).toContainText("T_obs");
+  // Timing update arrives on pause (the T_obs critical-path button, U7).
+  await expect(page.locator(".sim-tobs")).toContainText("T_obs");
 });
 
 test("U5: consuming a floating bus halts with a banner", async ({ page }) => {

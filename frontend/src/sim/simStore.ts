@@ -25,11 +25,16 @@ export class SimStore {
   readonly netValues = new Map<NetId, WireValue>();
   /** Document wire index → engine net (inverted LoadResult.net_map). */
   wireToNet: ReadonlyMap<WireIdx, NetId> | null = null;
+  /** Engine net → document wire indices (U7 pulses; built in onLoaded). */
+  netToWires: ReadonlyMap<NetId, WireIdx[]> | null = null;
   named: readonly NamedComponent[] = [];
   loadErrors: readonly LoadError[] = [];
   status: SimStatus | null = null;
   halted: SimHalted | null = null;
   timing: TimingUpdate | null = null;
+
+  /** Nets changed by the latest flushed frame (U7 pulse animations). */
+  lastChanged: readonly NetId[] = [];
 
   private _loaded = false;
   private _version = 0;
@@ -68,6 +73,13 @@ export class SimStore {
    */
   onLoaded(wireToNet: Map<WireIdx, NetId>, named: NamedComponent[]): void {
     this.wireToNet = wireToNet;
+    const reverse = new Map<NetId, WireIdx[]>();
+    for (const [wire, net] of wireToNet) {
+      const list = reverse.get(net);
+      if (list === undefined) reverse.set(net, [wire]);
+      else list.push(wire);
+    }
+    this.netToWires = reverse;
     this.named = named;
     this.loadErrors = [];
     this.status = null;
@@ -87,6 +99,7 @@ export class SimStore {
   /** One flushed frame of merged diffs (from DiffPump). */
   applyDiffs(changes: ReadonlyMap<NetId, WireValue>, cycle: number): void {
     for (const [net, val] of changes) this.netValues.set(net, val);
+    this.lastChanged = [...changes.keys()];
     this._cycle = cycle;
     this.bump();
   }
@@ -115,7 +128,9 @@ export class SimStore {
   /** Unload: everything back to the pre-load state. */
   reset(): void {
     this.netValues.clear();
+    this.lastChanged = [];
     this.wireToNet = null;
+    this.netToWires = null;
     this.named = [];
     this.loadErrors = [];
     this.status = null;
