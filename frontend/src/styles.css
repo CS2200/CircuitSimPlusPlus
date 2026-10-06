@@ -6,6 +6,7 @@
 :root,
 [data-theme="dark"] {
   --bg: #16161f;
+  --grid: #262634;
   --panel: #22222e;
   --panel-border: #34344a;
   --text: #e6e6f0;
@@ -27,6 +28,7 @@
 
 [data-theme="light"] {
   --bg: #f4f4f8;
+  --grid: #e2e2ec;
   --panel: #ffffff;
   --panel-border: #d4d4e0;
   --text: #1c1c26;
@@ -94,14 +96,43 @@ body {
   cursor: pointer;
 }
 
-.app-canvas-placeholder {
+.app-canvas {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
+  min-height: 0; /* allow the flex child to shrink to its container */
+}
+
+.canvas-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.circuit-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* pointer events own pan/zoom, not the browser */
+  cursor: grab;
+}
+
+.circuit-canvas:active {
+  cursor: grabbing;
+}
+
+.canvas-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
   color: var(--text-dim);
+  pointer-events: none;
+  white-space: pre;
 }
 
 .app-statusbar {
@@ -110,30 +141,4 @@ body {
   border-top: 1px solid var(--panel-border);
   font-size: 0.85rem;
   color: var(--text-dim);
-}
-
-/* Wire color demo swatches (placeholder body; real wires are canvas-rendered). */
-.wire-demo {
-  display: flex;
-  gap: 1rem;
-}
-
-.wire {
-  display: inline-block;
-  width: 64px;
-  height: 6px;
-  border-radius: 3px;
-}
-
-.wire-low {
-  background: var(--wire-low);
-}
-.wire-high {
-  background: var(--wire-high);
-}
-.wire-bus-a {
-  background: var(--bus-a);
-}
-.wire-bus-b {
-  background: var(--bus-b);
 }
