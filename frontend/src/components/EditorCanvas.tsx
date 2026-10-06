@@ -41,10 +41,10 @@ export interface EditorStatus {
 }
 
 export interface EditorHandle {
-  startPlacing(type: string, sticky?: boolean): void;
+  startPlacing(type: string, sticky?: boolean, attrs?: Record<string, unknown>): void;
   /** Redraw after an out-of-band doc mutation (properties dialog, …). */
   refresh(): void;
-  placeAt(type: string, world: Vec2): void;
+  placeAt(type: string, world: Vec2, attrs?: Record<string, unknown>): void;
   cancel(): void;
   undo(): void;
   redo(): void;
@@ -224,16 +224,17 @@ export default forwardRef<
   useImperativeHandle(
     ref,
     (): EditorHandle => ({
-      startPlacing: (type, sticky = false) => {
-        tool.startPlacing(type, sticky);
+      startPlacing: (type, sticky = false, attrs) => {
+        tool.startPlacing(type, sticky, attrs);
         bump();
       },
       refresh: () => bump(),
-      placeAt: (type, world) => {
+      placeAt: (type, world, attrs) => {
         doc.addComponent(sheetRef.current, {
           type,
           pos: [Math.round(world.x), Math.round(world.y)],
           rot: "E",
+          ...(attrs !== undefined && { attrs }),
         });
         bump();
       },
@@ -288,12 +289,22 @@ export default forwardRef<
       onDropWorld={(w, e) => {
         const type = e.dataTransfer.getData("text/x-csx-type");
         if (type !== "") {
+          const rawAttrs = e.dataTransfer.getData("text/x-csx-attrs");
+          let attrs: Record<string, unknown> | undefined;
+          if (rawAttrs !== "") {
+            try {
+              attrs = JSON.parse(rawAttrs) as Record<string, unknown>;
+            } catch {
+              attrs = undefined; // malformed payload — place attr-less
+            }
+          }
           // drop lands with the body CENTERED on the cursor
-          const { w: bw, h: bh } = compSize({ type });
+          const { w: bw, h: bh } = compSize({ type, attrs }, doc.circuits);
           doc.addComponent(sheetRef.current, {
             type,
             pos: [Math.round(w.x - bw / 2), Math.round(w.y - bh / 2)],
             rot: "E",
+            ...(attrs !== undefined && { attrs }),
           });
           bump();
         }

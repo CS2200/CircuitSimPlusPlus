@@ -92,10 +92,16 @@ npm run build          # tsc --noEmit && vite build → frontend/dist
 The UI is organized around a menu bar: **File** (New / Open / Save / Save As
 — native dialogs in the shell, download/upload fallbacks in the browser),
 **Simulation** (step/run-to/reset, speed presets, zero/delay mode,
-critical-path highlight), and **Subcircuits** (sheet create/rename/switch).
-File shortcuts: Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save-as. Saving always
-goes through the engine's canonical serializer (`save_circuit`), never local
-JSON.
+critical-path highlight), and **Subcircuits** (new/rename). Every circuit in
+the file gets a tab in the scrolling tab strip (double-click renames; "+"
+adds a subcircuit). A subcircuit's interface is its named **pin components**
+(`wiring.pin`): input pins face left by default, output pins (`isOutput`)
+face right. Instances are placed from the palette's Subcircuits group (any
+number of copies); the instance's pins mirror the target's interface — inputs
+on the left edge, outputs on the right, in document order, matching the
+netlist's bridge order. File shortcuts: Ctrl+O open, Ctrl+S save,
+Ctrl+Shift+S save-as. Saving always goes through the engine's canonical
+serializer (`save_circuit`), never local JSON.
 
 The browser-based dev flow uses the mock; the **real engine** is exercised
 through the Tauri shell. Gotcha: `.env.development` forces the mock in *every*

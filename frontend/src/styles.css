@@ -288,6 +288,50 @@ body {
   direction: rtl; /* long paths truncate at the FRONT, keeping the file name */
 }
 
+/* ---- circuit tabs (one per circuit in the file) ---- */
+
+.sheet-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px 0.5rem 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.sheet-tab {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  padding: 0.3rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.sheet-tab:hover {
+  color: var(--text);
+  background: var(--grid);
+}
+
+.sheet-tab.active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--panel-border);
+}
+
+.sheet-tab.sheet-new {
+  color: var(--text-dim);
+  padding: 0.3rem 0.7rem;
+  font-weight: bold;
+}
+
 /* ---- name dialog (sheet names, run-to cycle) ---- */
 
 .name-dialog form {

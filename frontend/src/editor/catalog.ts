@@ -1,4 +1,4 @@
-import type { CsxComponent } from "../model/csx";
+import type { CsxCircuit, CsxComponent } from "../model/csx";
 
 /**
  * Component metadata catalog (FRONTEND.md U3): pin geometry + body sizes
@@ -134,6 +134,85 @@ function plexerSpec(caption: string, flavor: "in" | "out" | "out-no-in"): CompSp
 
 const BUS_WIDTH = 32; // sentinel: attr-driven bus pin (boxSpec resolves via bitsOf)
 
+// ---- subcircuit instances (hierarchy) ----
+
+/** Instance box width; height scales with the interface size. */
+const SUB_W = 8;
+const SUB_MIN_H = 4;
+
+/**
+ * A circuit's interface: its named `wiring.pin` components in DOCUMENT
+ * ORDER (the netlist's bridge order, task B3), split by direction from the
+ * circuit's own perspective: an "input" pin drives the circuit's internals
+ * (isOutput unset), an "output" pin is driven by them (isOutput: true).
+ */
+export function circuitInterface(c: CsxCircuit): {
+  inputs: CsxComponent[];
+  outputs: CsxComponent[];
+} {
+  const pins = c.components.filter(
+    (x) => x.type === "wiring.pin" && x.name !== undefined && x.name !== "",
+  );
+  return {
+    inputs: pins.filter((x) => x.attrs?.isOutput !== true),
+    outputs: pins.filter((x) => x.attrs?.isOutput === true),
+  };
+}
+
+function subcircuitTarget(
+  attrs: Readonly<Record<string, unknown>>,
+  circuits: readonly CsxCircuit[],
+): CsxCircuit | undefined {
+  const name = attrs["circuit"];
+  return typeof name === "string" ? circuits.find((c) => c.name === name) : undefined;
+}
+
+function subcircuitHeight(
+  attrs: Readonly<Record<string, unknown>>,
+  circuits: readonly CsxCircuit[],
+): number {
+  const target = subcircuitTarget(attrs, circuits);
+  if (target === undefined) return SUB_MIN_H;
+  const { inputs, outputs } = circuitInterface(target);
+  return Math.max(SUB_MIN_H, 2 * Math.max(inputs.length, outputs.length));
+}
+
+/**
+ * Instance-side pins: subcircuit inputs on the LEFT edge, outputs on the
+ * RIGHT, each group spread top-to-bottom in the target's document order
+ * (gate-style spacing). Pin name = the pin component's `name`; width = its
+ * `bitsize`. Unknown target → no pins (validation reports the error).
+ */
+export function subcircuitPins(
+  attrs: Readonly<Record<string, unknown>>,
+  circuits: readonly CsxCircuit[],
+): PinSpec[] {
+  const target = subcircuitTarget(attrs, circuits);
+  if (target === undefined) return [];
+  const { inputs, outputs } = circuitInterface(target);
+  const h = subcircuitHeight(attrs, circuits);
+  const pins: PinSpec[] = [];
+  inputs.forEach((p, i) => {
+    pins.push({
+      name: p.name ?? "",
+      dx: 0,
+      dy: ((i + 1) * h) / (inputs.length + 1),
+      kind: "in",
+      bitsize: bitsOf(p.attrs ?? {}),
+    });
+  });
+  outputs.forEach((p, i) => {
+    pins.push({
+      name: p.name ?? "",
+      dx: SUB_W,
+      dy: ((i + 1) * h) / (outputs.length + 1),
+      kind: "out",
+      bitsize: bitsOf(p.attrs ?? {}),
+    });
+  });
+  return pins;
+}
+
 const REGISTRY: Record<string, CompSpec> = {
   // Gates (DESIGN.md §6)
   "gate.and": gateSpec("AND", 2),
@@ -162,12 +241,26 @@ const REGISTRY: Record<string, CompSpec> = {
   ),
 
   // Wiring
-  "wiring.pin": boxSpec(
-    2,
-    1,
-    [{ name: "port", dx: 2, dy: 0.5, kind: "inout", bitsize: BUS_WIDTH }],
-    "PIN",
-  ),
+  // The subcircuit interface (format-v2 §5): a pin's `name` is required and
+  // becomes the instance-side pin name; its single terminal is named "pin"
+  // (backend registry). An input pin (isOutput unset) DRIVES its circuit
+  // → kind "out"; an output pin is driven → kind "in". Canonical geometry
+  // faces EAST (terminal at dx=w); placement defaults put input pins at
+  // rot E (body faces left) and output pins at rot W (body faces right).
+  "wiring.pin": {
+    width: () => 2,
+    height: () => 1,
+    pins: (attrs) => [
+      {
+        name: "pin",
+        dx: 2,
+        dy: 0.5,
+        kind: attrs?.isOutput === true ? "in" : "out",
+        bitsize: bitsOf(attrs ?? {}),
+      },
+    ],
+    caption: () => "PIN",
+  },
   "wiring.constant": boxSpec(
     2,
     1,
@@ -318,9 +411,16 @@ const REGISTRY: Record<string, CompSpec> = {
     "ROM",
   ),
 
-  // Hierarchy (pins come from the referenced circuit's pin components —
-  // placeholder geometry until subcircuit editing lands)
-  subcircuit: boxSpec(8, 6, [], "SUB"),
+  // Hierarchy (pins come from the referenced circuit's wiring.pin
+  // components — see subcircuitPins below; compPins/compSize special-case
+  // this type with the document's circuits as context)
+  subcircuit: {
+    width: () => SUB_W,
+    height: () => SUB_MIN_H,
+    pins: () => [], // static fallback — the real pins need circuit context
+    caption: (attrs) =>
+      typeof attrs.circuit === "string" && attrs.circuit !== "" ? attrs.circuit : "SUB",
+  },
 
   // I/O (UI-only parts)
   "io.button": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "BTN"),
@@ -385,6 +485,7 @@ export function isKnownType(type: string): boolean {
 export type AttrField =
   | { key: string; label: string; kind: "number"; min: number; max: number }
   | { key: string; label: string; kind: "text" }
+  | { key: string; label: string; kind: "boolean" }
   | { key: string; label: string; kind: "select"; options: { value: string; label: string }[] };
 
 const BITSIZE_FIELD: AttrField = {
@@ -407,7 +508,20 @@ export function editableAttrs(type: string): AttrField[] {
   if (type.startsWith("arith.")) return [BITSIZE_FIELD];
   switch (type) {
     case "wiring.pin":
-      return [BITSIZE_FIELD];
+      return [
+        BITSIZE_FIELD,
+        { key: "isOutput", label: "Output pin (driven by this circuit)", kind: "boolean" },
+        {
+          key: "radix",
+          label: "Radix",
+          kind: "select",
+          options: [
+            { value: "unsigned", label: "Unsigned" },
+            { value: "signed", label: "Signed" },
+            { value: "hex", label: "Hex" },
+          ],
+        },
+      ];
     case "wiring.constant":
       return [
         BITSIZE_FIELD,
@@ -467,12 +581,24 @@ export const GATE_TYPE_OPTIONS = [
   "gate.buffer",
 ] as const;
 
-export function compSize(comp: Pick<CsxComponent, "type" | "attrs">): { w: number; h: number } {
+export function compSize(
+  comp: Pick<CsxComponent, "type" | "attrs">,
+  circuits?: readonly CsxCircuit[],
+): { w: number; h: number } {
+  if (comp.type === "subcircuit" && circuits !== undefined) {
+    return { w: SUB_W, h: subcircuitHeight(comp.attrs ?? {}, circuits) };
+  }
   const spec = compSpec(comp.type);
   const attrs = comp.attrs ?? {};
   return { w: spec.width(attrs), h: spec.height(attrs) };
 }
 
-export function compPins(comp: Pick<CsxComponent, "type" | "attrs">): PinSpec[] {
+export function compPins(
+  comp: Pick<CsxComponent, "type" | "attrs">,
+  circuits?: readonly CsxCircuit[],
+): PinSpec[] {
+  if (comp.type === "subcircuit") {
+    return subcircuitPins(comp.attrs ?? {}, circuits ?? []);
+  }
   return compSpec(comp.type).pins(comp.attrs ?? {});
 }

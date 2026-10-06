@@ -78,6 +78,8 @@ export class ToolMachine {
     type: string;
     pos: Vec2;
     rot: CsxComponent["rot"];
+    /** Placement attrs (e.g. a subcircuit instance's target circuit). */
+    attrs?: Record<string, unknown>;
     /** Shift-picked from the palette: keep placing until cancelled. */
     sticky: boolean;
   } | null = null;
@@ -99,9 +101,9 @@ export class ToolMachine {
 
   // ---- external triggers ----
 
-  startPlacing(type: string, sticky = false): void {
+  startPlacing(type: string, sticky = false, attrs?: Record<string, unknown>): void {
     this.cancel();
-    this.placing = { type, pos: { x: 0, y: 0 }, rot: "E", sticky };
+    this.placing = { type, pos: { x: 0, y: 0 }, rot: "E", attrs, sticky };
     this.changed();
   }
 
@@ -136,6 +138,7 @@ export class ToolMachine {
         type: p.type,
         pos: [snap(p.pos.x, 1), snap(p.pos.y, 1)],
         rot: p.rot,
+        ...(p.attrs !== undefined && { attrs: p.attrs }),
       });
       // One placement per palette pick; shift-picked (sticky) keeps placing
       // until Esc/right-click (UX decision).

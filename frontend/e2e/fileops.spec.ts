@@ -13,7 +13,17 @@ import { join } from "node:path";
 
 interface CsxDoc {
   name: string;
-  circuits: { name: string; components: { id: string; type: string }[]; wires: unknown[] }[];
+  circuits: {
+    name: string;
+    components: {
+      id: string;
+      type: string;
+      name?: string;
+      rot?: string;
+      attrs?: Record<string, unknown>;
+    }[];
+    wires: unknown[];
+  }[];
 }
 
 async function doc(page: Page): Promise<CsxDoc> {
@@ -64,9 +74,12 @@ test("File menu: New / Open / Save-As round-trip", async ({ page }) => {
 
     // ---- Open (accepting the confirm) loads the file from disk ----
     await openMenu(page, "File");
+    // Register BEFORE the click: the chooser can fire before a post-click
+    // waitForEvent would be registered (confirm resolves fast → race).
+    const chooserPromise = page.waitForEvent("filechooser");
     page.once("dialog", (d) => void d.accept());
     await page.getByRole("menuitem", { name: "Open…" }).click();
-    const chooser = await page.waitForEvent("filechooser");
+    const chooser = await chooserPromise;
     await chooser.setFiles(savedPath);
     const opened = await doc(page);
     expect(opened.name).toBe("untitled");
@@ -86,36 +99,92 @@ test("File menu: New / Open / Save-As round-trip", async ({ page }) => {
   }
 });
 
-test("Subcircuits menu: new sheet, switch, rename", async ({ page }) => {
+test("Subcircuits: tabs create, switch, rename", async ({ page }) => {
   await page.goto("/");
   await placeAndGate(page);
 
-  // ---- new sheet via the menu dialog ----
-  await openMenu(page, "Subcircuits");
-  await page.getByRole("menuitem", { name: "New sheet…" }).click();
+  // ---- new subcircuit via the tab strip's "+" ----
+  await page.getByRole("button", { name: "New subcircuit" }).click();
   const dialog = page.locator(".name-dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("textbox").fill("alu");
   await dialog.getByRole("button", { name: "Create" }).click();
 
-  // switched to the new (empty) sheet; the AND gate is back on "main"
+  // switched to the new (empty) tab; the AND gate is back on "main"
   let d = await doc(page);
   expect(d.circuits.map((c) => c.name)).toEqual(["main", "alu"]);
-  await expect(page.locator(".app-statusbar")).toContainText("sheet: alu");
+  await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
 
-  // ---- switch back via the sheet radio list ----
-  await openMenu(page, "Subcircuits");
-  await page.getByRole("menuitem", { name: "main" }).click();
-  await expect(page.locator(".app-statusbar")).toContainText("sheet: main");
+  // ---- switch back via the tab strip ----
+  await page.getByRole("tab", { name: "main" }).click();
+  await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");
 
-  // ---- rename the main sheet ----
-  await openMenu(page, "Subcircuits");
-  await page.getByRole("menuitem", { name: "Rename current sheet…" }).click();
+  // ---- rename the main circuit (double-click its tab) ----
+  await page.getByRole("tab", { name: "main" }).dblclick();
   await dialog.getByRole("textbox").fill("toplevel");
   await dialog.getByRole("button", { name: "Rename" }).click();
   d = await doc(page);
   expect(d.circuits.map((c) => c.name)).toEqual(["toplevel", "alu"]);
   expect(d.circuits[0].components).toHaveLength(1); // the gate survived
+});
+
+test("Subcircuits: define an interface with pins, place an instance", async ({ page }) => {
+  await page.goto("/");
+
+  // ---- new subcircuit "alu" with an input pin a and an output pin y ----
+  await openMenu(page, "Subcircuits");
+  await page.getByRole("menuitem", { name: "New subcircuit…" }).click();
+  const dialog = page.locator(".name-dialog");
+  await dialog.getByRole("textbox").fill("alu");
+  await dialog.getByRole("button", { name: "Create" }).click();
+
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+
+  // input pin at the center: default placement is an INPUT (faces left).
+  // Placement anchors the body top-left to the cursor; the 2×1 pin body
+  // center is +16,+8 CSS px at the default zoom — dblclick there.
+  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.mouse.click(center.x - 60, center.y);
+  await page.keyboard.press("Escape");
+  await page.mouse.dblclick(center.x - 60 + 16, center.y + 8);
+  await page.getByPlaceholder("(unnamed)").fill("a");
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  // second pin, made an OUTPUT via the properties dialog (rot mirrors to W)
+  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.mouse.click(center.x + 60, center.y);
+  await page.keyboard.press("Escape");
+  await page.mouse.dblclick(center.x + 60 + 16, center.y + 8);
+  await page.getByPlaceholder("(unnamed)").fill("y");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  let d = await doc(page);
+  const alu = d.circuits.find((c) => c.name === "alu")!;
+  const pins = alu.components.filter((c) => c.type === "wiring.pin");
+  expect(pins.map((p) => p.name)).toEqual(["a", "y"]);
+  expect(pins[1].attrs?.isOutput).toBe(true);
+  expect(pins[1].rot).toBe("W"); // output faces right by default
+  expect(pins[0].rot ?? "E").toBe("E"); // input faces left by default
+
+  // ---- back on main: the palette offers "alu" as a placeable instance ----
+  await page.getByRole("tab", { name: "main" }).click();
+  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await page.mouse.click(center.x, center.y - 80);
+  await page.keyboard.press("Escape");
+
+  d = await doc(page);
+  const inst = d.circuits[0].components.find((c) => c.type === "subcircuit");
+  expect(inst?.attrs?.circuit).toBe("alu");
+
+  // ---- placing a second copy works too (multiple instances) ----
+  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await page.mouse.click(center.x, center.y + 80);
+  await page.keyboard.press("Escape");
+  d = await doc(page);
+  expect(d.circuits[0].components.filter((c) => c.type === "subcircuit")).toHaveLength(2);
 });
 
 test("Simulation menu: mode radio + speed preset + run-to dialog", async ({ page }) => {

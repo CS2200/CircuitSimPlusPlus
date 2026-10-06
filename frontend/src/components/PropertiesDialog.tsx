@@ -13,12 +13,15 @@ export default function PropertiesDialog({
   doc,
   compId,
   circuitIdx = 0,
+  circuits,
   onClose,
 }: {
   doc: CircuitDocument;
   compId: string;
   /** Sheet the component lives on (subcircuits are separate sheets). */
   circuitIdx?: number;
+  /** All circuit names — the subcircuit target picker needs them. */
+  circuits?: readonly string[];
   onClose: () => void;
 }) {
   const comp = doc.circuit(circuitIdx).components.find((x) => x.id === compId);
@@ -39,7 +42,18 @@ export default function PropertiesDialog({
   }, [onClose]);
 
   if (comp === undefined) return null;
-  const fields = editableAttrs(type);
+  // Subcircuit instances pick their target from the file's circuits, not
+  // free text (a typo would only surface as an engine load error).
+  const fields = editableAttrs(type).map((f) =>
+    type === "subcircuit" && f.key === "circuit" && circuits !== undefined
+      ? {
+          key: "circuit",
+          label: "Circuit",
+          kind: "select" as const,
+          options: circuits.map((c) => ({ value: c, label: c })),
+        }
+      : f,
+  );
 
   const apply = () => {
     const patch: {
@@ -51,6 +65,15 @@ export default function PropertiesDialog({
     if (type !== comp.type) patch.type = type;
     if (rot !== (comp.rot ?? "E")) patch.rot = rot as CsxComponent["rot"];
     if (name !== (comp.name ?? "")) patch.name = name;
+    // A wiring.pin whose direction flips also mirrors its default facing
+    // (input faces left at rot E, output faces right at rot W); explicit
+    // N/S rotations are left alone.
+    if (
+      comp.type === "wiring.pin" &&
+      (comp.attrs?.isOutput === true) !== (attrs.isOutput === true)
+    ) {
+      if (rot === "E" || rot === "W") patch.rot = rot === "E" ? "W" : "E";
+    }
     patch.attrs = attrs;
     doc.updateComponent(circuitIdx, compId, patch);
     onClose();
@@ -149,6 +172,18 @@ function AttrFieldRow({
             </option>
           ))}
         </select>
+      </label>
+    );
+  }
+  if (field.kind === "boolean") {
+    return (
+      <label className="prop-row">
+        <span>{field.label}</span>
+        <input
+          type="checkbox"
+          checked={value === true}
+          onChange={(e) => onChange(field.key, e.target.checked)}
+        />
       </label>
     );
   }

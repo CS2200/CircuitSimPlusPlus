@@ -4,6 +4,7 @@ import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
 import PropertiesDialog from "./components/PropertiesDialog";
+import SheetTabs from "./components/SheetTabs";
 import SimBar from "./components/SimBar";
 import WatchPanel from "./components/WatchPanel";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
@@ -19,7 +20,7 @@ import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types
 
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
-  d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
+  d.pinResolver = (comp) => compPins(comp, d.circuits).map((p) => p.name);
   return d;
 }
 
@@ -228,8 +229,8 @@ export default function App() {
 
   const onNewSheet = useCallback(() => {
     setNameDialog({
-      title: "New sheet",
-      initial: `sheet${doc.circuits.length}`,
+      title: "New subcircuit",
+      initial: `sub${doc.circuits.length}`,
       submitLabel: "Create",
       onSubmit: (name) => {
         setNameDialog(null);
@@ -244,23 +245,26 @@ export default function App() {
     });
   }, [doc, toast]);
 
-  const onRenameSheet = useCallback(() => {
-    const current = doc.circuit(sheet).name;
-    setNameDialog({
-      title: `Rename sheet "${current}"`,
-      initial: current,
-      submitLabel: "Rename",
-      onSubmit: (name) => {
-        setNameDialog(null);
-        try {
-          doc.renameCircuit(sheet, name);
-          editorRef.current?.refresh();
-        } catch (err) {
-          toast(String(err instanceof Error ? err.message : err));
-        }
-      },
-    });
-  }, [doc, sheet, toast]);
+  const onRenameSheet = useCallback(
+    (idx: number) => {
+      const current = doc.circuit(idx).name;
+      setNameDialog({
+        title: `Rename "${current}"`,
+        initial: current,
+        submitLabel: "Rename",
+        onSubmit: (name) => {
+          setNameDialog(null);
+          try {
+            doc.renameCircuit(idx, name);
+            editorRef.current?.refresh();
+          } catch (err) {
+            toast(String(err instanceof Error ? err.message : err));
+          }
+        },
+      });
+    },
+    [doc, toast],
+  );
 
   // ---- simulation menu commands ----
 
@@ -360,15 +364,8 @@ export default function App() {
       {
         label: "Subcircuits",
         items: [
-          { label: "New sheet…", onSelect: onNewSheet },
-          { label: "Rename current sheet…", onSelect: onRenameSheet },
-          { kind: "sep" },
-          ...doc.circuits.map((c, i) => ({
-            label: c.name,
-            radio: true,
-            checked: i === sheet,
-            onSelect: () => setSheet(i),
-          })),
+          { label: "New subcircuit…", onSelect: onNewSheet },
+          { label: "Rename current…", onSelect: () => onRenameSheet(sheet) },
         ],
       },
     ];
@@ -525,6 +522,15 @@ export default function App() {
           onHzExp={setHzExp}
         />
       )}
+      {!stress && (
+        <SheetTabs
+          sheets={doc.circuits.map((c) => c.name)}
+          active={sheet}
+          onSwitch={setSheet}
+          onNew={onNewSheet}
+          onRename={onRenameSheet}
+        />
+      )}
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -550,6 +556,36 @@ export default function App() {
                   ))}
                 </div>
               ))}
+              {doc.circuits.length > 1 && (
+                <div className="palette-group">
+                  <div className="palette-group-title">Subcircuits</div>
+                  {doc.circuits.map(
+                    (c, i) =>
+                      i !== sheet && (
+                        <button
+                          key={c.name}
+                          className={`palette-item${status?.placing === "subcircuit" ? " active" : ""}`}
+                          draggable
+                          onClick={(e) =>
+                            editorRef.current?.startPlacing("subcircuit", e.shiftKey, {
+                              circuit: c.name,
+                            })
+                          }
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData("text/x-csx-type", "subcircuit");
+                            e.dataTransfer.setData(
+                              "text/x-csx-attrs",
+                              JSON.stringify({ circuit: c.name }),
+                            );
+                          }}
+                          title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
+                        >
+                          {c.name}
+                        </button>
+                      ),
+                  )}
+                </div>
+              )}
             </aside>
             <div className="editor-wrap">
               <EditorCanvas
@@ -573,7 +609,6 @@ export default function App() {
           {doc.name}
           {status?.dirty ? " •" : ""}
         </span>
-        {doc.circuits.length > 1 && <span>sheet: {doc.circuit(sheet).name}</span>}
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}
@@ -590,6 +625,7 @@ export default function App() {
           doc={doc}
           compId={editingComp}
           circuitIdx={sheet}
+          circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
           onClose={() => {
             setEditingComp(null);
             // The dialog mutates the doc out-of-band; repaint the canvas.

@@ -1,5 +1,5 @@
 import type { CircuitDocument } from "../model/document";
-import type { CsxComponent, CsxWire } from "../model/csx";
+import type { CsxCircuit, CsxComponent, CsxWire } from "../model/csx";
 import { isPinEndpoint } from "../model/csx";
 import { deriveNets, type NetDerivation, type NetInfo } from "../model/nets";
 import type { SelectionModel } from "../model/selection";
@@ -105,7 +105,12 @@ export interface SceneOverlay {
   /** Wire currently being routed (points so far + cursor). */
   wireInProgress: Vec2[] | null;
   /** Component type being placed + ghost position. */
-  placing: { type: string; pos: Vec2; rot: CsxComponent["rot"] } | null;
+  placing: {
+    type: string;
+    pos: Vec2;
+    rot: CsxComponent["rot"];
+    attrs?: Record<string, unknown>;
+  } | null;
   /** Box-select rectangle in progress. */
   boxRect: Rect | null;
   /** Shift-click wire info card: which wire + where to anchor the card. */
@@ -123,6 +128,8 @@ const PIN_TOL = 0.55;
 export class DocScene {
   private circuitIdx = -1;
   private revision = -1;
+  /** All circuits (subcircuit instances resolve their pins against these). */
+  private circuits: readonly CsxCircuit[] = [];
   private layouts = new Map<string, CompLayout>();
   private components: CsxComponent[] = [];
   private wires: CsxWire[] = [];
@@ -140,10 +147,11 @@ export class DocScene {
     if (doc.revision === this.revision && circuitIdx === this.circuitIdx) return;
     this.revision = doc.revision;
     this.circuitIdx = circuitIdx;
+    this.circuits = doc.circuits;
     const c = doc.circuit(circuitIdx);
     this.components = c.components;
     this.wires = c.wires;
-    this.layouts = new Map(c.components.map((x) => [x.id, compLayout(x)]));
+    this.layouts = new Map(c.components.map((x) => [x.id, compLayout(x, this.circuits)]));
     this.wirePaths = c.wires.map((w) => roundedPath(w.points.map(p2v), WIRE_RADIUS));
     this.junctionDots = [];
     for (const w of c.wires) {
@@ -325,7 +333,7 @@ export class DocScene {
         lineWidth: selected ? 0.22 : 0.12,
       };
       // Distinctive shape (local EAST frame → rotated about the center), or a box.
-      const local = compSize(comp);
+      const local = compSize(comp, this.circuits);
       const shape = gateShape(comp.type, layout.rect.x, layout.rect.y, local.w, local.h);
       const rot = comp.rot ?? "E";
       const cx = layout.rect.x + layout.rect.w / 2;
@@ -418,6 +426,19 @@ export class DocScene {
           caption,
           { color: theme.textDim, size: 1.0, align: "center" },
         );
+        // Subcircuit instances: label each interface pin just inside the
+        // box (inputs at the left edge, outputs at the right).
+        if (comp.type === "subcircuit") {
+          for (const p of layout.pins) {
+            const left = p.kind === "in";
+            renderer.drawText(
+              left ? layout.rect.x + 0.5 : layout.rect.x + layout.rect.w - 0.5,
+              p.y + 0.35,
+              p.name,
+              { color: theme.textDim, size: 0.7, align: left ? "left" : "right" },
+            );
+          }
+        }
       }
       for (const p of layout.pins) pinDots.push({ x: p.x, y: p.y });
     }
@@ -532,8 +553,9 @@ export class DocScene {
         type: overlay.placing.type,
         pos: [overlay.placing.pos.x, overlay.placing.pos.y],
         rot: overlay.placing.rot ?? "E",
+        ...(overlay.placing.attrs !== undefined && { attrs: overlay.placing.attrs }),
       };
-      const layout = compLayout(ghost);
+      const layout = compLayout(ghost, this.circuits);
       renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
         stroke: theme.accent,
         lineWidth: 0.15,

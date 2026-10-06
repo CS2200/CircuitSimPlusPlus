@@ -1,4 +1,4 @@
-import type { CsxComponent, Rotation } from "../model/csx";
+import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
 import type { Rect, Vec2 } from "../render/geom";
 import { compSize, compPins, type PinKind } from "./catalog";
 
@@ -25,8 +25,8 @@ export interface CompLayout {
   pins: PinLayout[];
 }
 
-export function compLayout(comp: CsxComponent): CompLayout {
-  const { w, h } = compSize(comp);
+export function compLayout(comp: CsxComponent, circuits?: readonly CsxCircuit[]): CompLayout {
+  const { w, h } = compSize(comp, circuits);
   const rot: Rotation = comp.rot ?? "E";
   const rotated = rot === "N" || rot === "S";
   const rw = rotated ? h : w;
@@ -34,7 +34,7 @@ export function compLayout(comp: CsxComponent): CompLayout {
   const rect: Rect = { x: comp.pos[0], y: comp.pos[1], w: rw, h: rh };
   const cx = rect.x + rw / 2;
   const cy = rect.y + rh / 2;
-  const pins = compPins(comp).map((p) => {
+  const pins = compPins(comp, circuits).map((p) => {
     // offset from body center, then rotate about the center.
     // Rotation naming = direction the component faces; the R key cycles
     // E → S → W → N in 90° clockwise steps (y-down screen coordinates).
@@ -65,8 +65,12 @@ export function compLayout(comp: CsxComponent): CompLayout {
   return { rect, pins };
 }
 
-export function pinPosition(comp: CsxComponent, pinName: string): Vec2 | null {
-  const layout = compLayout(comp);
+export function pinPosition(
+  comp: CsxComponent,
+  pinName: string,
+  circuits?: readonly CsxCircuit[],
+): Vec2 | null {
+  const layout = compLayout(comp, circuits);
   const pin = layout.pins.find((p) => p.name === pinName);
   return pin === undefined ? null : { x: pin.x, y: pin.y };
 }
