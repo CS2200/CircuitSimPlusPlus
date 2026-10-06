@@ -96,9 +96,134 @@ body {
   cursor: pointer;
 }
 
-.app-canvas {
+.app-main {
   flex: 1;
   min-height: 0; /* allow the flex child to shrink to its container */
+  display: flex;
+}
+
+.palette {
+  width: 190px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--panel-border);
+  padding: 8px;
+}
+
+.palette-group {
+  margin-bottom: 10px;
+}
+
+.palette-group-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin: 4px 2px;
+}
+
+.palette-item {
+  display: inline-block;
+  margin: 2px;
+  padding: 4px 10px;
+  min-width: 52px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 0.8rem;
+}
+
+.palette-item:hover {
+  border-color: var(--accent);
+}
+
+.palette-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+}
+
+.editor-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.header-actions button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+}
+
+.header-actions button.secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.header-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.app-statusbar {
+  display: flex;
+  gap: 1.2rem;
+  align-items: center;
+}
+
+.statusbar-hint {
+  margin-left: auto;
+}
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.help-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  max-width: 480px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.help-card h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1rem;
+}
+
+.help-card table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.help-card td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+}
+
+.help-card td:first-child {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.help-dismiss {
+  margin: 0.8rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
 }
 
 .canvas-host {

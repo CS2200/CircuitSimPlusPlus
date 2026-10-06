@@ -108,6 +108,10 @@ export class CircuitDocument {
     return JSON.stringify(this.data, null, 2);
   }
 
+  get name(): string {
+    return this.data.name;
+  }
+
   get revision(): number {
     return this._revision;
   }
@@ -220,16 +224,33 @@ export class CircuitDocument {
    * coalesce into one undo step (one drag = one undo).
    */
   moveComponent(circuitIdx: number, id: string, delta: { x: number; y: number }): void {
+    this.moveComponents(circuitIdx, new Set([id]), delta);
+  }
+
+  /**
+   * Drag a SET of components as ONE undoable command (multi-select drag).
+   * Consecutive moves of the same set coalesce (one drag = one undo).
+   */
+  moveComponents(
+    circuitIdx: number,
+    ids: ReadonlySet<string>,
+    delta: { x: number; y: number },
+  ): void {
+    if (ids.size === 0 || (delta.x === 0 && delta.y === 0)) return;
     const c = this.circuit(circuitIdx);
-    const comp = c.components.find((x) => x.id === id);
-    if (comp === undefined) throw new Error(`no component "${id}" in circuit "${c.name}"`);
-    if (delta.x === 0 && delta.y === 0) return;
+    for (const id of ids) {
+      if (!c.components.some((x) => x.id === id)) {
+        throw new Error(`no component "${id}" in circuit "${c.name}"`);
+      }
+    }
     const components = c.components.map((x) =>
-      x.id === id ? { ...x, pos: [x.pos[0] + delta.x, x.pos[1] + delta.y] as [number, number] } : x,
+      ids.has(x.id)
+        ? { ...x, pos: [x.pos[0] + delta.x, x.pos[1] + delta.y] as [number, number] }
+        : x,
     );
     const wires = c.wires.map((w) => {
-      const glueA = isPinEndpoint(w.a) && w.a.comp === id;
-      const glueB = isPinEndpoint(w.b) && w.b.comp === id;
+      const glueA = isPinEndpoint(w.a) && ids.has(w.a.comp);
+      const glueB = isPinEndpoint(w.b) && ids.has(w.b.comp);
       if (!glueA && !glueB) return w;
       const points = w.points.map((p, i) => {
         const glued = (i === 0 && glueA) || (i === w.points.length - 1 && glueB);
@@ -237,15 +258,95 @@ export class CircuitDocument {
       });
       return { ...w, points };
     });
+    const key = `move:${circuitIdx}:${[...ids].sort().join(",")}`;
+    const label = ids.size === 1 ? `move ${[...ids][0]}` : `move ${ids.size} components`;
+    this.exec(label, key, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
+  }
+
+  /** Cycle rotation (E→S→W→N) for a set of components as one command. */
+  rotateComponents(circuitIdx: number, ids: ReadonlySet<string>): void {
+    if (ids.size === 0) return;
+    const c = this.circuit(circuitIdx);
+    const components = c.components.map((x) => (ids.has(x.id) ? { ...x, rot: nextRot(x.rot) } : x));
+    const label = ids.size === 1 ? `rotate ${[...ids][0]}` : `rotate ${ids.size} components`;
+    this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components }));
+  }
+
+  /** Delete a selection (components + their wires + selected wires) as ONE command. */
+  deleteSelection(
+    circuitIdx: number,
+    compIds: ReadonlySet<string>,
+    wireIdxs: ReadonlySet<number>,
+  ): void {
+    if (compIds.size === 0 && wireIdxs.size === 0) return;
+    const c = this.circuit(circuitIdx);
+    const components = c.components.filter((x) => !compIds.has(x.id));
+    const roots = new Set(wireIdxs);
+    c.wires.forEach((w, i) => {
+      const onA = isPinEndpoint(w.a) && compIds.has(w.a.comp);
+      const onB = isPinEndpoint(w.b) && compIds.has(w.b.comp);
+      if (onA || onB) roots.add(i);
+    });
+    const wires = removeWiresCascade(c.wires, roots);
+    const n = compIds.size + wireIdxs.size;
     this.exec(
-      `move ${id}`,
-      `move:${circuitIdx}:${id}`,
+      `delete ${n} item${n === 1 ? "" : "s"}`,
+      undefined,
       this.replaceCircuit(circuitIdx, {
         ...c,
         components,
         wires,
       }),
     );
+  }
+
+  /**
+   * Paste a clipboard (components + wires) with an offset: fresh ids are
+   * allocated, pin references remapped, geometry translated. Returns the
+   * new component ids (for selecting the paste). Junction targets must be
+   * remapped already (see copySelection) — a dangling join is dropped.
+   */
+  paste(
+    circuitIdx: number,
+    components: CsxComponent[],
+    wires: CsxWire[],
+    offset: { x: number; y: number },
+  ): string[] {
+    const c = this.circuit(circuitIdx);
+    const idMap = new Map<string, string>();
+    const newComps: CsxComponent[] = [];
+    let scratch = { ...c, components: [...c.components] };
+    for (const comp of components) {
+      const id = allocComponentId(scratch);
+      scratch = { ...scratch, components: [...scratch.components, { ...comp, id }] };
+      idMap.set(comp.id, id);
+      newComps.push({ ...comp, id });
+    }
+    const moved: CsxComponent[] = newComps.map((x) => ({
+      ...x,
+      pos: [x.pos[0] + offset.x, x.pos[1] + offset.y] as [number, number],
+    }));
+    const newWires: CsxWire[] = [];
+    for (const w of wires) {
+      const a = remapPasteEndpoint(w.a, idMap);
+      const b = remapPasteEndpoint(w.b, idMap);
+      if (a === null || b === null) continue; // endpoint outside the paste → drop
+      newWires.push({
+        a,
+        b,
+        points: w.points.map((p) => [p[0] + offset.x, p[1] + offset.y] as [number, number]),
+      });
+    }
+    this.exec(
+      `paste ${components.length} components`,
+      undefined,
+      this.replaceCircuit(circuitIdx, {
+        ...c,
+        components: [...c.components, ...moved],
+        wires: [...c.wires, ...newWires],
+      }),
+    );
+    return moved.map((x) => x.id);
   }
 
   /** Delete components and every wire touching them (with junction cascades). */
@@ -461,4 +562,31 @@ function remapJoin(e: CsxEndpoint, remap: ReadonlyMap<number, number>): CsxEndpo
     throw new Error(`internal: dangling junction onto wire ${e.join.wire} after cascade`);
   }
   return { join: { wire, segment: e.join.segment } };
+}
+
+/** Remap a pin endpoint's component id through the paste id map; null if outside the paste. */
+function remapPasteEndpoint(
+  e: CsxEndpoint,
+  idMap: ReadonlyMap<string, string>,
+): CsxEndpoint | null {
+  if (isPinEndpoint(e)) {
+    const comp = idMap.get(e.comp);
+    return comp === undefined ? null : { comp, pin: e.pin };
+  }
+  return e; // junction targets were already remapped by copySelection
+}
+
+/** Rotation cycle E→S→W→N (mirrors editor/layout.nextRotation; kept local to stay schema-only). */
+function nextRot(rot: CsxComponent["rot"]): CsxComponent["rot"] {
+  switch (rot) {
+    case undefined:
+    case "E":
+      return "S";
+    case "S":
+      return "W";
+    case "W":
+      return "N";
+    case "N":
+      return "E";
+  }
 }

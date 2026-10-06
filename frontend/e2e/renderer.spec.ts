@@ -22,7 +22,7 @@ interface BenchResult {
 }
 
 test("canvas renders the stress scene (non-blank)", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?stress=1");
   const canvas = page.locator("canvas.circuit-canvas");
   await expect(canvas).toBeVisible();
   await page.waitForFunction(
@@ -56,7 +56,7 @@ test("canvas renders the stress scene (non-blank)", async ({ page }) => {
 
 test("U1 acceptance: stress scene benchmark (measured, reported)", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/?stress=1");
   await page.waitForFunction(
     () => (window as unknown as { __circuitBench?: unknown }).__circuitBench !== undefined,
   );

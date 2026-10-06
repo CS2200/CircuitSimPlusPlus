@@ -1,0 +1,108 @@
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * U3 acceptance: place, wire, junction, drag, delete-branch, undo-all —
+ * one continuous interaction flow driven through the real UI (palette +
+ * canvas pointer events), asserting on the document JSON after each step.
+ *
+ * The editor camera starts at world (0,0), scale 16 CSS px per grid unit —
+ * world→screen = bbox center + world × 16.
+ */
+
+interface CsxDoc {
+  circuits: {
+    name: string;
+    components: { id: string; type: string; pos: [number, number]; rot?: string }[];
+    wires: {
+      a: unknown;
+      b: unknown;
+      points: [number, number][];
+    }[];
+  }[];
+}
+
+async function doc(page: Page): Promise<CsxDoc> {
+  return page.evaluate(() =>
+    JSON.parse((window as unknown as { __circuitDoc: () => string }).__circuitDoc()),
+  );
+}
+
+async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y: number }> {
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  return { x: box.x + wx * 16 + box.width / 2, y: box.y + wy * 16 + box.height / 2 };
+}
+
+async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
+  const p = await world(page, wx, wy);
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.click(p.x, p.y);
+}
+
+test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", async ({ page }) => {
+  await page.goto("/");
+
+  // ---- place: AND at world (0,0), NOT at (10,0) via palette ----
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  await clickWorld(page, 0, 0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "NOT", exact: true }).click();
+  await clickWorld(page, 10, 0);
+  await page.keyboard.press("Escape");
+
+  let d = await doc(page);
+  expect(d.circuits[0].components).toHaveLength(2);
+  expect(d.circuits[0].components[0]).toMatchObject({ type: "gate.and", pos: [0, 0] });
+  expect(d.circuits[0].components[1]).toMatchObject({ type: "gate.not", pos: [10, 0] });
+  const [and, not] = d.circuits[0].components.map((c) => c.id);
+
+  // ---- wire: AND.out (5,1.5) → NOT.in (10,1) ----
+  await clickWorld(page, 5, 1.5);
+  await clickWorld(page, 10, 1);
+  d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(1);
+  expect(d.circuits[0].wires[0].a).toEqual({ comp: and, pin: "out" });
+  expect(d.circuits[0].wires[0].b).toEqual({ comp: not, pin: "in" });
+
+  // ---- junction: wire from NOT.out (13,1) dropped onto wire 0's segment ----
+  const [ax, ay] = d.circuits[0].wires[0].points[0];
+  const [bx, by] = d.circuits[0].wires[0].points[1];
+  const mid = { x: (ax + bx) / 2, y: (ay + by) / 2 };
+  await clickWorld(page, 13, 1);
+  await clickWorld(page, mid.x, mid.y);
+  d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(2);
+  expect(d.circuits[0].wires[1].a).toEqual({ comp: not, pin: "out" });
+  expect(d.circuits[0].wires[1].b).toEqual({ join: { wire: 0, segment: 0 } });
+
+  // ---- drag: move the AND +3 units; the glued wire endpoint follows ----
+  const from = await world(page, 2.5, 1.5);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i++) {
+    await page.mouse.move(from.x + i * 8, from.y); // 48px = 3 grid units
+  }
+  await page.mouse.up();
+  d = await doc(page);
+  expect(d.circuits[0].components[0].pos).toEqual([3, 0]);
+  expect(d.circuits[0].wires[0].points[0]).toEqual([8, 1.5]);
+
+  // ---- delete-branch: selecting the parent wire + Del cascades to the junction wire ----
+  const [px, py] = d.circuits[0].wires[0].points[0];
+  const [qx, qy] = d.circuits[0].wires[0].points[1];
+  await clickWorld(page, (px + qx) / 2, (py + qy) / 2);
+  await page.keyboard.press("Delete");
+  d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(0); // junction child went with its parent
+  expect(d.circuits[0].components).toHaveLength(2);
+
+  // ---- undo-all: back to an empty circuit ----
+  for (let i = 0; i < 12; i++) {
+    d = await doc(page);
+    if (d.circuits[0].components.length === 0 && d.circuits[0].wires.length === 0) break;
+    await page.keyboard.press("Control+z");
+  }
+  d = await doc(page);
+  expect(d.circuits[0].components).toHaveLength(0);
+  expect(d.circuits[0].wires).toHaveLength(0);
+});
