@@ -32,6 +32,7 @@
 //! representation can replace `Vec` behind this API without touching
 //! callers.
 
+use std::cmp::Ordering;
 use std::fmt;
 
 use crate::api::WireValue;
@@ -137,6 +138,48 @@ fn shl_bits(src: &[u64], n: u32, dst_limbs: usize) -> Vec<u64> {
         }
     }
     out
+}
+
+/// Limb-wise `a + b + cin` → (sum limbs, carry-out). Result has `a.len()`
+/// limbs; `b` may be shorter (treated as zero-padded).
+fn limbs_add(a: &[u64], b: &[u64], cin: bool) -> (Vec<u64>, bool) {
+    let mut out = Vec::with_capacity(a.len());
+    let mut carry = u64::from(cin);
+    for (i, &ai) in a.iter().enumerate() {
+        let bi = b.get(i).copied().unwrap_or(0);
+        let (s, c1) = ai.overflowing_add(bi);
+        let (s, c2) = s.overflowing_add(carry);
+        carry = u64::from(c1 || c2);
+        out.push(s);
+    }
+    (out, carry != 0)
+}
+
+/// Limb-wise `a - b - bin` → (difference limbs mod 2^(64·len), borrow-out).
+fn limbs_sub(a: &[u64], b: &[u64], bin: bool) -> (Vec<u64>, bool) {
+    let mut out = Vec::with_capacity(a.len());
+    let mut borrow = bin;
+    for (i, &ai) in a.iter().enumerate() {
+        let bi = b.get(i).copied().unwrap_or(0);
+        let (d, b1) = ai.overflowing_sub(bi);
+        let (d, b2) = d.overflowing_sub(u64::from(borrow));
+        borrow = b1 || b2;
+        out.push(d);
+    }
+    (out, borrow)
+}
+
+/// Limb-wise unsigned comparison, most-significant limb first.
+fn limbs_cmp(a: &[u64], b: &[u64]) -> Ordering {
+    for i in (0..a.len().max(b.len())).rev() {
+        let ai = a.get(i).copied().unwrap_or(0);
+        let bi = b.get(i).copied().unwrap_or(0);
+        match ai.cmp(&bi) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+    }
+    Ordering::Equal
 }
 
 /// Canonical hex rendering of a mask: empty string when zero (per
@@ -262,6 +305,21 @@ impl Value {
                 Bit::Zero => {}
             }
         }
+        v
+    }
+
+    /// Build a known (no X/Z) value from raw `ones` limbs; extra limbs are
+    /// truncated and missing limbs zero-filled. Internal use.
+    fn from_limbs(width: u32, mut ones: Vec<u64>) -> Value {
+        ones.resize(n_limbs(width), 0);
+        ones.truncate(n_limbs(width));
+        let mut v = Value {
+            width,
+            ones,
+            xs: vec![0; n_limbs(width)],
+            zs: vec![0; n_limbs(width)],
+        };
+        v.normalize();
         v
     }
 
@@ -600,6 +658,185 @@ impl Value {
         self.extract(0, width)
     }
 
+    // ---- Arithmetic (DESIGN.md §6; task B4)
+    //
+    // Uniform unknown-value rule: if *any* input bit is X or Z, every
+    // output bit is X (each output bit depends on at least one input bit,
+    // and for carry chains typically on many). Consuming Z is a
+    // simulation-halting error at the behavior level (§4.1), so a Z here
+    // is defensive only — the engines halt first.
+
+    /// `self + rhs + cin` → (`sum` mod 2^width, carry-out as a 1-bit value).
+    pub fn add(&self, rhs: &Value, cin: bool) -> (Value, Value) {
+        assert_eq!(self.width, rhs.width, "add: width mismatch");
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return (Value::x(self.width), Value::x(1));
+        }
+        // Compute with one extra limb of headroom so the carry-out at the
+        // *value* width (not the limb width) is observable: the full sum
+        // is < 2^(width+1), so bit `width` of the result is the carry.
+        let n = n_limbs(self.width + 1);
+        let (mut a, mut b) = (self.ones.clone(), rhs.ones.clone());
+        a.resize(n, 0);
+        b.resize(n, 0);
+        let (sum, _) = limbs_add(&a, &b, cin);
+        let carry = (sum[(self.width / LIMB_BITS) as usize] >> (self.width % LIMB_BITS)) & 1;
+        (
+            Value::from_limbs(self.width, sum),
+            Value::from_u64(1, carry),
+        )
+    }
+
+    /// `self - rhs - bin` → (difference mod 2^width, borrow-out 1-bit).
+    pub fn sub(&self, rhs: &Value, bin: bool) -> (Value, Value) {
+        assert_eq!(self.width, rhs.width, "sub: width mismatch");
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return (Value::x(self.width), Value::x(1));
+        }
+        // Same headroom trick as `add`: bit `width` of the full
+        // difference (mod 2^(width+1)) is the borrow-out.
+        let n = n_limbs(self.width + 1);
+        let (mut a, mut b) = (self.ones.clone(), rhs.ones.clone());
+        a.resize(n, 0);
+        b.resize(n, 0);
+        let (diff, _) = limbs_sub(&a, &b, bin);
+        let borrow = (diff[(self.width / LIMB_BITS) as usize] >> (self.width % LIMB_BITS)) & 1;
+        (
+            Value::from_limbs(self.width, diff),
+            Value::from_u64(1, borrow),
+        )
+    }
+
+    /// `self * rhs` → product of width `2 * width` (no truncation).
+    pub fn mul(&self, rhs: &Value) -> Value {
+        assert_eq!(self.width, rhs.width, "mul: width mismatch");
+        let out_w = 2 * self.width;
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return Value::x(out_w);
+        }
+        let n = n_limbs(out_w);
+        let mut acc = vec![0u64; n];
+        for i in 0..self.width {
+            if (rhs.ones[(i / LIMB_BITS) as usize] >> (i % LIMB_BITS)) & 1 == 1 {
+                let shifted = shl_bits(&self.ones, i, n);
+                // Carry-out is impossible: product < 2^(2w).
+                acc = limbs_add(&acc, &shifted, false).0;
+            }
+        }
+        Value::from_limbs(out_w, acc)
+    }
+
+    /// `self / rhs` → (quotient, remainder), unsigned; `None` when `rhs`
+    /// is zero (the caller decides what divide-by-zero means — the
+    /// divider component maps it to `X`).
+    pub fn div_rem(&self, rhs: &Value) -> Option<(Value, Value)> {
+        assert_eq!(self.width, rhs.width, "div_rem: width mismatch");
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return Some((Value::x(self.width), Value::x(self.width)));
+        }
+        if rhs.ones.iter().all(|&l| l == 0) {
+            return None;
+        }
+        let n = n_limbs(self.width);
+        let mut rem = vec![0u64; n];
+        let mut quot = vec![0u64; n];
+        // Restoring long division, MSB first. `rem` stays < rhs after each
+        // subtraction, so it fits in `width` bits; the shift-in may set
+        // conceptual bit `width` (tracked as `spill`), which forces the
+        // subtraction and is cancelled by its borrow-out.
+        for i in (0..self.width).rev() {
+            let bit = (self.ones[(i / LIMB_BITS) as usize] >> (i % LIMB_BITS)) & 1;
+            let mut carry = bit;
+            for l in rem.iter_mut() {
+                let nc = *l >> 63;
+                *l = (*l << 1) | carry;
+                carry = nc;
+            }
+            let spill = carry != 0;
+            if spill || limbs_cmp(&rem, &rhs.ones) != Ordering::Less {
+                rem = limbs_sub(&rem, &rhs.ones, false).0;
+                quot[(i / LIMB_BITS) as usize] |= 1 << (i % LIMB_BITS);
+            }
+        }
+        Some((
+            Value::from_limbs(self.width, quot),
+            Value::from_limbs(self.width, rem),
+        ))
+    }
+
+    /// Two's-complement negation (`0 - self`).
+    pub fn neg(&self) -> Value {
+        Value::zero(self.width).sub(self, false).0
+    }
+
+    /// Unsigned three-way comparison; `None` on unknown inputs.
+    /// (Named `compare` to avoid confusion with `Ord::cmp`.)
+    pub fn compare(&self, rhs: &Value) -> Option<Ordering> {
+        assert_eq!(self.width, rhs.width, "compare: width mismatch");
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return None;
+        }
+        Some(limbs_cmp(&self.ones, &rhs.ones))
+    }
+
+    /// Shift left logical by `n` (≥ width → 0).
+    pub fn shl(&self, n: u32) -> Value {
+        if !self.is_fully_known() {
+            return Value::x(self.width);
+        }
+        Value::from_limbs(self.width, shl_bits(&self.ones, n, n_limbs(self.width)))
+    }
+
+    /// Shift right logical by `n` (≥ width → 0).
+    pub fn shr(&self, n: u32) -> Value {
+        if !self.is_fully_known() {
+            return Value::x(self.width);
+        }
+        Value::from_limbs(self.width, shr_bits(&self.ones, n, n_limbs(self.width)))
+    }
+
+    /// Shift right arithmetic by `n`, replicating the sign bit
+    /// (≥ width → all-sign-bits).
+    pub fn sar(&self, n: u32) -> Value {
+        if !self.is_fully_known() {
+            return Value::x(self.width);
+        }
+        let mut out = shr_bits(&self.ones, n, n_limbs(self.width));
+        if self.bit(self.width - 1) == Bit::One {
+            let keep = self.width.saturating_sub(n); // bits that survive
+            for i in keep..self.width {
+                out[(i / LIMB_BITS) as usize] |= 1 << (i % LIMB_BITS);
+            }
+        }
+        Value::from_limbs(self.width, out)
+    }
+
+    /// Rotate left by `n mod width`.
+    pub fn rotl(&self, n: u32) -> Value {
+        if !self.is_fully_known() {
+            return Value::x(self.width);
+        }
+        let n = n % self.width;
+        let (l, r) = (self.shl(n), self.shr(self.width - n));
+        Value::from_limbs(
+            self.width,
+            l.ones.iter().zip(&r.ones).map(|(a, b)| a | b).collect(),
+        )
+    }
+
+    /// Rotate right by `n mod width`.
+    pub fn rotr(&self, n: u32) -> Value {
+        if !self.is_fully_known() {
+            return Value::x(self.width);
+        }
+        let n = n % self.width;
+        let (l, r) = (self.shr(n), self.shl(self.width - n));
+        Value::from_limbs(
+            self.width,
+            l.ones.iter().zip(&r.ones).map(|(a, b)| a | b).collect(),
+        )
+    }
+
     // ---- External representations
 
     /// Encode as the IPC `{v, x, z}` hex masks (`docs/ipc.md` §1).
@@ -665,6 +902,105 @@ mod tests {
 
     fn bits(v: &Value) -> Vec<Bit> {
         (0..v.width()).map(|i| v.bit(i)).collect()
+    }
+
+    // ---- Arithmetic (task B4)
+
+    fn k(width: u32, v: u64) -> Value {
+        Value::from_u64(width, v)
+    }
+
+    #[test]
+    fn add_carry_chain_across_limbs() {
+        // 64-bit boundary carry: (2^64 - 1) + 1 = 2^64 in 128 bits.
+        let (s, c) = k(128, u64::MAX).add(&k(128, 1), false);
+        assert_eq!(s, Value::from_limbs(128, vec![0, 1]));
+        assert_eq!(c, k(1, 0));
+        // Carry out of the top.
+        let (s, c) = k(4, 0b1111).add(&k(4, 0b1111), true);
+        assert_eq!(s, k(4, 0b1111));
+        assert_eq!(c, k(1, 1));
+        // cin propagation.
+        let (s, c) = k(8, 0).add(&k(8, 0), true);
+        assert_eq!(s, k(8, 1));
+        assert_eq!(c, k(1, 0));
+    }
+
+    #[test]
+    fn sub_borrow() {
+        let (d, b) = k(8, 10).sub(&k(8, 3), false);
+        assert_eq!(d, k(8, 7));
+        assert_eq!(b, k(1, 0));
+        let (d, b) = k(8, 3).sub(&k(8, 10), false);
+        assert_eq!(d, k(8, 249)); // 3 - 10 mod 256
+        assert_eq!(b, k(1, 1));
+        let (d, b) = k(8, 10).sub(&k(8, 10), true);
+        assert_eq!(d, k(8, 255));
+        assert_eq!(b, k(1, 1));
+    }
+
+    #[test]
+    fn mul_double_width() {
+        assert_eq!(k(16, 0xFFFF).mul(&k(16, 0xFFFF)), k(32, 0xFFFE_0001));
+        assert_eq!(k(8, 0).mul(&k(8, 0xFF)), k(16, 0));
+        // High-bit factors place bits above limb 0 of the result.
+        assert_eq!(k(2, 0b10).mul(&k(2, 0b10)), k(4, 0b0100));
+    }
+
+    #[test]
+    fn div_rem_incl_spill_and_zero() {
+        let (q, r) = k(8, 100).div_rem(&k(8, 7)).unwrap();
+        assert_eq!((q, r), (k(8, 14), k(8, 2)));
+        // Dividend smaller than divisor.
+        let (q, r) = k(8, 3).div_rem(&k(8, 200)).unwrap();
+        assert_eq!((q, r), (k(8, 0), k(8, 3)));
+        // Large divisor forces the rem shift spill path.
+        let (q, r) = k(8, 255).div_rem(&k(8, 200)).unwrap();
+        assert_eq!((q, r), (k(8, 1), k(8, 55)));
+        // Divide by zero → None (component maps to X).
+        assert!(k(8, 5).div_rem(&k(8, 0)).is_none());
+        // Wide division across limbs: (2^64-1) / 3 = 0x5555...5555 r 0.
+        let (q, r) = k(96, u64::MAX).div_rem(&k(96, 3)).unwrap();
+        assert_eq!(
+            (q, r),
+            (Value::from_limbs(96, vec![u64::MAX / 3]), k(96, 0))
+        );
+    }
+
+    #[test]
+    fn neg_cmp() {
+        assert_eq!(k(8, 1).neg(), k(8, 0xFF));
+        assert_eq!(k(8, 0).neg(), k(8, 0));
+        assert_eq!(k(8, 9).compare(&k(8, 10)), Some(Ordering::Less));
+        assert_eq!(k(8, 10).compare(&k(8, 10)), Some(Ordering::Equal));
+        assert_eq!(k(128, 0).compare(&k(128, 1)), Some(Ordering::Less));
+        assert_eq!(Value::x(8).compare(&k(8, 1)), None);
+    }
+
+    #[test]
+    fn shifts_and_rotates() {
+        assert_eq!(k(8, 0b1000_0001).shl(1), k(8, 0b0000_0010));
+        assert_eq!(k(8, 0b1000_0001).shr(1), k(8, 0b0100_0000));
+        assert_eq!(k(8, 0b1000_0001).sar(1), k(8, 0b1100_0000));
+        assert_eq!(k(8, 0b1000_0000).sar(9), k(8, 0xFF)); // n ≥ width
+        assert_eq!(k(8, 0b0000_0001).shl(8), k(8, 0));
+        assert_eq!(k(8, 0b1000_0001).rotl(1), k(8, 0b0000_0011));
+        assert_eq!(k(8, 0b1000_0001).rotr(1), k(8, 0b1100_0000));
+        assert_eq!(k(8, 0xAB).rotl(8), k(8, 0xAB)); // full turn
+    }
+
+    #[test]
+    fn arithmetic_unknown_inputs_are_x() {
+        for unk in [Value::x(8), Value::z(8)] {
+            assert_eq!(unk.add(&k(8, 1), false).0, Value::x(8));
+            assert_eq!(unk.sub(&k(8, 1), false).0, Value::x(8));
+            assert_eq!(unk.mul(&k(8, 1)), Value::x(16));
+            assert_eq!(unk.div_rem(&k(8, 1)).unwrap().0, Value::x(8));
+            assert_eq!(unk.neg(), Value::x(8));
+            assert_eq!(unk.shl(3), Value::x(8));
+            assert_eq!(unk.sar(3), Value::x(8));
+            assert_eq!(unk.rotl(3), Value::x(8));
+        }
     }
 
     /// Both invariants, checked on everything the tests produce.

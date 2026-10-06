@@ -35,6 +35,165 @@ pub enum PinDir {
     InOut,
 }
 
+// ---------------------------------------------------------------------------
+// Typed component configuration (task B4)
+//
+// `analyze` parses `attrs` once and produces both the pin signatures and a
+// typed [`CompKind`]; behavior construction (behavior.rs) consumes the
+// typed form, so attribute parsing lives in exactly one place.
+// ---------------------------------------------------------------------------
+
+/// Gate function. `Nand`/`Nor`/`Xnor` are the base op with inverted output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateOp {
+    And,
+    Or,
+    Xor,
+    Nand,
+    Nor,
+    Xnor,
+}
+
+impl GateOp {
+    /// The non-inverting fold op; `true` in the second slot when the output
+    /// is inverted (NAND/NOR/XNOR).
+    pub fn base(self) -> (GateOp, bool) {
+        match self {
+            GateOp::And | GateOp::Nand => (GateOp::And, self == GateOp::Nand),
+            GateOp::Or | GateOp::Nor => (GateOp::Or, self == GateOp::Nor),
+            GateOp::Xor | GateOp::Xnor => (GateOp::Xor, self == GateOp::Xnor),
+        }
+    }
+}
+
+/// Shifter mode (`attrs.shift`, DESIGN.md §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftMode {
+    LogicalLeft,
+    LogicalRight,
+    ArithRight,
+    RotateLeft,
+    RotateRight,
+}
+
+/// Bit-extender fill mode (`attrs.mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtendMode {
+    Zero,
+    Sign,
+}
+
+/// A component's typed configuration, parsed from `attrs` by [`analyze`]
+/// (leniently: invalid values fall back to the same defaults the pin
+/// signatures use, since netlisting runs only after validation passed).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompKind {
+    Not {
+        bitsize: u32,
+    },
+    Buffer {
+        bitsize: u32,
+    },
+    Gate {
+        op: GateOp,
+        bitsize: u32,
+        inputs: u32,
+        negate_inputs: Vec<String>,
+    },
+    ControlledBuffer {
+        bitsize: u32,
+    },
+    Pin {
+        bitsize: u32,
+        is_output: bool,
+    },
+    Constant {
+        bitsize: u32,
+        value: Value,
+    },
+    Clock,
+    /// Split pin name → bus bit indices (array position = split-pin bit),
+    /// sorted by pin name; `bus_width` covers the highest mapped bit + 1.
+    Splitter {
+        splits: Vec<(String, Vec<u32>)>,
+        bus_width: u32,
+    },
+    Probe {
+        bitsize: u32,
+    },
+    Mux {
+        bitsize: u32,
+        select_bits: u32,
+    },
+    Demux {
+        bitsize: u32,
+        select_bits: u32,
+    },
+    Decoder {
+        input_bits: u32,
+    },
+    Adder {
+        bitsize: u32,
+    },
+    Subtractor {
+        bitsize: u32,
+    },
+    Multiplier {
+        bitsize: u32,
+    },
+    Divider {
+        bitsize: u32,
+    },
+    Comparator {
+        bitsize: u32,
+    },
+    Negator {
+        bitsize: u32,
+    },
+    Shifter {
+        bitsize: u32,
+        mode: ShiftMode,
+    },
+    BitExtender {
+        in_bits: u32,
+        out_bits: u32,
+        mode: ExtendMode,
+    },
+    Register {
+        bitsize: u32,
+    },
+    Ram {
+        bitsize: u32,
+        depth: u32,
+        autoload: Option<String>,
+        contents: Option<String>,
+    },
+    Rom {
+        bitsize: u32,
+        depth: u32,
+        autoload: Option<String>,
+        contents: Option<String>,
+    },
+    Subcircuit {
+        circuit: String,
+    },
+    Button,
+    Led {
+        bitsize: u32,
+    },
+    HexDisplay {
+        bitsize: u32,
+    },
+}
+
+/// Full typed configuration: kind + per-instance delay override
+/// (`attrs.delay`, DESIGN.md §4.3 — `None` = use the delay table, task B7).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompConfig {
+    pub kind: CompKind,
+    pub delay: Option<u64>,
+}
+
 /// A component pin's interface: name, direction, and width in bits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinSig {
@@ -223,18 +382,24 @@ impl<'a> AttrCheck<'a> {
 
 const GATE_ATTRS: &[&str] = &["bitsize", "delay"];
 
-/// Analyze a component instance: validate its attrs and compute its pin
-/// signatures. Returns `None` for an unknown type string (with an issue
-/// recorded). On invalid attrs, issues are recorded and signatures are
-/// computed with defaults substituted so downstream resolution still works.
-fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<String>)> {
-    let (pins, c) = match type_ {
+/// Analyze a component instance: validate its attrs, compute its pin
+/// signatures, and produce its typed configuration. Returns `None` for an
+/// unknown type string (with an issue recorded). On invalid attrs, issues
+/// are recorded and signatures/config use defaults substituted so
+/// downstream resolution still works.
+fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<String>, CompKind)> {
+    let (pins, c, kind) = match type_ {
         "gate.not" | "gate.buffer" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
             c.delay();
             c.finish();
-            (vec![PinSig::i("in", b), PinSig::o("out", b)], c)
+            let kind = if type_ == "gate.not" {
+                CompKind::Not { bitsize: b }
+            } else {
+                CompKind::Buffer { bitsize: b }
+            };
+            (vec![PinSig::i("in", b), PinSig::o("out", b)], c, kind)
         }
         "gate.and" | "gate.or" | "gate.xor" | "gate.nand" | "gate.nor" | "gate.xnor" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "inputs", "negateInputs", "delay"]);
@@ -248,7 +413,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 .collect();
             pins.push(PinSig::o("out", b));
             let names: BTreeSet<&str> = pins.iter().map(|p| p.name.as_str()).collect();
-            for name in negate {
+            for name in &negate {
                 if !names.contains(name.as_str()) || name == "out" {
                     c_issue(
                         &mut c,
@@ -256,7 +421,21 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     );
                 }
             }
-            (pins, c)
+            let op = match type_ {
+                "gate.and" => GateOp::And,
+                "gate.or" => GateOp::Or,
+                "gate.xor" => GateOp::Xor,
+                "gate.nand" => GateOp::Nand,
+                "gate.nor" => GateOp::Nor,
+                _ => GateOp::Xnor,
+            };
+            let kind = CompKind::Gate {
+                op,
+                bitsize: b,
+                inputs,
+                negate_inputs: negate,
+            };
+            (pins, c, kind)
         }
         "wiring.controlled-buffer" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
@@ -266,6 +445,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (
                 vec![PinSig::i("in", b), PinSig::i("en", 1), PinSig::o("out", b)],
                 c,
+                CompKind::ControlledBuffer { bitsize: b },
             )
         }
         // A pin's direction is from the perspective of the circuit that
@@ -285,6 +465,10 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     width: b,
                 }],
                 c,
+                CompKind::Pin {
+                    bitsize: b,
+                    is_output,
+                },
             )
         }
         "wiring.constant" => {
@@ -293,15 +477,26 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let value = c.string("value", "0");
             c.delay();
             c.finish();
-            if let Err(e) = Value::from_hex_masks(b, &value, "", "") {
-                c_issue(&mut c, format!("attr 'value': {e}"));
-            }
-            (vec![PinSig::o("out", b)], c)
+            let parsed = match Value::from_hex_masks(b, &value, "", "") {
+                Ok(v) => v,
+                Err(e) => {
+                    c_issue(&mut c, format!("attr 'value': {e}"));
+                    Value::zero(b)
+                }
+            };
+            (
+                vec![PinSig::o("out", b)],
+                c,
+                CompKind::Constant {
+                    bitsize: b,
+                    value: parsed,
+                },
+            )
         }
         "wiring.clock" => {
             let mut c = AttrCheck::new(attrs, &["delay"]);
             c.finish();
-            (vec![PinSig::o("out", 1)], c)
+            (vec![PinSig::o("out", 1)], c, CompKind::Clock)
         }
         // Splitter pins are bidirectional (InOut): which side drives is
         // resolved dynamically (DESIGN.md §6 "arbitrary bit mapping — the
@@ -326,7 +521,8 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 }
             };
             c.finish();
-            let mut pins = Vec::new();
+            // Map iteration is sorted by pin name (BTreeMap) — deterministic.
+            let mut split_cfgs: Vec<(String, Vec<u32>)> = Vec::new();
             let mut seen: Vec<u32> = Vec::new();
             for (name, bits) in &splits {
                 let mut idxs: Vec<u32> = Vec::new();
@@ -350,7 +546,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                         format!("splits entry '{name}' must be a non-empty array of bit indices"),
                     ),
                 }
-                pins.push((name.clone(), idxs.len() as u32));
+                split_cfgs.push((name.clone(), idxs));
             }
             if splits.len() as u32 > MAX_SPLIT_PINS {
                 c_issue(
@@ -372,15 +568,26 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             }
             let bus_width = sorted.last().map_or(0, |m| m + 1);
             let mut sigs = vec![PinSig::io("bus", bus_width)];
-            sigs.extend(pins.into_iter().map(|(n, w)| PinSig::io(n, w)));
-            (sigs, c)
+            sigs.extend(
+                split_cfgs
+                    .iter()
+                    .map(|(n, idxs)| PinSig::io(n.clone(), idxs.len() as u32)),
+            );
+            (
+                sigs,
+                c,
+                CompKind::Splitter {
+                    splits: split_cfgs,
+                    bus_width,
+                },
+            )
         }
         "wiring.probe" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "radix", "delay"]);
             let b = c.bitsize(1);
             c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
             c.finish();
-            (vec![PinSig::i("in", b)], c)
+            (vec![PinSig::i("in", b)], c, CompKind::Probe { bitsize: b })
         }
         "plexers.mux" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits", "delay"]);
@@ -393,7 +600,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 .collect();
             pins.push(PinSig::i("sel", sel));
             pins.push(PinSig::o("out", b));
-            (pins, c)
+            (
+                pins,
+                c,
+                CompKind::Mux {
+                    bitsize: b,
+                    select_bits: sel,
+                },
+            )
         }
         "plexers.demux" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits", "delay"]);
@@ -403,7 +617,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             c.finish();
             let mut pins = vec![PinSig::i("in", b), PinSig::i("sel", sel)];
             pins.extend((0..(1u32 << sel)).map(|i| PinSig::o(format!("out{i}"), b)));
-            (pins, c)
+            (
+                pins,
+                c,
+                CompKind::Demux {
+                    bitsize: b,
+                    select_bits: sel,
+                },
+            )
         }
         "plexers.decoder" => {
             let mut c = AttrCheck::new(attrs, &["inputBits", "delay"]);
@@ -412,7 +633,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             c.finish();
             let mut pins = vec![PinSig::i("in", bits)];
             pins.extend((0..(1u32 << bits)).map(|i| PinSig::o(format!("out{i}"), 1)));
-            (pins, c)
+            (pins, c, CompKind::Decoder { input_bits: bits })
         }
         "arith.adder" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
@@ -428,6 +649,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("cout", 1),
                 ],
                 c,
+                CompKind::Adder { bitsize: b },
             )
         }
         "arith.subtractor" => {
@@ -444,6 +666,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("bout", 1),
                 ],
                 c,
+                CompKind::Subtractor { bitsize: b },
             )
         }
         "arith.multiplier" => {
@@ -458,6 +681,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("out", 2 * b),
                 ],
                 c,
+                CompKind::Multiplier { bitsize: b },
             )
         }
         "arith.divider" => {
@@ -473,6 +697,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("rem", b),
                 ],
                 c,
+                CompKind::Divider { bitsize: b },
             )
         }
         "arith.comparator" => {
@@ -489,6 +714,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("gt", 1),
                 ],
                 c,
+                CompKind::Comparator { bitsize: b },
             )
         }
         "arith.negator" => {
@@ -496,14 +722,25 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let b = c.bitsize(1);
             c.delay();
             c.finish();
-            (vec![PinSig::i("in", b), PinSig::o("out", b)], c)
+            (
+                vec![PinSig::i("in", b), PinSig::o("out", b)],
+                c,
+                CompKind::Negator { bitsize: b },
+            )
         }
         "arith.shifter" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "shift", "delay"]);
             let b = c.bitsize(1);
-            c.enumeration("shift", &["ll", "lr", "ar", "rl", "rr"], "ll");
+            let shift = c.enumeration("shift", &["ll", "lr", "ar", "rl", "rr"], "ll");
             c.delay();
             c.finish();
+            let mode = match shift.as_str() {
+                "lr" => ShiftMode::LogicalRight,
+                "ar" => ShiftMode::ArithRight,
+                "rl" => ShiftMode::RotateLeft,
+                "rr" => ShiftMode::RotateRight,
+                _ => ShiftMode::LogicalLeft,
+            };
             (
                 vec![
                     PinSig::i("in", b),
@@ -511,13 +748,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("out", b),
                 ],
                 c,
+                CompKind::Shifter { bitsize: b, mode },
             )
         }
         "arith.bit-extender" => {
             let mut c = AttrCheck::new(attrs, &["inBits", "outBits", "mode", "delay"]);
             let in_bits = c.uint("inBits", 8, 1, MAX_BITSIZE);
             let out_bits = c.uint("outBits", 16, 1, MAX_BITSIZE);
-            c.enumeration("mode", &["zero", "sign"], "zero");
+            let mode = c.enumeration("mode", &["zero", "sign"], "zero");
             c.delay();
             c.finish();
             if out_bits <= in_bits {
@@ -529,6 +767,15 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (
                 vec![PinSig::i("in", in_bits), PinSig::o("out", out_bits)],
                 c,
+                CompKind::BitExtender {
+                    in_bits,
+                    out_bits,
+                    mode: if mode == "sign" {
+                        ExtendMode::Sign
+                    } else {
+                        ExtendMode::Zero
+                    },
+                },
             )
         }
         "mem.register" => {
@@ -545,6 +792,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("q", b),
                 ],
                 c,
+                CompKind::Register { bitsize: b },
             )
         }
         "mem.ram" => {
@@ -554,12 +802,12 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             );
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
-            c.opt_string("autoload");
+            let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
             c.delay();
             c.finish();
-            if let Some(contents) = contents {
-                if let Err(e) = crate::format::rle::parse(&contents, MAX_MEM_DEPTH as usize) {
+            if let Some(contents) = &contents {
+                if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
                     c_issue(&mut c, format!("attr 'contents': {e}"));
                 }
             }
@@ -572,6 +820,12 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::i("clk", 1),
                 ],
                 c,
+                CompKind::Ram {
+                    bitsize: b,
+                    depth,
+                    autoload,
+                    contents,
+                },
             )
         }
         "mem.rom" => {
@@ -581,57 +835,70 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             );
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
-            c.opt_string("autoload");
+            let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
             c.delay();
             c.finish();
-            if let Some(contents) = contents {
-                if let Err(e) = crate::format::rle::parse(&contents, MAX_MEM_DEPTH as usize) {
+            if let Some(contents) = &contents {
+                if let Err(e) = crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
                     c_issue(&mut c, format!("attr 'contents': {e}"));
                 }
             }
             (
                 vec![PinSig::i("addr", addr_width(depth)), PinSig::o("out", b)],
                 c,
+                CompKind::Rom {
+                    bitsize: b,
+                    depth,
+                    autoload,
+                    contents,
+                },
             )
         }
         "subcircuit" => {
             let mut c = AttrCheck::new(attrs, &["circuit"]);
-            match attrs.get("circuit") {
-                Some(Json::String(_)) => {}
-                other => c_issue(
-                    &mut c,
-                    format!(
-                        "subcircuit requires a string attr 'circuit', got {}",
-                        other.map_or("nothing".to_string(), |o| o.to_string())
-                    ),
-                ),
-            }
+            let circuit = match attrs.get("circuit") {
+                Some(Json::String(s)) => s.clone(),
+                other => {
+                    c_issue(
+                        &mut c,
+                        format!(
+                            "subcircuit requires a string attr 'circuit', got {}",
+                            other.map_or("nothing".to_string(), |o| o.to_string())
+                        ),
+                    );
+                    String::new()
+                }
+            };
             c.finish();
             // Pins come from the referenced circuit's pin components;
             // callers with document context resolve them.
-            (Vec::new(), c)
+            (Vec::new(), c, CompKind::Subcircuit { circuit })
         }
         "io.button" => {
             let mut c = AttrCheck::new(attrs, &["delay"]);
             c.finish();
-            (vec![PinSig::o("out", 1)], c)
+            (vec![PinSig::o("out", 1)], c, CompKind::Button)
         }
         "io.led" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
             c.finish();
-            (vec![PinSig::i("in", b)], c)
+            (vec![PinSig::i("in", b)], c, CompKind::Led { bitsize: b })
         }
         "io.hexdisplay" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(4);
             c.finish();
-            (vec![PinSig::i("in", b)], c)
+            (
+                vec![PinSig::i("in", b)],
+                c,
+                CompKind::HexDisplay { bitsize: b },
+            )
         }
         _ => return None,
     };
-    Some((pins, c.issues))
+    Some((pins, c.issues, kind))
 }
 
 fn c_issue(c: &mut AttrCheck, message: String) {
@@ -642,7 +909,17 @@ fn c_issue(c: &mut AttrCheck, message: String) {
 /// back to defaults). `None` = unknown type string. Used by the netlist
 /// builder, which runs after validation has already reported any issues.
 pub fn pin_sigs(type_: &str, attrs: &Map<String, Json>) -> Option<Vec<PinSig>> {
-    analyze(type_, attrs).map(|(sigs, _)| sigs)
+    analyze(type_, attrs).map(|(sigs, _, _)| sigs)
+}
+
+/// Typed configuration for behavior construction (task B4), from the same
+/// single parse as [`pin_sigs`]. `None` = unknown type string.
+pub fn config(type_: &str, attrs: &Map<String, Json>) -> Option<CompConfig> {
+    let delay = match attrs.get("delay") {
+        Some(Json::Number(n)) => n.as_u64(),
+        _ => None,
+    };
+    analyze(type_, attrs).map(|(_, _, kind)| CompConfig { kind, delay })
 }
 
 /// Validate a component's attrs and return its pin signatures. Returns
@@ -667,7 +944,7 @@ pub fn validate_component(
             });
             None
         }
-        Some((sigs, issues)) => {
+        Some((sigs, issues, _)) => {
             for message in issues {
                 errors.push(LoadError {
                     kind: LoadErrorKind::Other,
