@@ -159,7 +159,11 @@ export class MockCore implements CoreApi {
   private pc = 0;
   private clk = false;
   private busForced: WireValue | null = null;
-  private readonly imem = new Uint32Array(IMEM_WORDS);
+  private readonly imem = new Uint32Array(IMEM_WORDS); // standalone mode's RAM
+  /** Doc-mode memories by name (standalone mode uses `imem` only). */
+  private mems = new Map<string, Uint32Array>();
+  /** Autoload images applied at load (= engine reset semantics, §5.2). */
+  private autoloads = new Map<string, Uint32Array>();
   private readonly snapshots = new Map<string, string>();
   /** Last emitted value per net — diffs are computed against this. */
   private nets = new Map<number, WireValue>();
@@ -191,6 +195,8 @@ export class MockCore implements CoreApi {
     this.clk = false;
     this.busForced = null;
     this.imem.fill(0);
+    this.mems.clear();
+    this.autoloads.clear();
 
     const doc = tryParseCsx(src.bytes);
     const circuit = doc?.circuits[0];
@@ -200,6 +206,14 @@ export class MockCore implements CoreApi {
       const derivation = deriveNets(circuit);
       const net_map = derivation.nets.map((n) => ({ net: n.id, wires: n.wires }));
       const named = namedComponents(doc);
+      for (const comp of circuit.components) {
+        if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
+          const depth = Math.min(4096, numAttr(comp.attrs, "depth", IMEM_WORDS));
+          const image = mockAutoloadImage(comp.attrs?.autoload, depth);
+          this.mems.set(comp.name, new Uint32Array(image));
+          this.autoloads.set(comp.name, image);
+        }
+      }
       if (circuit.name === MOCK_DEMO_CIRCUIT) {
         this.layout = demoLayout(circuit, derivation.wireToNet);
         this.allZNets = null;
@@ -351,8 +365,10 @@ export class MockCore implements CoreApi {
   }
 
   private namedMem(name: string): Uint32Array {
-    if (name !== "imem") throw new Error(`mock: no memory named "${name}"`);
-    return this.imem;
+    const mem = this.mems.get(name);
+    if (mem !== undefined) return mem;
+    if (this.mems.size === 0 && name === "imem") return this.imem; // standalone mode
+    throw new Error(`mock: no memory named "${name}"`);
   }
 
   // ---- snapshots (in-memory; the real engine writes files) ----
@@ -529,6 +545,34 @@ const NAMED_KINDS: Record<string, NamedKind> = {
   "mem.ram": "ram",
   "mem.rom": "rom",
 };
+
+function numAttr(attrs: Record<string, unknown> | undefined, key: string, dflt: number): number {
+  const v = attrs?.[key];
+  return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : dflt;
+}
+
+/**
+ * Mock autoload convention: the real engine reads a FILE relative to the
+ * circuit (DESIGN.md §11); the mock can't touch the filesystem, so a path
+ * of the form `hex:0a ff 3-00` embeds the image inline (rle-hex-v1: hex
+ * words and count-value runs). Any other path yields an empty image.
+ */
+function mockAutoloadImage(autoload: unknown, depth: number): Uint32Array {
+  const image = new Uint32Array(depth);
+  if (typeof autoload !== "string" || !autoload.startsWith("hex:")) return image;
+  let addr = 0;
+  for (const tok of autoload.slice(4).trim().split(/\s+/)) {
+    const run = /^(\d+)-([0-9a-fA-F]+)$/.exec(tok);
+    if (run !== null) {
+      const n = Number(run[1]);
+      const v = Number(BigInt(`0x${run[2]}`));
+      for (let i = 0; i < n && addr < depth; i++) image[addr++] = v;
+    } else if (/^[0-9a-fA-F]+$/.test(tok)) {
+      if (addr < depth) image[addr++] = Number(BigInt(`0x${tok}`));
+    }
+  }
+  return image;
+}
 
 /** Watch-addressable components (named, of the four contract kinds). */
 function namedComponents(doc: CsxDocument): NamedComponent[] {

@@ -91,6 +91,11 @@ export class SimStore {
     this.bump();
   }
 
+  /** Memory contents changed out-of-band (mem_write has no event). */
+  touch(): void {
+    this.bump();
+  }
+
   onStatus(status: SimStatus): void {
     this.status = status;
     this._cycle = status.cycle;

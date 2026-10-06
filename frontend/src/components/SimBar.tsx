@@ -12,7 +12,16 @@ import type { SimMode } from "../ipc/types";
  * afterwards makes the loaded sim stale until the next command reloads
  * (auto-reload-on-edit is a U6 refinement).
  */
-export default function SimBar({ ctl, doc }: { ctl: SimController; doc: CircuitDocument }) {
+export default function SimBar({
+  ctl,
+  doc,
+  onReset,
+}: {
+  ctl: SimController;
+  doc: CircuitDocument;
+  /** Reset = engine reset + autoload re-applies (DESIGN.md §5.2). */
+  onReset: () => Promise<void>;
+}) {
   useSyncExternalStore(ctl.store.subscribe, ctl.store.getVersion.bind(ctl.store));
   const s = ctl.store;
   const [hzExp, setHzExp] = useState(10); // slider: hz = 10^(exp/10)
@@ -93,6 +102,13 @@ export default function SimBar({ ctl, doc }: { ctl: SimController; doc: CircuitD
           />
           <span>{hz.toLocaleString()} Hz</span>
         </label>
+        <button
+          className="secondary"
+          title="Reset: fresh engine state; memory autoload files re-apply (§5.2)"
+          onClick={() => void onReset()}
+        >
+          reset
+        </button>
         <button
           className="secondary"
           title="Evaluation mode: zero-delay (fast/debug) vs delay-aware (teaching/grading)"

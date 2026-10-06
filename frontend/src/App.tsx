@@ -42,6 +42,38 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [editingComp, setEditingComp] = useState<string | null>(null);
   const [animate, setAnimate] = useState(true);
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+
+  const toast = useCallback((text: string) => {
+    setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
+  }, []);
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timer = setTimeout(() => setToasts((t) => t.slice(1)), 4500);
+    return () => clearTimeout(timer);
+  }, [toasts]);
+
+  // Reset (U6, DESIGN.md §5.2): fresh engine state; autoload images
+  // re-apply — confirmed with a toast naming each reloaded memory.
+  const onReset = useCallback(async () => {
+    const mems = doc
+      .circuit(0)
+      .components.filter(
+        (c) =>
+          (c.type === "mem.ram" || c.type === "mem.rom") &&
+          c.name !== undefined &&
+          typeof c.attrs?.autoload === "string" &&
+          c.attrs.autoload !== "",
+      );
+    const ok = await sim.load(doc);
+    if (ok) {
+      toast(
+        mems.length > 0
+          ? `Reset — reloaded ${mems.map((m) => `${m.name} from ${String(m.attrs?.autoload)}`).join(", ")}`
+          : "Reset — circuit reloaded (no autoload memories)",
+      );
+    }
+  }, [doc, sim, toast]);
 
   const onStatus = useCallback((s: EditorStatus) => setStatus(s), []);
 
@@ -69,6 +101,8 @@ export default function App() {
         };
         load: () => Promise<boolean>;
         poke: (comp: CompId, pin: string, val: WireValue) => Promise<void>;
+        memRead: (name: string, addr: number, len: number) => Promise<WireValue[]>;
+        memWrite: (name: string, addr: number, values: WireValue[]) => Promise<void>;
       };
     };
     w.__sim = {
@@ -81,6 +115,8 @@ export default function App() {
       }),
       load: () => sim.load(doc),
       poke: (comp, pin, val) => sim.poke(comp, pin, val),
+      memRead: (name, addr, len) => sim.memRead(name, addr, len),
+      memWrite: (name, addr, values) => sim.memWrite(name, addr, values),
     };
     return () => {
       delete w.__sim;
@@ -143,7 +179,7 @@ export default function App() {
           </button>
         </div>
       </header>
-      {!stress && <SimBar ctl={sim} doc={doc} />}
+      {!stress && <SimBar ctl={sim} doc={doc} onReset={onReset} />}
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -203,6 +239,13 @@ export default function App() {
       {editingComp !== null && (
         <PropertiesDialog doc={doc} compId={editingComp} onClose={() => setEditingComp(null)} />
       )}
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div className="toast" key={t.id} role="status">
+            {t.text}
+          </div>
+        ))}
+      </div>
       {showHelp && (
         <div className="help-overlay" onClick={() => setShowHelp(false)}>
           <div className="help-card" onClick={(e) => e.stopPropagation()}>

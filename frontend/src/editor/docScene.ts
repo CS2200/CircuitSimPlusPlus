@@ -17,6 +17,7 @@ import type { PathCmd, Renderer, WireState } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import type { WireValue } from "../ipc/types";
+import { formatValue, type ValueMode } from "../sim/controller";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
 import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
@@ -50,6 +51,11 @@ export function wireValueState(val: WireValue): WireState {
 
 function maskNonzero(hex: string): boolean {
   return hex !== "" && BigInt(`0x${hex}`) !== 0n;
+}
+
+/** Probe `display` attr → watch value mode (default hex). */
+function probeDisplayMode(attr: unknown): ValueMode {
+  return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
 }
 
 export type PinHit = { kind: "pin"; compId: string; pin: string; pos: Vec2 };
@@ -329,8 +335,25 @@ export class DocScene {
           strokeStyle,
         );
         const spec = compSpec(comp.type);
-        const caption =
+        let caption =
           comp.name !== undefined && comp.name !== "" ? comp.name : spec.caption(comp.attrs ?? {});
+        // Probe value display (U6): with a sim loaded, probes show their
+        // net's value in the configured display mode; the name moves above.
+        if (comp.type === "wiring.probe" && sim !== undefined) {
+          const docNet = this.nets.pinToNet.get(`${comp.id}:in`);
+          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+          const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
+          if (val !== undefined) {
+            caption = formatValue(val, probeDisplayMode(comp.attrs?.display));
+            if (comp.name !== undefined && comp.name !== "") {
+              renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+                color: theme.textDim,
+                size: 0.9,
+                align: "center",
+              });
+            }
+          }
+        }
         renderer.drawText(
           layout.rect.x + layout.rect.w / 2,
           layout.rect.y + layout.rect.h / 2,

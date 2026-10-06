@@ -1,14 +1,16 @@
 import { useState, useSyncExternalStore } from "react";
 import { formatValue, type SimController, type ValueMode } from "../sim/controller";
+import MemoryInspector from "./MemoryInspector";
 
 /**
- * Watch panel (FRONTEND.md U5): named probes/registers (and memories —
- * their inspector is U6) with per-row display mode (unsigned/signed/hex,
- * DESIGN.md §7.1). Values stream from net_diffs via the SimStore.
+ * Watch panel (FRONTEND.md U5/U6): named probes/registers with per-row
+ * display mode (unsigned/signed/hex, DESIGN.md §7.1); RAM/ROM rows open
+ * the memory inspector. Values stream from net_diffs via the SimStore.
  */
 export default function WatchPanel({ ctl }: { ctl: SimController }) {
   useSyncExternalStore(ctl.store.subscribe, ctl.store.getVersion.bind(ctl.store));
   const [modes, setModes] = useState<ReadonlyMap<string, ValueMode>>(new Map());
+  const [inspect, setInspect] = useState<string | null>(null);
   const named = ctl.store.named;
 
   if (!ctl.store.loaded || named.length === 0) return null;
@@ -26,14 +28,25 @@ export default function WatchPanel({ ctl }: { ctl: SimController }) {
       {named.map((n) => {
         const mode = modes.get(n.name) ?? "hex";
         const value = ctl.watchValue(n);
+        const isMem = n.kind === "ram" || n.kind === "rom";
         return (
           <div className="watch-row" key={n.name} data-watch={n.name}>
             <span className="watch-name" title={`${n.kind} (comp ${n.comp_id})`}>
               {n.name}
             </span>
-            <span className={`watch-value${value === undefined ? " watch-unknown" : ""}`}>
-              {n.kind === "ram" || n.kind === "rom" ? "(inspector: U6)" : formatValue(value, mode)}
-            </span>
+            {isMem ? (
+              <button
+                className="watch-value watch-mem"
+                title="Open memory inspector"
+                onClick={() => setInspect(inspect === n.name ? null : n.name)}
+              >
+                inspect…
+              </button>
+            ) : (
+              <span className={`watch-value${value === undefined ? " watch-unknown" : ""}`}>
+                {formatValue(value, mode)}
+              </span>
+            )}
             <button
               className="watch-mode"
               title="Display mode: unsigned / signed / hex"
@@ -44,6 +57,9 @@ export default function WatchPanel({ ctl }: { ctl: SimController }) {
           </div>
         );
       })}
+      {inspect !== null && (
+        <MemoryInspector ctl={ctl} name={inspect} onClose={() => setInspect(null)} />
+      )}
     </aside>
   );
 }

@@ -123,6 +123,15 @@ export class SimController {
     return this.core.api.poke(compId, pin, value);
   }
 
+  memRead(name: string, addr: number, len: number): Promise<WireValue[]> {
+    return this.core.api.memRead(name, addr, len);
+  }
+
+  memWrite(name: string, addr: number, values: WireValue[]): Promise<void> {
+    // mem_write has no event; touch so inspectors/watch refresh.
+    return this.core.api.memWrite(name, addr, values).then(() => this.store.touch());
+  }
+
   // ---- document-side resolution ----
 
   /** Current value of a watch-addressable component, if its net is known. */

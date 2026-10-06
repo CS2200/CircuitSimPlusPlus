@@ -91,6 +91,40 @@ describe("mock core: demo document mode (U5)", () => {
   });
 });
 
+describe("mock core: memory autoload (U6)", () => {
+  function docWithAutoload(autoload: string) {
+    const doc = buildMockDemoDoc();
+    doc.updateComponent(0, "c5", { attrs: { autoload } }); // c5 = imem
+    return doc;
+  }
+
+  it("seeds the memory from the inline-hex image at load", async () => {
+    const core = createMockCore();
+    await core.api.loadCircuit({ bytes: bytesOf(docWithAutoload("hex:0a ff 3-00 2a").toJson()) });
+    const words = await core.api.memRead("imem", 0, 6);
+    expect(words.map((w) => Number(BigInt(`0x${w.v}`)))).toEqual([0x0a, 0xff, 0, 0, 0, 0x2a]);
+  });
+
+  it("reset (re-load) restores the image after memWrite (§5.2)", async () => {
+    const core = createMockCore();
+    const doc = docWithAutoload("hex:01 02");
+    await core.api.loadCircuit({ bytes: bytesOf(doc.toJson()) });
+    await core.api.memWrite("imem", 0, [{ v: "dead", x: "", z: "" }]);
+    expect((await core.api.memRead("imem", 0, 1))[0].v).toBe("0000dead");
+    // reset = load again: the autoload image re-applies
+    await core.api.loadCircuit({ bytes: bytesOf(doc.toJson()) });
+    const words = await core.api.memRead("imem", 0, 2);
+    expect(words.map((w) => Number(BigInt(`0x${w.v}`)))).toEqual([1, 2]);
+  });
+
+  it("a plain (non-inline-hex) path yields an empty image", async () => {
+    const core = createMockCore();
+    await core.api.loadCircuit({ bytes: bytesOf(docWithAutoload("program.hex").toJson()) });
+    const words = await core.api.memRead("imem", 0, 4);
+    expect(words.every((w) => w.v === "00000000")).toBe(true);
+  });
+});
+
 describe("mock core: generic document mode (U5)", () => {
   it("loads any document structurally; every net floats, no behavior", async () => {
     const core = createMockCore();

@@ -481,3 +481,125 @@ body {
 .watch-mode:hover {
   border-color: var(--accent);
 }
+
+/* Memory inspector (U6) */
+.memory-inspector {
+  margin-top: 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: var(--bg);
+}
+
+.memory-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.memory-inspector-head .mem-addr {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.memory-inspector-head .mem-addr input {
+  width: 5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8rem;
+}
+
+.memory-inspector-head button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  cursor: pointer;
+}
+
+.mem-running {
+  color: var(--wire-z);
+  font-size: 0.75rem;
+}
+
+.mem-close {
+  margin-left: auto;
+}
+
+.mem-error {
+  color: var(--wire-x);
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+}
+
+.mem-grid {
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.mem-rowaddr {
+  color: var(--text-dim);
+  padding-right: 0.5rem;
+  text-align: right;
+}
+
+.mem-cell {
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--panel-border);
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+.mem-cell.editable:hover {
+  border-color: var(--accent);
+  cursor: text;
+}
+
+.mem-cell.mem-editing input {
+  width: 5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
+}
+
+.watch-mem {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  margin-left: auto;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* Toasts (U6 reset confirmations) */
+.toast-stack {
+  position: fixed;
+  bottom: 2.2rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  z-index: 30;
+}
+
+.toast {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
