@@ -6,57 +6,74 @@
 //! reactions run in component-index order — runs are bit-for-bit
 //! reproducible (§4.6).
 //!
-//! ## The delay model (resolved D1)
+//! ## The delay model (resolved D1, per-path since contract v1.1 / F14)
 //!
-//! - **Wires — transport delay.** Each net delays every transition of its
-//!   resolved value by `d_net = wire_len × wire-delay constant` from the
-//!   delay table (task B7; 0 disables wire delay). Every transition is
-//!   reproduced, however narrow the pulse.
+//! - **Wires — per-path transport delay.** Every transition of a net's
+//!   resolved value is delivered to each *sink pin* at
+//!   `path_len(driver → that sink) × wire-delay constant` (path lengths
+//!   from the netlist's wire graph, in grid units; the constant from the
+//!   delay table; 0 disables). Unused stub branches do **not** inflate
+//!   other sinks' delays. Each sink pin has its own *view* of the net;
+//!   every transition is reproduced at every sink, however narrow the
+//!   pulse. (Multi-driver nets use the nearest driver's path per sink —
+//!   documented approximation; single-driver nets are exact.)
 //! - **Gates — inertial delay.** Each component carries a `(generation,
 //!   pending outputs)` pair; an input change recomputes the outputs and
 //!   re-schedules the pending commit at `now + t_pd`, cancelling the
 //!   previous generation — an input pulse narrower than `t_pd` never
-//!   reaches the output.
-//! - **Registers — clk→Q + setup/hold.** On a rising `clk` net, D is
+//!   reaches the output. If the recomputed outputs equal the already
+//!   scheduled ones, the pending commit keeps its original time (the
+//!   schedule is not deferred — U23).
+//! - **Registers — clk→Q + setup/hold.** On a rising `clk` view, D is
 //!   sampled (consuming `Z` halts, §4.1) and Q commits `clk→Q` later
 //!   (last edge wins, same generation mechanism). D changing within
-//!   `t_setup` before the edge or `t_hold` after it is recorded as a
-//!   **warning** (`TimingViolation`); the latch still happens,
-//!   deterministically.
+//!   `t_setup` before the edge (`edge − t_setup < change ≤ edge`) or
+//!   within `t_hold` after it (`edge ≤ change < edge + t_hold`) is
+//!   recorded as a **warning** (`TimingViolation`); the latch still
+//!   happens, deterministically.
 //! - **RAM/ROM** — reads settle `t_access` after an address change;
 //!   writes obey the same edge + setup/hold discipline as registers
-//!   (tracked on `din` and `addr`).
+//!   (tracked on `din`, `addr`, and `we`).
 //!
-//! ## Floating-consume in an event engine (§4.1)
+//! ## Boot settle (contract v1.1, F6)
 //!
-//! Arrival-order transients make "halt the moment a gate sees Z" wrong:
-//! with differing delays, a gate's inputs legitimately arrive at
-//! different times. The rule here matches the zero-delay engine's
-//! *settled-state* semantics (§3's behavioral-identity goal):
+//! Construction runs a **boot settle**: the power-on event queue is
+//! processed to quiescence *without any clock edges* (rails stabilizing
+//! before the clock starts; the boot is capped by
+//! `events_per_cycle_cap` — a free-running ring halts with
+//! `Oscillation`). Time then restarts at 0, cycle accounting begins, and
+//! the first rising edge is at `T = 2 × half`. Boot activity does not
+//! count toward DTA settle times.
 //!
-//! - A combinational component evaluates only once **all** its inputs are
-//!   non-`Z` (a `Z` input means "not yet arrived"; the output holds its
-//!   previous value, which may itself be the never-driven `Z`).
-//! - At each **cycle close**, every net that is still fully `Z` *and*
-//!   feeds a combinational sink (or a RAM/ROM address pin) halts the run
-//!   with `FloatingRead`, naming the first such sink in comp order. A bus
-//!   idling between transactions shows `Z` on probes/pins without halting
-//!   (observation is not consumption); a bus feeding a gate directly at
-//!   cycle close is the accepted-strict false positive (§13.5, D3).
-//! - Register/RAM consume rules (D while enabled at an edge, RAM ports
-//!   during an access) halt immediately, exactly as in zero-delay.
+//! ## Floating-consume in an event engine (§4.1, per-consumer since F6)
+//!
+//! Combinational components evaluate only once **all** their input views
+//! are non-`Z` (a `Z` view means "not yet arrived"; the output holds).
+//! At each **cycle close** a per-consumer sweep halts the run with
+//! `FloatingRead` only when a pin that *consumes* (per the behavior
+//! module's consume table — muxes consume only the selected input,
+//! probes/splitters nothing, etc.) still sees a fully-`Z` input view
+//! **and** its net has never carried a non-`Z` value this run (genuinely
+//! undriven). Nets that were driven and went idle-`Z` (tri-state buses)
+//! never halt; overclocked designs (propagation longer than the period)
+//! produce setup/hold warnings and wrong-but-deterministic latching,
+//! never a floating halt. Register/RAM consume rules (D while enabled at
+//! an edge, RAM ports during an access) halt immediately, exactly as in
+//! the zero-delay engine.
 //!
 //! ## Clock, cycles, DTA
 //!
 //! The global clock is a free-running square wave with half period
-//! `clock_half_period` (an engine parameter; B9 exposes it). Cycle 0 is
-//! the boot/settle cycle; the first rising edge is at `T = 2 × half`.
-//! Per cycle, the engine records the timestamp of the last value change
-//! on any net feeding a register/memory input, measured from cycle
-//! start; `T_obs` is the maximum over the run (§4.4) and `est_time =
-//! cycles × T_obs`. The top-k (10) longest distinct observed paths are
-//! kept as component-ID chains for UI highlighting, reconstructed from
-//! per-net causal back-pointers (`net → (comp, triggering input net)`).
+//! `clock_half_period` (engine parameter; the CLI pins it with
+//! `--clock-half-period-ns`, default 1000 ns). Cycle 0 is the first full
+//! period after the boot settle. Per cycle, the engine records the
+//! timestamp of the last input change at any register/memory input pin
+//! (its own view's arrival), measured from cycle start; `T_obs` is the
+//! maximum over the run — **including the final in-progress cycle, which
+//! is closed out at run end** (§4.4, F7) — and `est_time = cycles ×
+//! T_obs`. The top-k (10) longest distinct observed paths are kept as
+//! component-ID chains for UI highlighting, reconstructed from per-net
+//! causal back-pointers (`net → (comp, triggering input net)`).
 //!
 //! An **event storm** (§4.5 — e.g. a zero-delay inverter ring) is capped
 //! per cycle (`events_per_cycle_cap`) and halts with
@@ -66,7 +83,7 @@
 //! kind, ids, value masks) is the determinism tripwire: same circuit +
 //! same inputs ⇒ same hash, every platform.
 
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead, Timing};
@@ -131,8 +148,21 @@ enum EvKind {
     /// Commit a component's pending outputs (inertial: dropped when the
     /// generation was cancelled by a newer input change).
     Fire { comp: u32, gen: u64 },
-    /// Apply a resolved net value (transport: never cancelled).
+    /// Apply a resolved net value to the net's shared "latest" slot at the
+    /// earliest sink's arrival (transport bookkeeping; reactions happen
+    /// per sink via `Deliver`).
     Net { net: u32, value: Value },
+    /// Deliver a resolved net value to one sink pin's view, at that
+    /// sink's own path-delay arrival (per-path transport, F14). `kind`
+    /// is the precomputed sink-pin classification (avoids a per-event
+    /// sink-table scan on wide fan-out nets).
+    Deliver {
+        net: u32,
+        comp: u32,
+        slot: u32,
+        kind: SinkKind,
+        value: Value,
+    },
     /// Drive a root input pin at an absolute time (testbench poking).
     Poke { comp: u32, value: Value },
 }
@@ -156,7 +186,9 @@ impl PartialOrd for Ev {
     }
 }
 
-/// Serializable snapshot form (`snapshot`/`restore`, §8.1).
+/// Serializable snapshot form (`snapshot`/`restore`, §8.1). Version 2:
+/// per-sink views + per-path deliveries (F14); version 1 files are
+/// rejected cleanly.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct DelaySnap {
     version: u32,
@@ -177,10 +209,11 @@ struct DelaySnap {
     halted: Option<Halt>,
     comps: Vec<serde_json::Value>,
     drives: Vec<Vec<crate::api::WireValue>>,
+    views: Vec<Vec<crate::api::WireValue>>,
     net_values: Vec<crate::api::WireValue>,
     net_scheduled: Vec<crate::api::WireValue>,
     net_cause: Vec<Option<(u32, Option<u32>)>>,
-    z_nets: Vec<u32>,
+    net_ever_driven: Vec<bool>,
     pending_gen: Vec<u64>,
     pending_val: Vec<Vec<crate::api::WireValue>>,
     pending_cause: Vec<Option<u32>>,
@@ -204,6 +237,10 @@ struct SnapEv {
     #[serde(default)]
     net: u32,
     #[serde(default)]
+    slot: u32,
+    #[serde(default)]
+    kind2: SinkKind,
+    #[serde(default)]
     phase: bool,
     #[serde(default)]
     value: Option<crate::api::WireValue>,
@@ -211,13 +248,45 @@ struct SnapEv {
 
 impl SnapEv {
     fn from_ev(e: &Ev) -> SnapEv {
-        let (kind, comp, gen, net, phase, value) = match &e.kind {
-            EvKind::Clock { phase } => ("clock", 0, 0, 0, *phase, None),
-            EvKind::Fire { comp, gen } => ("fire", *comp, *gen, 0, false, None),
-            EvKind::Net { net, value } => ("net", 0, 0, *net, false, Some(value.to_wire_value())),
-            EvKind::Poke { comp, value } => {
-                ("poke", *comp, 0, 0, false, Some(value.to_wire_value()))
-            }
+        let (kind, comp, gen, net, slot, kind2, phase, value) = match &e.kind {
+            EvKind::Clock { phase } => ("clock", 0, 0, 0, 0, SinkKind::Other, *phase, None),
+            EvKind::Fire { comp, gen } => ("fire", *comp, *gen, 0, 0, SinkKind::Other, false, None),
+            EvKind::Net { net, value } => (
+                "net",
+                0,
+                0,
+                *net,
+                0,
+                SinkKind::Other,
+                false,
+                Some(value.to_wire_value()),
+            ),
+            EvKind::Deliver {
+                net,
+                comp,
+                slot,
+                kind,
+                value,
+            } => (
+                "deliver",
+                *comp,
+                0,
+                *net,
+                *slot,
+                *kind,
+                false,
+                Some(value.to_wire_value()),
+            ),
+            EvKind::Poke { comp, value } => (
+                "poke",
+                *comp,
+                0,
+                0,
+                0,
+                SinkKind::Other,
+                false,
+                Some(value.to_wire_value()),
+            ),
         };
         SnapEv {
             time: e.time,
@@ -226,13 +295,15 @@ impl SnapEv {
             comp,
             gen,
             net,
+            slot,
+            kind2,
             phase,
             value,
         }
     }
 
     /// Rebuild the event; `width_of` resolves payload widths (net events
-    /// from the net, poke events from the pin).
+    /// from the net, poke/deliver events from the pin).
     fn to_ev(&self, width_of: impl Fn(&SnapEv) -> Result<u32, String>) -> Result<Ev, String> {
         let value = |w: u32| -> Result<Value, String> {
             let wv = self
@@ -249,6 +320,13 @@ impl SnapEv {
             },
             "net" => EvKind::Net {
                 net: self.net,
+                value: value(width_of(self)?)?,
+            },
+            "deliver" => EvKind::Deliver {
+                net: self.net,
+                comp: self.comp,
+                slot: self.slot,
+                kind: self.kind2,
                 value: value(width_of(self)?)?,
             },
             "poke" => EvKind::Poke {
@@ -302,24 +380,29 @@ fn class_of(type_: &str, has_inputs: bool, has_outputs: bool) -> Class {
     }
 }
 
-/// Per-clocked-component setup/hold tracking.
+/// Per-clocked-component setup/hold tracking. `we` is tracked like
+/// `din`/`addr` (contract v1.1, F11 — the write-enable must also be
+/// stable around the edge).
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 struct ClockTrack {
     last_edge: Option<u64>,
     last_d: Option<u64>,
     last_din: Option<u64>,
     last_addr: Option<u64>,
+    last_we: Option<u64>,
 }
 
-/// Precomputed sink-pin identity per net (Copy — the hot Net-apply loop
-/// iterates it without cloning the netlist's `String` sink table).
+/// Precomputed sink-pin identity per net (Copy — the hot Deliver-apply
+/// loop iterates it without cloning the netlist's `String` sink table).
 #[derive(Debug, Clone, Copy)]
 struct SinkPin {
     comp: u32,
+    /// Pin slot within the sink component (view index).
+    slot: u32,
     kind: SinkKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 enum SinkKind {
     D,
     Clk,
@@ -328,6 +411,7 @@ enum SinkKind {
     Addr,
     Din,
     We,
+    #[default]
     Other,
 }
 
@@ -353,27 +437,35 @@ pub struct DelayEngine {
     comps: Vec<Behavior>,
     cdata: Vec<CompData>,
     drives: Vec<Vec<Value>>,
+    /// Per-sink-pin views of each net, comp-major in `PinConn` order (like
+    /// `drives`): what each input pin has *received* — per-path transport
+    /// (F14). Splitter pins don't use views (they read other drivers'
+    /// drive slots directly).
+    views: Vec<Vec<Value>>,
     net_drivers: Vec<Vec<(u32, usize)>>,
+    /// Latest *applied* resolved value per net (observation/probe value;
+    /// applied at the earliest sink's arrival).
     net_values: Vec<Value>,
     /// Last *scheduled* value per net (transport bookkeeping: a resolved
     /// transition equal to the current value must still be scheduled when
     /// an earlier transition is already in flight — otherwise the trailing
     /// edge of a pulse narrower than the wire delay would be lost).
     net_scheduled: Vec<Value>,
-    /// Transport delay per net (ns).
-    net_delay: Vec<u64>,
+    /// Per-sink transport delay (ns), aligned with `net_sinks`
+    /// (nearest-driver path length × table constant, F14).
+    net_sink_delay: Vec<Vec<u64>>,
+    /// Per net: earliest sink arrival (ns); 0 for sink-less nets.
+    net_min_delay: Vec<u64>,
     /// Causal back-pointer per net: (comp that last changed it, that
     /// comp's triggering input net) — for critical-path reconstruction.
     net_cause: Vec<Option<(u32, Option<u32>)>>,
     /// Nets feeding a register/memory input pin (DTA settle watchers).
     state_input_net: Vec<bool>,
-    /// Nets whose persistent `Z` state is a floating-read error at cycle
-    /// close (feed a combinational sink or RAM/ROM address).
-    z_watched_net: Vec<bool>,
+    /// Whether a non-fully-`Z` resolution of this net has ever been
+    /// scheduled this run (the cycle-close sweep's immunity rule, F6).
+    net_ever_driven: Vec<bool>,
     /// Precomputed sinks per net (comp order preserved).
     net_sinks: Vec<Vec<SinkPin>>,
-    /// Currently-fully-`Z` watched nets (min-first for determinism).
-    z_nets: BTreeSet<u32>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
     pending_gen: Vec<u64>,
@@ -395,19 +487,24 @@ pub struct DelayEngine {
     top_paths: Vec<(u64, Vec<CompId>)>,
     violations: Vec<TimingViolation>,
     clk_track: Vec<ClockTrack>,
-    /// Cap on applied events per cycle (storm detection, §4.5).
+    /// Cap on applied events per cycle (storm detection, §4.5); also the
+    /// boot settle's quiescence cap.
     pub events_per_cycle_cap: u64,
     events_this_cycle: u64,
     events_processed: u64,
     trace_hash: u64,
     halted: Option<Halt>,
+    /// True during the construction-time boot settle (module docs): no
+    /// cycle closes, no DTA settle tracking.
+    in_boot: bool,
 }
 
 impl DelayEngine {
     /// Build the engine. `clock_half_period` is in delay-table units
-    /// (ns); it must exceed the design's true critical path or setup
-    /// violations pile up (that's the lesson, §4.3). All delays come from
-    /// `table` (the published table named by `settings.delayTable`, B7).
+    /// (ns); it should exceed the design's true critical path or setup
+    /// violations pile up (that's the lesson, §4.3 — the engine no longer
+    /// *halts* in that case, F6). All delays come from `table` (the
+    /// published table named by `settings.delayTable`, B7).
     pub fn new(
         netlist: Netlist,
         clock_half_period: u64,
@@ -417,7 +514,6 @@ impl DelayEngine {
         let n = comps.len();
         let mut cdata = Vec::with_capacity(n);
         let mut state_input_net = vec![false; netlist.nets.len()];
-        let mut z_watched_net = vec![false; netlist.nets.len()];
         for (ci, beh) in comps.iter().enumerate() {
             let fc = &netlist.comps[ci];
             let in_pins: Vec<(usize, NetId)> = fc
@@ -435,23 +531,15 @@ impl DelayEngine {
                 .map(|(i, p)| (i, p.net))
                 .collect();
             let class = class_of(&fc.type_, !in_pins.is_empty(), !out_pins.is_empty());
-            match class {
-                Class::Register | Class::Ram | Class::Rom => {
-                    // DTA watches *data* inputs; the clock is the
-                    // reference, not a settling signal (its falling edge
-                    // would otherwise dominate every cycle).
-                    for (slot, net) in &in_pins {
-                        if fc.pins[*slot].pin != "clk" {
-                            state_input_net[net.idx()] = true;
-                        }
+            if let Class::Register | Class::Ram | Class::Rom = class {
+                // DTA watches *data* inputs; the clock is the reference,
+                // not a settling signal (its falling edge would otherwise
+                // dominate every cycle).
+                for (slot, net) in &in_pins {
+                    if fc.pins[*slot].pin != "clk" {
+                        state_input_net[net.idx()] = true;
                     }
                 }
-                Class::Comb => {
-                    for (_, net) in &in_pins {
-                        z_watched_net[net.idx()] = true;
-                    }
-                }
-                _ => {}
             }
             cdata.push(CompData {
                 class,
@@ -460,28 +548,24 @@ impl DelayEngine {
                 timing: beh.timing(table),
             });
         }
-        // RAM/ROM addresses are Z-watched too (a floating address is an
-        // access on a floating port, §4.1).
-        for (ci, cd) in cdata.iter().enumerate() {
-            if matches!(cd.class, Class::Ram | Class::Rom) {
-                for (_, net) in &cd.in_pins {
-                    z_watched_net[net.idx()] = true;
-                }
-                let _ = ci;
-            }
-        }
         let net_values: Vec<Value> = netlist.nets.iter().map(|n| Value::z(n.width)).collect();
         let net_scheduled = net_values.clone();
-        let net_delay: Vec<u64> = netlist
+        let views: Vec<Vec<Value>> = ec::drive_slots(&netlist); // all-Z, same shape
+                                                                // Per-sink path delays (F14): grid units × the table's wire
+                                                                // constant; min per net for the shared "latest value" slot.
+        let net_sink_delay: Vec<Vec<u64>> = netlist
             .nets
             .iter()
-            .map(|n| table.wire_delay(n.wire_len))
+            .map(|n| {
+                n.sink_wire_units
+                    .iter()
+                    .map(|&units| table.wire_delay(units))
+                    .collect()
+            })
             .collect();
-        let z_nets: BTreeSet<u32> = z_watched_net
+        let net_min_delay: Vec<u64> = net_sink_delay
             .iter()
-            .enumerate()
-            .filter(|(_, &w)| w)
-            .map(|(i, _)| i as u32)
+            .map(|ds| ds.iter().copied().min().unwrap_or(0))
             .collect();
         let net_drivers = ec::net_drivers(&netlist);
         let net_sinks: Vec<Vec<SinkPin>> = netlist
@@ -492,6 +576,11 @@ impl DelayEngine {
                     .iter()
                     .map(|(c, pin)| SinkPin {
                         comp: c.0,
+                        slot: netlist.comps[c.idx()]
+                            .pins
+                            .iter()
+                            .position(|p| &p.pin == pin)
+                            .expect("sink pin exists") as u32,
                         kind: SinkKind::from_pin(pin),
                     })
                     .collect()
@@ -504,15 +593,16 @@ impl DelayEngine {
             comps,
             cdata,
             drives,
+            views,
             net_drivers,
             net_values,
             net_scheduled,
-            net_delay,
+            net_sink_delay,
+            net_min_delay,
             net_cause: vec![None; n_nets],
             state_input_net,
-            z_watched_net,
+            net_ever_driven: vec![false; n_nets],
             net_sinks,
-            z_nets,
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
             pending_cause: vec![None; n],
@@ -535,12 +625,14 @@ impl DelayEngine {
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
             halted: None,
+            in_boot: true,
         };
         // Power-on for combinational loops: seed loop nets to 0 (same
         // deterministic rule as the zero-delay engine) so feedback logic
         // starts from a defined state. Splitters are excepted: they carry
         // values but never originate them (B11 — a 0 seed phantom-contends
-        // with the other side of a splitter chain).
+        // with the other side of a splitter chain). The seed must reach
+        // every sink's *view* (gates read views, F14).
         let (_, residue) = crate::zero::levelize(&eng.netlist, &eng.comps);
         for c in residue {
             if eng.comps[c as usize].is_splitter() {
@@ -550,12 +642,13 @@ impl DelayEngine {
                 let width = eng.netlist.nets[net.idx()].width;
                 eng.net_values[net.idx()] = Value::zero(width);
                 eng.net_scheduled[net.idx()] = Value::zero(width);
-                eng.z_nets.remove(&net.0);
+                for sp in &eng.net_sinks[net.idx()] {
+                    eng.views[sp.comp as usize][sp.slot as usize] = Value::zero(width);
+                }
             }
         }
         // Power-on: sources and state elements commit their initial
-        // outputs at T=0 (in comp order, §4.3); the first rising edge is
-        // at T = 2×half so cycle 0 is the boot/settle cycle.
+        // outputs at T=0 (in comp order, §4.3).
         for c in 0..n as u32 {
             let cd = &eng.cdata[c as usize];
             if matches!(cd.class, Class::Source | Class::Register) {
@@ -570,8 +663,35 @@ impl DelayEngine {
                 })?;
             }
         }
-        eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
+        // Boot settle (module docs): run the power-on queue to quiescence
+        // WITHOUT clock edges. A halt here (e.g. an enabled RAM port
+        // reading a floating address, or an oscillating ring tripping the
+        // storm cap) becomes the sticky halt the first `run` reports.
+        if let Err(h) = eng.boot() {
+            eng.halted = Some(h);
+        }
+        // Time restarts at 0; cycle accounting begins.
+        eng.in_boot = false;
+        eng.now = 0;
+        eng.next_boundary = 2 * clock_half_period;
+        eng.events_this_cycle = 0;
+        eng.clk_track
+            .iter_mut()
+            .for_each(|t| *t = ClockTrack::default());
+        if eng.halted.is_none() {
+            eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
+        }
         Ok(eng)
+    }
+
+    /// The boot settle: apply every queued event (no clock events exist
+    /// yet) until the queue is empty. `apply` caps runaway rings with the
+    /// storm limit (`Oscillation`).
+    fn boot(&mut self) -> Result<(), Halt> {
+        while let Some(ev) = self.queue.pop() {
+            self.apply(ev)?;
+        }
+        Ok(())
     }
 
     /// The flattened design under simulation.
@@ -599,6 +719,12 @@ impl DelayEngine {
         &self.violations
     }
 
+    /// The sticky halt, if the engine has halted — including a
+    /// boot-settle halt at construction (the session surfaces it).
+    pub fn halted(&self) -> Option<&Halt> {
+        self.halted.as_ref()
+    }
+
     /// FNV-1a hash over every applied event so far (§4.6).
     pub fn trace_hash(&self) -> u64 {
         self.trace_hash
@@ -609,12 +735,12 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in (time, seq) order; restoring into an engine
     /// built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test).
+    /// (§4.6 — see the test). Snapshot version 2 (F14): per-sink views.
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.seq));
         let snap = DelaySnap {
-            version: 1,
+            version: 2,
             half_period: self.half_period,
             now: self.now,
             seq: self.seq,
@@ -636,6 +762,11 @@ impl DelayEngine {
                 .iter()
                 .map(|slots| slots.iter().map(Value::to_wire_value).collect())
                 .collect(),
+            views: self
+                .views
+                .iter()
+                .map(|slots| slots.iter().map(Value::to_wire_value).collect())
+                .collect(),
             net_values: self.net_values.iter().map(Value::to_wire_value).collect(),
             net_scheduled: self
                 .net_scheduled
@@ -643,7 +774,7 @@ impl DelayEngine {
                 .map(Value::to_wire_value)
                 .collect(),
             net_cause: self.net_cause.clone(),
-            z_nets: self.z_nets.iter().copied().collect(),
+            net_ever_driven: self.net_ever_driven.clone(),
             pending_gen: self.pending_gen.clone(),
             pending_val: self
                 .pending_val
@@ -663,7 +794,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 1 {
+        if snap.version != 2 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.half_period != self.half_period {
@@ -673,13 +804,15 @@ impl DelayEngine {
         let n_nets = self.netlist.nets.len();
         let shape_ok = snap.comps.len() == n_comps
             && snap.drives.len() == n_comps
+            && snap.views.len() == n_comps
             && snap.pending_gen.len() == n_comps
             && snap.pending_val.len() == n_comps
             && snap.pending_cause.len() == n_comps
             && snap.clk_track.len() == n_comps
             && snap.net_values.len() == n_nets
             && snap.net_scheduled.len() == n_nets
-            && snap.net_cause.len() == n_nets;
+            && snap.net_cause.len() == n_nets
+            && snap.net_ever_driven.len() == n_nets;
         if !shape_ok {
             return Err("snapshot does not match this circuit".to_string());
         }
@@ -698,6 +831,15 @@ impl DelayEngine {
             }
             for (slot, wv) in slots.iter().enumerate() {
                 self.drives[ci][slot] = values(wv, fc.pins[slot].width)?;
+            }
+        }
+        for (ci, slots) in snap.views.iter().enumerate() {
+            let fc = &self.netlist.comps[ci];
+            if slots.len() != fc.pins.len() {
+                return Err("snapshot view slots do not match".to_string());
+            }
+            for (slot, wv) in slots.iter().enumerate() {
+                self.views[ci][slot] = values(wv, fc.pins[slot].width)?;
             }
         }
         for (i, wv) in snap.net_values.iter().enumerate() {
@@ -723,7 +865,7 @@ impl DelayEngine {
             self.pending_val[ci] = rebuilt;
         }
         self.net_cause = snap.net_cause;
-        self.z_nets = snap.z_nets.into_iter().collect();
+        self.net_ever_driven = snap.net_ever_driven;
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
         self.pending_net_cause = snap.pending_net_cause;
@@ -739,6 +881,13 @@ impl DelayEngine {
                         .get(se.net as usize)
                         .map(|n| n.width)
                         .ok_or_else(|| format!("net event for unknown net {}", se.net)),
+                    "deliver" => self
+                        .netlist
+                        .comps
+                        .get(se.comp as usize)
+                        .and_then(|c| c.pins.get(se.slot as usize))
+                        .map(|p| p.width)
+                        .ok_or_else(|| format!("deliver event for unknown pin {}", se.comp)),
                     "poke" => self
                         .netlist
                         .comps
@@ -772,18 +921,20 @@ impl DelayEngine {
         self.net_values[net.idx()].clone()
     }
 
-    /// Value of a named probe (its input net) or register (stored state).
+    /// Value of a named probe (its input pin's view) or register (stored
+    /// state).
     pub fn named_value(&self, name: &str) -> Option<Value> {
         let named = self.netlist.named.iter().find(|n| n.name == name)?;
-        let ci = named.comp_id.idx();
+        let ci = self.netlist.named_engine_id(name)?.idx();
         match named.kind {
             NamedKind::Register => self.comps[ci].register_value().cloned(),
             NamedKind::Probe => {
-                let pin = self.netlist.comps[ci]
+                let (slot, _) = self.netlist.comps[ci]
                     .pins
                     .iter()
-                    .find(|p| p.dir == crate::components::PinDir::In)?;
-                Some(self.net_value(pin.net))
+                    .enumerate()
+                    .find(|(_, p)| p.dir == crate::components::PinDir::In)?;
+                Some(self.views[ci][slot].clone())
             }
             NamedKind::Ram | NamedKind::Rom => None,
         }
@@ -794,7 +945,7 @@ impl DelayEngine {
         let named = self.netlist.named.iter().find(|n| n.name == name)?;
         match named.kind {
             NamedKind::Ram | NamedKind::Rom => {
-                self.comps[named.comp_id.idx()].memory_word(addr as usize)
+                self.comps[self.netlist.named_engine_id(name)?.idx()].memory_word(addr as usize)
             }
             _ => None,
         }
@@ -808,27 +959,60 @@ impl DelayEngine {
         if named.kind != NamedKind::Ram {
             return false;
         }
-        self.comps[named.comp_id.idx()].set_memory_word(addr as usize, v);
+        let Some(ci) = self.netlist.named_engine_id(name) else {
+            return false;
+        };
+        self.comps[ci.idx()].set_memory_word(addr as usize, v);
         true
     }
 
     /// Bulk-load a named memory's image (autoload/`--load`, task B9).
-    pub fn load_memory_image(&mut self, name: &str, image: &[u64]) -> bool {
+    /// `Ok(false)` = no such named memory; `Err` = image error (F1 —
+    /// e.g. a word wider than the memory's bitsize; never panics).
+    /// The asynchronous read is re-evaluated so `dout` commits from the
+    /// new image after the access time (a load applied after the boot
+    /// settle must not leave a stale `dout`).
+    pub fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
         let Some(named) = self.netlist.named.iter().find(|n| n.name == name) else {
-            return false;
+            return Ok(false);
         };
         match named.kind {
             NamedKind::Ram | NamedKind::Rom => {
-                self.comps[named.comp_id.idx()].load_words(image);
-                true
+                let ci = self
+                    .netlist
+                    .named_engine_id(name)
+                    .expect("named_flat is parallel to named");
+                self.comps[ci.idx()].load_words(image)?;
+                let now = self.now;
+                self.eval_and_schedule(ci.0, now, None)
+                    .map_err(|h| h.details)?;
+                Ok(true)
             }
-            _ => false,
+            _ => Ok(false),
         }
     }
 
     /// Drive a root input pin at the current time.
     pub fn poke_input_pin(&mut self, name: &str, v: Value) -> bool {
         self.poke_at(name, v, self.now)
+    }
+
+    /// Press/release a named root button (interactive poking); the new
+    /// drive commits through the normal event path.
+    pub fn poke_button(&mut self, name: &str, pressed: bool) -> bool {
+        let Some(fc) = self
+            .netlist
+            .comps
+            .iter()
+            .find(|c| c.type_ == "io.button" && c.name.as_deref() == Some(name))
+        else {
+            return false;
+        };
+        let id = fc.id.0;
+        self.comps[id as usize].set_pressed(pressed);
+        // A button has no inputs, so its evaluation cannot halt.
+        let _ = self.eval_and_schedule(id, self.now, None);
+        true
     }
 
     /// Drive a root input pin at an absolute simulation time (testbench
@@ -854,17 +1038,53 @@ impl DelayEngine {
 
     /// Run `cycles` full clock cycles (rising edges). Returns the run
     /// report; on a halt, the engine stays halted (the error is sticky).
+    /// The in-progress final cycle is *closed out* at run end (F7): its
+    /// settle time counts toward `t_obs` and the cycle-close
+    /// floating-read sweep runs.
     pub fn run(&mut self, cycles: u64) -> Result<RunReport, Halt> {
         if let Some(h) = &self.halted {
             return Err(h.clone());
         }
-        match self.run_inner(cycles) {
+        match self.run_inner(cycles).and_then(|mut rep| {
+            // Fold the final in-progress cycle (module docs, F7). The
+            // boundary itself is NOT advanced — the pending clock edge
+            // closes the (now empty) cycle on the next run.
+            self.floating_sweep()?;
+            self.record_cycle();
+            // The report must reflect the fold (the final cycle's settle
+            // counts toward T_obs, F7).
+            rep.t_obs = self.t_obs;
+            rep.top_paths = self.top_paths.clone();
+            rep.violations = self.violations.clone();
+            rep.trace_hash = self.trace_hash;
+            rep.events_processed = self.events_processed;
+            Ok(rep)
+        }) {
             Ok(rep) => Ok(rep),
             Err(h) => {
                 self.halted = Some(h.clone());
                 Err(h)
             }
         }
+    }
+
+    /// Advance one half-period (one clock edge — the contract v1.1
+    /// `step_tick` in delay mode): apply events up to and including the
+    /// next global clock event.
+    pub fn step_tick(&mut self) -> Result<(), Halt> {
+        if let Some(h) = &self.halted {
+            return Err(h.clone());
+        }
+        while let Some(ev) = self.queue.pop() {
+            let is_clock = matches!(ev.kind, EvKind::Clock { .. });
+            self.apply(ev).inspect_err(|h| {
+                self.halted = Some(h.clone());
+            })?;
+            if is_clock {
+                return Ok(());
+            }
+        }
+        Ok(())
     }
 
     /// Process events up to (not including) simulation time `t`
@@ -938,15 +1158,27 @@ impl DelayEngine {
                 .collect();
             beh.eval_splitter(&nets)
         } else {
+            // Each input pin reads its own *view* of its net (per-path
+            // transport, F14).
             let ins: Vec<Value> = cd
                 .in_pins
                 .iter()
-                .map(|(_, net)| self.net_values[net.idx()].clone())
+                .map(|(slot, _)| self.views[c][*slot].clone())
                 .collect();
-            // Combinational parts wait until every input has arrived
-            // (module docs, §4.1); clocked parts consume per B4's table.
-            if cd.class == Class::Comb && ins.iter().any(|v| v.has_z()) {
-                return Ok(());
+            // Combinational parts wait until every input has *arrived*
+            // (module docs, §4.1). A `Z` view on a DRIVERLESS net can
+            // never arrive — it is passed through so the behavior's
+            // consume table decides (a mux's unselected input is not
+            // consumed; a gate input is and halts). `Z` on a driven net
+            // means "still in flight or idle": wait (the output holds).
+            if cd.class == Class::Comb {
+                let waiting = ins
+                    .iter()
+                    .zip(cd.in_pins.iter())
+                    .any(|(v, &(_, net))| v.has_z() && !self.netlist.nets[net.idx()].floating);
+                if waiting {
+                    return Ok(());
+                }
             }
             let ins_refs: Vec<&Value> = ins.iter().collect();
             beh.eval(&ins_refs)
@@ -980,9 +1212,10 @@ impl DelayEngine {
         Halt {
             reason: HaltReason::FloatingRead,
             cycle: self.rising_seen,
+            // Contract v1.1 details format: root-sheet document-order id.
             details: format!(
-                "{}: pin '{}'",
-                self.netlist.comps[comp as usize].origin(),
+                "comp {} pin \"{}\": floating (Z) value consumed",
+                self.netlist.root_sheet_comp(CompId(comp)),
                 fr.pin
             ),
         }
@@ -993,8 +1226,9 @@ impl DelayEngine {
         self.now = ev.time;
         // Cycle close at apply time (events are processed in time order):
         // closing on peek would be premature when the run loop stops
-        // *before* a boundary-edge it only looked at.
-        while self.now >= self.next_boundary {
+        // *before* a boundary-edge it only looked at. No cycle accounting
+        // during the boot settle.
+        while !self.in_boot && self.now >= self.next_boundary {
             self.close_cycle()?;
         }
         self.events_this_cycle += 1;
@@ -1053,16 +1287,39 @@ impl DelayEngine {
                     // `net_scheduled` field docs).
                     if resolved != self.net_scheduled[net as usize] {
                         self.net_scheduled[net as usize] = resolved.clone();
-                        let at = ev.time + self.net_delay[net as usize];
+                        // The shared "latest" slot applies at the earliest
+                        // sink's arrival; each sink pin's *view* is
+                        // delivered at its own path delay (F14).
+                        let nidx = net as usize;
+                        let at = ev.time + self.net_min_delay[nidx];
                         self.schedule(
                             at,
                             EvKind::Net {
                                 net,
-                                value: resolved,
+                                value: resolved.clone(),
                             },
                         );
                         // Causal pointer lands at apply time (below).
                         self.pending_net_cause.push((net, cause));
+                        let deliveries: Vec<(u64, EvKind)> = self.net_sinks[nidx]
+                            .iter()
+                            .enumerate()
+                            .map(|(i, sp)| {
+                                (
+                                    ev.time + self.net_sink_delay[nidx][i],
+                                    EvKind::Deliver {
+                                        net,
+                                        comp: sp.comp,
+                                        slot: sp.slot,
+                                        kind: sp.kind,
+                                        value: resolved.clone(),
+                                    },
+                                )
+                            })
+                            .collect();
+                        for (t, kind) in deliveries {
+                            self.schedule(t, kind);
+                        }
                     }
                 }
             }
@@ -1074,20 +1331,23 @@ impl DelayEngine {
                     let (_, cause) = self.pending_net_cause.remove(pos);
                     self.net_cause[n] = Some(cause);
                 }
-                if self.net_values[n] == value {
-                    return Ok(()); // superseded transport duplicate
+                if !value.is_fully_z() {
+                    self.net_ever_driven[n] = true;
                 }
-                self.net_values[n] = value.clone();
-                // Z-watch maintenance.
-                if self.z_watched_net[n] {
-                    if value.is_fully_z() {
-                        self.z_nets.insert(net);
-                    } else {
-                        self.z_nets.remove(&net);
-                    }
-                }
-                // DTA settle tracking.
-                if self.state_input_net[n] {
+                self.net_values[n] = value;
+            }
+            EvKind::Deliver {
+                net,
+                comp,
+                slot,
+                kind,
+                value,
+            } => {
+                // Per-sink transport arrival: update the pin's view, then
+                // notify the sink (F14). DTA settle and setup/hold
+                // tracking happen at the pin's own arrival time.
+                self.views[comp as usize][slot as usize] = value;
+                if !self.in_boot && self.state_input_net[net as usize] {
                     let cycle_start = self.next_boundary - 2 * self.half_period;
                     let dt = ev.time - cycle_start;
                     if dt > self.cycle_settle {
@@ -1095,12 +1355,7 @@ impl DelayEngine {
                         self.cycle_settle_net = Some(net);
                     }
                 }
-                // Reactions in comp order (sinks were built in comp order);
-                // iterate the precomputed Copy table — no cloning.
-                for i in 0..self.net_sinks[n].len() {
-                    let SinkPin { comp, kind } = self.net_sinks[n][i];
-                    self.react(comp, net, kind, ev.time)?;
-                }
+                self.react(comp, net, kind, ev.time)?;
             }
             EvKind::Poke { comp, value } => {
                 self.comps[comp as usize].set_pin_value(value);
@@ -1110,7 +1365,7 @@ impl DelayEngine {
         Ok(())
     }
 
-    /// A net changed: notify one sink component.
+    /// A value arrived at one sink pin: notify the sink component.
     fn react(&mut self, comp: u32, net: u32, pin: SinkKind, time: u64) -> Result<(), Halt> {
         let c = comp as usize;
         match self.cdata[c].class {
@@ -1123,8 +1378,14 @@ impl DelayEngine {
                     self.eval_and_schedule(comp, time, Some(net))?;
                 }
                 SinkKind::Din => self.track_hold(c, TrackField::Din, time),
+                SinkKind::We => self.track_hold(c, TrackField::We, time),
                 SinkKind::Clk => {
-                    let cur = self.net_values[net as usize].bit(0);
+                    let cur = self.views[c]
+                        .iter()
+                        .zip(&self.netlist.comps[c].pins)
+                        .find(|(_, p)| p.pin == "clk")
+                        .map(|(v, _)| v.bit(0))
+                        .unwrap_or(Bit::Z);
                     if cur == Bit::One {
                         self.clock_edge(comp, time)?;
                     }
@@ -1134,7 +1395,12 @@ impl DelayEngine {
             Class::Register => match pin {
                 SinkKind::D => self.track_hold(c, TrackField::D, time),
                 SinkKind::Clk => {
-                    let cur = self.net_values[net as usize].bit(0);
+                    let cur = self.views[c]
+                        .iter()
+                        .zip(&self.netlist.comps[c].pins)
+                        .find(|(_, p)| p.pin == "clk")
+                        .map(|(v, _)| v.bit(0))
+                        .unwrap_or(Bit::Z);
                     if cur == Bit::One {
                         self.clock_edge(comp, time)?;
                     }
@@ -1165,17 +1431,19 @@ impl DelayEngine {
             TrackField::D => tr.last_d = Some(time),
             TrackField::Din => tr.last_din = Some(time),
             TrackField::Addr => tr.last_addr = Some(time),
+            TrackField::We => tr.last_we = Some(time),
         }
     }
 
-    /// Rising clock edge on a register/RAM: setup check, latch/write
-    /// (consuming `Z` halts), schedule the output commit.
+    /// Rising clock edge on a register/RAM: setup check (data inputs
+    /// include `we` for RAM, F11), latch/write (consuming `Z` halts),
+    /// schedule the output commit.
     fn clock_edge(&mut self, comp: u32, time: u64) -> Result<(), Halt> {
         let c = comp as usize;
         let setup = self.cdata[c].timing.setup;
         let tr = self.clk_track[c];
         let last_data = match self.cdata[c].class {
-            Class::Ram => tr.last_din.max(tr.last_addr),
+            Class::Ram => tr.last_din.max(tr.last_addr).max(tr.last_we),
             _ => tr.last_d,
         };
         if let Some(dc) = last_data {
@@ -1189,11 +1457,12 @@ impl DelayEngine {
             }
         }
         self.clk_track[c].last_edge = Some(time);
-        // Sample inputs and latch (consume rules fire here).
+        // Sample inputs from the pins' *views* and latch (consume rules
+        // fire here).
         let ins: Vec<Value> = self.cdata[c]
             .in_pins
             .iter()
-            .map(|(_, net)| self.net_values[net.idx()].clone())
+            .map(|(slot, _)| self.views[c][*slot].clone())
             .collect();
         let ins_refs: Vec<&Value> = ins.iter().collect();
         self.comps[c]
@@ -1204,29 +1473,20 @@ impl DelayEngine {
         Ok(())
     }
 
-    /// Close the current cycle: record DTA results, run the
-    /// floating-read sweep, reset per-cycle counters.
+    /// Close the current cycle at a clock boundary: per-consumer
+    /// floating sweep, then record DTA results and advance the boundary.
     fn close_cycle(&mut self) -> Result<(), Halt> {
-        // Persistent-Z sweep (module docs): the first watched net that is
-        // still floating, in net-id order, names its first watched sink.
-        if let Some(&net) = self.z_nets.iter().next() {
-            let n = &self.netlist.nets[net as usize];
-            for (sink, pin) in &n.sinks {
-                let cd = &self.cdata[sink.idx()];
-                let watched = matches!(cd.class, Class::Comb)
-                    || (matches!(cd.class, Class::Ram | Class::Rom) && pin == "addr");
-                if watched {
-                    return Err(Halt {
-                        reason: HaltReason::FloatingRead,
-                        cycle: self.rising_seen,
-                        details: format!(
-                            "{}: pin '{pin}'",
-                            self.netlist.comps[sink.idx()].origin()
-                        ),
-                    });
-                }
-            }
-        }
+        self.floating_sweep()?;
+        self.record_cycle();
+        self.next_boundary += 2 * self.half_period;
+        Ok(())
+    }
+
+    /// Fold the current cycle's settle measurements into `t_obs` /
+    /// `top_paths` and reset the per-cycle counters (without advancing
+    /// the boundary — also called at run end for the final in-progress
+    /// cycle, F7).
+    fn record_cycle(&mut self) {
         if self.cycle_settle > 0 {
             self.t_obs = self.t_obs.max(self.cycle_settle);
             let path = self.extract_path(self.cycle_settle_net);
@@ -1241,7 +1501,51 @@ impl DelayEngine {
         self.cycle_settle = 0;
         self.cycle_settle_net = None;
         self.events_this_cycle = 0;
-        self.next_boundary += 2 * self.half_period;
+    }
+
+    /// Per-consumer floating-read sweep (contract v1.1, F6 — module
+    /// docs). A halt requires BOTH: a pin that consumes (per the behavior
+    /// consume table, evaluated with current values — muxes consume only
+    /// the selected input, disabled buffers nothing, etc.) still seeing a
+    /// fully-`Z` view, AND that pin's net never having carried a non-`Z`
+    /// value this run. Driven-then-idle nets (tri-state buses) and
+    /// in-flight arrivals (overclocked designs) are immune.
+    fn floating_sweep(&mut self) -> Result<(), Halt> {
+        for c in 0..self.comps.len() {
+            let cd = &self.cdata[c];
+            if !matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
+                continue;
+            }
+            let beh = &self.comps[c];
+            if beh.is_splitter() {
+                continue; // splitters consume nothing
+            }
+            // Substitute immune floating views with a driven 0 so the
+            // behavior's own consume rule (the oracle) only ever fires on
+            // genuinely never-driven nets.
+            let mut ins: Vec<Value> = cd
+                .in_pins
+                .iter()
+                .map(|(slot, _)| self.views[c][*slot].clone())
+                .collect();
+            let mut candidate = false;
+            for (v, &(_, net)) in ins.iter_mut().zip(cd.in_pins.iter()) {
+                if v.has_z() {
+                    if self.net_ever_driven[net.idx()] {
+                        *v = Value::zero(v.width());
+                    } else {
+                        candidate = true;
+                    }
+                }
+            }
+            if !candidate {
+                continue;
+            }
+            let ins_refs: Vec<&Value> = ins.iter().collect();
+            if let Err(fr) = beh.eval(&ins_refs) {
+                return Err(self.halt_floating(c as u32, fr));
+            }
+        }
         Ok(())
     }
 
@@ -1302,6 +1606,22 @@ impl DelayEngine {
                 mix(wv.x.as_bytes());
                 mix(wv.z.as_bytes());
             }
+            EvKind::Deliver {
+                net,
+                comp,
+                slot,
+                value,
+                ..
+            } => {
+                mix(&[4]);
+                mix(&net.to_le_bytes());
+                mix(&comp.to_le_bytes());
+                mix(&slot.to_le_bytes());
+                let wv = value.to_wire_value();
+                mix(wv.v.as_bytes());
+                mix(wv.x.as_bytes());
+                mix(wv.z.as_bytes());
+            }
         }
         self.trace_hash = h;
     }
@@ -1312,6 +1632,7 @@ enum TrackField {
     D,
     Din,
     Addr,
+    We,
 }
 
 #[cfg(test)]
@@ -1679,6 +2000,159 @@ mod tests {
         eng.poke_at("eb", k(1, 0), 110);
         eng.run(1).unwrap(); // bus idles at Z across a cycle close — no halt
         assert_eq!(eng.named_value("bus"), Some(Value::z(8)));
+    }
+
+    /// F11: the RAM write-enable is tracked like din/addr — a `we`
+    /// change inside the setup window is a warning (the write still
+    /// happens, deterministically).
+    #[test]
+    fn ram_we_setup_violation_is_tracked() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":2}}}},
+                {{"id":"zd","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8}}}},
+                {{"id":"we","type":"wiring.pin","pos":[0,0],"name":"we"}},
+                {{"id":"m","type":"mem.ram","pos":[0,0],"name":"m","attrs":{{"bitsize":8,"depth":4}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"m","pin":"clk"}}}},
+                {{"a":{{"comp":"za","pin":"out"}},"b":{{"comp":"m","pin":"addr"}}}},
+                {{"a":{{"comp":"zd","pin":"out"}},"b":{{"comp":"m","pin":"din"}}}},
+                {{"a":{{"comp":"we","pin":"pin"}},"b":{{"comp":"m","pin":"we"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        // Edge at 1000 (clk wire 0). we rises at 990 — inside setup 15.
+        assert!(eng.poke_at("we", k(1, 1), 990));
+        let rep = eng.run(1).unwrap();
+        assert_eq!(rep.violations.len(), 1, "we setup violation tracked");
+        assert_eq!(rep.violations[0].kind, ViolationKind::Setup);
+        assert_eq!(
+            eng.memory_word("m", 0),
+            Some(k(8, 0)),
+            "write still happened"
+        );
+    }
+
+    /// F6 (S1): a propagation path longer than the clock period must NOT
+    /// halt as floating-read — the boot settle quiesces first; the run
+    /// completes with setup/hold warnings and deterministic latching.
+    #[test]
+    fn overclocked_chain_completes_with_setup_violation() {
+        let mut comps = String::new();
+        let mut wires = String::new();
+        comps.push_str(
+            r#"{"id":"clk","type":"wiring.clock","pos":[0,0]},
+            {"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{"value":"1"}},
+            {"id":"zero","type":"wiring.constant","pos":[0,0]},
+            {"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"},
+            {"id":"r2","type":"mem.register","pos":[300,0],"name":"r2"},"#,
+        );
+        wires.push_str(
+            r#"{"a":{"comp":"clk","pin":"out"},"b":{"comp":"r2","pin":"clk"}},
+            {"a":{"comp":"one","pin":"out"},"b":{"comp":"r2","pin":"en"}},
+            {"a":{"comp":"zero","pin":"out"},"b":{"comp":"r2","pin":"rst"}},"#,
+        );
+        let mut prev = ("src".to_string(), "pin".to_string());
+        for i in 0..250 {
+            comps.push_str(&format!(
+                r#"{{"id":"g{i}","type":"gate.not","pos":[{},2]}},"#,
+                i
+            ));
+            wires.push_str(&format!(
+                r#"{{"a":{{"comp":"{}","pin":"{}"}},"b":{{"comp":"g{i}","pin":"in"}}}},"#,
+                prev.0, prev.1
+            ));
+            prev = (format!("g{i}"), "out".to_string());
+        }
+        wires.push_str(&format!(
+            r#"{{"a":{{"comp":"{}","pin":"{}"}},"b":{{"comp":"r2","pin":"d"}}}}"#,
+            prev.0, prev.1
+        ));
+        let json = format!(
+            r##"{{"format":"circuitsim-plus-plus","version":2,"name":"t",{SETTINGS},
+            "circuits":[{{"name":"main","components":[{}],"wires":[{}]}}]}}"##,
+            comps.trim_end_matches(','),
+            wires
+        );
+        // 250 inverters ≈ 2250 ns; period 1000 ns < the path. Before F6
+        // this died at cycle close with a spurious FloatingRead.
+        let mut eng = engine(&json, 500);
+        assert!(eng.halted().is_none(), "boot halt: {:?}", eng.halted());
+        // src rises at T=770; r2.d changes ~2255 ns later (3025), inside
+        // the setup window (15 ns) of r2's clock edge — the 300-unit clk
+        // wire delays the edge to 3000+30=3030 → warning, not a halt.
+        assert!(eng.poke_at("src", k(1, 1), 770));
+        let rep = eng.run(3).expect("overclocked run must complete");
+        assert_eq!(rep.cycles, 3);
+        assert_eq!(rep.violations.len(), 1, "exactly one setup violation");
+        assert_eq!(rep.violations[0].kind, ViolationKind::Setup);
+        // The final-cycle fold (F7) counts the last cycle's settle:
+        // d changed at 3025, cycle 3 starts at 3000 → dt 25.
+        assert_eq!(rep.t_obs, 25, "final in-progress cycle is folded");
+    }
+
+    /// F6 (S3): a floating value on a mux's UNSELECTED input is not
+    /// consumed — no halt; the output is still computed (driverless-net
+    /// views do not block evaluation).
+    #[test]
+    fn mux_floating_unselected_input_does_not_halt() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"c","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"z","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"m","type":"plexers.mux","pos":[0,0]}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out"}}
+            ], "wires": [
+                {{"a":{{"comp":"c","pin":"out"}},"b":{{"comp":"m","pin":"in0"}}}},
+                {{"a":{{"comp":"z","pin":"out"}},"b":{{"comp":"m","pin":"sel"}}}},
+                {{"a":{{"comp":"m","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        // in1 is unwired (driverless); sel=0 selects in0.
+        let mut eng = engine(&json, 500);
+        eng.run(2)
+            .expect("mux with floating UNSELECTED input must not halt");
+        assert_eq!(eng.named_value("out"), Some(k(1, 1)));
+    }
+
+    /// F14: a stub branch off a net must not inflate another sink's
+    /// arrival — per-path wire delays.
+    #[test]
+    fn stub_branch_does_not_inflate_sink_arrival() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"p","type":"wiring.probe","pos":[20,0],"name":"d"}},
+                {{"id":"q","type":"wiring.probe","pos":[20,10000],"name":"stub"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"p","pin":"in"}},
+                 "points":[[0,0],[200,0]]}},
+                {{"a":{{"comp":"q","pin":"in"}},"b":{{"join":{{"wire":0,"segment":0}}}},
+                 "points":[[200,10000],[100,0]]}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 5000);
+        assert!(eng.poke_at("src", k(1, 1), 100));
+        eng.run_until_time(120).unwrap();
+        assert_eq!(eng.named_value("d"), Some(k(1, 0)));
+        eng.run_until_time(121).unwrap();
+        // path src→p = 200 units → 20 ns; the ~10100-unit stub branch is
+        // irrelevant to p's arrival (the old net-lumped model added it).
+        assert_eq!(
+            eng.named_value("d"),
+            Some(k(1, 1)),
+            "stub must not inflate the sink's arrival"
+        );
     }
 
     #[test]

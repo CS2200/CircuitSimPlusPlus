@@ -551,7 +551,6 @@ dependencies = [
 name = "csim-core"
 version = "0.1.0"
 dependencies = [
- "indexmap 2.14.2",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

@@ -41,9 +41,9 @@ at X MHz". When staff finalize the numbers, a **new table version**
 - `name` — table identifier; must equal the file's basename.
 - `status` — informational provenance marker (`"DRAFT"` until finalized).
 - `units` — must be `"ns"`. All integer fields below are in these units.
-- `wire` — net transport delay: `wire_len × num / den` (floor), where
-  `wire_len` is the net's accumulated drawn wire length in grid units
-  (§5.2). `num = 0` disables wire delay; `den = 0` is invalid.
+- `wire` — wire transport delay constant: `units × num / den` (floor),
+  applied to **per-path** lengths (see "Wire delay semantics" below).
+  `num = 0` disables wire delay; `den = 0` is invalid.
 - `components` — map from component type string (`docs/format-v2.md`
   registry) to an entry with optional integer fields (absent = 0):
   - `prop` — combinational propagation delay; clk→Q for `mem.register`.
@@ -54,6 +54,59 @@ at X MHz". When staff finalize the numbers, a **new table version**
   - `access` — RAM/ROM read settling time.
 
 Unknown fields anywhere in the document are rejected.
+
+## Wire delay semantics (contract v1.1, F14)
+
+Wire delay is **per-path, never net-lumped**: a sink pin's arrival is
+
+```
+arrival(sink) = driver commit time + path_len(driver → that sink) × num / den
+```
+
+where `path_len` is the shortest path through the net's wire graph (pins and
+junctions as nodes, drawn segments weighted by length) in grid units.
+Consequences, all normative:
+
+- **Unused stub branches do not inflate other sinks' delays.** (The pre-v1.1
+  lumped model summed every wire on the net for every sink; a long meander on
+  a branch penalized unrelated sinks.)
+- Every transition is reproduced at every sink, however narrow the pulse —
+  transport, per §4.3. On multi-driver nets (tri-state buses) the delay uses
+  the **nearest** driver's path per sink (single-driver nets are exact).
+- **Junction attachment:** a junction onto segment `s` of a target wire
+  attaches at the segment's **midpoint** (the format records no
+  intra-segment position).
+- **Manhattan fallback (kept from v1):** a wire with empty `points`
+  contributes the Manhattan distance between its endpoint *components'*
+  `pos` positions (a single straight segment). The UI always saves drawn
+  paths, so hand-drawn circuits get exact lengths.
+- STA uses the same per-path lengths (informational only, below).
+
+## Clock for grading runs
+
+The delay engine's global clock half-period is a run parameter,
+`--clock-half-period-ns` / `clock_half_period_ns` (spec), default **1000
+ns** (2000 ns period). It does not affect correctness — it sets edge times
+for setup/hold detection — and it no longer bounds what can be graded: a
+design whose propagation exceeds the period produces setup/hold warnings and
+wrong-but-deterministic latching, never a floating-read halt (F6). The
+teaching point stands: `T_obs` tells you how fast the clock may go.
+
+## Timing conventions: DTA vs STA (F13)
+
+The two numbers in a report measure different things, deliberately:
+
+| | **DTA `t_obs`** (grading) | **STA `t_sta`** (informational) |
+|---|---|---|
+| What | max observed per-cycle settle over the run | structural longest path |
+| Start of measurement | the clock **edge** (clk→Q of the launching register **included**) | the launching register's output (arrival 0; clk→Q **excluded**) |
+| End of measurement | last change at any register/RAM data-input view (setup **excluded**) | arrival at a register/RAM data input **plus the destination's setup time** (the textbook clock-period bound) |
+| Paths | only sensitized ones | all structural ones — may include paths the design never uses |
+
+STA is informational only (decision D11): always labeled
+*"structural bound — may include paths your design never uses"*. Both
+metrics use the same table and the same per-path wire lengths, so on a
+design whose critical path is exercised, `t_sta ≈ t_obs + setup`.
 
 ## Lookup semantics
 

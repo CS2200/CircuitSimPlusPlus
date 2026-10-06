@@ -181,8 +181,12 @@ value := [0-9a-fA-F]{1,16}     (hex; at most one machine word)
 A bare `value` is one word; `count-value` is `count` consecutive copies. Canonical encoding
 collapses runs of length ≥ 2 and zero-pads values to the memory's hex width. Decoders must
 bound expansion (`max_words`) — a hostile `999999999-ffff` must not OOM the process (§11).
-Autoload paths resolve relative to the circuit file, sandboxed to its directory tree (§11;
-enforced by the loader that owns file access, task B4/B9).
+A `contents` image longer than the memory's `depth` is a **load error** (F3), and a word
+that does not fit the memory's `bitsize` is a **load error** in `contents` and a clean
+configuration error in `--load`/autoload files (F1) — never a panic, never silent zeroing.
+Autoload paths resolve relative to the circuit file, sandboxed to its directory tree (§11),
+and address memories by hierarchical name (see §9 "Named access" and docs/autograder.md
+§7–8; F12).
 
 ## 8. Implementation limits (§11)
 
@@ -193,7 +197,78 @@ split pins ≤ 64; splitter bus bits < 32; hierarchy depth ≤ 64; post-flatten 
 ~1M (enforced in B3). These bound corrupt files, not students — no real course circuit comes
 close.
 
-## 9. JSON Schema
+## 9. Simulation semantics (ratified engine decisions)
+
+The file format is semantics-neutral; this section records the normative simulation
+semantics the engines implement for circuits written in it (references: DESIGN.md §4;
+details in `crates/core/src/{behavior,zero,delay}.rs` module docs and docs/autograder.md).
+
+**Values and state initialization.**
+
+- Four-state logic per DESIGN.md §4.1. Registers and RAM **power on at 0** (not `X`;
+  contents/autoload aside) — matches legacy CircuitSim and keeps grading deterministic.
+- Register reset is **synchronous**, sampled at the rising edge, and **wins over enable**.
+- Combinational feedback (the zero-delay engine's fixed-point residue and the delay
+  engine's loop nets) is **seeded to 0 at power-on** — deterministic (§4.5: nothing is ever
+  resolved randomly). Splitters are excepted: they carry values but never originate them.
+- RAM `depth` must be a power of two (validation), so the `addr` pin's width exactly covers
+  `0..depth`. The defensive past-end path (reads `X`, writes drop) remains for the
+  `depth = 1` corner and the lenient post-validation path. A write with `X` in the address
+  is dropped (target unknown).
+- Divide by zero yields quotient and remainder `X`. A mux with an `X` select outputs the
+  data value when all data inputs are equal, else `X`.
+
+**The floating-consume table (§4.1, D3).** Consuming a floating (`Z`) value is a
+simulation-halting error naming the component and pin. What counts as *consuming*:
+
+| Component | Consumes |
+|---|---|
+| gates (incl. not/buffer) | every input |
+| controlled buffer | `en` always; `in` only while `en ≠ 0` |
+| mux | `sel` always; the selected data input (all of them if `sel` is `X`) |
+| demux / decoder | all inputs |
+| arithmetic | all inputs |
+| register (rising edge only) | `en`, `rst` always; `d` only when `en ≠ 0` and `rst ≠ 1` |
+| RAM | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
+| ROM | `addr` continuously |
+| pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal |
+| splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
+
+When a control input is `X` (mux select, buffer enable, register enable/reset, RAM
+write-enable), behaviors consume *conservatively* — any input that could affect the output.
+The zero-delay engine enforces the table at settle; the delay engine enforces register/RAM
+edge rules immediately and combinational rules via a per-consumer cycle-close sweep (a pin
+that consumes still seeing a never-driven `Z` view halts; driven-then-idle tri-state buses
+and in-flight arrivals in overclocked designs never halt — F6).
+
+**Delay-model semantics** (details: docs/delay-table.md).
+
+- The grading clock is a run parameter (`--clock-half-period-ns`, default 1000 ns;
+  docs/delay-table.md). The delay engine runs a **boot settle** (power-on events to
+  quiescence, no clock edges) before cycle accounting, and closes the in-progress final
+  cycle at run end so its settle counts toward `T_obs` (F7).
+- Wire delay is **per-path** per sink (F14; junctions attach at segment midpoints;
+  Manhattan fallback for empty `points` — all in docs/delay-table.md).
+- Inertial gates: an input change reschedules the pending commit; if the recomputed
+  outputs equal the already-scheduled ones, the commit keeps its original time (no defer).
+- Setup/hold boundaries: a change `d` is a **setup** violation iff
+  `edge − t_setup < d ≤ edge`; a **hold** violation iff `edge ≤ d < edge + t_hold`.
+  Violations are warnings; the latch still happens, deterministically. RAM tracks `din`,
+  `addr`, and `we`.
+- Engine caps (§11 backstops): event storms halt at 1M events/cycle (`Oscillation`,
+  also the boot-settle quiescence cap); the zero-delay fixed point iterates at most
+  `residue + 2` passes. These bound corrupt/pathological inputs, not students.
+
+**Named access.** Autograder/watch-visible components (`mem.ram/rom`, `mem.register`,
+`wiring.probe` with a `name`) are addressed by hierarchical name: the plain name at root,
+`instance/.../name` when nested (docs/autograder.md §7). Their wire-facing `comp_id`s are
+document-order indices within the defining circuit (contract v1.1).
+
+**Reporting pointers.** Exit-code taxonomy, assertion grammar, JSON test-spec, snapshot
+schema, and the `est_time`/`timing_violations`/`errors` report fields: docs/autograder.md.
+Zero-mode reports omit timing fields (`t_obs`, `est_time`, `trace_hash` are 0/null).
+
+## 10. JSON Schema
 
 Structural schema (Draft 2020-12). Per-type `attrs` constraints are normative in §4's table;
 the schema constrains common shapes only.

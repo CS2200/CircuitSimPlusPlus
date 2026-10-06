@@ -9,7 +9,7 @@
 //! bit-for-bit reproducible across runs and platforms:
 //!
 //! - No `HashMap`/`HashSet` iteration order may affect anything observable.
-//!   Use index-ordered `Vec`, `BTreeMap`, or `indexmap::IndexMap` instead.
+//!   Use index-ordered `Vec` or `BTreeMap` instead.
 //! - No floating point, no wall-clock, no RNG in the evaluation path.
 //!
 //! Same file + same mode + same inputs ⇒ identical trace, everywhere.
@@ -23,6 +23,7 @@ mod engine_common;
 pub mod format;
 pub mod ids;
 pub mod netlist;
+pub mod session;
 pub mod sta;
 pub mod timing_table;
 pub mod value;

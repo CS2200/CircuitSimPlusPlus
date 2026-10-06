@@ -8,23 +8,31 @@
 //! STA exists so TAs can eyeball anomalies and students can bound their
 //! clock before running the suite.
 //!
-//! ## Model
+//! ## Model (contract v1.1: per-path wires + setup-inclusive totals)
 //!
 //! - **Breaks:** register `q` and source components (`wiring.pin` inputs,
 //!   constants, clocks, buttons) start paths at arrival 0. Register
 //!   `d`/`en`/`rst` and RAM `din`/`we`/`addr` are **endpoints** (they
 //!   must settle before the clock edge); so are output pins, probes, and
 //!   LEDs/displays (they bound comb-only designs like an ALU).
+//! - **Setup-inclusive totals (F13):** an endpoint at a register or RAM
+//!   data input adds the destination element's `setup` time — the
+//!   textbook clock-period bound (launch clk→Q is *excluded*: paths
+//!   start at register outputs). DTA's `T_obs` is instead measured
+//!   edge-to-settle (clk→Q included, setup excluded). Both conventions
+//!   are documented in docs/delay-table.md.
 //! - **Through-edges:** combinational comps contribute `prop` (table,
 //!   per-bit scaled, `attrs.delay` applied) from every input pin to
 //!   every output pin; RAM/ROM `addr → dout` contributes `access`
 //!   (asynchronous read, §6).
-//! - **Wires:** a net's transport delay (`wire_len ×` table constant)
-//!   is added where its drivers meet it.
+//! - **Wires (per-path, F14):** a sink pin's arrival adds the
+//!   driver→that-pin path length (netlist wire graph) × the table
+//!   constant — not a net-lumped total, so unused stub branches never
+//!   inflate other sinks.
 //! - **Splitters** are wiring: all of a splitter's pin nets are
-//!   union-find merged into one STA node with zero added delay. The
-//!   merged node's arrival is the max over its member nets (per-member
-//!   wire delay included; the split side's own stub length is not
+//!   union-find merged into one STA node with zero added delay. A
+//!   cross-splitter hop costs the driver's path to the nearest splitter
+//!   tap on the driver's net (the split side's own stub length is not
 //!   double-counted).
 //! - **Pure-combinational cycles** have no max-plus fixed point: they
 //!   are a clean [`StaError`], not a hang (the zero-delay engine's
@@ -33,7 +41,7 @@
 //! Determinism (§4.6): all iteration is index-ordered; equal-arrival
 //! ties resolve to the lowest `CompId`/net index.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use thiserror::Error;
 
@@ -174,7 +182,7 @@ pub fn analyze(
     let group_of = |net: u32| groups.parent[net as usize];
 
     let mut roles = Vec::with_capacity(n_comps);
-    let mut endpoints: Vec<(u32, String, u32)> = Vec::new(); // (comp, pin, group)
+    let mut endpoints: Vec<(u32, String, u32)> = Vec::new(); // (comp, pin, net)
     for (ci, fc) in netlist.comps.iter().enumerate() {
         let in_width = fc
             .pins
@@ -190,21 +198,21 @@ pub fn analyze(
             "mem.register" => {
                 for p in &fc.pins {
                     if p.dir == PinDir::In && p.pin != "clk" {
-                        endpoints.push((ci as u32, p.pin.clone(), group_of(p.net.0)));
+                        endpoints.push((ci as u32, p.pin.clone(), p.net.0));
                     }
                 }
             }
             "mem.ram" => {
                 for p in &fc.pins {
                     if p.dir == PinDir::In && (p.pin == "din" || p.pin == "we" || p.pin == "addr") {
-                        endpoints.push((ci as u32, p.pin.clone(), group_of(p.net.0)));
+                        endpoints.push((ci as u32, p.pin.clone(), p.net.0));
                     }
                 }
             }
             "wiring.pin" | "wiring.probe" | "io.led" | "io.hexdisplay" => {
                 for p in &fc.pins {
                     if p.dir == PinDir::In {
-                        endpoints.push((ci as u32, p.pin.clone(), group_of(p.net.0)));
+                        endpoints.push((ci as u32, p.pin.clone(), p.net.0));
                     }
                 }
             }
@@ -230,14 +238,17 @@ pub fn analyze(
     }
 
     // Consumed groups per comp (through-path inputs only — endpoints are
-    // evaluated after the DP and impose no ordering).
+    // evaluated after the DP and impose no ordering), plus the input pins
+    // used for per-path arrival computation.
     let mut consumed: Vec<Vec<u32>> = vec![Vec::new(); n_comps];
+    let mut input_pins: Vec<Vec<(String, u32)>> = vec![Vec::new(); n_comps];
     for (ci, fc) in netlist.comps.iter().enumerate() {
         match roles[ci] {
             Role::Comb { .. } => {
                 for p in &fc.pins {
                     if p.dir == PinDir::In {
                         consumed[ci].push(group_of(p.net.0));
+                        input_pins[ci].push((p.pin.clone(), p.net.0));
                     }
                 }
             }
@@ -245,6 +256,7 @@ pub fn analyze(
                 for p in &fc.pins {
                     if p.pin == "addr" {
                         consumed[ci].push(group_of(p.net.0));
+                        input_pins[ci].push((p.pin.clone(), p.net.0));
                     }
                 }
             }
@@ -253,6 +265,74 @@ pub fn analyze(
         consumed[ci].sort_unstable();
         consumed[ci].dedup();
     }
+
+    // -- Per-net path-length lookups (F14: per driver→sink path) ----------
+    // net -> (driver comp -> drivers index); net -> ((sink comp, pin) ->
+    // sinks index); net -> splitter sink indices.
+    let driver_idx: Vec<BTreeMap<u32, usize>> = netlist
+        .nets
+        .iter()
+        .map(|n| {
+            n.drivers
+                .iter()
+                .enumerate()
+                .map(|(i, (c, _))| (c.0, i))
+                .collect()
+        })
+        .collect();
+    let sink_idx: Vec<BTreeMap<(u32, &str), usize>> = netlist
+        .nets
+        .iter()
+        .map(|n| {
+            n.sinks
+                .iter()
+                .enumerate()
+                .map(|(i, (c, p))| ((c.0, p.as_str()), i))
+                .collect()
+        })
+        .collect();
+    let splitter_sinks: Vec<Vec<usize>> = netlist
+        .nets
+        .iter()
+        .map(|n| {
+            n.sinks
+                .iter()
+                .enumerate()
+                .filter(|(_, (c, _))| roles[c.idx()] == Role::Splitter)
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .collect();
+    // Path length in grid units from driver `d` on net `m` to a target
+    // sink: either a specific pin (same net) or the nearest splitter tap
+    // (cross-net group member — the split side's own stub is not
+    // double-counted, module docs).
+    let path_units = |m: u32, d: u32, target: Option<(u32, &str)>| -> u32 {
+        let net = &netlist.nets[m as usize];
+        let Some(&didx) = driver_idx[m as usize].get(&d) else {
+            return net.wire_len;
+        };
+        let Some((_, per_sink)) = net
+            .sink_wire_by_driver
+            .iter()
+            .find(|(i, _)| *i == didx as u32)
+        else {
+            return net.wire_len;
+        };
+        match target {
+            Some((c, pin)) => sink_idx[m as usize]
+                .get(&(c, pin))
+                .and_then(|&si| per_sink.get(si))
+                .copied()
+                .unwrap_or(net.wire_len),
+            None => splitter_sinks[m as usize]
+                .iter()
+                .filter_map(|&si| per_sink.get(si))
+                .copied()
+                .min()
+                .unwrap_or(net.wire_len),
+        }
+    };
 
     // -- Two-counter Kahn: a group finalizes once all its drivers are
     //    processed; a comp processes once all its input groups finalized.
@@ -267,57 +347,53 @@ pub fn analyze(
     }
 
     let mut out_arrival = vec![0u64; n_comps];
-    let mut in_cause: Vec<Option<u32>> = vec![None; n_comps];
+    // The driver comp achieving each comp's max input arrival (path
+    // reconstruction; `None` for sources).
+    let mut in_driver: Vec<Option<u32>> = vec![None; n_comps];
     let mut processed = vec![false; n_comps];
-    let mut group_arrival = vec![0u64; n_nets];
-    let mut group_cause: Vec<Option<u32>> = vec![None; n_nets];
     let mut group_final = vec![false; n_nets];
 
     let mut queue: VecDeque<u32> = (0..n_comps as u32)
         .filter(|&c| pending_in[c as usize] == 0 && roles[c as usize] != Role::Splitter)
         .collect();
 
-    let finalize_group = |g: u32,
-                          processed: &[bool],
-                          out_arrival: &[u64],
-                          group_arrival: &mut [u64],
-                          group_cause: &mut [Option<u32>],
-                          group_final: &mut [bool]| {
-        debug_assert!(group_drivers[g as usize]
-            .iter()
-            .all(|&d| processed[d as usize]));
+    // Arrival at one consuming pin, per-path (F14): max over the group's
+    // non-splitter drivers of `out_arrival[driver] + driver→this-pin
+    // wire path`. Group must be finalized. Returns (arrival, driver).
+    let pin_arrival = |g: u32,
+                       consumer_net: u32,
+                       ci: u32,
+                       pin: &str,
+                       out_arrival: &[u64],
+                       group_final: &[bool]|
+     -> (u64, Option<u32>) {
+        debug_assert!(group_final[g as usize]);
         let mut best = 0u64;
-        let mut cause = None;
-        for &ni in &group_nets[g as usize] {
-            let net = &netlist.nets[ni as usize];
-            let wd = table.wire_delay(net.wire_len);
-            for (d, _) in &net.drivers {
+        let mut best_d = None;
+        for &m in &group_nets[g as usize] {
+            for (d, _) in &netlist.nets[m as usize].drivers {
                 if roles[d.idx()] == Role::Splitter {
                     continue;
                 }
-                let cand = out_arrival[d.idx()] + wd;
-                if cause.is_none() || cand > best {
+                let target = if m == consumer_net {
+                    Some((ci, pin))
+                } else {
+                    None // nearest splitter tap (module docs)
+                };
+                let cand = out_arrival[d.idx()] + table.wire_delay(path_units(m, d.0, target));
+                if best_d.is_none() || cand > best {
                     best = cand;
-                    cause = Some(d.0);
+                    best_d = Some(d.0);
                 }
             }
         }
-        group_arrival[g as usize] = best;
-        group_cause[g as usize] = cause;
-        group_final[g as usize] = true;
+        (best, best_d)
     };
 
     // Seed: groups with no (non-splitter) drivers finalize at arrival 0.
     for g in 0..n_nets as u32 {
         if pending_drivers[g as usize] == 0 && !group_nets[g as usize].is_empty() {
-            finalize_group(
-                g,
-                &processed,
-                &out_arrival,
-                &mut group_arrival,
-                &mut group_cause,
-                &mut group_final,
-            );
+            group_final[g as usize] = true;
             for &r in &group_readers[g as usize] {
                 pending_in[r as usize] -= 1;
                 if pending_in[r as usize] == 0 {
@@ -338,28 +414,32 @@ pub fn analyze(
             Role::Comb { prop } => {
                 let mut best = 0u64;
                 let mut cause = None;
-                for &g in &consumed[ci] {
-                    debug_assert!(group_final[g as usize]);
-                    let cand = group_arrival[g as usize];
+                for (pin, net) in &input_pins[ci] {
+                    let g = group_of(*net);
+                    let (cand, d) = pin_arrival(g, *net, c, pin, &out_arrival, &group_final);
                     if cause.is_none() || cand > best {
                         best = cand;
-                        cause = Some(g);
+                        cause = d;
                     }
                 }
                 (best + prop, cause)
             }
             Role::Ram { access } | Role::Rom { access } => {
-                // (A RAM/ROM always has an `addr` pin; `first` is just
-                // defensive.)
-                match consumed[ci].first() {
-                    Some(&g) => (group_arrival[g as usize] + access, Some(g)),
+                match input_pins[ci].first() {
+                    Some((pin, net)) => {
+                        let g = group_of(*net);
+                        let (arr, d) = pin_arrival(g, *net, c, pin, &out_arrival, &group_final);
+                        (arr + access, d)
+                    }
+                    // (A RAM/ROM always has an `addr` pin; empty is just
+                    // defensive.)
                     None => (0, None),
                 }
             }
             Role::EndpointOnly | Role::Splitter => (0, None), // unreachable
         };
         out_arrival[ci] = arrival;
-        in_cause[ci] = cause;
+        in_driver[ci] = cause;
         // Free groups this comp drives (dedup: several Out pins may land
         // on the same group, but the comp is counted once per group).
         let mut driven: Vec<u32> = netlist.comps[ci]
@@ -373,14 +453,7 @@ pub fn analyze(
         for g in driven {
             pending_drivers[g as usize] -= 1;
             if pending_drivers[g as usize] == 0 {
-                finalize_group(
-                    g,
-                    &processed,
-                    &out_arrival,
-                    &mut group_arrival,
-                    &mut group_cause,
-                    &mut group_final,
-                );
+                group_final[g as usize] = true;
                 for &r in &group_readers[g as usize] {
                     pending_in[r as usize] -= 1;
                     if pending_in[r as usize] == 0 {
@@ -400,9 +473,23 @@ pub fn analyze(
     }
 
     // -- Endpoints, T_sta, top-k paths ------------------------------------
-    let mut cands: Vec<(u64, u32, &str, u32)> = endpoints
+    // F13: register/RAM data-input endpoints INCLUDE the destination
+    // element's setup time (the textbook clock-period bound); DTA's
+    // settle is measured edge-to-settle instead (docs/delay-table.md).
+    let setup_of = |ci: usize| -> u64 {
+        match netlist.comps[ci].type_.as_str() {
+            "mem.register" => table.timing("mem.register", 1, None).setup,
+            "mem.ram" => table.timing("mem.ram", 1, None).setup,
+            _ => 0,
+        }
+    };
+    let mut cands: Vec<(u64, u32, &str, Option<u32>)> = endpoints
         .iter()
-        .map(|(c, pin, g)| (group_arrival[*g as usize], *c, pin.as_str(), *g))
+        .map(|(c, pin, net)| {
+            let g = group_of(*net);
+            let (arr, d) = pin_arrival(g, *net, *c, pin, &out_arrival, &group_final);
+            (arr + setup_of(*c as usize), *c, pin.as_str(), d)
+        })
         .collect();
     cands.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(b.2)));
     let t_sta = cands.first().map(|c| c.0).unwrap_or(0);
@@ -410,13 +497,14 @@ pub fn analyze(
     let top_paths = cands
         .iter()
         .take(top_k)
-        .map(|&(delay, comp, _, mut g)| {
+        .map(|&(delay, comp, _, driver)| {
             let mut path = Vec::new();
-            while let Some(d) = group_cause[g as usize] {
+            let mut cur = driver;
+            while let Some(d) = cur {
                 path.push(CompId(d));
-                match in_cause[d as usize] {
-                    Some(next) => g = next,
-                    None => break,
+                cur = in_driver[d as usize];
+                if path.len() > n_comps {
+                    break; // defensive: arrivals strictly decrease along a cause chain
                 }
             }
             StaPath {
@@ -454,7 +542,8 @@ mod tests {
     }
 
     /// r1 toggles (d ← not(q)); r1.q → not → and(+const1) → r2.d.
-    /// T_sta = not 9 + and 10 = 19, path [and, n1, r1] ending at source r1.
+    /// T_sta = not 9 + and 10 + r2 setup 15 = 34 (F13: setup-inclusive),
+    /// path [and, n1, r1] ending at source r1.
     fn pipeline_json() -> String {
         format!(
             r##"{{
@@ -484,16 +573,17 @@ mod tests {
     #[test]
     fn pipeline_matches_hand_computed() {
         let (r, nl) = sta(&pipeline_json(), 10).unwrap();
-        assert_eq!(r.t_sta, 19, "not 9 + and 10");
+        assert_eq!(r.t_sta, 34, "not 9 + and 10 + setup 15");
         let p = &r.top_paths[0];
-        assert_eq!(p.delay, 19);
+        assert_eq!(p.delay, 34);
         assert_eq!(nl.comps[p.endpoint.idx()].def_id, "r2");
         assert_eq!(names(&nl, &p.comps), ["a1", "n1", "r1"]);
     }
 
     #[test]
     fn adder32_ripple_scales_per_bit() {
-        // pin(32) → adder(+const) → register: T_sta = 15 + 31×4 = 139.
+        // pin(32) → adder(+const) → register:
+        // T_sta = 15 + 31×4 + setup 15 = 154.
         let json = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
@@ -513,7 +603,7 @@ mod tests {
         }}"##
         );
         let (r, nl) = sta(&json, 10).unwrap();
-        assert_eq!(r.t_sta, 15 + 31 * 4);
+        assert_eq!(r.t_sta, 15 + 31 * 4 + 15);
         assert_eq!(names(&nl, &r.top_paths[0].comps), ["add", "src"]);
     }
 
@@ -545,10 +635,13 @@ mod tests {
         }}"##
         );
         let (r, nl) = sta(&json, 10).unwrap();
-        assert_eq!(r.t_sta, 50, "ROM access from a register output");
+        assert_eq!(
+            r.t_sta, 50,
+            "ROM access from a register output (probe endpoint: no setup)"
+        );
         assert_eq!(names(&nl, &r.top_paths[0].comps), ["rom", "r1"]);
-        // Second-longest: wire 20 + and 10 = 30 at r1.d.
-        assert_eq!(r.top_paths[1].delay, 30);
+        // Second-longest: wire 20 + and 10 + setup 15 = 45 at r1.d.
+        assert_eq!(r.top_paths[1].delay, 45);
         assert_eq!(
             nl.comps[r.top_paths[1].endpoint.idx()].def_id,
             "r1",
@@ -581,7 +674,7 @@ mod tests {
         }}"##
         );
         let (r, _) = sta(&json, 10).unwrap();
-        assert_eq!(r.t_sta, 10, "splitter adds no delay");
+        assert_eq!(r.t_sta, 10 + 15, "splitter adds no delay; setup included");
     }
 
     #[test]

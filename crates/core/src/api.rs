@@ -101,13 +101,22 @@ pub enum NamedKind {
 }
 
 /// A component carrying a unique, validated `name` (DESIGN.md §5.2).
+///
+/// `comp_id` obeys the **CompId-on-the-wire rule** (contract v1.1): it is
+/// the component's document-order index within `circuit`'s `components`
+/// array — NOT the post-flatten engine index. Named memories/registers
+/// inside subcircuit instances are addressable by hierarchical name
+/// (`instance/.../name`, docs/autograder.md); their `circuit` is the
+/// circuit that *defines* them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamedComponent {
-    /// The unique, validated name (§5.2).
+    /// The unique, validated name (§5.2; hierarchical when nested).
     pub name: String,
     /// Component kind.
     pub kind: NamedKind,
-    /// Engine handle for the component.
+    /// Circuit whose `components` array `comp_id` indexes into.
+    pub circuit: CircuitName,
+    /// Document-order index within `circuit`'s `components` array.
     pub comp_id: CompId,
 }
 
@@ -151,17 +160,29 @@ pub struct NetChange {
     pub net: NetId,
     /// The net's new value.
     pub val: WireValue,
+    /// Simulation time (ns since run start) of the change; present in
+    /// delay mode, absent in zero mode (contract v1.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
 }
 
 /// Event: values of nets that changed. Diffs only, never full state
 /// (DESIGN.md §7.2). Consumers apply at most one batch per animation frame
 /// and may drop intermediate batches — never queue a backlog.
+///
+/// **Exception (contract v1.1):** exactly one batch — the first after
+/// `load_circuit`/`resume` — has `full: true` and contains **all** nets
+/// (unchanged nets included), so the UI can paint initial state without
+/// waiting for activity. All later batches have `full: false`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetDiffs {
     /// Cycle at which this batch was produced.
     pub cycle: u64,
     /// The nets that changed, with their new values.
     pub changes: Vec<NetChange>,
+    /// `true` exactly for the one initial batch after load/resume
+    /// (contains ALL nets — the documented exception to diff-only).
+    pub full: bool,
 }
 
 /// Event: run-state telemetry. Emitted on play/pause and ~1 Hz while running.
@@ -199,31 +220,84 @@ pub enum HaltReason {
 
 /// Event: simulation halted. `details` names the component/pin for UI
 /// highlighting.
+///
+/// **`details` format (contract v1.1):** when the halt is attributable to
+/// a component pin (floating-read), it starts with the parseable prefix
+/// `comp <CompId> pin "<pin>": <message>`. The `CompId` is document-order:
+/// the component's index within the ROOT circuit when the culprit is at
+/// root level, or the root-sheet id of the enclosing subcircuit INSTANCE
+/// when it is nested (v1 UI highlights root-sheet only). Halts with no
+/// single culprit (oscillation, event storms) use a plain message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimHalted {
     /// Cycle at which the halt occurred.
     pub cycle: u64,
     /// Why the run stopped.
     pub reason: HaltReason,
-    /// Names the component/pin for UI highlighting.
+    /// `comp <CompId> pin "<pin>": <message>` when attributable (see
+    /// above), else a plain message.
     pub details: String,
+}
+
+/// Which timing discipline a [`TimingViolation`] records (§4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViolationKind {
+    /// Data changed within `t_setup` before the clock edge.
+    Setup,
+    /// Data changed within `t_hold` after the clock edge.
+    Hold,
+}
+
+/// A setup/hold warning (DESIGN.md §4.3), contract v1.1. `comp_id` obeys
+/// the CompId-on-the-wire rule: the document-order index within `circuit`'s
+/// `components` array. For a violating component inside a subcircuit, the
+/// pair (`circuit`, `comp_id`) names the component within its defining
+/// circuit; hierarchical designs attribute violations per circuit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimingViolation {
+    /// Circuit whose `components` array `comp_id` indexes into.
+    pub circuit: CircuitName,
+    /// Document-order index of the violating component within `circuit`.
+    pub comp_id: CompId,
+    /// Which discipline was violated.
+    pub kind: ViolationKind,
+    /// Human-readable detail (offending edge time, cycle, pin).
+    pub detail: String,
+}
+
+/// One observed critical path (DTA, §4.4), contract v1.1. `comps` are
+/// document-order indices within `circuit`'s `components` array (the
+/// CompId-on-the-wire rule). A path that crosses circuit boundaries is
+/// split into consecutive per-circuit runs, one [`TimingPath`] per run,
+/// preserving order; every emitted `CompId` is then valid within the
+/// named `circuit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimingPath {
+    /// Circuit whose `components` array `comps` indexes into.
+    pub circuit: CircuitName,
+    /// The path's components, document-order indices within `circuit`,
+    /// endpoint's driver first, launching element last.
+    pub comps: Vec<CompId>,
+    /// Observed settle time (ns) of the path.
+    pub delay_ns: u64,
 }
 
 /// Event: DTA timing results (DESIGN.md §4.4), emitted after `run_until` and
 /// on pause. `t_obs` is the max observed per-cycle settle time in delay-table
-/// units (ns); `est_time` is `cycles × t_obs` (saturating); `top_paths` are
-/// the observed critical paths as component-ID sequences for UI highlighting.
+/// units (ns); `est_time` is `cycles × t_obs` (saturating); `violations` is
+/// the setup/hold warning list (the count is its length); `top_paths` are
+/// the observed critical paths for UI highlighting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimingUpdate {
     /// Max observed per-cycle settle time in delay-table units (ns).
     pub t_obs: u64,
     /// `cycles × t_obs` (saturating).
     pub est_time: u64,
-    /// Setup/hold warning count (§4.3).
-    pub violations: u64,
-    /// Observed critical paths as component-ID sequences, for UI
-    /// highlighting.
-    pub top_paths: Vec<Vec<CompId>>,
+    /// Setup/hold warnings (§4.3); the count is the list length.
+    pub violations: Vec<TimingViolation>,
+    /// Observed critical paths, grouped per circuit, for UI highlighting.
+    pub top_paths: Vec<TimingPath>,
 }
 
 /// Sink for engine events. The Tauri shell implements this by emitting Tauri
@@ -239,7 +313,19 @@ pub trait EventSink: Send {
     fn timing(&mut self, timing: &TimingUpdate);
 }
 
-/// The simulation session API. One instance per open circuit.
+/// The simulation session API. One instance per open circuit, implemented
+/// by [`crate::session::Session`].
+///
+/// **Semantics (contract v1.1):**
+///
+/// - Exactly one *full* [`NetDiffs`] batch (`full: true`, all nets) is
+///   emitted after each successful `load_circuit_*`/`resume`/`reset`;
+///   every later batch is diff-only (`full: false`).
+/// - A *tick* is one clock half-period in delay mode (advance to the next
+///   clock edge) and one full cycle in zero mode.
+/// - `CompId`s on the wire are always document-order indices within the
+///   referenced circuit (see [`NamedComponent`]); engine-internal
+///   flattened ids are mapped back at the boundary.
 ///
 /// Default bodies are `unimplemented!()` scaffolding (task B0); the engine
 /// fills them in across tasks B2–B6. Callers must not rely on defaults.
@@ -307,6 +393,17 @@ pub trait Sim {
     fn resume(&mut self, path: &str) {
         unimplemented!("csim-core engine — BACKEND.md task B5")
     }
+
+    /// Re-power-on the simulation and re-apply every memory's `autoload`
+    /// image (DESIGN.md §5.2, goal G6: reset reloads the program).
+    /// `contents` attributes are part of the document and re-apply through
+    /// the rebuild; file `autoload`s are re-read (resolving relative to
+    /// the circuit file's directory, sandboxed per §11; a session loaded
+    /// from bytes has no base path and resolves against the current
+    /// working directory). Emits a fresh full [`NetDiffs`] batch.
+    fn reset(&mut self) {
+        unimplemented!("csim-core engine — contract v1.1")
+    }
 }
 
 #[cfg(test)]
@@ -339,15 +436,34 @@ mod tests {
                     x: String::new(),
                     z: String::new(),
                 },
+                at: None,
             }],
+            full: false,
         };
         let json = serde_json::to_string(&diffs).unwrap();
         assert_eq!(
             json,
-            r#"{"cycle":42,"changes":[{"net":7,"val":{"v":"1","x":"","z":""}}]}"#
+            r#"{"cycle":42,"changes":[{"net":7,"val":{"v":"1","x":"","z":""}}],"full":false}"#
         );
         let back: NetDiffs = serde_json::from_str(&json).unwrap();
         assert_eq!(diffs, back);
+
+        // `at` present (delay mode) and a full (initial) batch.
+        let initial = NetDiffs {
+            cycle: 0,
+            changes: vec![NetChange {
+                net: NetId(0),
+                val: WireValue::default(),
+                at: Some(20),
+            }],
+            full: true,
+        };
+        let json = serde_json::to_string(&initial).unwrap();
+        assert_eq!(
+            json,
+            r#"{"cycle":0,"changes":[{"net":0,"val":{"v":"","x":"","z":""},"at":20}],"full":true}"#
+        );
+        assert_eq!(initial, serde_json::from_str(&json).unwrap());
 
         // Enum wire spellings must match the contract exactly.
         assert_eq!(
@@ -359,5 +475,34 @@ mod tests {
             r#""floating-read""#
         );
         assert_eq!(serde_json::to_string(&NamedKind::Ram).unwrap(), r#""ram""#);
+        assert_eq!(
+            serde_json::to_string(&ViolationKind::Setup).unwrap(),
+            r#""setup""#
+        );
+    }
+
+    #[test]
+    fn timing_payloads_roundtrip() {
+        let update = TimingUpdate {
+            t_obs: 39,
+            est_time: 117,
+            violations: vec![TimingViolation {
+                circuit: "main".into(),
+                comp_id: CompId(4),
+                kind: ViolationKind::Hold,
+                detail: "d changed 3 ns after the edge".into(),
+            }],
+            top_paths: vec![TimingPath {
+                circuit: "main".into(),
+                comps: vec![CompId(4), CompId(2)],
+                delay_ns: 39,
+            }],
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert_eq!(
+            json,
+            r#"{"t_obs":39,"est_time":117,"violations":[{"circuit":"main","comp_id":4,"kind":"hold","detail":"d changed 3 ns after the edge"}],"top_paths":[{"circuit":"main","comps":[4,2],"delay_ns":39}]}"#
+        );
+        assert_eq!(update, serde_json::from_str(&json).unwrap());
     }
 }

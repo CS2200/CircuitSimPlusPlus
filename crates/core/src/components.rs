@@ -948,7 +948,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
             }
             if let Some(contents) = &contents {
-                match crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
+                match crate::format::rle::parse(contents, depth as usize) {
                     Err(e) => c_issue(&mut c, format!("attr 'contents': {e}")),
                     Ok(words) => {
                         if b < 64 {
@@ -998,7 +998,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
             }
             if let Some(contents) = &contents {
-                match crate::format::rle::parse(contents, MAX_MEM_DEPTH as usize) {
+                match crate::format::rle::parse(contents, depth as usize) {
                     Err(e) => c_issue(&mut c, format!("attr 'contents': {e}")),
                     Ok(words) => {
                         if b < 64 {
@@ -1227,6 +1227,26 @@ mod tests {
         let (_, e) = pins("mem.ram", json!({"contents": "3-0f-2"}));
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("contents"));
+    }
+
+    #[test]
+    fn contents_longer_than_depth_is_a_load_error() {
+        // F3: was previously validated against MAX_MEM_DEPTH and then
+        // silently zeroed at engine build — now a clean load error.
+        for t in ["mem.ram", "mem.rom"] {
+            let (_, e) = pins(
+                t,
+                json!({"bitsize": 8, "depth": 2, "contents": "aa bb cc dd"}),
+            );
+            assert_eq!(e.len(), 1, "{t}");
+            assert!(e[0].message.contains("exceeding"), "{:?}", e[0].message);
+        }
+        // Exactly-depth contents are fine.
+        let (_, e) = pins(
+            "mem.rom",
+            json!({"bitsize": 8, "depth": 2, "contents": "aa bb"}),
+        );
+        assert!(e.is_empty(), "{e:?}");
     }
 
     #[test]

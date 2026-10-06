@@ -815,19 +815,27 @@ impl Behavior {
     }
 
     /// Bulk-load a memory image (autoload / `--load`, tasks B9/B10).
-    /// Extra words are ignored; missing words are zero.
-    pub fn load_words(&mut self, image: &[u64]) {
+    /// Extra words are ignored; missing words keep their previous value.
+    /// Never panics (§11): a word wider than the memory's bitsize is a
+    /// clean error naming the offending word (F1).
+    pub fn load_words(&mut self, image: &[u64]) -> Result<(), String> {
         let words = match &mut self.kind {
             BehaviorKind::Ram { words, .. } | BehaviorKind::Rom { words, .. } => words,
-            _ => return,
+            _ => return Ok(()),
         };
         for (i, w) in image.iter().enumerate() {
             if i >= words.len() {
                 break;
             }
             let bitsize = words[i].width();
+            if bitsize < 64 && (*w >> bitsize) != 0 {
+                return Err(format!(
+                    "image word {i} ({w:#x}) does not fit in {bitsize} bits"
+                ));
+            }
             words[i] = Value::from_u64(bitsize, *w);
         }
+        Ok(())
     }
 
     /// The `autoload` path of a memory (resolved/sandboxed by the loader,
@@ -1580,7 +1588,7 @@ mod tests {
         );
         // Bulk image load (autoload / --load path).
         let mut ram = mk("mem.ram", json!({"bitsize": 8, "depth": 4}));
-        ram.load_words(&[1, 2, 3, 4, 5]); // extra ignored
+        ram.load_words(&[1, 2, 3, 4, 5]).unwrap(); // extra ignored
         assert_eq!(ram.memory_word(3), Some(k(8, 4)));
         ram.set_memory_word(1, k(8, 0xEE));
         assert_eq!(ram.memory_word(1), Some(k(8, 0xEE)));

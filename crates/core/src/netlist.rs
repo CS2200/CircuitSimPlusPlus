@@ -167,12 +167,18 @@ pub struct Net {
     pub sinks: Vec<(CompId, String)>,
     /// Total drawn wire length on this net, in grid units (sum of the
     /// polylines of every wire merged into the net, across all inlined
-    /// expansions). The delay-aware engine turns this into a transport
-    /// delay via the delay table's wire constant (§4.3); wires without
-    /// drawn `points` contribute the Manhattan distance between their
-    /// endpoint components' positions (a coarse approximation — the
-    /// frontend always saves drawn paths).
+    /// expansions). Kept for STA's structural estimates and documentation;
+    /// the delay-aware engine uses the per-sink path delays below.
     pub wire_len: u32,
+    /// Per-sink transport delay in grid units, aligned with `sinks`:
+    /// the shortest path through the net's wire graph from the nearest
+    /// driver to that sink (contract v1.1, F14 — unused stub branches do
+    /// not inflate other sinks' delays).
+    pub sink_wire_units: Vec<u32>,
+    /// Per-driver, per-sink path lengths in grid units (STA's per-path
+    /// structural arrivals): `sink_wire_by_driver[i]` is the driver list
+    /// index into `drivers` and the per-sink vector aligned with `sinks`.
+    pub sink_wire_by_driver: Vec<(u32, Vec<u32>)>,
 }
 
 /// The flattened design: primitive instances + derived nets + named access.
@@ -183,12 +189,53 @@ pub struct Netlist {
     /// Derived nets; indexed by `NetId`.
     pub nets: Vec<Net>,
     /// Autograder-visible named components (RAM/ROM/register/probe); §8.2.
+    /// `comp_id` is the DOCUMENT-ORDER index within `circuit` (contract
+    /// v1.1); engines must use [`Netlist::named_flat`] instead.
     pub named: Vec<NamedComponent>,
+    /// Engine (post-flatten) ids parallel to [`Netlist::named`]; internal.
+    pub named_flat: Vec<CompId>,
     /// Root-circuit wire segments per net, for UI net highlighting.
     pub net_map: Vec<NetMapEntry>,
     /// Index of the root circuit in the document's `circuits` array (see
     /// [`root_circuit`]).
     pub root: usize,
+}
+
+impl Netlist {
+    /// Engine (post-flatten) id of a named component — the internal
+    /// companion of the contract-facing [`Netlist::named`] registry.
+    pub fn named_engine_id(&self, name: &str) -> Option<CompId> {
+        self.named
+            .iter()
+            .position(|n| n.name == name)
+            .map(|i| self.named_flat[i])
+    }
+
+    /// Map an engine (post-flatten) component to its document identity:
+    /// the circuit that defines it and its document-order index within
+    /// that circuit's `components` array (contract v1.1 CompId rule).
+    pub fn doc_id(&self, flat: CompId) -> (CircuitName, CompId) {
+        let fc = &self.comps[flat.idx()];
+        (fc.def_circuit.clone(), CompId(fc.def_idx as u32))
+    }
+
+    /// Map an engine component to the document-order id used in
+    /// `sim_halted.details` (contract v1.1): its own index when it lives
+    /// in the root circuit, else the root-circuit index of the enclosing
+    /// subcircuit INSTANCE (v1 UI highlights root-sheet only).
+    pub fn root_sheet_comp(&self, flat: CompId) -> CompId {
+        let fc = &self.comps[flat.idx()];
+        if fc.inst_path.is_empty() {
+            return CompId(fc.def_idx as u32);
+        }
+        let top = fc.inst_path.split('/').next().unwrap_or("");
+        // The first path segment is a component id in the root circuit.
+        self.comps
+            .iter()
+            .find(|c| c.inst_path.is_empty() && c.def_id == top)
+            .map(|c| CompId(c.def_idx as u32))
+            .unwrap_or(CompId(fc.def_idx as u32))
+    }
 }
 
 /// Build a netlist from a validated document (instance cap §11).
@@ -220,6 +267,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         insts,
         root_wire_nodes,
         wire_len_nodes,
+        wire_recs,
         ..
     } = ex;
 
@@ -228,9 +276,12 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
     let mut nets: Vec<Net> = Vec::new();
     let mut pin_widths: Vec<Vec<(u32, CompId, String)>> = Vec::new(); // per net
     let mut comps: Vec<FlatComp> = Vec::with_capacity(insts.len());
+    // UF terminal node per (comp, pin slot) — the wire graph's endpoints.
+    let mut terminal_of: Vec<Vec<u32>> = Vec::with_capacity(insts.len());
 
     for (inst_idx, inst) in insts.iter().enumerate() {
         let comp_id = CompId(inst_idx as u32);
+        terminal_of.push(inst.pin_nodes.clone());
         let mut pins = Vec::with_capacity(inst.sigs.len());
         for (pidx, sig) in inst.sigs.iter().enumerate() {
             let class = uf.find(inst.pin_nodes[pidx]);
@@ -242,6 +293,8 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
                     drivers: Vec::new(),
                     sinks: Vec::new(),
                     wire_len: 0,
+                    sink_wire_units: Vec::new(),
+                    sink_wire_by_driver: Vec::new(),
                 });
                 pin_widths.push(Vec::new());
                 NetId(nets.len() as u32 - 1)
@@ -284,6 +337,18 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         }
     }
 
+    // ---- Per-sink wire path lengths (contract v1.1, F14): build each
+    // net's wire graph (pins + junction nodes, segments as weighted
+    // edges) and compute driver→sink shortest paths.
+    {
+        let mut graphs = WireGraphs {
+            uf: &mut uf,
+            recs: &wire_recs,
+            net_of_root: &net_of_root,
+        };
+        graphs.compute(&mut nets, &comps, &terminal_of);
+    }
+
     // ---- Checks: bitsize agreement, floating.
     let mut errors = Vec::new();
     for (nidx, votes) in pin_widths.iter().enumerate() {
@@ -317,8 +382,11 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         return Err(errors);
     }
 
-    // ---- Named access (hierarchical names; §8.2).
+    // ---- Named access (hierarchical names; §8.2). The wire-facing
+    // `comp_id` is the DOCUMENT-ORDER index within the defining circuit
+    // (contract v1.1); `named_flat` keeps the engine ids in parallel.
     let mut named = Vec::new();
+    let mut named_flat = Vec::new();
     for (inst_idx, inst) in insts.iter().enumerate() {
         let kind = match inst.type_.as_str() {
             "mem.ram" => Some(NamedKind::Ram),
@@ -336,8 +404,10 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
             named.push(NamedComponent {
                 name,
                 kind,
-                comp_id: CompId(inst_idx as u32),
+                circuit: inst.def_circuit.clone(),
+                comp_id: CompId(inst.def_idx as u32),
             });
+            named_flat.push(CompId(inst_idx as u32));
         }
     }
 
@@ -360,9 +430,74 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         comps,
         nets,
         named,
+        named_flat,
         net_map,
         root,
     })
+}
+
+/// Collect every memory (`mem.ram`/`mem.rom`) carrying a nonempty
+/// `autoload` attr, addressed by its **hierarchical** name (contract
+/// v1.1, F12 — e.g. `u1/imem` for a memory nested in an instance), with
+/// its raw autoload path. Paths are resolved/sandboxed by the caller
+/// (the CLI owns file access, §11). Shares the expander's traversal, so
+/// names always match the netlist's `named` registry.
+pub fn autoload_memories(doc: &Document) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Some(root) = root_circuit(doc) else {
+        return out;
+    };
+    let circuit_by_name: BTreeMap<&str, usize> = doc
+        .circuits
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.name.as_str(), i))
+        .collect();
+    let mut stack: Vec<(usize, String)> = vec![(root, String::new())];
+    let mut visited_guard = 0usize;
+    while let Some((cidx, path)) = stack.pop() {
+        // The hierarchy is acyclic (validated); the guard only protects
+        // the lenient unvalidated path.
+        visited_guard += 1;
+        if visited_guard > 1_000_000 {
+            break;
+        }
+        let mut children = Vec::new();
+        for comp in &doc.circuits[cidx].components {
+            if comp.type_ == "subcircuit" {
+                if let Some(target) = comp.attrs.get("circuit").and_then(|v| v.as_str()) {
+                    if let Some(&tidx) = circuit_by_name.get(target) {
+                        let child = if path.is_empty() {
+                            comp.id.clone()
+                        } else {
+                            format!("{path}/{}", comp.id)
+                        };
+                        children.push((tidx, child));
+                    }
+                }
+                continue;
+            }
+            if !matches!(comp.type_.as_str(), "mem.ram" | "mem.rom") || comp.name.is_empty() {
+                continue;
+            }
+            if let Some(auto) = comp.attrs.get("autoload").and_then(|v| v.as_str()) {
+                if auto.is_empty() {
+                    continue;
+                }
+                let name = if path.is_empty() {
+                    comp.name.clone()
+                } else {
+                    format!("{path}/{}", comp.name)
+                };
+                out.push((name, auto.to_string()));
+            }
+        }
+        // Document order: the stack pops last-in-first-out.
+        for child in children.into_iter().rev() {
+            stack.push(child);
+        }
+    }
+    out
 }
 
 /// A primitive instance under construction (pins already have UF nodes).
@@ -390,6 +525,42 @@ struct Expander<'a> {
     /// (UF node, drawn length) per processed wire, for per-net transport
     /// delays (§4.3) — attributed to nets after union-find completes.
     wire_len_nodes: Vec<(u32, u32)>,
+    /// One record per processed wire (all expansions), for the per-sink
+    /// wire graph (F14).
+    wire_recs: Vec<WireRec>,
+}
+
+/// One endpoint of a [`WireRec`].
+#[derive(Debug, Clone, Copy)]
+enum RecEnd {
+    /// Unresolvable reference (lenient path; validation reports it).
+    None,
+    /// A pin's UF terminal node.
+    Pin(u32),
+    /// Junction onto `segment` of the wire with this record index
+    /// (absolute within `Expander::wire_recs`).
+    Join(usize, u32),
+}
+
+/// A processed wire's geometry for path-length computation.
+#[derive(Debug, Clone)]
+struct WireRec {
+    /// Raw endpoints.
+    a: RecEnd,
+    /// Raw endpoints.
+    b: RecEnd,
+    /// Resolved terminals used for the union (as before), either end.
+    resolved: Option<u32>,
+    /// Per-segment drawn lengths in grid units (polyline Manhattan, or
+    /// the endpoint-distance fallback as a single segment).
+    segs: Vec<u32>,
+}
+
+impl WireRec {
+    /// Total drawn length.
+    fn len(&self) -> u32 {
+        self.segs.iter().sum()
+    }
 }
 
 impl<'a> Expander<'a> {
@@ -408,6 +579,7 @@ impl<'a> Expander<'a> {
             errors: Vec::new(),
             root_wire_nodes: Vec::new(),
             wire_len_nodes: Vec::new(),
+            wire_recs: Vec::new(),
         }
     }
 
@@ -521,13 +693,21 @@ impl<'a> Expander<'a> {
         }
 
         for wire in &circuit.wires {
+            let rec_base = self.wire_recs.len();
             let na = endpoint_node(circuit, &comp_idx_by_id, &local, &wire.a);
             let nb = endpoint_node(circuit, &comp_idx_by_id, &local, &wire.b);
             if let (Some(a), Some(b)) = (na, nb) {
                 self.uf.union(a, b);
             }
+            let segs = wire_segments(circuit, &comp_idx_by_id, wire);
+            let len: u32 = segs.iter().sum();
+            self.wire_recs.push(WireRec {
+                a: endpoint_raw(&comp_idx_by_id, &local, &wire.a, rec_base),
+                b: endpoint_raw(&comp_idx_by_id, &local, &wire.b, rec_base),
+                resolved: na.or(nb),
+                segs,
+            });
             if let Some(node) = na.or(nb) {
-                let len = wire_length(circuit, &comp_idx_by_id, wire);
                 if len > 0 {
                     self.wire_len_nodes.push((node, len));
                 }
@@ -541,31 +721,49 @@ impl<'a> Expander<'a> {
     }
 }
 
-/// Drawn length of a wire in grid units: polyline Manhattan length when
-/// `points` are present; otherwise the Manhattan distance between the two
-/// endpoint components' positions (0 when unresolvable, e.g. a bare join
-/// with no drawn path).
-fn wire_length(
+/// Per-segment drawn lengths of a wire in grid units (polyline Manhattan
+/// per consecutive `points` pair; a single fallback segment when `points`
+/// is empty, per the Manhattan endpoint-distance rule — see
+/// docs/delay-table.md).
+fn wire_segments(
     circuit: &Circuit,
     by_id: &BTreeMap<&str, usize>,
     wire: &crate::format::Wire,
-) -> u32 {
-    let manhattan = |pts: &[[i32; 2]]| -> u32 {
-        pts.windows(2)
-            .map(|w| w[0][0].abs_diff(w[1][0]) + w[0][1].abs_diff(w[1][1]))
-            .sum()
-    };
+) -> Vec<u32> {
     if wire.points.len() >= 2 {
-        return manhattan(&wire.points);
+        return wire
+            .points
+            .windows(2)
+            .map(|w| w[0][0].abs_diff(w[1][0]) + w[0][1].abs_diff(w[1][1]))
+            .collect();
     }
     let pos = |ep: &Endpoint| -> Option<[i32; 2]> {
         let p = ep.as_pin()?;
         let idx = *by_id.get(p.0)?;
         Some(circuit.components[idx].pos)
     };
-    match (pos(&wire.a), pos(&wire.b)) {
+    let len = match (pos(&wire.a), pos(&wire.b)) {
         (Some(a), Some(b)) => a[0].abs_diff(b[0]) + a[1].abs_diff(b[1]),
         _ => 0,
+    };
+    vec![len]
+}
+
+/// Raw endpoint extraction for the wire graph (joins kept as references,
+/// unlike [`endpoint_node`] which resolves them to a terminal).
+fn endpoint_raw(
+    by_id: &BTreeMap<&str, usize>,
+    local: &BTreeMap<(usize, String), u32>,
+    ep: &Endpoint,
+    rec_base: usize,
+) -> RecEnd {
+    match ep {
+        Endpoint::Pin(p) => by_id
+            .get(p.comp.as_str())
+            .and_then(|&i| local.get(&(i, p.pin.clone())))
+            .map(|&n| RecEnd::Pin(n))
+            .unwrap_or(RecEnd::None),
+        Endpoint::Join(j) => RecEnd::Join(rec_base + j.join.wire as usize, j.join.segment),
     }
 }
 
@@ -584,6 +782,178 @@ fn endpoint_node(
         }
         Endpoint::Join(j) => resolve_join(circuit, by_id, local, j.join.wire as usize),
     }
+}
+
+/// Per-net wire graphs: driver→sink shortest-path lengths through the
+/// drawn geometry (contract v1.1, F14 — per-path wire delays).
+///
+/// Nodes are pin UF-terminals plus synthesized junction nodes; edges are
+/// wire (sub-)segments weighted by drawn length. A junction onto segment
+/// `s` of a target wire attaches at the segment's MIDPOINT (uniform
+/// assumption — the format does not record an intra-segment position;
+/// documented in docs/delay-table.md).
+struct WireGraphs<'a> {
+    uf: &'a mut Uf,
+    recs: &'a [WireRec],
+    net_of_root: &'a BTreeMap<u32, NetId>,
+}
+
+impl WireGraphs<'_> {
+    fn compute(&mut self, nets: &mut [Net], comps: &[FlatComp], terminal_of: &[Vec<u32>]) {
+        let n_uf = self.uf.parent.len() as u32;
+        let n_recs = self.recs.len();
+
+        // -- Junction nodes + split points per target wire ----------------
+        let mut join_node: Vec<[Option<u32>; 2]> = vec![[None; 2]; n_recs];
+        let mut splits: Vec<Vec<(u32, u32)>> = vec![Vec::new(); n_recs];
+        let mut next = n_uf;
+        for (i, rec) in self.recs.iter().enumerate() {
+            for (end, ep) in [rec.a, rec.b].into_iter().enumerate() {
+                if let RecEnd::Join(target, seg) = ep {
+                    let jn = next;
+                    next += 1;
+                    join_node[i][end] = Some(jn);
+                    if target < n_recs {
+                        let trec = &self.recs[target];
+                        let mut d = 0u32;
+                        for (si, s) in trec.segs.iter().enumerate() {
+                            if si == seg as usize {
+                                d += s / 2; // segment midpoint (module docs)
+                                break;
+                            }
+                            d += s;
+                        }
+                        splits[target].push((d.min(trec.len()), jn));
+                    }
+                }
+            }
+        }
+        for s in &mut splits {
+            s.sort_unstable();
+        }
+
+        // -- Edges per rec (split chains), attributed to a net class ------
+        // (u, v, weight, net).
+        let mut per_net: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); nets.len()];
+        let end_node = |i: usize, end: usize| -> Option<u32> {
+            match if end == 0 {
+                self.recs[i].a
+            } else {
+                self.recs[i].b
+            } {
+                RecEnd::None => None,
+                RecEnd::Pin(t) => Some(t),
+                RecEnd::Join(..) => join_node[i][end],
+            }
+        };
+        for (i, rec) in self.recs.iter().enumerate() {
+            let Some(resolved) = rec.resolved else {
+                continue;
+            };
+            let class = self.uf.find(resolved);
+            let Some(&net) = self.net_of_root.get(&class) else {
+                continue;
+            };
+            let (ea, eb) = (end_node(i, 0), end_node(i, 1));
+            let len = rec.len();
+            if splits[i].is_empty() {
+                if let (Some(a), Some(b)) = (ea, eb) {
+                    per_net[net.idx()].push((a, b, len));
+                }
+                continue;
+            }
+            // Chain: a-end → splits (sorted by distance) → b-end.
+            let mut prev_node = ea;
+            let mut prev_d = 0u32;
+            let mut chain: Vec<(Option<u32>, u32)> =
+                splits[i].iter().map(|&(d, jn)| (Some(jn), d)).collect();
+            chain.push((eb, len));
+            for (node, d) in chain {
+                if let (Some(u), Some(v)) = (prev_node, node) {
+                    per_net[net.idx()].push((u, v, d.saturating_sub(prev_d)));
+                }
+                prev_node = node;
+                prev_d = d;
+            }
+        }
+
+        // -- Per net: adjacency + Dijkstra from each driver ---------------
+        let terminal = |comps: &[FlatComp], c: CompId, pin: &str| -> Option<u32> {
+            let slot = comps[c.idx()].pins.iter().position(|p| p.pin == pin)?;
+            terminal_of.get(c.idx()).and_then(|t| t.get(slot)).copied()
+        };
+        for net in nets.iter_mut() {
+            let mut adj: BTreeMap<u32, Vec<(u32, u32)>> = BTreeMap::new();
+            for &(u, v, w) in &per_net[net.id.idx()] {
+                adj.entry(u).or_default().push((v, w));
+                adj.entry(v).or_default().push((u, w));
+            }
+            let sinks: Vec<Option<u32>> = net
+                .sinks
+                .iter()
+                .map(|(c, p)| terminal(comps, *c, p))
+                .collect();
+            let mut min_per_sink = vec![u32::MAX; sinks.len()];
+            let mut by_driver = Vec::with_capacity(net.drivers.len());
+            for (didx, (dc, dp)) in net.drivers.iter().enumerate() {
+                let Some(dt) = terminal(comps, *dc, dp) else {
+                    continue;
+                };
+                let dist = dijkstra(&adj, dt);
+                let mut per_sink = Vec::with_capacity(sinks.len());
+                for (si, st) in sinks.iter().enumerate() {
+                    let d = st.and_then(|st| dist.get(&st)).copied();
+                    if let Some(d) = d {
+                        min_per_sink[si] = min_per_sink[si].min(d);
+                        per_sink.push(d);
+                    } else {
+                        per_sink.push(u32::MAX);
+                    }
+                }
+                by_driver.push((didx as u32, per_sink));
+            }
+            let fallback = net.wire_len;
+            net.sink_wire_units = min_per_sink
+                .iter()
+                .map(|&d| if d == u32::MAX { fallback } else { d })
+                .collect();
+            net.sink_wire_by_driver = by_driver
+                .into_iter()
+                .map(|(didx, ds)| {
+                    (
+                        didx,
+                        ds.into_iter()
+                            .map(|d| if d == u32::MAX { fallback } else { d })
+                            .collect(),
+                    )
+                })
+                .collect();
+        }
+    }
+}
+
+/// Dijkstra shortest paths from `src` over a small weighted graph
+/// (adjacency lists). Deterministic: integer weights, `BTreeMap` storage.
+fn dijkstra(adj: &BTreeMap<u32, Vec<(u32, u32)>>, src: u32) -> BTreeMap<u32, u32> {
+    use std::cmp::Reverse;
+    let mut dist = BTreeMap::from([(src, 0u32)]);
+    let mut heap = std::collections::BinaryHeap::new();
+    heap.push(Reverse((0u32, src)));
+    while let Some(Reverse((d, u))) = heap.pop() {
+        if dist.get(&u).is_some_and(|&best| d > best) {
+            continue;
+        }
+        if let Some(edges) = adj.get(&u) {
+            for &(v, w) in edges {
+                let nd = d.saturating_add(w);
+                if dist.get(&v).is_none_or(|&best| nd < best) {
+                    dist.insert(v, nd);
+                    heap.push(Reverse((nd, v)));
+                }
+            }
+        }
+    }
+    dist
 }
 
 /// A junction electrically connects to the joined wire's net: resolve to
@@ -913,6 +1283,34 @@ mod tests {
         // sink but no driver → floating (runtime will halt on consume, §4.1).
         assert!(nl.nets[0].floating);
         assert_eq!(nl.nets[0].sinks.len(), 1);
+    }
+
+    #[test]
+    fn autoload_memories_are_hierarchical() {
+        // F12: a memory inside a subcircuit instance is addressed by its
+        // hierarchical name (`u1/imem`), matching the `named` registry.
+        let json = header(
+            r##"{"name":"chip","components":[
+                {"id":"m","type":"mem.ram","pos":[0,0],"name":"imem",
+                 "attrs":{"bitsize":32,"depth":16,"autoload":"prog.hex"}}
+            ]},
+            {"name":"main","components":[
+                {"id":"u1","type":"subcircuit","pos":[0,0],"attrs":{"circuit":"chip"}},
+                {"id":"u2","type":"subcircuit","pos":[0,4],"attrs":{"circuit":"chip"}},
+                {"id":"t","type":"mem.rom","pos":[4,0],"name":"top",
+                 "attrs":{"bitsize":32,"depth":16,"autoload":"top.hex"}}
+            ]}"##,
+        );
+        let doc = crate::format::load_document(json.as_bytes()).unwrap();
+        let loads = autoload_memories(&doc);
+        assert_eq!(
+            loads,
+            vec![
+                ("top".to_string(), "top.hex".to_string()),
+                ("u1/imem".to_string(), "prog.hex".to_string()),
+                ("u2/imem".to_string(), "prog.hex".to_string()),
+            ]
+        );
     }
 
     #[test]

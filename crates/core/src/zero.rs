@@ -48,7 +48,7 @@ use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-use crate::api::{HaltReason, LoadError, NamedKind, NetId};
+use crate::api::{CompId, HaltReason, LoadError, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead};
 use crate::components::PinDir;
 use crate::netlist::Netlist;
@@ -284,7 +284,7 @@ impl ZeroEngine {
     /// [`ZeroEngine::memory_word`].
     pub fn named_value(&self, name: &str) -> Option<Value> {
         let named = self.netlist.named.iter().find(|n| n.name == name)?;
-        let ci = named.comp_id.idx();
+        let ci = self.netlist.named_engine_id(name)?.idx();
         match named.kind {
             NamedKind::Register => self.comps[ci].register_value().cloned(),
             NamedKind::Probe => {
@@ -301,7 +301,7 @@ impl ZeroEngine {
         let named = self.netlist.named.iter().find(|n| n.name == name)?;
         match named.kind {
             NamedKind::Ram | NamedKind::Rom => {
-                self.comps[named.comp_id.idx()].memory_word(addr as usize)
+                self.comps[self.netlist.named_engine_id(name)?.idx()].memory_word(addr as usize)
             }
             _ => None,
         }
@@ -315,21 +315,30 @@ impl ZeroEngine {
         if named.kind != NamedKind::Ram {
             return false;
         }
-        self.comps[named.comp_id.idx()].set_memory_word(addr as usize, v);
+        let Some(ci) = self.netlist.named_engine_id(name) else {
+            return false;
+        };
+        self.comps[ci.idx()].set_memory_word(addr as usize, v);
         true
     }
 
     /// Bulk-load a named memory's image (autoload/`--load`, task B9).
-    pub fn load_memory_image(&mut self, name: &str, image: &[u64]) -> bool {
+    /// `Ok(false)` = no such named memory; `Err` = image error (F1 —
+    /// e.g. a word wider than the memory's bitsize; never panics).
+    pub fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
         let Some(named) = self.netlist.named.iter().find(|n| n.name == name) else {
-            return false;
+            return Ok(false);
         };
         match named.kind {
             NamedKind::Ram | NamedKind::Rom => {
-                self.comps[named.comp_id.idx()].load_words(image);
-                true
+                let ci = self
+                    .netlist
+                    .named_engine_id(name)
+                    .expect("named_flat is parallel to named");
+                self.comps[ci.idx()].load_words(image)?;
+                Ok(true)
             }
-            _ => false,
+            _ => Ok(false),
         }
     }
 
@@ -345,6 +354,23 @@ impl ZeroEngine {
             return Ok(false);
         };
         self.comps[fc.id.idx()].set_pin_value(v);
+        self.settle()?;
+        Ok(true)
+    }
+
+    /// Press/release a named root button (interactive poking). Settles
+    /// afterwards so the change is visible in net values.
+    pub fn poke_button(&mut self, name: &str, pressed: bool) -> Result<bool, Halt> {
+        let Some(fc) = self
+            .netlist
+            .comps
+            .iter()
+            .find(|c| c.type_ == "io.button" && c.name.as_deref() == Some(name))
+        else {
+            return Ok(false);
+        };
+        let id = fc.id;
+        self.comps[id.idx()].set_pressed(pressed);
         self.settle()?;
         Ok(true)
     }
@@ -435,8 +461,9 @@ impl ZeroEngine {
     }
 
     /// The single-sweep settle + bounded fixed-point iteration over the
-    /// residue (module docs).
-    fn settle(&mut self) -> Result<(), Halt> {
+    /// residue (module docs). Public so the session layer (contract v1.1)
+    /// can settle once to paint initial state.
+    pub fn settle(&mut self) -> Result<(), Halt> {
         let Self {
             netlist,
             comps,
@@ -447,10 +474,16 @@ impl ZeroEngine {
             cycle,
             ..
         } = self;
+        // Contract v1.1 details format: `comp <id> pin "<pin>": <message>`
+        // with the root-sheet document-order id (see api::SimHalted).
         let halt = |c: u32, fr: FloatingRead| Halt {
             reason: HaltReason::FloatingRead,
             cycle: *cycle,
-            details: format!("{}: pin '{}'", netlist.comps[c as usize].origin(), fr.pin),
+            details: format!(
+                "comp {} pin \"{}\": floating (Z) value consumed",
+                netlist.root_sheet_comp(CompId(c)),
+                fr.pin
+            ),
         };
         for &c in order.iter() {
             eval_comp(netlist, net_drivers, comps, drives, c).map_err(|fr| halt(c, fr))?;
@@ -520,7 +553,11 @@ impl ZeroEngine {
             self.comps[ci].rising_edge(&ins_refs).map_err(|fr| Halt {
                 reason: HaltReason::FloatingRead,
                 cycle: self.cycle,
-                details: format!("{}: pin '{}'", fc.origin(), fr.pin),
+                details: format!(
+                    "comp {} pin \"{}\": floating (Z) value consumed",
+                    self.netlist.root_sheet_comp(CompId(ci as u32)),
+                    fr.pin
+                ),
             })?;
         }
         if self.clock_phase {
@@ -689,7 +726,11 @@ mod tests {
         let mut eng = engine(json);
         let halt = eng.step_tick().expect_err("must halt");
         assert_eq!(halt.reason, HaltReason::FloatingRead);
-        assert_eq!(halt.details, "main: g: pin 'in1'");
+        // Contract v1.1 details: root-sheet document-order comp id.
+        assert_eq!(
+            halt.details,
+            r#"comp 1 pin "in1": floating (Z) value consumed"#
+        );
     }
 
     #[test]

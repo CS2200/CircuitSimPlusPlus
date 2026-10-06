@@ -33,17 +33,22 @@ enum Cmd {
         /// Circuit file (.csx).
         file: PathBuf,
     },
-    /// Timing analysis: informational STA (always) plus a DTA run when
-    /// --cycles is given (DESIGN.md §4.4).
+    /// Timing analysis: observed (DTA) timing is primary — a grading
+    /// engine run of --cycles cycles (default 1000). STA is available
+    /// via --sta, clearly labeled informational (DESIGN.md §4.4, F9).
     Timing {
         /// Circuit file (.csx).
         file: PathBuf,
         /// Number of top critical paths to report.
         #[arg(long, default_value_t = 10)]
         paths: usize,
-        /// Also run this many cycles for observed (DTA) timing.
+        /// Cycles for the observed (DTA) run (default 1000; 0 disables).
         #[arg(long)]
         cycles: Option<u64>,
+        /// Include informational STA (structural bound — may include
+        /// paths the design never uses).
+        #[arg(long)]
+        sta: bool,
         /// Write the JSON output to this path instead of stdout.
         #[arg(long)]
         json: Option<PathBuf>,
@@ -155,12 +160,17 @@ fn print_or_write(json: &str, out: Option<&Path>) -> ExitCode {
     }
 }
 
-/// `csim validate <file>`: parse + validate, print the complete error list
-/// as JSON. Exit 0 when valid, `MALFORMED_FILE` otherwise.
+/// `csim validate <file>`: parse + validate + netlist-build (F8: a
+/// netlist-level load error such as a bitsize mismatch is a validation
+/// failure too), print the complete error list as JSON. Exit 0 when
+/// valid, `MALFORMED_FILE` otherwise.
 fn validate(file: &Path) -> ExitCode {
     let errors = match std::fs::read(file) {
         Ok(bytes) => match format::load_document(&bytes) {
-            Ok(_) => Vec::new(),
+            Ok(doc) => match csim_core::netlist::build(&doc) {
+                Ok(_) => Vec::new(),
+                Err(errors) => errors,
+            },
             Err(errors) => errors,
         },
         Err(e) => io_error(file, &e),
@@ -216,8 +226,11 @@ fn sandbox_check(root: &Path, path: &Path, relaxed: bool) -> Result<PathBuf, Str
     }
 }
 
-/// Collect `autoload` attrs (named memories) from the document; explicit
-/// --load entries win. Paths resolve against the circuit file's dir (§11).
+/// Collect `autoload` attrs, addressed by HIERARCHICAL memory name
+/// (contract v1.1, F12 — e.g. `u1/imem` for a memory nested in a
+/// subcircuit instance); explicit --load entries win by the same
+/// hierarchical name. Paths resolve against the circuit file's dir and
+/// stay inside its tree (§11).
 fn autoloads(
     doc: &Document,
     circuit_dir: &Path,
@@ -225,30 +238,15 @@ fn autoloads(
     relaxed: bool,
 ) -> Result<Vec<(String, LoadSource)>, String> {
     let mut out = Vec::new();
-    for circuit in &doc.circuits {
-        for comp in &circuit.components {
-            let name = &comp.name;
-            if name.is_empty() {
-                continue;
-            }
-            let Some(target) = comp.attrs.get("autoload") else {
-                continue;
-            };
-            if !matches!(comp.type_.as_str(), "mem.ram" | "mem.rom") {
-                continue;
-            }
-            let Some(rel) = target.as_str() else {
-                return Err(format!("{name}: 'autoload' must be a string"));
-            };
-            if explicit
-                .iter()
-                .any(|l| l.split_once('=').is_some_and(|(n, _)| n == name))
-            {
-                continue; // explicit --load wins
-            }
-            let path = sandbox_check(circuit_dir, Path::new(rel), relaxed)?;
-            out.push((name.clone(), LoadSource::File(path)));
+    for (name, rel) in csim_core::netlist::autoload_memories(doc) {
+        if explicit
+            .iter()
+            .any(|l| l.split_once('=').is_some_and(|(n, _)| n == name))
+        {
+            continue; // explicit --load wins
         }
+        let path = sandbox_check(circuit_dir, Path::new(&rel), relaxed)?;
+        out.push((name, LoadSource::File(path)));
     }
     Ok(out)
 }
@@ -309,31 +307,24 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
 
 /// `csim run`: the grading flow (§8.1/§8.2).
 fn run(args: &RunArgs) -> ExitCode {
+    // F10: one malformed-file JSON shape everywhere — the full §8.2
+    // Report with halt_reason "malformed-file" and the error list in
+    // `errors` (exit code unchanged: 6).
+    let emit_malformed = |errors: Vec<LoadError>| -> ExitCode {
+        let report = autograde::malformed_report(errors, "unknown");
+        let json = serde_json::to_string_pretty(&report).expect("report serializes");
+        match print_or_write(&json, args.json.as_deref()) {
+            ExitCode::SUCCESS => ExitCode::from(exit::MALFORMED_FILE),
+            other => other,
+        }
+    };
     let bytes = match std::fs::read(&args.file) {
         Ok(b) => b,
-        Err(e) => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": false, "errors": io_error(&args.file, &e)
-                }))
-                .expect("serializes")
-            );
-            return ExitCode::from(exit::MALFORMED_FILE);
-        }
+        Err(e) => return emit_malformed(io_error(&args.file, &e)),
     };
     let doc = match format::load_document(&bytes) {
         Ok(d) => d,
-        Err(errors) => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": false, "errors": errors
-                }))
-                .expect("serializes")
-            );
-            return ExitCode::from(exit::MALFORMED_FILE);
-        }
+        Err(errors) => return emit_malformed(errors),
     };
     let mut cfg = match run_config(args) {
         Ok(c) => c,
@@ -373,8 +364,15 @@ fn run(args: &RunArgs) -> ExitCode {
     }
 }
 
-/// `csim timing`: STA always; DTA when --cycles is given (§4.4).
-fn timing(file: &Path, paths: usize, cycles: Option<u64>, json_out: Option<&Path>) -> ExitCode {
+/// `csim timing`: observed/DTA timing primary (default 1000 cycles);
+/// STA only behind --sta, labeled informational (F9).
+fn timing(
+    file: &Path,
+    paths: usize,
+    cycles: Option<u64>,
+    want_sta: bool,
+    json_out: Option<&Path>,
+) -> ExitCode {
     let doc = match std::fs::read(file)
         .map_err(|e| e.to_string())
         .and_then(|b| format::load_document(&b).map_err(|e| format!("{e:?}")))
@@ -385,51 +383,13 @@ fn timing(file: &Path, paths: usize, cycles: Option<u64>, json_out: Option<&Path
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    let nl = match csim_core::netlist::build(&doc) {
-        Ok(nl) => nl,
-        Err(errors) => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": false, "errors": errors
-                }))
-                .expect("serializes")
-            );
-            return ExitCode::from(exit::MALFORMED_FILE);
-        }
-    };
-    let table = match TimingTable::builtin(&doc.settings.delay_table) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("csim: {e}");
-            return ExitCode::from(exit::MALFORMED_FILE);
-        }
-    };
-    let (t_sta, sta_note, sta_paths) = match csim_core::sta::analyze(&nl, &table, paths) {
-        Ok(r) => (
-            Some(r.t_sta),
-            "structural bound — may include paths your design never uses".to_string(),
-            r.top_paths
-                .iter()
-                .map(|p| {
-                    serde_json::json!({
-                        "delay": p.delay,
-                        "endpoint": nl.comps[p.endpoint.idx()].name,
-                        "comps": p.comps.iter().map(|c| nl.comps[c.idx()].name.clone()
-                            .unwrap_or_else(|| format!("{}:{}", nl.comps[c.idx()].def_circuit, nl.comps[c.idx()].def_id))).collect::<Vec<_>>(),
-                    })
-                })
-                .collect::<Vec<_>>(),
-        ),
-        Err(e) => (None, e.to_string(), Vec::new()),
-    };
     let mut out = serde_json::json!({
-        "t_sta": t_sta,
-        "sta_note": sta_note,
-        "sta_paths": sta_paths,
-        "delay_table": format!("{} ({})", table.name(), table.status()),
+        "delay_table": format!("{} (DRAFT)", doc.settings.delay_table),
     });
-    if let Some(n) = cycles {
+
+    // -- DTA (primary): run the grading engine --------------------------
+    let n = cycles.unwrap_or(1000);
+    if n > 0 {
         let cfg = GradeConfig {
             limits: RunLimits {
                 max_cycles: n,
@@ -450,6 +410,55 @@ fn timing(file: &Path, paths: usize, cycles: Option<u64>, json_out: Option<&Path
             Err(e) => {
                 eprintln!("csim: {e}");
                 return ExitCode::from(exit::USAGE);
+            }
+        }
+    }
+
+    // -- STA (informational only, on request) -----------------------------
+    if want_sta {
+        let nl = match csim_core::netlist::build(&doc) {
+            Ok(nl) => nl,
+            Err(errors) => {
+                eprintln!(
+                    "csim: {}",
+                    serde_json::to_string(&errors).expect("serializes")
+                );
+                return ExitCode::from(exit::MALFORMED_FILE);
+            }
+        };
+        let table = match TimingTable::builtin(&doc.settings.delay_table) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("csim: {e}");
+                return ExitCode::from(exit::MALFORMED_FILE);
+            }
+        };
+        match csim_core::sta::analyze(&nl, &table, paths) {
+            Ok(r) => {
+                out["t_sta"] = serde_json::json!(r.t_sta);
+                out["sta_note"] = serde_json::json!(
+                    "informational structural bound — includes setup time; may include paths your design never uses"
+                );
+                out["sta_paths"] = r
+                    .top_paths
+                    .iter()
+                    .map(|p| {
+                        let (circuit, comp_id) = nl.doc_id(p.endpoint);
+                        serde_json::json!({
+                            "delay": p.delay,
+                            "endpoint": { "circuit": circuit, "comp_id": comp_id },
+                            "comps": p.comps.iter().map(|c| {
+                                let (cc, ci) = nl.doc_id(*c);
+                                serde_json::json!({ "circuit": cc, "comp_id": ci })
+                            }).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .into();
+            }
+            Err(e) => {
+                out["t_sta"] = serde_json::Value::Null;
+                out["sta_note"] = serde_json::json!(e.to_string());
             }
         }
     }
@@ -582,6 +591,18 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
+    // F2: the embedded circuit is untrusted input — run FULL validation
+    // before anything is built from it (never panic on load, §11).
+    {
+        let errors = csim_core::format::validate::validate(&doc);
+        if !errors.is_empty() {
+            eprintln!(
+                "csim: embedded circuit is invalid: {}",
+                serde_json::to_string(&errors).expect("serializes")
+            );
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    }
     let state = serde_json::to_string(&file["state"]).expect("state serializes");
     let zero = file["mode"] == "zero";
     let nl = match csim_core::netlist::build(&doc) {
@@ -603,7 +624,16 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
                 .collect::<Vec<_>>()
         };
     let out = if zero {
-        let mut eng = csim_core::zero::ZeroEngine::new(nl).expect("netlist rebuilt");
+        let mut eng = match csim_core::zero::ZeroEngine::new(nl) {
+            Ok(e) => e,
+            Err(errors) => {
+                eprintln!(
+                    "csim: {}",
+                    serde_json::to_string(&errors).expect("serializes")
+                );
+                return ExitCode::from(exit::MALFORMED_FILE);
+            }
+        };
         if let Err(e) = eng.restore(&state) {
             eprintln!("csim: {e}");
             return ExitCode::from(exit::MALFORMED_FILE);
@@ -615,7 +645,13 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
         let vals = named_values(eng.netlist(), &|n| eng.named_value(n));
         serde_json::json!({ "cycle": eng.cycle(), "halted": false, "named": vals })
     } else {
-        let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
+        let table = match TimingTable::builtin(&doc.settings.delay_table) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("csim: {e}");
+                return ExitCode::from(exit::MALFORMED_FILE);
+            }
+        };
         let half = file["clock_half_period_ns"].as_u64().unwrap_or(1000).max(1);
         let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
             Ok(e) => e,
@@ -668,8 +704,9 @@ fn main() -> ExitCode {
             file,
             paths,
             cycles,
+            sta,
             json,
-        } => timing(file, *paths, *cycles, json.as_deref()),
+        } => timing(file, *paths, *cycles, *sta, json.as_deref()),
         Cmd::Snapshot {
             file,
             out,
@@ -801,7 +838,7 @@ mod tests {
             .unwrap()
             .iter()
             .all(|a| a["passed"] == true));
-        assert_eq!(report["t_sta"], 19);
+        assert_eq!(report["t_sta"], 34);
         assert!(report["trace_hash"].is_u64());
         // A failing assertion → exit 1.
         let args = run_args(
@@ -865,19 +902,99 @@ mod tests {
     }
 
     #[test]
-    fn timing_subcommand_sta_and_dta() {
+    fn timing_subcommand_dta_primary_sta_on_request() {
         let dir = counter_dir("timing");
         let out = dir.join("timing.json");
+        // F9: DTA is primary (default cycles when None → 1000); STA only
+        // behind --sta.
         assert_eq!(
-            timing(&dir.join("counter.csx"), 5, Some(3), Some(&out)),
+            timing(&dir.join("counter.csx"), 5, Some(3), true, Some(&out)),
             ExitCode::SUCCESS
         );
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-        assert_eq!(v["t_sta"], 19);
-        assert!(v["sta_note"].as_str().unwrap().contains("structural bound"));
         assert_eq!(v["dta"]["cycles"], 3);
         assert_eq!(v["dta"]["t_obs"], 39);
+        // F13: STA totals include the destination register's setup time:
+        // not 9 + and 10 + setup 15 = 34.
+        assert_eq!(v["t_sta"], 34);
+        assert!(v["sta_note"].as_str().unwrap().contains("structural bound"));
+        // No --sta: STA fields absent, DTA present with the default run.
+        assert_eq!(
+            timing(&dir.join("counter.csx"), 5, None, false, Some(&out)),
+            ExitCode::SUCCESS
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert!(v.get("t_sta").is_none());
+        assert_eq!(v["dta"]["cycles"], 1000, "default DTA run length");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F8: `csim validate` catches netlist-level load errors (bitsize
+    /// mismatch), exit 6 with the LoadResult JSON shape.
+    #[test]
+    fn validate_catches_bitsize_mismatch() {
+        let dir = std::env::temp_dir().join(format!("csim-cli-val8-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("bad.csx");
+        std::fs::write(
+            &f,
+            r##"{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+            "settings": {"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"a","type":"wiring.pin","pos":[0,0],"name":"a"},
+                {"id":"b","type":"wiring.pin","pos":[0,0],"name":"b","attrs":{"bitsize":32}}
+            ], "wires": [
+                {"a":{"comp":"a","pin":"pin"},"b":{"comp":"b","pin":"pin"}}
+            ]}]
+        }"##,
+        )
+        .unwrap();
+        assert_eq!(validate(&f), ExitCode::from(exit::MALFORMED_FILE));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F10: `csim run` on a malformed file emits the full §8.2 Report
+    /// shape (halt_reason "malformed-file", errors list), exit 6.
+    #[test]
+    fn run_malformed_emits_report_shape() {
+        let dir = std::env::temp_dir().join(format!("csim-cli-f10-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("bad.csx");
+        std::fs::write(&f, r#"{"version":2}"#).unwrap();
+        let report_path = dir.join("report.json");
+        let args = run_args(
+            &f,
+            &["--cycles", "1", "--json", report_path.to_str().unwrap()],
+        );
+        assert_eq!(run(&args), ExitCode::from(exit::MALFORMED_FILE));
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
+        assert_eq!(v["halt_reason"], "malformed-file");
+        assert!(v["errors"].as_array().unwrap().len() == 1);
+        assert_eq!(v["cycles"], 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// F2: `csim resume` fully validates the embedded circuit — a
+    /// hand-corrupted snapshot (bogus delayTable) is a clean error exit,
+    /// never a panic (§11).
+    #[test]
+    fn resume_rejects_invalid_embedded_circuit() {
+        let dir = counter_dir("resume-evil");
+        let snap = dir.join("state.json");
+        assert_eq!(
+            snapshot(&dir.join("counter.csx"), &snap, 1, Some("delay"), None),
+            ExitCode::SUCCESS
+        );
+        // Corrupt the embedded circuit's delayTable.
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&snap).unwrap()).unwrap();
+        v["circuit"]["settings"]["delayTable"] = serde_json::json!("bogus-table");
+        std::fs::write(&snap, serde_json::to_string(&v).unwrap()).unwrap();
+        assert_eq!(resume(&snap, 1, None), ExitCode::from(exit::MALFORMED_FILE));
         std::fs::remove_dir_all(&dir).ok();
     }
 

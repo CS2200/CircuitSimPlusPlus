@@ -44,7 +44,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::api::{CompId, HaltReason, LoadError, NamedKind, SimMode};
+use crate::api::{self, CompId, HaltReason, LoadError, NamedKind, SimMode};
 use crate::delay::{DelayEngine, RunReport};
 use crate::format::Document;
 use crate::netlist::{self, Netlist};
@@ -533,21 +533,8 @@ impl TestSpec {
 }
 
 // ---------------------------------------------------------------------------
-// Report (§8.2 — all fields)
+// Report (§8.2 — all fields; contract v1.1 shapes)
 // ---------------------------------------------------------------------------
-
-/// One setup/hold warning, with the component identified for the report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ViolationEntry {
-    /// Component identity (hierarchical name, else `circuit:def_id`).
-    pub comp: String,
-    /// `"setup"` or `"hold"`.
-    pub kind: String,
-    /// Time (ns) of the offending input change.
-    pub time: u64,
-    /// Cycle in which the violation occurred.
-    pub cycle: u64,
-}
 
 /// Per-assertion outcome.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -562,26 +549,25 @@ pub struct AssertionResult {
     pub expected: String,
 }
 
-/// An observed critical path with component identities for UI highlight.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ReportPath {
-    /// Observed settle time (ns) of the path.
-    pub settle: u64,
-    /// Component identities along the path, for UI highlight.
-    pub comps: Vec<String>,
-}
-
 /// The JSON report (§8.2). Simulation-derived fields are bit-identical
 /// across runs/machines; `wall_time_ms`/`peak_rss_bytes` are telemetry.
+///
+/// Contract v1.1: `timing_violations` is the setup/hold warning **count**
+/// (DESIGN §8.2's name); the warnings themselves are in
+/// `violation_details`, and `top_paths` uses the document-identity
+/// [`api::TimingPath`] shape. `errors` carries the load/validation error list
+/// when `halt_reason` is `"malformed-file"` (empty otherwise) — one
+/// malformed-file JSON shape everywhere (F10).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Report {
     /// Cycles executed.
     pub cycles: u64,
     /// "completed" | "cycle-limit" | "oscillation" | "floating-read" |
-    /// "contention" | "error" | "malformed-file" (+ "-detail" in
-    /// `halt_details`).
+    /// "contention" | "error" | "timeout" | "resource-limit" |
+    /// "malformed-file" (+ detail in `halt_details`).
     pub halt_reason: String,
-    /// Names the component/pin involved in the halt, when any.
+    /// Names the component/pin involved in the halt, when any
+    /// (`comp <id> pin "<pin>": …` prefix, contract v1.1).
     pub halt_details: String,
     /// Max observed per-cycle settle time, delay-table units (ns); 0 in
     /// zero mode.
@@ -591,15 +577,20 @@ pub struct Report {
     /// `baseline_est_time / est_time`; `None` without a baseline or when
     /// `est_time == 0`.
     pub speedup_vs_baseline: Option<f64>,
-    /// Setup/hold warnings (§4.3).
-    pub timing_violations: Vec<ViolationEntry>,
+    /// Number of setup/hold warnings (§8.2; `violation_details.len()`).
+    pub timing_violations: u64,
+    /// The setup/hold warnings themselves, with document-identity
+    /// component references (contract v1.1).
+    pub violation_details: Vec<api::TimingViolation>,
     /// Per-assertion outcomes.
     pub assertions: Vec<AssertionResult>,
-    /// Top-k observed critical paths (§4.4).
-    pub top_paths: Vec<ReportPath>,
+    /// Top-k observed critical paths (§4.4), grouped per circuit with
+    /// document-order component indices (contract v1.1).
+    pub top_paths: Vec<api::TimingPath>,
     /// Informational structural bound (§4.4) — may include paths the
-    /// design never sensitizes. `None` when not requested or when STA
-    /// failed (see `sta_note`).
+    /// design never sensitizes; STA totals INCLUDE the destination
+    /// register's setup time (docs/delay-table.md). `None` when not
+    /// requested or when STA failed (see `sta_note`).
     pub t_sta: Option<u64>,
     /// Labeling/provenance note for `t_sta` (§4.4), or the STA error.
     pub sta_note: Option<String>,
@@ -609,12 +600,53 @@ pub struct Report {
     pub trace_hash: Option<u64>,
     /// §8.3 rubric hook; `None` when no threshold was given.
     pub rubric_full_credit: Option<bool>,
-    /// Load/validation errors when `halt_reason` is `"malformed-file"`.
-    pub load_errors: Vec<LoadError>,
+    /// Load/validation errors when `halt_reason` is `"malformed-file"`;
+    /// empty on success (F10).
+    pub errors: Vec<LoadError>,
     /// Peak resident set, in bytes (telemetry — varies by machine).
     pub peak_rss_bytes: Option<u64>,
     /// Wall-clock duration of the run (telemetry — varies by machine).
     pub wall_time_ms: u64,
+}
+
+/// Map an engine violation to the contract shape (document identity).
+pub(crate) fn api_violation(
+    nl: &Netlist,
+    v: &crate::delay::TimingViolation,
+) -> api::TimingViolation {
+    let (circuit, comp_id) = nl.doc_id(v.comp);
+    let origin = nl.comps[v.comp.idx()].origin();
+    api::TimingViolation {
+        circuit,
+        comp_id,
+        kind: match v.kind {
+            crate::delay::ViolationKind::Setup => api::ViolationKind::Setup,
+            crate::delay::ViolationKind::Hold => api::ViolationKind::Hold,
+        },
+        detail: format!(
+            "{:?} violation at {origin}: input changed at T={} ns (cycle {})",
+            v.kind, v.time, v.cycle
+        ),
+    }
+}
+
+/// Map a flat (engine) observed path to contract [`TimingPath`]s: split
+/// into consecutive runs by defining circuit, one entry per run,
+/// preserving order (contract v1.1's "group/attribute per circuit").
+pub(crate) fn api_path(nl: &Netlist, settle: u64, path: &[CompId]) -> Vec<api::TimingPath> {
+    let mut out: Vec<api::TimingPath> = Vec::new();
+    for &c in path {
+        let (circuit, comp_id) = nl.doc_id(c);
+        match out.last_mut() {
+            Some(last) if last.circuit == circuit => last.comps.push(comp_id),
+            _ => out.push(api::TimingPath {
+                circuit,
+                comps: vec![comp_id],
+                delay_ns: settle,
+            }),
+        }
+    }
+    out
 }
 
 /// What came back from a grading run.
@@ -639,15 +671,6 @@ pub struct ConfigError(pub String);
 
 /// Cycles per engine call between limit checks (timeout/RSS granularity).
 const RUN_CHUNK: u64 = 2048;
-
-/// Component identity for reports: hierarchical name when present, else
-/// `circuit:def_id` (unique, stable, UI-highlightable).
-fn comp_label(nl: &Netlist, c: CompId) -> String {
-    let fc = &nl.comps[c.idx()];
-    fc.name
-        .clone()
-        .unwrap_or_else(|| format!("{}:{}", fc.def_circuit, fc.def_id))
-}
 
 /// Render an observed 4-state value for an assertion result.
 fn render_actual(v: &Value) -> String {
@@ -693,6 +716,14 @@ fn malformed(errors: Vec<LoadError>, table_name: &str, started: Instant) -> Grad
     (GradeOutcome::MalformedFile, errors, table_name, started).into()
 }
 
+/// The one malformed-file report shape (contract v1.1, F10) — public so
+/// the CLI emits the identical JSON for errors it discovers before the
+/// runner starts (parse/validation failures). `delay_table` is best-
+/// effort (`"unknown"` when the document didn't parse far enough).
+pub fn malformed_report(errors: Vec<LoadError>, delay_table: &str) -> Report {
+    malformed(errors, delay_table, Instant::now()).report
+}
+
 impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
     fn from(
         (outcome, errors, table_name, started): (GradeOutcome, Vec<LoadError>, &str, Instant),
@@ -705,7 +736,8 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 t_obs: 0,
                 est_time: 0,
                 speedup_vs_baseline: None,
-                timing_violations: Vec::new(),
+                timing_violations: 0,
+                violation_details: Vec::new(),
                 assertions: Vec::new(),
                 top_paths: Vec::new(),
                 t_sta: None,
@@ -713,7 +745,7 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 delay_table: table_name.to_string(),
                 trace_hash: None,
                 rubric_full_credit: None,
-                load_errors: errors,
+                errors,
                 peak_rss_bytes: peak_rss_bytes(),
                 wall_time_ms: started.elapsed().as_millis() as u64,
             },
@@ -814,20 +846,31 @@ fn apply_loads<E: MemAccess>(
                     .map_err(|e| ConfigError(format!("{}: {e}", path.display())))?
             }
         };
-        if !eng.load_memory_image(name, &words) {
-            return Err(ConfigError(format!("no named memory '{name}'")));
+        match eng.load_memory_image(name, &words) {
+            Ok(true) => {}
+            // F1: image errors (e.g. a word wider than the memory's
+            // bitsize) are clean configuration errors, never panics.
+            Err(e) => return Err(ConfigError(format!("{name}: {e}"))),
+            Ok(false) => return Err(ConfigError(format!("no named memory '{name}'"))),
         }
     }
     Ok(())
 }
 
-fn memory_depth(nl: &Netlist, name: &str) -> Option<u64> {
-    let nc = nl
-        .named
-        .iter()
-        .find(|n| n.name == name && matches!(n.kind, NamedKind::Ram | NamedKind::Rom))?;
-    let fc = &nl.comps[nc.comp_id.idx()];
-    fc.attrs.get("depth").and_then(|v| v.as_u64())
+/// Effective depth of a named memory. Goes through the typed component
+/// configuration so an omitted `depth` attr yields the documented
+/// default (F4) rather than a spurious "no named memory".
+pub(crate) fn memory_depth(nl: &Netlist, name: &str) -> Option<u64> {
+    let ci = nl.named_engine_id(name)?;
+    let fc = &nl.comps[ci.idx()];
+    if !matches!(fc.type_.as_str(), "mem.ram" | "mem.rom") {
+        return None;
+    }
+    match crate::components::config(&fc.type_, &fc.attrs)?.kind {
+        crate::components::CompKind::Ram { depth, .. }
+        | crate::components::CompKind::Rom { depth, .. } => Some(u64::from(depth)),
+        _ => None,
+    }
 }
 
 /// Poke targets are named `wiring.pin` *input* components (§8.3); they
@@ -837,6 +880,18 @@ fn input_pin_width(nl: &Netlist, name: &str) -> Option<u32> {
         .iter()
         .find(|c| c.type_ == "wiring.pin" && c.name.as_deref() == Some(name))
         .and_then(|c| c.pins.first().map(|p| p.width))
+}
+
+/// Width-check a poke value (F5): a value wider than the target pin is a
+/// clean error, never a panic.
+fn poke_value(width: u32, p: &Poke) -> Result<Value, ConfigError> {
+    if width < 64 && (p.value >> width) != 0 {
+        return Err(ConfigError(format!(
+            "poke '{}': value {:#x} does not fit in {} bits",
+            p.target, p.value, width
+        )));
+    }
+    Ok(Value::from_u64(width, p.value))
 }
 
 /// Delay-mode pokes are scheduled at absolute times before the run.
@@ -852,7 +907,8 @@ fn apply_pokes_delay(
                 p.target
             ))
         })?;
-        if !eng.poke_at(&p.target, Value::from_u64(width, p.value), p.at) {
+        let v = poke_value(width, p)?;
+        if !eng.poke_at(&p.target, v, p.at) {
             return Err(ConfigError(format!(
                 "poke target '{}' is not a named input pin",
                 p.target
@@ -864,17 +920,17 @@ fn apply_pokes_delay(
 
 /// The engine operations the grader shares across modes.
 trait MemAccess {
-    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> bool;
+    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String>;
 }
 
 impl MemAccess for DelayEngine {
-    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> bool {
+    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
         DelayEngine::load_memory_image(self, name, image)
     }
 }
 
 impl MemAccess for ZeroEngine {
-    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> bool {
+    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
         ZeroEngine::load_memory_image(self, name, image)
     }
 }
@@ -1003,32 +1059,25 @@ fn grade_delay(
             .baseline_est_time
             .filter(|_| est_time > 0)
             .map(|b| b as f64 / est_time as f64),
-        timing_violations: eng
+        timing_violations: eng.violations().len() as u64,
+        violation_details: eng
             .violations()
             .iter()
-            .map(|v| ViolationEntry {
-                comp: comp_label(&nl, v.comp),
-                kind: format!("{:?}", v.kind).to_lowercase(),
-                time: v.time,
-                cycle: v.cycle,
-            })
+            .map(|v| api_violation(&nl, v))
             .collect(),
         assertions: results,
         top_paths: last_report
             .top_paths
             .iter()
             .take(cfg.top_k)
-            .map(|(settle, path)| ReportPath {
-                settle: *settle,
-                comps: path.iter().map(|c| comp_label(&nl, *c)).collect(),
-            })
+            .flat_map(|(settle, path)| api_path(&nl, *settle, path))
             .collect(),
         t_sta,
         sta_note,
         delay_table: format!("{} ({})", table.name(), table.status()),
         trace_hash: Some(eng.trace_hash()),
         rubric_full_credit: cfg.rubric_full_credit_below.map(|t| est_time < t),
-        load_errors: Vec::new(),
+        errors: Vec::new(),
         peak_rss_bytes: peak_rss_bytes(),
         wall_time_ms: started.elapsed().as_millis() as u64,
     };
@@ -1050,7 +1099,8 @@ fn grade_zero(
                 p.target
             ))
         })?;
-        match eng.poke_input_pin(&p.target, Value::from_u64(width, p.value)) {
+        let v = poke_value(width, p)?;
+        match eng.poke_input_pin(&p.target, v) {
             Ok(true) => {}
             Ok(false) => {
                 return Err(ConfigError(format!(
@@ -1125,7 +1175,8 @@ fn grade_zero(
         t_obs: 0,
         est_time: 0,
         speedup_vs_baseline: None,
-        timing_violations: Vec::new(),
+        timing_violations: 0,
+        violation_details: Vec::new(),
         assertions: results,
         top_paths: Vec::new(),
         t_sta,
@@ -1133,7 +1184,7 @@ fn grade_zero(
         delay_table: format!("{} ({})", table.name(), table.status()),
         trace_hash: None,
         rubric_full_credit: None,
-        load_errors: Vec::new(),
+        errors: Vec::new(),
         peak_rss_bytes: peak_rss_bytes(),
         wall_time_ms: started.elapsed().as_millis() as u64,
     };
@@ -1392,18 +1443,20 @@ mod tests {
         assert_eq!(r.t_obs, 39);
         assert_eq!(r.est_time, 3 * 39);
         assert_eq!(r.speedup_vs_baseline, Some(2.0));
-        assert!(r.timing_violations.is_empty());
+        assert_eq!(r.timing_violations, 0);
         assert!(r.assertions.iter().all(|a| a.passed));
         assert_eq!(r.assertions.len(), 6);
         assert!(!r.top_paths.is_empty());
-        assert_eq!(r.top_paths[0].settle, 39);
-        assert!(r.top_paths[0].comps.contains(&"r1".to_string()));
-        assert_eq!(r.t_sta, Some(19));
+        assert_eq!(r.top_paths[0].delay_ns, 39);
+        assert_eq!(r.top_paths[0].circuit, "main");
+        // r1 is the 6th component in the fixture's document order.
+        assert!(r.top_paths[0].comps.contains(&CompId(5)));
+        assert_eq!(r.t_sta, Some(34));
         assert!(r.sta_note.as_deref().unwrap().contains("structural bound"));
         assert_eq!(r.delay_table, "cs2200-74ls-v1 (DRAFT)");
         assert!(r.trace_hash.is_some());
         assert_eq!(r.rubric_full_credit, Some(true));
-        assert!(r.load_errors.is_empty());
+        assert!(r.errors.is_empty());
         assert!(r.peak_rss_bytes.unwrap_or(1) > 0);
     }
 
@@ -1525,11 +1578,14 @@ mod tests {
             "{:?}",
             out.report.assertions
         );
-        let v = &out.report.timing_violations;
+        assert_eq!(out.report.timing_violations, 2);
+        let v = &out.report.violation_details;
         assert_eq!(v.len(), 2);
-        assert_eq!(v[0].kind, "setup");
-        assert_eq!(v[1].kind, "hold");
-        assert_eq!(v[0].comp, "r");
+        assert_eq!(v[0].kind, crate::api::ViolationKind::Setup);
+        assert_eq!(v[1].kind, crate::api::ViolationKind::Hold);
+        assert_eq!(v[0].circuit, "main");
+        // `r` is the 5th component in the fixture's document order.
+        assert_eq!(v[0].comp_id, CompId(4));
     }
 
     // ---- Exit-code paths ---------------------------------------------------
@@ -1630,7 +1686,7 @@ mod tests {
         assert_eq!(out.outcome, GradeOutcome::MalformedFile);
         assert_eq!(out.outcome.exit_code(), EXIT_MALFORMED_FILE);
         assert_eq!(out.report.halt_reason, "malformed-file");
-        assert!(!out.report.load_errors.is_empty());
+        assert!(!out.report.errors.is_empty());
     }
 
     // ---- Zero mode + STA note ----------------------------------------------
@@ -1650,7 +1706,7 @@ mod tests {
         assert_eq!(out.report.t_obs, 0);
         assert_eq!(out.report.est_time, 0);
         assert_eq!(out.report.trace_hash, None);
-        assert_eq!(out.report.t_sta, Some(19));
+        assert_eq!(out.report.t_sta, Some(34));
     }
 
     // ---- Preload from file -------------------------------------------------
@@ -1707,6 +1763,72 @@ mod tests {
             at: 0,
         }];
         assert!(matches!(grade(&d, &cfg), Err(ConfigError(_))));
+    }
+
+    // ---- F1/F4/F5: untrusted-image and poke robustness ----------------------
+
+    #[test]
+    fn f1_preload_word_wider_than_bitsize_is_a_config_error() {
+        // RAM bitsize 8, image contains 0x1ff — was a panic (value.rs
+        // from_u64); now a clean ConfigError (§11).
+        // dmem is 32-bit: use a 33-bit word.
+        let d = doc(&counter_json());
+        let mut cfg = cfg3();
+        cfg.loads = vec![("dmem".into(), LoadSource::Words(vec![0x1_FFFF_FFFF]))];
+        let e = grade(&d, &cfg).expect_err("must be a ConfigError, not a panic");
+        assert!(e.to_string().contains("does not fit"), "{e}");
+    }
+
+    #[test]
+    fn f4_preload_uses_default_depth_when_attr_absent() {
+        // A RAM without an explicit `depth` attr defaults to 256 words
+        // (components.rs); preloading it must not error.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8}}}},
+                {{"id":"zw","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"m","type":"mem.ram","pos":[0,0],"name":"m","attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"m","pin":"clk"}}}},
+                {{"a":{{"comp":"za","pin":"out"}},"b":{{"comp":"m","pin":"addr"}}}},
+                {{"a":{{"comp":"zw","pin":"out"}},"b":{{"comp":"m","pin":"we"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut cfg = cfg3();
+        cfg.mode = SimMode::Zero;
+        cfg.loads = vec![("m".into(), LoadSource::Words(vec![0x2A; 300]))]; // > 256: extra ignored
+        cfg.assertions = vec![parse_assertion("mem('m')[0] == 0x2A").unwrap()];
+        let out = grade(&doc(&json), &cfg).unwrap();
+        assert_eq!(out.outcome, GradeOutcome::Passed, "{:?}", out.report);
+    }
+
+    #[test]
+    fn f5_poke_value_wider_than_pin_is_a_config_error() {
+        // A 1-bit pin and a 9-bit poke value.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"p","type":"wiring.probe","pos":[5,0],"name":"out"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let d = doc(&json);
+        let mut cfg = cfg3();
+        cfg.pokes = vec![Poke {
+            target: "src".into(),
+            value: 0x1FF, // pin is 1 bit
+            at: 0,
+        }];
+        let e = grade(&d, &cfg).expect_err("must be a ConfigError, not a panic");
+        assert!(e.to_string().contains("does not fit"), "{e}");
     }
 
     // ---- TestSpec (§8.3) -----------------------------------------------------
