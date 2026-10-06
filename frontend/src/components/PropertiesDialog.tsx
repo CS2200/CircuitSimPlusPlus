@@ -12,13 +12,16 @@ import { editableAttrs, GATE_TYPE_OPTIONS, type AttrField } from "../editor/cata
 export default function PropertiesDialog({
   doc,
   compId,
+  circuitIdx = 0,
   onClose,
 }: {
   doc: CircuitDocument;
   compId: string;
+  /** Sheet the component lives on (subcircuits are separate sheets). */
+  circuitIdx?: number;
   onClose: () => void;
 }) {
-  const comp = doc.circuit(0).components.find((x) => x.id === compId);
+  const comp = doc.circuit(circuitIdx).components.find((x) => x.id === compId);
   const [name, setName] = useState(comp?.name ?? "");
   const [type, setType] = useState(comp?.type ?? "");
   const [rot, setRot] = useState(comp?.rot ?? "E");
@@ -49,7 +52,7 @@ export default function PropertiesDialog({
     if (rot !== (comp.rot ?? "E")) patch.rot = rot as CsxComponent["rot"];
     if (name !== (comp.name ?? "")) patch.name = name;
     patch.attrs = attrs;
-    doc.updateComponent(0, compId, patch);
+    doc.updateComponent(circuitIdx, compId, patch);
     onClose();
   };
 

@@ -13,6 +13,8 @@ csim-core.workspace = true
 tauri.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 
 [features]
 # Tauri's default features pull in compression for assets; keep the shell lean.

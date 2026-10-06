@@ -181,6 +181,135 @@ body {
   cursor: default;
 }
 
+/* ---- menu bar ---- */
+
+.menubar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 0.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+  user-select: none;
+}
+
+.menu {
+  position: relative;
+  display: flex;
+}
+
+.menu-btn {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  margin: 2px 0;
+}
+
+.menu-btn:hover,
+.menu-btn.active {
+  background: var(--grid);
+}
+
+.menu-pop {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 90;
+  min-width: 220px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 5px;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-item:hover:not(:disabled) {
+  background: var(--grid);
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.menu-mark {
+  width: 1em;
+  flex: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
+.menu-label {
+  flex: 1;
+}
+
+.menu-sc {
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  margin-left: 1.5rem;
+}
+
+.menu-sep {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 4px 6px;
+}
+
+.menubar-path {
+  margin-left: auto;
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  direction: rtl; /* long paths truncate at the FRONT, keeping the file name */
+}
+
+/* ---- name dialog (sheet names, run-to cycle) ---- */
+
+.name-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.name-dialog input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+.name-dialog input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .app-statusbar {
   display: flex;
   gap: 1.2rem;

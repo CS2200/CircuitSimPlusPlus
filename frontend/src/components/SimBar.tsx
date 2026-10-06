@@ -18,6 +18,8 @@ export default function SimBar({
   onReset,
   pathOn,
   onTogglePath,
+  hzExp,
+  onHzExp,
 }: {
   ctl: SimController;
   doc: CircuitDocument;
@@ -26,10 +28,13 @@ export default function SimBar({
   /** Critical-path highlight toggle state (U7). */
   pathOn: boolean;
   onTogglePath: () => void;
+  /** Speed slider exponent (hz = 10^(exp/10)); lifted to App so the
+   *  Simulation menu's speed presets share the same state. */
+  hzExp: number;
+  onHzExp: (exp: number) => void;
 }) {
   useSyncExternalStore(ctl.store.subscribe, ctl.store.getVersion.bind(ctl.store));
   const s = ctl.store;
-  const [hzExp, setHzExp] = useState(10); // slider: hz = 10^(exp/10)
   const [runTo, setRunTo] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
   const hz = Math.round(10 ** (hzExp / 10));
@@ -127,7 +132,7 @@ export default function SimBar({
             value={hzExp}
             onChange={(e) => {
               const exp = Number(e.target.value);
-              setHzExp(exp);
+              onHzExp(exp);
               if (running) void guard(ctl.play(Math.round(10 ** (exp / 10))));
             }}
           />
@@ -140,17 +145,10 @@ export default function SimBar({
         >
           reset
         </button>
-        <button
-          className="secondary"
-          title="Evaluation mode: zero-delay (fast/debug) vs delay-aware (teaching/grading)"
-          onClick={() => withLoadedDoc(() => ctl.setMode(mode === "delay" ? "zero" : "delay"))}
-        >
-          {mode}
-        </button>
         <span className="sim-status">
           {s.loaded ? (
             <>
-              cycle {s.cycle}
+              cycle {s.cycle} · {mode}
               {running && s.status !== null && ` · ${s.status.eff_hz.toLocaleString()} Hz eff.`}
             </>
           ) : (

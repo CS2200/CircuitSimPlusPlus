@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
+import MenuBar, { type MenuDef } from "./components/MenuBar";
+import NameDialog from "./components/NameDialog";
 import PropertiesDialog from "./components/PropertiesDialog";
 import SimBar from "./components/SimBar";
 import WatchPanel from "./components/WatchPanel";
@@ -12,29 +14,35 @@ import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
+import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
 import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
 
+/** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
+function initDoc(d: CircuitDocument): CircuitDocument {
+  d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
+  return d;
+}
+
 /**
- * App shell: header + sim transport + palette + canvas + watch panel +
- * statusbar. The circuit editor is the default view; the U1 stress harness
- * stays reachable at ?stress=1, the U4 visual showcase at ?demo=1, and the
- * U5 mock-core demo circuit at ?simdemo=1.
+ * App shell: header + menu bar + sim transport + palette + canvas + watch
+ * panel + statusbar. The circuit editor is the default view; the U1 stress
+ * harness stays reachable at ?stress=1, the U4 visual showcase at ?demo=1,
+ * and the U5 mock-core demo circuit at ?simdemo=1.
  */
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
-  const [doc] = useState(() => {
-    const d = params.has("simdemo")
-      ? buildMockDemoDoc()
-      : params.has("demo")
-        ? buildDemoDoc()
-        : CircuitDocument.create("untitled");
-    // editor injects pin knowledge so type/attr edits prune dangling wires
-    d.pinResolver = (comp) => compPins(comp).map((p) => p.name);
-    return d;
-  });
+  const [doc, setDoc] = useState(() =>
+    initDoc(
+      params.has("simdemo")
+        ? buildMockDemoDoc()
+        : params.has("demo")
+          ? buildDemoDoc()
+          : CircuitDocument.create("untitled"),
+    ),
+  );
   // One sim session per app lifetime (U5). Core is the mock under
   // VITE_MOCK_CORE=1 (dev default), else the Tauri adapter.
   const [sim] = useState(() => new SimController(getCore()));
@@ -46,22 +54,39 @@ export default function App() {
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [pathOn, setPathOn] = useState(false);
+  // File state: real path in the Tauri shell; a bare file name after a
+  // browser-mode open/download (browsers never expose real paths).
+  const [filePath, setFilePath] = useState<string | null>(null);
+  // Current sheet (circuit) index — subcircuits live on their own sheets.
+  const [sheet, setSheet] = useState(0);
+  // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
+  const [hzExp, setHzExp] = useState(10); // hz = 10^(exp/10)
+  const hz = Math.round(10 ** (hzExp / 10));
+  const [nameDialog, setNameDialog] = useState<{
+    title: string;
+    initial: string;
+    submitLabel?: string;
+    onSubmit: (value: string) => void;
+  } | null>(null);
   const simVersion = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
+
+  // Current sheet name (safe while a doc/sheet swap is mid-render).
+  const sheetName = doc.circuits[sheet]?.name;
 
   // U7: the observed critical path (top-1) as document component ids —
   // only when its circuit is the current sheet (contract v1.1 filter).
   const pathIds = useMemo(() => {
     if (!pathOn || !sim.store.loaded) return null;
-    return sim.topPathIds();
+    return sim.topPathIds(sheetName);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
-  }, [pathOn, sim, doc, simVersion]);
+  }, [pathOn, sim, doc, sheetName, simVersion]);
 
   // U7: setup/hold violation markers for the current sheet.
   const violationMarkers = useMemo(() => {
     if (!sim.store.loaded || sim.store.timing === null) return null;
-    return sim.violationMarkers();
+    return sim.violationMarkers(sheetName);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
-  }, [sim, doc, simVersion]);
+  }, [sim, doc, sheetName, simVersion]);
 
   // A fresh load invalidates any path highlight.
   useEffect(() => {
@@ -102,6 +127,269 @@ export default function App() {
   }, [doc, sim, toast]);
 
   const onStatus = useCallback((s: EditorStatus) => setStatus(s), []);
+
+  // ---- file operations (File menu) ----
+
+  /** Replace the editor document (New/Open); the sim engine is re-synced by the caller. */
+  const adoptDoc = useCallback((d: CircuitDocument, path: string | null) => {
+    setDoc(d);
+    setFilePath(path);
+    setSheet(0);
+    setEditingComp(null);
+  }, []);
+
+  const confirmDiscard = useCallback(() => {
+    if (!doc.dirty) return true;
+    return window.confirm(`Discard unsaved changes to ${filePath ?? doc.name}?`);
+  }, [doc, filePath]);
+
+  const onNew = useCallback(() => {
+    if (!confirmDiscard()) return;
+    sim.unload();
+    adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
+    toast("New circuit");
+  }, [confirmDiscard, adoptDoc, sim, toast]);
+
+  const onOpen = useCallback(async () => {
+    if (!confirmDiscard()) return;
+    let opened;
+    try {
+      opened = await openCircuitFile();
+    } catch (err) {
+      toast(`Open failed: ${String(err)}`);
+      return;
+    }
+    if (opened === null) return; // cancelled
+    let d: CircuitDocument;
+    try {
+      d = initDoc(CircuitDocument.fromJson(opened.text));
+    } catch (err) {
+      toast(`Open failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    adoptDoc(d, opened.path ?? opened.name);
+    // Engine side: path-load in the shell (autoloads resolve next to the
+    // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
+    // in the sim banner via the store.
+    const load = opened.path !== null ? sim.loadFromPath(d, opened.path) : sim.load(d);
+    void load.then((ok) => {
+      if (ok) toast(`Opened ${opened.name}`);
+    });
+  }, [confirmDiscard, adoptDoc, sim, toast]);
+
+  const doSave = useCallback(
+    async (path: string) => {
+      try {
+        const res = await sim.save(doc, path);
+        if (!res.ok) {
+          toast(`Save failed: ${res.errors[0]?.message ?? "unknown error"}`);
+          return;
+        }
+        doc.markClean();
+        setFilePath(path);
+        editorRef.current?.refresh(); // re-report the dirty flag
+        toast(`Saved ${baseName(path)}`);
+      } catch (err) {
+        toast(`Save failed: ${String(err)}`);
+      }
+    },
+    [doc, sim, toast],
+  );
+
+  const onSaveAs = useCallback(() => {
+    const suggested = `${doc.name}.csx`;
+    if (isTauri()) {
+      void pickSavePath(suggested, filePath !== null && filePath.includes("/") ? filePath : null)
+        .then((path) => {
+          if (path !== null) void doSave(path);
+        })
+        .catch((err) => toast(`Save failed: ${String(err)}`));
+    } else {
+      // The browser fallback cannot write files — it downloads instead.
+      downloadTextFile(suggested, doc.toJson());
+      doc.markClean();
+      setFilePath(doc.name);
+      editorRef.current?.refresh();
+      toast(`Downloaded ${suggested}`);
+    }
+  }, [doc, filePath, doSave, toast]);
+
+  const onSave = useCallback(() => {
+    // Only the Tauri shell can write to a known path; outside it Save is
+    // always Save-As (a download).
+    if (isTauri() && filePath !== null && filePath.includes("/")) {
+      void doSave(filePath);
+    } else {
+      onSaveAs();
+    }
+  }, [filePath, doSave, onSaveAs]);
+
+  // ---- sheet (subcircuit) operations (Subcircuits menu) ----
+
+  const onNewSheet = useCallback(() => {
+    setNameDialog({
+      title: "New sheet",
+      initial: `sheet${doc.circuits.length}`,
+      submitLabel: "Create",
+      onSubmit: (name) => {
+        setNameDialog(null);
+        try {
+          const idx = doc.addCircuit(name);
+          setSheet(idx);
+          editorRef.current?.refresh();
+        } catch (err) {
+          toast(String(err instanceof Error ? err.message : err));
+        }
+      },
+    });
+  }, [doc, toast]);
+
+  const onRenameSheet = useCallback(() => {
+    const current = doc.circuit(sheet).name;
+    setNameDialog({
+      title: `Rename sheet "${current}"`,
+      initial: current,
+      submitLabel: "Rename",
+      onSubmit: (name) => {
+        setNameDialog(null);
+        try {
+          doc.renameCircuit(sheet, name);
+          editorRef.current?.refresh();
+        } catch (err) {
+          toast(String(err instanceof Error ? err.message : err));
+        }
+      },
+    });
+  }, [doc, sheet, toast]);
+
+  // ---- simulation menu commands ----
+
+  /** Menu mirror of SimBar's load-then-command guard; errors toast. */
+  const simCmd = useCallback(
+    async (cmd: () => Promise<void>) => {
+      try {
+        if (!sim.store.loaded) {
+          const ok = await sim.load(doc);
+          if (!ok) return; // load errors already surface in the sim banner
+        }
+        await cmd();
+      } catch (err) {
+        toast(String(err));
+      }
+    },
+    [sim, doc, toast],
+  );
+
+  const onRunTo = useCallback(() => {
+    setNameDialog({
+      title: "Run to cycle",
+      initial: String(Math.max(sim.store.cycle + 100, 100)),
+      submitLabel: "Run",
+      onSubmit: (value) => {
+        setNameDialog(null);
+        const cycle = Number(value);
+        if (!Number.isInteger(cycle) || cycle < 0) {
+          toast(`Run to: "${value}" is not a non-negative integer cycle`);
+          return;
+        }
+        void simCmd(() => sim.runUntil(cycle));
+      },
+    });
+  }, [sim, simCmd, toast]);
+
+  // ---- menus ----
+
+  const menus: MenuDef[] = useMemo(() => {
+    const mode = sim.store.status?.mode ?? "delay";
+    const speedPresets = [1, 10, 100, 1_000, 10_000, 100_000];
+    return [
+      {
+        label: "File",
+        items: [
+          { label: "New Circuit", onSelect: onNew },
+          { label: "Open…", shortcut: "Ctrl+O", onSelect: () => void onOpen() },
+          { kind: "sep" },
+          { label: "Save", shortcut: "Ctrl+S", onSelect: onSave },
+          { label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveAs },
+        ],
+      },
+      {
+        label: "Simulation",
+        items: [
+          {
+            label: "Step tick",
+            shortcut: "Ctrl+J",
+            onSelect: () => void simCmd(() => sim.stepTick()),
+          },
+          { label: "Step cycle", onSelect: () => void simCmd(() => sim.stepCycle()) },
+          { label: "Run to cycle…", onSelect: onRunTo },
+          {
+            label: "Reset (autoload re-applies)",
+            shortcut: "Ctrl+R",
+            onSelect: () => void onReset(),
+          },
+          { kind: "sep" },
+          ...speedPresets.map((p) => ({
+            label: p >= 1000 ? `${p / 1000} kHz` : `${p} Hz`,
+            radio: true,
+            checked: hz === p,
+            onSelect: () => setHzExp(Math.round(10 * Math.log10(p))),
+          })),
+          { kind: "sep" },
+          {
+            label: "Delay-aware mode (teaching/grading)",
+            radio: true,
+            checked: mode === "delay",
+            onSelect: () => void simCmd(() => sim.setMode("delay")),
+          },
+          {
+            label: "Zero-delay mode (fast/debug)",
+            radio: true,
+            checked: mode === "zero",
+            onSelect: () => void simCmd(() => sim.setMode("zero")),
+          },
+          { kind: "sep" },
+          {
+            label: "Highlight critical path",
+            checked: pathOn,
+            disabled: sim.store.timing === null,
+            onSelect: () => setPathOn((v) => !v),
+          },
+        ],
+      },
+      {
+        label: "Subcircuits",
+        items: [
+          { label: "New sheet…", onSelect: onNewSheet },
+          { label: "Rename current sheet…", onSelect: onRenameSheet },
+          { kind: "sep" },
+          ...doc.circuits.map((c, i) => ({
+            label: c.name,
+            radio: true,
+            checked: i === sheet,
+            onSelect: () => setSheet(i),
+          })),
+        ],
+      },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
+  }, [
+    doc,
+    sheet,
+    hz,
+    pathOn,
+    onNew,
+    onOpen,
+    onSave,
+    onSaveAs,
+    onNewSheet,
+    onRenameSheet,
+    onRunTo,
+    onReset,
+    sim,
+    simCmd,
+    simVersion,
+  ]);
 
   // DEV hook: e2e reads the document JSON through this.
   useEffect(() => {
@@ -153,17 +441,30 @@ export default function App() {
     };
   }, [sim, doc]);
 
-  // "?" toggles the shortcut overlay; Escape closes it.
+  // "?" toggles the shortcut overlay; Escape closes it. Mod+O/S/Shift+S are
+  // the file shortcuts (Ctrl+N is browser-reserved — New is menu-only).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        void onOpen();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (e.shiftKey) onSaveAs();
+        else onSave();
+        return;
+      }
       if (e.key === "?") setShowHelp((v) => !v);
       if (e.key === "Escape") setShowHelp(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [onOpen, onSave, onSaveAs]);
 
   return (
     <div className="app" data-theme={theme}>
@@ -212,6 +513,7 @@ export default function App() {
           </button>
         </div>
       </header>
+      {!stress && <MenuBar menus={menus} pathLabel={filePath} />}
       {!stress && (
         <SimBar
           ctl={sim}
@@ -219,6 +521,8 @@ export default function App() {
           onReset={onReset}
           pathOn={pathOn}
           onTogglePath={() => setPathOn((v) => !v)}
+          hzExp={hzExp}
+          onHzExp={setHzExp}
         />
       )}
       <main className="app-main">
@@ -252,6 +556,7 @@ export default function App() {
                 ref={editorRef}
                 doc={doc}
                 themeName={theme}
+                sheetIdx={sheet}
                 onStatus={onStatus}
                 onEditComponent={setEditingComp}
                 sim={sim}
@@ -268,6 +573,7 @@ export default function App() {
           {doc.name}
           {status?.dirty ? " •" : ""}
         </span>
+        {doc.circuits.length > 1 && <span>sheet: {doc.circuit(sheet).name}</span>}
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}
@@ -283,11 +589,21 @@ export default function App() {
         <PropertiesDialog
           doc={doc}
           compId={editingComp}
+          circuitIdx={sheet}
           onClose={() => {
             setEditingComp(null);
             // The dialog mutates the doc out-of-band; repaint the canvas.
             editorRef.current?.refresh();
           }}
+        />
+      )}
+      {nameDialog !== null && (
+        <NameDialog
+          title={nameDialog.title}
+          initial={nameDialog.initial}
+          submitLabel={nameDialog.submitLabel}
+          onSubmit={nameDialog.onSubmit}
+          onCancel={() => setNameDialog(null)}
         />
       )}
       <div className="toast-stack">
@@ -344,6 +660,14 @@ export default function App() {
                 <tr>
                   <td>Ctrl+A</td>
                   <td>select all</td>
+                </tr>
+                <tr>
+                  <td>Ctrl+O</td>
+                  <td>open a .csx circuit</td>
+                </tr>
+                <tr>
+                  <td>Ctrl+S / Ctrl+Shift+S</td>
+                  <td>save / save as</td>
                 </tr>
                 <tr>
                   <td>Ctrl+Z / Ctrl+Y</td>

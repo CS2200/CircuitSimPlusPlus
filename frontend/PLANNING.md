@@ -18,18 +18,21 @@ Ordered roughly by dependency.
   `csim` CLI cycle-for-cycle. The whole UI side is already built and
   e2e-tested against the mock.
 
-## 2. File open/save UI — deferred on purpose
+## 2. File open/save UI — IMPLEMENTED (menu bar)
 
-The contract has `load_circuit { path }` / `save_circuit { path, document }`
-(canonical serializer engine-side — **never** save local JSON). Missing UI,
-to build at integration:
+Implemented via the menu bar (`src/components/MenuBar.tsx` +
+`src/files.ts`): File menu with New / Open… (Ctrl+O) / Save (Ctrl+S) /
+Save As… (Ctrl+Shift+S), dirty-confirm on destructive opens, native
+dialogs in the Tauri shell (`@tauri-apps/plugin-dialog` + `plugin-fs`),
+browser fallbacks (file input / download) in mock dev. The engine loads
+via `load_circuit { path }` so memory autoloads resolve next to the file;
+saves go through `save_circuit { path, document }` (canonical serializer
+engine-side — never local JSON). Subcircuit sheets live in the
+Subcircuits menu (new/rename/switch). Still open:
 
-- Open/Save/Save-as buttons + Tauri file dialogs (`@tauri-apps/plugin-dialog`),
-  recent-files list, dirty-dot → save reminder, autosave-on-quit prompt.
-- Load flow: file path → `load_circuit` → errors listed in the banner
-  (store already handles `LoadError`s with comp/wire highlighting hooks).
-- Save flow: doc → `save_circuit` (engine canonicalizes; byte-identical
-  re-saves, §5.1).
+- Recent-files list, autosave-on-quit prompt.
+- Native-dialog smoke on Windows/macOS (CI drives the browser fallbacks;
+  Linux verified).
 
 ## 3. Contract gaps → RESOLVED by contract v1.1 (docs/ipc.md, human-ratified)
 

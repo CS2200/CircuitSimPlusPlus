@@ -59,6 +59,8 @@ export default forwardRef<
   {
     doc: CircuitDocument;
     themeName: string;
+    /** Index of the sheet being edited (subcircuits are separate sheets). */
+    sheetIdx?: number;
     onStatus?: (s: EditorStatus) => void;
     onEditComponent?: (compId: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
@@ -69,7 +71,7 @@ export default forwardRef<
     violations?: readonly ViolationMarker[] | null;
   }
 >(function EditorCanvas(
-  { doc, themeName, onStatus, onEditComponent, sim, pathIds, violations },
+  { doc, themeName, sheetIdx = 0, onStatus, onEditComponent, sim, pathIds, violations },
   ref,
 ) {
   const [tick, setTick] = useState(0);
@@ -78,6 +80,10 @@ export default forwardRef<
   const pulses = useMemo(() => new PulseTracker(), [doc]);
   const [pulsesLive, setPulsesLive] = useState(false);
   const lastPulseChanges = useRef<readonly unknown[] | null>(null);
+  // Tools/scene read the CURRENT sheet through a ref so a sheet switch does
+  // not rebuild the whole tool machine (doc identity still does).
+  const sheetRef = useRef(sheetIdx);
+  sheetRef.current = sheetIdx;
   const { scene, sel, tool } = useMemo(() => {
     const scene = new DocScene();
     const sel = new SelectionModel();
@@ -85,7 +91,7 @@ export default forwardRef<
       doc,
       scene,
       sel,
-      () => 0,
+      () => sheetRef.current,
       () => setTick((t) => t + 1),
     );
     return { scene, sel, tool };
@@ -113,11 +119,21 @@ export default forwardRef<
     sim ? () => sim.store.getVersion() : () => 0,
   );
 
+  // Sheet switch: repaint the new circuit and drop the old sheet's
+  // selection (its ids are meaningless here) and pulse bookkeeping.
+  useEffect(() => {
+    sel.clear();
+    lastPulseChanges.current = null;
+    setTick((t) => t + 1);
+  }, [sheetIdx, sel]);
+
   const draw = useCallback<CanvasHostProps["draw"]>(
     (renderer, camera, view, theme, tMs) => {
-      scene.sync(doc, 0);
+      scene.sync(doc, sheetRef.current);
       let simOverlay: SimOverlay | undefined;
-      if (sim !== undefined && sim.store.loaded) {
+      // net_map is root-sheet-only (contract v1.1): no sim overlay on
+      // subcircuit sheets.
+      if (sim !== undefined && sim.store.loaded && sheetRef.current === 0) {
         const store = sim.store;
         const highlight = sim.haltHighlight();
         // Pulse spawn: once per flushed frame, in delay mode at low speed
@@ -214,7 +230,11 @@ export default forwardRef<
       },
       refresh: () => bump(),
       placeAt: (type, world) => {
-        doc.addComponent(0, { type, pos: [Math.round(world.x), Math.round(world.y)], rot: "E" });
+        doc.addComponent(sheetRef.current, {
+          type,
+          pos: [Math.round(world.x), Math.round(world.y)],
+          rot: "E",
+        });
         bump();
       },
       cancel: () => {
@@ -270,7 +290,7 @@ export default forwardRef<
         if (type !== "") {
           // drop lands with the body CENTERED on the cursor
           const { w: bw, h: bh } = compSize({ type });
-          doc.addComponent(0, {
+          doc.addComponent(sheetRef.current, {
             type,
             pos: [Math.round(w.x - bw / 2), Math.round(w.y - bh / 2)],
             rot: "E",

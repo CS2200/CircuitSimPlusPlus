@@ -14,6 +14,7 @@ import type {
   LoadResult,
   NamedComponent,
   NetId,
+  SaveResult,
   SimMode,
   ViolationKind,
   WireIdx,
@@ -66,6 +67,23 @@ export class SimController {
 
   /** Load the editor document into the core. Returns true on success. */
   async load(doc: CircuitDocument): Promise<boolean> {
+    return this.loadInto(doc, () => this.core.api.loadCircuit({ bytes: encode(doc.toJson()) }));
+  }
+
+  /**
+   * Load a document FROM DISK into the core (File → Open in the Tauri
+   * shell): the engine reads the file itself, so memory autoloads resolve
+   * relative to the circuit's directory (DESIGN.md §5.2). `doc` is the
+   * editor's own copy of the same file (parsed by the frontend).
+   */
+  async loadFromPath(doc: CircuitDocument, path: string): Promise<boolean> {
+    return this.loadInto(doc, () => this.core.api.loadCircuit({ path }));
+  }
+
+  private async loadInto(
+    doc: CircuitDocument,
+    invokeLoad: () => Promise<LoadResult>,
+  ): Promise<boolean> {
     this.doc = doc;
     this.pump.clear();
     // Reset BEFORE the call: cores emit the initial full-state batch during
@@ -74,7 +92,7 @@ export class SimController {
     this.store.reset();
     let result: LoadResult;
     try {
-      result = await this.core.api.loadCircuit({ bytes: encode(doc.toJson()) });
+      result = await invokeLoad();
     } catch (err) {
       this.store.onLoadFailed([{ kind: "other", message: String(err), circuit: doc.name }]);
       return false;
@@ -89,6 +107,19 @@ export class SimController {
     }
     this.store.onLoaded(wireToNet, result.named);
     return true;
+  }
+
+  /**
+   * Save through the core's canonical serializer (File → Save). The real
+   * backend writes via the live session, so one is created (by loading the
+   * current document) when the user saves before ever running the sim.
+   */
+  async save(doc: CircuitDocument, path: string): Promise<SaveResult> {
+    if (!this.store.loaded) {
+      const ok = await this.load(doc);
+      if (!ok) return { ok: false, errors: [...this.store.loadErrors] };
+    }
+    return this.core.api.saveCircuit(path, doc.data);
   }
 
   unload(): void {
@@ -152,7 +183,11 @@ export class SimController {
   /** Current value of a watch-addressable component, if its net is known. */
   watchValue(named: NamedComponent): WireValue | undefined {
     if (this.doc === null || this.store.wireToNet === null) return undefined;
-    const comp = this.doc.circuit(0).components[named.comp_id];
+    const root = this.doc.circuit(0);
+    // net_map is root-circuit-only (contract v1.1): subcircuit internals
+    // have no wire→net mapping to resolve against.
+    if (named.circuit !== root.name) return undefined;
+    const comp = root.components[named.comp_id];
     if (comp === undefined) return undefined;
     const pin = VALUE_PIN[named.kind];
     const wireIdx = this.doc
@@ -186,14 +221,15 @@ export class SimController {
 
   /**
    * Setup/hold violation markers for the CURRENT sheet (U7): violations
-   * whose `circuit` matches the open circuit, resolved to document comp
-   * ids. Violations in other circuits are filtered out (v1 UI highlights
-   * the root sheet only, contract v1.1).
+   * whose `circuit` matches the viewed sheet, resolved to document comp
+   * ids. Violations in other circuits are filtered out (contract v1.1).
    */
-  violationMarkers(): { compId: string; kind: ViolationKind; detail: string }[] {
+  violationMarkers(sheetName?: string): { compId: string; kind: ViolationKind; detail: string }[] {
     const timing = this.store.timing;
     if (timing === null || this.doc === null) return [];
-    const sheet = this.doc.circuit(0);
+    const idx = sheetName === undefined ? 0 : this.doc.circuitIdxByName(sheetName);
+    if (idx < 0) return []; // stale sheet name (e.g. mid-open) — no markers
+    const sheet = this.doc.circuit(idx);
     const out: { compId: string; kind: ViolationKind; detail: string }[] = [];
     for (const v of timing.violations) {
       if (v.circuit !== sheet.name) continue;
@@ -205,16 +241,20 @@ export class SimController {
 
   /**
    * The top observed critical path as document comp ids — only when the
-   * path's `circuit` is the current sheet (contract v1.1 filter).
+   * path's `circuit` is the viewed sheet (contract v1.1 filter).
    */
-  topPathIds(): string[] | null {
+  topPathIds(sheetName?: string): string[] | null {
     const timing = this.store.timing;
     if (timing === null || this.doc === null) return null;
     const top = timing.top_paths[0];
     if (top === undefined || top.comps.length === 0) return null;
-    if (top.circuit !== this.doc.circuit(0).name) return null;
+    const name = sheetName ?? this.doc.circuit(0).name;
+    if (top.circuit !== name) return null;
+    const idx = this.doc.circuitIdxByName(name);
+    if (idx < 0) return null; // stale sheet name (e.g. mid-open)
+    const sheet = this.doc.circuit(idx);
     return top.comps
-      .map((idx) => this.doc!.circuit(0).components[idx]?.id)
+      .map((idx) => sheet.components[idx]?.id)
       .filter((id): id is string => id !== undefined);
   }
 }
