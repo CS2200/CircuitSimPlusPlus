@@ -6,6 +6,7 @@
 :root,
 [data-theme="dark"] {
   --bg: #16161f;
+  --grid: #262634;
   --panel: #22222e;
   --panel-border: #34344a;
   --text: #e6e6f0;
@@ -21,12 +22,16 @@
   /* Per-bus hues (multi-bit "rainbow buses", DLS-style) */
   --bus-a: #f0b43c;
   --bus-b: #b478e6;
+  --bus-c: #4dd0e1;
+  --bus-d: #f368a0;
+  --bus-e: #b8e34d;
 
   --accent: #5b8def;
 }
 
 [data-theme="light"] {
   --bg: #f4f4f8;
+  --grid: #e2e2ec;
   --panel: #ffffff;
   --panel-border: #d4d4e0;
   --text: #1c1c26;
@@ -40,6 +45,9 @@
 
   --bus-a: #c88f1e;
   --bus-b: #8a4fc0;
+  --bus-c: #1e9ab0;
+  --bus-d: #c04a78;
+  --bus-e: #6a9a2a;
 
   --accent: #3b6fd4;
 }
@@ -94,14 +102,231 @@ body {
   cursor: pointer;
 }
 
-.app-canvas-placeholder {
+.app-main {
   flex: 1;
+  min-height: 0; /* allow the flex child to shrink to its container */
   display: flex;
-  flex-direction: column;
+}
+
+.palette {
+  width: 190px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--panel-border);
+  padding: 8px;
+}
+
+.palette-group {
+  margin-bottom: 10px;
+}
+
+.palette-group-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin: 4px 2px;
+}
+
+.palette-item {
+  display: inline-block;
+  margin: 2px;
+  padding: 4px 10px;
+  min-width: 52px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 0.8rem;
+}
+
+.palette-item:hover {
+  border-color: var(--accent);
+}
+
+.palette-item.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+}
+
+.editor-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.header-actions button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+}
+
+.header-actions button.secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.header-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.app-statusbar {
+  display: flex;
+  gap: 1.2rem;
+  align-items: center;
+}
+
+.statusbar-hint {
+  margin-left: auto;
+}
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  z-index: 100;
+}
+
+.help-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  padding: 1.2rem 1.6rem;
+  max-width: 480px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+
+.help-card h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1rem;
+}
+
+.help-card table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.help-card td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+}
+
+.help-card td:first-child {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.help-dismiss {
+  margin: 0.8rem 0 0;
+  font-size: 0.75rem;
   color: var(--text-dim);
+}
+
+.prop-dialog {
+  min-width: 320px;
+}
+
+.prop-dialog .prop-type {
+  color: var(--text-dim);
+  font-weight: normal;
+  font-size: 0.85rem;
+  font-family: ui-monospace, monospace;
+}
+
+.prop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+
+.prop-row span {
+  color: var(--text-dim);
+}
+
+.prop-row input,
+.prop-row select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+  min-width: 140px;
+}
+
+.prop-row input:focus,
+.prop-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prop-actions button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.prop-actions button.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+}
+
+.canvas-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.circuit-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* pointer events own pan/zoom, not the browser */
+  cursor: grab;
+}
+
+.circuit-canvas:active {
+  cursor: grabbing;
+}
+
+.canvas-overlay {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+  pointer-events: none;
+  white-space: pre;
 }
 
 .app-statusbar {
@@ -112,28 +337,309 @@ body {
   color: var(--text-dim);
 }
 
-/* Wire color demo swatches (placeholder body; real wires are canvas-rendered). */
-.wire-demo {
+/* Sim transport bar (U5) */
+.simbar {
   display: flex;
-  gap: 1rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 0.9rem;
 }
 
-.wire {
-  display: inline-block;
-  width: 64px;
-  height: 6px;
+.simbar button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.simbar button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.simbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.simbar .sim-play {
+  min-width: 2.4rem;
+  font-size: 1rem;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sim-runto {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.sim-runto input {
+  width: 6.5rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.sim-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.sim-speed input[type="range"] {
+  width: 9rem;
+  accent-color: var(--accent);
+}
+
+.sim-speed span {
+  min-width: 5.5rem;
+  font-family: ui-monospace, monospace;
+}
+
+.sim-status {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+/* Halt / load-error banner */
+.sim-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 1rem;
+  background: color-mix(in srgb, var(--wire-x) 16%, var(--panel));
+  border-bottom: 1px solid var(--wire-x);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+/* Watch panel (U5) */
+.watch-panel {
+  width: 15rem;
+  overflow-y: auto;
+  padding: 0.6rem;
+  background: var(--panel);
+  border-left: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.watch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+}
+
+.watch-name {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-value {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.watch-unknown {
+  color: var(--text-dim);
+}
+
+.watch-mode {
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  width: 1.5rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.watch-mode:hover {
+  border-color: var(--accent);
+}
+
+/* Memory inspector (U6) */
+.memory-inspector {
+  margin-top: 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  background: var(--bg);
+}
+
+.memory-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.memory-inspector-head .mem-addr {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.memory-inspector-head .mem-addr input {
+  width: 5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.8rem;
+}
+
+.memory-inspector-head button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  cursor: pointer;
+}
+
+.mem-running {
+  color: var(--wire-z);
+  font-size: 0.75rem;
+}
+
+.mem-close {
+  margin-left: auto;
+}
+
+.mem-error {
+  color: var(--wire-x);
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+}
+
+.mem-grid {
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.mem-rowaddr {
+  color: var(--text-dim);
+  padding-right: 0.5rem;
+  text-align: right;
+}
+
+.mem-cell {
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--panel-border);
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+.mem-cell.editable:hover {
+  border-color: var(--accent);
+  cursor: text;
+}
+
+.mem-cell.mem-editing input {
+  width: 5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--accent);
   border-radius: 3px;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
 }
 
-.wire-low {
-  background: var(--wire-low);
+.watch-mem {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  margin-left: auto;
+  cursor: pointer;
+  padding: 0;
 }
-.wire-high {
-  background: var(--wire-high);
+
+/* Toasts (U6 reset confirmations) */
+.toast-stack {
+  position: fixed;
+  bottom: 2.2rem;
+  right: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  z-index: 30;
 }
-.wire-bus-a {
-  background: var(--bus-a);
+
+.toast {
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
-.wire-bus-b {
-  background: var(--bus-b);
+
+/* T_obs / critical-path button (U7) */
+.sim-tobs {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+
+.sim-tobs:hover,
+.sim-tobs.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sim-violations {
+  color: var(--wire-x);
+}
+
+/* Update nudge + About (U8) */
+.update-nudge p {
+  margin: 0.4rem 0;
+}
+
+.update-link {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.update-link:hover {
+  filter: brightness(1.15);
 }

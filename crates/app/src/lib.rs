@@ -1,15 +1,23 @@
 //! CircuitSim++ Tauri shell.
 //!
-//! This crate is a **thin adapter** (FRONTEND.md task U5 wires it to a real
-//! engine): it exposes the IPC contract from `docs/tasks/README.md` §3 as
-//! Tauri commands, and forwards engine events as Tauri events. All types come
-//! from `csim_core::api` — the shell owns no semantics.
+//! This crate is a **thin adapter**: it exposes the IPC contract from
+//! `docs/tasks/README.md` §3 as Tauri commands, and forwards engine events
+//! as Tauri events. All types come from `csim_core::api` — the shell owns
+//! no semantics.
 //!
-//! Event names on the frontend side: `net_diffs`, `sim_status`, `sim_halted`,
-//! `timing_update` (payloads are the `csim_core::api` types, serialized).
+//! Session model (DESIGN.md §7.2): one `Box<dyn Sim + Send>` per app,
+//! guarded by a mutex in Tauri state; the engine runs on its own thread
+//! and pushes events through a [`TauriSink`]. The concrete `Sim`
+//! implementation lands with BACKEND.md B9; until then session creation
+//! returns a clean error and the UI runs on the mock (`VITE_MOCK_CORE=1`).
 
-use csim_core::api::{CompId, LoadResult, NamedKind, SaveResult, SimMode, WireValue};
-use tauri::Emitter;
+use std::sync::Mutex;
+
+use csim_core::api::{
+    CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimMode, SimStatus,
+    TimingUpdate, WireValue,
+};
+use tauri::{AppHandle, Emitter, State};
 
 /// Tauri event names (frontend subscribes to these — see `docs/ipc.md`).
 pub mod events {
@@ -23,98 +31,149 @@ pub mod events {
     pub const TIMING_UPDATE: &str = "timing_update";
 }
 
-// --- Commands (README §3). Bodies land in FRONTEND.md task U5 against a
-// --- `csim_core::api::Sim` held in Tauri state on a dedicated sim thread.
+/// Engine events → Tauri events (README §3). Emit failures are dropped:
+/// a closed window must not crash the sim thread.
+struct TauriSink(AppHandle);
 
-#[tauri::command]
-fn load_circuit(path: Option<String>, bytes: Option<Vec<u8>>) -> LoadResult {
-    let _ = (path, bytes);
-    unimplemented!("FRONTEND.md U5 — wire to csim_core::api::Sim")
+impl EventSink for TauriSink {
+    fn net_diffs(&mut self, diffs: &NetDiffs) {
+        let _ = self.0.emit(events::NET_DIFFS, diffs);
+    }
+    fn status(&mut self, status: &SimStatus) {
+        let _ = self.0.emit(events::SIM_STATUS, status);
+    }
+    fn halted(&mut self, halted: &SimHalted) {
+        let _ = self.0.emit(events::SIM_HALTED, halted);
+    }
+    fn timing(&mut self, timing: &TimingUpdate) {
+        let _ = self.0.emit(events::TIMING_UPDATE, timing);
+    }
 }
 
-#[tauri::command]
-fn save_circuit(path: String, document: serde_json::Value) -> SaveResult {
-    let _ = (path, document);
-    unimplemented!("FRONTEND.md U5 — wire to csim_core::api::Sim")
+/// The one live simulation session (None before the first load).
+struct SimState(Mutex<Option<Box<dyn Sim + Send>>>);
+
+/// Construct a session over the engine. BACKEND.md B9 lands the concrete
+/// `Sim` implementation in csim-core; swap it in here (one line) when it
+/// exists. Until then the real-core path reports cleanly and the frontend
+/// runs against the TypeScript mock.
+fn new_session(_sink: TauriSink) -> Result<Box<dyn Sim + Send>, String> {
+    Err("csim-core session API not available yet (BACKEND.md B9); run the UI with VITE_MOCK_CORE=1".into())
 }
 
-#[tauri::command]
-fn sim_play(hz: u64) {
-    let _ = hz;
-    unimplemented!("FRONTEND.md U5")
+fn lock<'a>(state: &'a State<SimState>) -> Result<std::sync::MutexGuard<'a, Option<Box<dyn Sim + Send>>>, String> {
+    state.0.lock().map_err(|_| "sim state lock poisoned".to_string())
 }
 
-#[tauri::command]
-fn sim_pause() {
-    unimplemented!("FRONTEND.md U5")
+fn session<'a>(
+    guard: &'a mut Option<Box<dyn Sim + Send>>,
+) -> Result<&'a mut Box<dyn Sim + Send>, String> {
+    guard
+        .as_mut()
+        .ok_or_else(|| "no circuit loaded".to_string())
 }
 
-#[tauri::command]
-fn sim_step_tick() {
-    unimplemented!("FRONTEND.md U5")
-}
+// --- Commands (README §3). Errors reject the frontend's invoke() promise.
 
 #[tauri::command]
-fn sim_step_cycles(n: u64) {
-    let _ = n;
-    unimplemented!("FRONTEND.md U5")
-}
-
-#[tauri::command]
-fn sim_run_until(cycle: u64) {
-    let _ = cycle;
-    unimplemented!("FRONTEND.md U5")
-}
-
-#[tauri::command]
-fn sim_set_mode(mode: SimMode) {
-    let _ = mode;
-    unimplemented!("FRONTEND.md U5")
-}
-
-#[tauri::command]
-fn poke(comp_id: CompId, pin: String, value: WireValue) {
-    let _ = (comp_id, pin, value);
-    unimplemented!("FRONTEND.md U5")
-}
-
-#[tauri::command]
-fn mem_read(name: String, addr: u64, len: u64) -> Vec<WireValue> {
-    let _ = (name, addr, len);
-    unimplemented!("FRONTEND.md U5")
-}
-
-#[tauri::command]
-fn mem_write(name: String, addr: u64, values: Vec<WireValue>) {
-    let _ = (name, addr, values);
-    unimplemented!("FRONTEND.md U5")
+fn load_circuit(
+    app: AppHandle,
+    state: State<SimState>,
+    path: Option<String>,
+    bytes: Option<Vec<u8>>,
+) -> Result<LoadResult, String> {
+    if path.is_none() && bytes.is_none() {
+        return Err("load_circuit: a path or bytes is required".into());
+    }
+    let mut sim = new_session(TauriSink(app))?;
+    let result = match (path, bytes) {
+        (Some(p), _) => sim.load_circuit_path(&p),
+        (None, Some(b)) => sim.load_circuit_bytes(&b),
+        (None, None) => unreachable!("checked above"),
+    };
+    *lock(&state)? = Some(sim);
+    Ok(result)
 }
 
 #[tauri::command]
-fn snapshot(path: String) {
-    let _ = path;
-    unimplemented!("FRONTEND.md U5")
+fn save_circuit(
+    state: State<SimState>,
+    path: String,
+    document: serde_json::Value,
+) -> Result<SaveResult, String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.save_circuit(&path, &document))
 }
 
 #[tauri::command]
-fn resume(path: String) {
-    let _ = path;
-    unimplemented!("FRONTEND.md U5")
+fn sim_play(state: State<SimState>, hz: u64) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.play(hz))
 }
 
-/// Contract sanity: referenced so the compiler type-checks the event payload
-/// types used by the frontend (task U5 will emit them for real).
-#[allow(dead_code)]
-fn emit_timing_update(app: &tauri::AppHandle, update: &csim_core::api::TimingUpdate) {
-    let _ = app.emit(events::TIMING_UPDATE, update);
+#[tauri::command]
+fn sim_pause(state: State<SimState>) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.pause())
 }
 
-/// Contract sanity: keeps [`NamedKind`] referenced from the shell.
-#[allow(dead_code)]
-fn _named_kind_marker(_: NamedKind) {}
+#[tauri::command]
+fn sim_step_tick(state: State<SimState>) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.step_tick())
+}
+
+#[tauri::command]
+fn sim_step_cycles(state: State<SimState>, n: u64) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.step_cycles(n))
+}
+
+#[tauri::command]
+fn sim_run_until(state: State<SimState>, cycle: u64) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.run_until(cycle))
+}
+
+#[tauri::command]
+fn sim_set_mode(state: State<SimState>, mode: SimMode) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.set_mode(mode))
+}
+
+#[tauri::command]
+fn poke(state: State<SimState>, comp_id: CompId, pin: String, value: WireValue) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.poke(comp_id, &pin, value))
+}
+
+#[tauri::command]
+fn mem_read(state: State<SimState>, name: String, addr: u64, len: u64) -> Result<Vec<WireValue>, String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.mem_read(&name, addr, len))
+}
+
+#[tauri::command]
+fn mem_write(state: State<SimState>, name: String, addr: u64, values: Vec<WireValue>) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.mem_write(&name, addr, &values))
+}
+
+#[tauri::command]
+fn snapshot(state: State<SimState>, path: String) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.snapshot(&path))
+}
+
+#[tauri::command]
+fn resume(state: State<SimState>, path: String) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    Ok(session(&mut guard)?.resume(&path))
+}
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(SimState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             load_circuit,
             save_circuit,
