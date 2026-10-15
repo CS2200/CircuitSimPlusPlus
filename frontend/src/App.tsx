@@ -28,6 +28,7 @@ import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
+import { diffDocuments } from "./model/versionDiff";
 import { PALETTE, compPins, compSpec, defaultAttrs, editableAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
@@ -36,6 +37,8 @@ import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import {
   baseName,
+  forgetSavedFileHandle,
+  hasSavedFileHandle,
   isTauri,
   openCircuitFile,
   pickSavePath,
@@ -443,6 +446,7 @@ export default function App() {
     if (!confirmDiscard()) return;
     sim.unload();
     adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
+    forgetSavedFileHandle(); // a new document must not overwrite the last file (§35)
     toast("New circuit");
   }, [confirmDiscard, adoptDoc, sim, toast]);
 
@@ -464,6 +468,7 @@ export default function App() {
       return;
     }
     adoptDoc(d, opened.path ?? opened.name);
+    forgetSavedFileHandle(); // opened a different file (§35)
     // Engine side: path-load in the shell (autoloads resolve next to the
     // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
     // in the sim banner via the store.
@@ -498,6 +503,26 @@ export default function App() {
     [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion],
   );
 
+  /**
+   * Browser save (§35): with a file already chosen this writes straight to it,
+   * so Ctrl+S behaves like a real save instead of re-asking for a name. Only
+   * "Save As" (or the first save) opens the picker.
+   */
+  const saveInBrowser = useCallback(
+    async (suggested: string, forcePicker: boolean): Promise<void> => {
+      const saved = await saveTextFile(suggested, doc.toJson(), { forcePicker });
+      if (!saved) return; // cancelled — nothing was written
+      doc.markClean();
+      setFilePath(doc.name);
+      editorRef.current?.refresh();
+      setSaveState({ kind: "saved", at: Date.now() });
+      void discardRecovery();
+      void takeVersion(0);
+      toast(`Saved ${suggested}`);
+    },
+    [doc, discardRecovery, takeVersion, toast],
+  );
+
   const onSaveAs = useCallback(() => {
     const suggested = `${doc.name}.csx`;
     if (isTauri()) {
@@ -507,30 +532,53 @@ export default function App() {
         })
         .catch((err) => toast(`Save failed: ${String(err)}`));
     } else {
-      // The browser has no filesystem: the File System Access picker writes a
-      // real file (and reports cancel); the download shim is the fallback.
-      void saveTextFile(suggested, doc.toJson()).then((saved) => {
-        if (!saved) return; // cancelled — nothing was written
-        doc.markClean();
-        setFilePath(doc.name);
-        editorRef.current?.refresh();
-        setSaveState({ kind: "saved", at: Date.now() });
-        void discardRecovery();
-        void takeVersion(0);
-        toast(`Saved ${suggested}`);
-      });
+      void saveInBrowser(suggested, true).catch((err) => toast(`Save failed: ${String(err)}`));
     }
-  }, [doc, filePath, doSave, toast, discardRecovery, takeVersion]);
+  }, [doc, filePath, doSave, saveInBrowser, toast]);
 
   const onSave = useCallback(() => {
-    // Only the Tauri shell can write to a known path; outside it Save is
-    // always Save-As (a download).
+    // The Tauri shell writes to the known path; the browser writes to the file
+    // it already has a handle for. Either way only the FIRST save asks where.
     if (isTauri() && filePath !== null && filePath.includes("/")) {
       void doSave(filePath);
+    } else if (!isTauri() && hasSavedFileHandle()) {
+      void saveInBrowser(`${doc.name}.csx`, false).catch((err) =>
+        toast(`Save failed: ${String(err)}`),
+      );
     } else {
       onSaveAs();
     }
-  }, [filePath, doSave, onSaveAs]);
+  }, [filePath, doc, doSave, onSaveAs, saveInBrowser, toast]);
+
+  /**
+   * Click the title to name the file (§35). Naming writes a file, so this is
+   * Save-As semantics: an existing file is left untouched and the title follows
+   * whatever name/path is chosen.
+   */
+  const renameFile = useCallback(() => {
+    setNameDialog({
+      title: "Name this circuit file",
+      initial: (filePath === null ? doc.name : baseName(filePath)).replace(/\.csx$/i, ""),
+      submitLabel: "Save",
+      onSubmit: (name) => {
+        setNameDialog(null);
+        const clean = name.trim();
+        if (clean === "") return;
+        doc.rename(clean);
+        editorRef.current?.refresh();
+        const suggested = `${clean}.csx`;
+        if (isTauri()) {
+          void pickSavePath(suggested, null)
+            .then((path) => {
+              if (path !== null) void doSave(path);
+            })
+            .catch((err) => toast(`Save failed: ${String(err)}`));
+        } else {
+          void saveInBrowser(suggested, true).catch((err) => toast(`Save failed: ${String(err)}`));
+        }
+      },
+    });
+  }, [doc, filePath, doSave, saveInBrowser, toast]);
 
   // ---- autosave: crash recovery + optional atomic file rewrite -------------
 
@@ -771,6 +819,16 @@ export default function App() {
     return selectedVersion.label !== "" ? `${when} · ${selectedVersion.label}` : when;
   }, [selectedVersion]);
 
+  /** How the previewed version differs from the open document (§35). */
+  const versionDiff = useMemo(() => {
+    if (!historyOpen || historyPreview === null) return null;
+    try {
+      return diffDocuments(doc, CircuitDocument.fromJson(historyPreview));
+    } catch {
+      return null;
+    }
+  }, [historyOpen, historyPreview, doc]);
+
   // The preview follows the selection (read on demand — versions can be large).
   useEffect(() => {
     if (!historyOpen || historySelectedId === null) {
@@ -845,64 +903,13 @@ export default function App() {
   );
 
   /** Save a version to a new file (Tauri: dialog + engine write; browser: download). */
-  const saveVersionCopy = useCallback(
-    async (id: string) => {
-      const text = await historyStore()
-        .read(historyTarget(), id)
-        .catch(() => null);
-      if (text === null) {
-        toast("That version is no longer available");
-        return;
-      }
-      const suggested = `${docRef.current.name}-v${id}.csx`;
-      if (isTauri()) {
-        const path = await pickSavePath(suggested, null);
-        if (path === null) return;
-        try {
-          const d = initDoc(CircuitDocument.fromJson(text));
-          const res = await sim.save(d, path);
-          if (!res.ok) {
-            toast(`Save failed: ${res.errors[0]?.message ?? "unknown error"}`);
-            return;
-          }
-          toast(`Saved ${baseName(path)}`);
-        } catch (err) {
-          toast(`Save failed: ${String(err)}`);
-        }
-      } else {
-        await saveTextFile(suggested, text);
-        toast(`Downloaded ${suggested}`);
-      }
-    },
-    [historyTarget, sim, toast],
-  );
-
-  const nameVersion = useCallback(
-    (id: string) => {
-      const version = versions.find((v) => v.id === id);
-      setNameDialog({
-        title: "Name this version",
-        initial: version?.label ?? "",
-        submitLabel: "Name",
-        onSubmit: (label) => {
-          setNameDialog(null);
-          void historyStore()
-            .name(historyTarget(), id, label)
-            .then(() => refreshHistory())
-            .catch(() => undefined);
-        },
-      });
-    },
-    [versions, historyTarget, refreshHistory],
-  );
-
-  const deleteVersion = useCallback(
-    async (id: string) => {
-      if (!window.confirm("Delete this version? The document itself is not affected.")) return;
-      await historyStore()
-        .remove(historyTarget(), id)
-        .catch(() => false);
-      void refreshHistory();
+  /** Rename a version in place (the drawer's click-the-name edit, §35). */
+  const renameVersion = useCallback(
+    (id: string, label: string) => {
+      void historyStore()
+        .name(historyTarget(), id, label)
+        .then(() => refreshHistory())
+        .catch(() => undefined);
     },
     [historyTarget, refreshHistory],
   );
@@ -1254,6 +1261,7 @@ export default function App() {
         logo={<AppLogoIcon />}
         title={stress ? "stress harness — ?stress=1" : docTitle}
         titleTooltip={stress ? undefined : (filePath ?? undefined)}
+        onRenameFile={stress ? undefined : renameFile}
         status={!stress ? <SaveIndicator state={saveState} autosaveOn={autosaveOn} /> : undefined}
         menus={!stress ? <MenuBar menus={menus} /> : undefined}
         transport={
@@ -1483,10 +1491,9 @@ export default function App() {
             versions={versions}
             selectedId={historySelectedId}
             usage={historyUsage}
+            diff={versionDiff}
             onSelect={setHistorySelectedId}
-            onSaveCopy={(id) => void saveVersionCopy(id)}
-            onName={nameVersion}
-            onDelete={(id) => void deleteVersion(id)}
+            onRename={renameVersion}
             onClose={closeHistory}
           />
         )}

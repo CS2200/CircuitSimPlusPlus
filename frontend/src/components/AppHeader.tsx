@@ -15,6 +15,7 @@ export default function AppHeader({
   logo,
   title,
   titleTooltip,
+  onRenameFile,
   status,
   menus,
   actions,
@@ -26,6 +27,8 @@ export default function AppHeader({
   title: string;
   /** Full path, for the hover tooltip. */
   titleTooltip?: string;
+  /** Given when clicking the title should name/rename the file. */
+  onRenameFile?: () => void;
   /** Save-state chip beside the title (absent in stress mode). */
   status?: ReactNode;
   /** Row-2 left: the menu buttons, or null when there are none. */
@@ -44,9 +47,19 @@ export default function AppHeader({
         <span className="app-logo" title="CircuitSim++">
           {logo}
         </span>
-        <span className="app-title" title={titleTooltip ?? title}>
-          {title}
-        </span>
+        {onRenameFile === undefined ? (
+          <span className="app-title" title={titleTooltip ?? title}>
+            {title}
+          </span>
+        ) : (
+          <button
+            className="app-title app-title-editable"
+            title={`${titleTooltip ?? title} — click to rename`}
+            onClick={onRenameFile}
+          >
+            {title}
+          </button>
+        )}
         {status}
         <div className="appheader-actions">{actions}</div>
       </div>

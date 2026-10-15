@@ -470,6 +470,20 @@ body {
   white-space: nowrap;
 }
 
+/* Clickable title (§35): looks like the label, invites a click to rename. */
+.app-title-editable {
+  padding: 0.1rem 0.35rem;
+  margin-left: -0.35rem;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.app-title-editable:hover {
+  background: var(--grid);
+}
+
 /* The app title stays in the accessibility tree but is not drawn (the
  * top bar itself is the chrome, VSCode-style). */
 .sr-only {
@@ -1980,18 +1994,11 @@ body {
   font-size: 0.82rem;
 }
 
+/* A row is a plain container: the click target is an overlay button, so the
+ * version's name (and its edit field) can sit above it (§35). */
 .history-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.05rem;
-  width: 100%;
-  padding: 0.4rem 0.5rem;
-  background: transparent;
-  border: none;
+  position: relative;
   border-radius: 6px;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
 }
 
 .history-row:hover {
@@ -2000,6 +2007,25 @@ body {
 
 .history-row.active {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.history-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.history-body {
+  position: relative; /* above .history-select */
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.4rem 0.5rem;
+  pointer-events: none; /* clicks fall through unless a child opts in */
 }
 
 .history-when {
@@ -2022,11 +2048,37 @@ body {
 }
 
 .history-label {
+  align-self: flex-start;
+  max-width: 100%;
   overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: none;
   color: var(--text);
+  font: inherit;
   font-size: 0.82rem;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: auto; /* the one clickable child */
+  cursor: text;
+}
+
+.history-label:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.history-rename {
+  width: 100%;
+  padding: 0.1rem 0.3rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.82rem;
+  pointer-events: auto;
 }
 
 .history-meta {
@@ -2034,30 +2086,44 @@ body {
   font-size: 0.72rem;
 }
 
-.history-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.55rem 0.6rem;
+/* "This version vs the open document" (§35). */
+.history-diff {
+  padding: 0.5rem 0.7rem;
   border-top: 1px solid var(--panel-border);
 }
 
-.history-actions-row {
-  display: flex;
-  gap: 0.35rem;
+.history-diff h3 {
+  margin: 0 0 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.history-actions-row button {
-  flex: 1;
+.history-diff-summary {
+  margin: 0 0 0.3rem;
+  font-size: 0.82rem;
 }
 
-.history-actions > button:first-child {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+.history-diff-list {
+  max-height: 11rem;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--text-dim);
+  font-family: ui-monospace, monospace;
+  font-size: 0.74rem;
 }
 
-.history-actions button,
+.history-diff-list li {
+  overflow: hidden;
+  padding: 0.05rem 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-action {
   background: transparent;
   color: var(--text);
@@ -2068,7 +2134,6 @@ body {
   cursor: pointer;
 }
 
-.history-actions button:hover,
 .settings-action:hover {
   border-color: var(--accent);
 }

@@ -115,25 +115,62 @@ export async function pickSavePath(
   return picked === "" ? null : withCsxExtension(picked);
 }
 
+interface BrowserWritable {
+  write: (data: string) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+interface BrowserFileHandle {
+  createWritable: () => Promise<BrowserWritable>;
+}
+
 /**
- * Browser-mode save: prefer the File System Access API (Chromium), which gives
- * a real Save-As dialog **and a cancel signal**; fall back to a download where
- * it is unavailable (or under automation, where a native picker could not be
- * driven). Returns false when the user cancelled.
+ * The handle from the last browser save. Once a file exists, Ctrl+S writes to
+ * it again instead of re-opening the picker (the browser has no path to save
+ * to, so the handle stands in for one — §35).
  */
-export async function saveTextFile(name: string, text: string): Promise<boolean> {
+let savedHandle: BrowserFileHandle | null = null;
+
+/** True when the browser can save straight to the last chosen file. */
+export function hasSavedFileHandle(): boolean {
+  return savedHandle !== null;
+}
+
+/** Forget the browser's file (New / Open adopt a different document). */
+export function forgetSavedFileHandle(): void {
+  savedHandle = null;
+}
+
+/**
+ * Browser-mode save. With a file already chosen this writes straight to it;
+ * otherwise it prefers the File System Access API (Chromium), which gives a
+ * real Save-As dialog **and a cancel signal**, and falls back to a download
+ * where that is unavailable (or under automation, where a native picker could
+ * not be driven). Returns false when the user cancelled.
+ */
+export async function saveTextFile(
+  name: string,
+  text: string,
+  { forcePicker = false }: { forcePicker?: boolean } = {},
+): Promise<boolean> {
   const picker = (
     window as unknown as {
-      showSaveFilePicker?: (opts: unknown) => Promise<{
-        createWritable: () => Promise<{
-          write: (data: string) => Promise<void>;
-          close: () => Promise<void>;
-        }>;
-      }>;
+      showSaveFilePicker?: (opts: unknown) => Promise<BrowserFileHandle>;
     }
   ).showSaveFilePicker;
   const automated = typeof navigator !== "undefined" && navigator.webdriver === true;
   if (typeof picker === "function" && !automated) {
+    if (!forcePicker && savedHandle !== null) {
+      try {
+        const writable = await savedHandle.createWritable();
+        await writable.write(text);
+        await writable.close();
+        return true;
+      } catch {
+        // Permission lapsed, or the file moved: ask for a target again.
+        savedHandle = null;
+      }
+    }
     try {
       const handle = await picker({
         suggestedName: withCsxExtension(name),
@@ -142,6 +179,7 @@ export async function saveTextFile(name: string, text: string): Promise<boolean>
       const writable = await handle.createWritable();
       await writable.write(text);
       await writable.close();
+      savedHandle = handle;
       return true;
     } catch (err) {
       // AbortError = the user cancelled; anything else falls back to download.

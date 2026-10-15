@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Version history (UI_OVERHAUL §32), browser/mock mode.
+ * Version history (UI_OVERHAUL §34/§35), browser/mock mode.
  *
- * The drawer overlays the right dock and previews the selected version on the
- * canvas. Versions are taken on every successful save; in the browser the store
- * is sessionStorage-backed (the Tauri shell keeps it in the app data
- * directory), so every path here is the real one.
+ * The drawer overlays the right dock, previews the selected version on the
+ * canvas, lists how it differs from the open document, and renames a version
+ * when its name is clicked. Versions are taken on every successful save; in the
+ * browser the store is sessionStorage-backed (the Tauri shell keeps it in the
+ * app data directory), so every path here is the real one.
  */
 
 const DRAWER = "Version history";
@@ -78,15 +79,21 @@ test("version history: previews switch with the selection, and Restore applies o
   const rows = drawer.locator(".history-row");
   await expect(rows).toHaveCount(2);
 
-  // Opening the drawer previews the newest version.
+  // The drawer opens on the newest version: it previews the canvas, and the
+  // change list says there is nothing to report.
   await expect(page.locator(".history-preview")).toBeVisible();
   await expect(page.locator(".history-preview-text")).toContainText("Viewing an older version");
+  await expect(drawer.locator(".history-diff-summary")).toHaveText(
+    "No differences from the open document",
+  );
   await expect.poll(async () => (await previewHash(page)).length).toBeGreaterThan(100);
   const newest = await previewHash(page);
 
-  // Selecting the older version draws a different circuit.
+  // The older version: a different circuit, and one part missing from it.
   await rows.nth(1).click();
   await expect.poll(async () => previewHash(page)).not.toBe(newest);
+  await expect(drawer.locator(".history-diff-summary")).toHaveText("1 part removed");
+  await expect(drawer.locator(".history-diff-list")).toContainText("− gate.and");
 
   // Restore is the only thing that touches the document.
   await page.getByRole("button", { name: "Restore this version" }).click();
@@ -94,15 +101,17 @@ test("version history: previews switch with the selection, and Restore applies o
   await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(1);
 });
 
-test("version history: name a version, then clear the history", async ({ page }) => {
+test("version history: click a name to rename it, then clear from Settings", async ({ page }) => {
   await page.goto("/");
   await placeAndGate(page);
   await saveAs(page);
 
   const drawer = await openHistory(page);
-  await drawer.getByRole("button", { name: "Name…" }).click();
-  await page.getByPlaceholder("(unnamed)").fill("Milestone");
-  await page.getByRole("button", { name: "Name", exact: true }).click();
+  await drawer.locator(".history-label").first().click();
+  const field = drawer.locator(".history-rename");
+  await field.fill("Milestone");
+  await field.press("Enter");
+  await expect(drawer.locator(".history-label").first()).toHaveText("Milestone");
   await expect(drawer.locator(".history-badge")).toHaveText("named");
 
   await page.keyboard.press("Escape"); // Escape closes the drawer

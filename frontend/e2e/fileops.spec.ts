@@ -303,3 +303,33 @@ test("sim transport bar: log slider with notches, run-to", async ({ page }) => {
   await page.getByRole("button", { name: "run to" }).click();
   await expect(status).toContainText("cycle 5");
 });
+
+test("the header title names the file, and Save then writes without asking again", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // Clicking "(unsaved)" in the header asks for a name and saves with it (§35).
+  await expect(page.locator(".app-title")).toHaveText("(unsaved)");
+  await page.locator(".app-title").click();
+  await page.getByRole("textbox", { name: "Name this circuit file" }).fill("alu");
+  const first = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await first;
+  await expect(page.locator(".app-title")).toHaveText("alu");
+  expect((await doc(page)).name).toBe("alu");
+
+  // A later edit + Ctrl+S saves again with no new name.
+  await page.locator('[data-group="Gates"]').click();
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.press("Escape");
+
+  const again = page.waitForEvent("download");
+  await page.keyboard.press("Control+s");
+  await again;
+  await expect(page.locator(".app-title")).toHaveText("alu");
+  await expect(page.locator(".app-title")).not.toHaveText("(unsaved)");
+});

@@ -1027,3 +1027,32 @@ menu, and tidy the simulation bar.
 
 **Acceptance:** 292 unit / 45 e2e green. The transport is 2px taller, so the
 committed screenshot baselines need the usual `--update-snapshots` pass on CI.
+
+## 35. Follow-up batch Z (2026-10-16): one save per file, renameable names, change list
+
+Four follow-ups on saving and version history.
+
+- **Ctrl+S saves** (it used to re-ask every time in the browser — the shell
+  always wrote straight to its path). `saveTextFile` now keeps the File System
+  Access handle from the first save and writes to it again, so the picker
+  appears once per file; `forgetSavedFileHandle()` (on New / Open) is what makes
+  the next save ask again, while Save As and renaming pass `forcePicker`.
+- **The header title names the file.** `.app-title` is a button (in the shell;
+  stress mode keeps the plain label): clicking it opens the name dialog, renames
+  the document (`CircuitDocument.rename` — marks dirty, bumps the revision) and
+  then saves. That is Save-As semantics, so an existing file is left alone and
+  the title follows the chosen name.
+- **The version drawer lost its buttons.** Save a copy…, Name… and Delete are
+  gone; a version is renamed by clicking its name (inline field: Enter commits,
+  Escape cancels). The row's click target is a transparent overlay button, so the
+  name can sit above it and take its own clicks.
+- **Change list.** `model/versionDiff.ts` compares the previewed version with the
+  open document — components by `id`, wires as a multiset, circuits by name — and
+  the drawer shows "This version vs the open document": a summary plus the
+  individual changes (`+ part`, `~ field old → new`, `− part`), capped at eight
+  lines. The newest version therefore reads "No differences from the open
+  document".
+
+**Acceptance:** 302 unit / 46 e2e green. New unit tests cover the diff
+(`versionDiff.test.ts`) and the browser handle reuse (`files.test.ts`) — the
+latter has no e2e because automation bypasses the picker entirely.
