@@ -687,3 +687,17 @@ freeze animations).
 
 **Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (baselines
 regenerated locally; Linux still wants one `--update-snapshots` run).
+
+## 22. Follow-up batch M (2026-10-16): arrows set the facing
+
+- **Arrows are absolute, not a step.** The arrow whose direction matches the
+  way a part should point is the one that does it: **→ faces East, ← West,
+  ↑ North, ↓ South**, for the selection and the placement ghost alike. Pressing
+  → on a part already facing east does nothing; pressing ← makes it face west
+  whatever it faced before. `R` still steps the E→S→W→N cycle (one undoable op
+  per change, and the wired-pin repair still runs, since `applyRotation` is now
+  shared by the cycle and the absolute setter).
+- The canvas key handler already ignores events from inputs/buttons/resize
+  handles, so the rail's own arrow navigation is untouched.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.

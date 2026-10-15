@@ -504,6 +504,7 @@ export class ToolMachine {
 
   // ---- commands (keyboard/menu) ----
 
+  /** R: step the rotation cycle (E→S→W→N); ccw reverses it. */
   rotateSelection(ccw = false): void {
     if (this.placing !== null) {
       const rot = this.placing.rot;
@@ -513,6 +514,25 @@ export class ToolMachine {
     }
     if (this.selection.components.size > 0) {
       this.doc.rotateComponents(this.circuitIdx(), this.selection.components, ccw);
+      this.changed();
+    }
+  }
+
+  /**
+   * Arrow keys: make the selection (or the placement ghost) face the direction
+   * of the arrow — right → East, left → West, up → North, down → South. This
+   * is absolute, not a step: the part ends up pointing at that arrow whatever
+   * it faced before (UI_OVERHAUL §22).
+   */
+  faceSelection(rot: Rotation): void {
+    if (this.placing !== null) {
+      if (this.placing.rot === rot) return;
+      this.placing = { ...this.placing, rot };
+      this.changed();
+      return;
+    }
+    if (this.selection.components.size > 0) {
+      this.doc.setRotation(this.circuitIdx(), this.selection.components, rot);
       this.changed();
     }
   }

@@ -281,10 +281,12 @@ export default forwardRef<
       else if (e.key === "Escape") tool.cancel();
       else if (e.key === "Delete" || e.key === "Backspace") tool.deleteSelection();
       else if (e.key.toLowerCase() === "r" && !mod) tool.rotateSelection();
-      // Arrow keys rotate the selection (← counter-clockwise, → clockwise) and
-      // the placement ghost while placing (UI_OVERHAUL §20).
-      else if (e.key === "ArrowRight" && !mod) tool.rotateSelection();
-      else if (e.key === "ArrowLeft" && !mod) tool.rotateSelection(true);
+      // Arrows point the selection / placement ghost AT that direction:
+      // right → East, left → West, up → North, down → South (UI_OVERHAUL §22).
+      else if (e.key === "ArrowRight" && !mod) tool.faceSelection("E");
+      else if (e.key === "ArrowLeft" && !mod) tool.faceSelection("W");
+      else if (e.key === "ArrowUp" && !mod) tool.faceSelection("N");
+      else if (e.key === "ArrowDown" && !mod) tool.faceSelection("S");
       else if (e.key.toLowerCase() === "x" && !mod) tool.flipRoute();
       else handled = false;
       if (handled) {

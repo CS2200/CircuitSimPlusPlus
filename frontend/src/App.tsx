@@ -886,8 +886,8 @@ export default function App() {
                   <td>rotate selection / placement ghost (clockwise)</td>
                 </tr>
                 <tr>
-                  <td>← / →</td>
-                  <td>rotate selection / placement ghost (counter-clockwise / clockwise)</td>
+                  <td>← ↑ → ↓</td>
+                  <td>point the selection / placement ghost that way (W / N / E / S)</td>
                 </tr>
                 <tr>
                   <td>Del / Backspace</td>
