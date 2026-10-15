@@ -36,6 +36,16 @@ export function readFileText(path: string): Promise<string> {
   return readTextFile(path);
 }
 
+/**
+ * Rename (or move) a circuit file in the shell, taking its version history with
+ * it (§39). `to` is a full target path; the shell enforces the `.csx`
+ * extension and refuses to clobber an existing file. Resolves to the path
+ * actually written.
+ */
+export function renameCircuitFile(from: string, to: string): Promise<string> {
+  return invoke<string>("rename_circuit_file", { from, to });
+}
+
 export interface OpenedCircuit {
   /** Real path (Tauri) or null (browser — file paths are not exposed). */
   path: string | null;

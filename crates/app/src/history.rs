@@ -247,6 +247,25 @@ pub fn snapshot(
     })
 }
 
+/// Move a document's history to another key — used when a file is renamed or
+/// moved, since history is keyed by path (D1). Returns false when the source
+/// had no history; an existing target history is replaced.
+pub fn rename(base: &Path, from_key: &str, to_key: &str) -> std::io::Result<bool> {
+    let from = doc_dir(base, from_key);
+    if !from.exists() {
+        return Ok(false);
+    }
+    let to = doc_dir(base, to_key);
+    if to.exists() {
+        std::fs::remove_dir_all(&to)?;
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(&from, &to)?;
+    Ok(true)
+}
+
 /// Every version for a document, newest first.
 pub fn list(base: &Path, key: &str) -> Vec<VersionMeta> {
     let mut versions = load_index(base, key).versions;
@@ -466,6 +485,22 @@ mod tests {
         // Still usable: a new snapshot writes a fresh index.
         snapshot(&base, "k", &doc("b"), "b", 2, 0).unwrap();
         assert_eq!(list(&base, "k").len(), 1);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn rename_moves_a_document_history_to_its_new_key() {
+        let base = tmp("rename");
+        let a = snapshot(&base, "old", &doc("a"), "a", 1, 0).unwrap();
+        assert!(rename(&base, "old", "new").unwrap());
+        assert!(list(&base, "old").is_empty());
+        let moved = list(&base, "new");
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].id, a.id);
+        // The blobs came along, so the version still reads back.
+        assert_eq!(read(&base, "new", &a.id).unwrap(), doc("a"));
+        // A key with no history is a no-op, not an error.
+        assert!(!rename(&base, "missing", "elsewhere").unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 

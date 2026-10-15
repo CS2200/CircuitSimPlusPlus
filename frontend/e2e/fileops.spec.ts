@@ -303,17 +303,28 @@ test("sim transport bar: log slider with notches, run-to", async ({ page }) => {
   await expect(status).toContainText("cycle 5");
 });
 
-test("the header title names the file, and Save then writes without asking again", async ({
+test("the header title edits in place, and Ctrl+S then writes without asking again", async ({
   page,
 }) => {
   await page.goto("/");
 
-  // Clicking "(unsaved)" in the header asks for a name and saves with it (§35).
+  // Clicking "(unsaved)" turns the title into a field (§39).
   await expect(page.locator(".app-title")).toHaveText("(unsaved)");
-  await page.locator(".app-title").click();
-  await page.getByRole("textbox", { name: "Name this circuit file" }).fill("alu");
+  await page.locator(".app-title-editable").click();
+  const field = page.locator(".app-title-input");
+  await expect(field).toBeVisible();
+  await expect(field).toBeFocused();
+
+  // Escape leaves the old name in place.
+  await field.fill("discard me");
+  await field.press("Escape");
+  await expect(page.locator(".app-title")).toHaveText("(unsaved)");
+
+  // Enter commits: the document is named and saved under that name.
+  await page.locator(".app-title-editable").click();
+  await page.locator(".app-title-input").fill("alu");
   const first = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.locator(".app-title-input").press("Enter");
   await first;
   await expect(page.locator(".app-title")).toHaveText("alu");
   expect((await doc(page)).name).toBe("alu");

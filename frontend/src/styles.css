@@ -484,6 +484,18 @@ body {
   background: var(--grid);
 }
 
+/* Inline editing (§39): the same box, but boxed and focused so it reads as a
+ * field you can type in — the document-editor gesture. */
+.app-title-input {
+  padding: 0.1rem 0.35rem;
+  margin-left: -0.35rem;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 /* The app title stays in the accessibility tree but is not drawn (the
  * top bar itself is the chrome, VSCode-style). */
 .sr-only {

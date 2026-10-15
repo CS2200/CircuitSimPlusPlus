@@ -312,6 +312,35 @@ fn history_usage(app: AppHandle) -> Result<history::Usage, String> {
     Ok(history::usage(&recovery_base(&app)?))
 }
 
+/// Rename (or move) a circuit file, taking its version history with it (§39).
+///
+/// History is keyed by path (D1), so a rename has to move the store too —
+/// otherwise the file would look like it had lost every version. Returns the
+/// path actually written (a `.csx` extension is enforced, as Save-As does).
+#[tauri::command]
+fn rename_circuit_file(app: AppHandle, from: String, to: String) -> Result<String, String> {
+    let target = if to.to_ascii_lowercase().ends_with(".csx") {
+        to
+    } else {
+        format!("{to}.csx")
+    };
+    if target == from {
+        return Ok(target);
+    }
+    if std::path::Path::new(&target).exists() {
+        return Err(format!("{target} already exists"));
+    }
+    std::fs::rename(&from, &target).map_err(|e| e.to_string())?;
+    let base = recovery_base(&app)?;
+    history::rename(
+        &base,
+        &recovery::key_for(Some(&from), ""),
+        &recovery::key_for(Some(&target), ""),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(target)
+}
+
 /// Size + mtime of a file (`None` when it does not exist). Used by the
 /// frontend's external-change guard: autosave refuses to overwrite a file that
 /// changed underneath it.
@@ -422,6 +451,7 @@ pub fn run() {
             history_clear,
             history_usage,
             file_stat,
+            rename_circuit_file,
             poke,
             mem_read,
             mem_write,

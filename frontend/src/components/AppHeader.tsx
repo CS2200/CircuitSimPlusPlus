@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 /**
  * Application header (UI_OVERHAUL.md §28): a Docs-style two-row bar.
@@ -15,7 +15,8 @@ export default function AppHeader({
   logo,
   title,
   titleTooltip,
-  onRenameFile,
+  renameValue,
+  onRename,
   status,
   menus,
   actions,
@@ -27,8 +28,10 @@ export default function AppHeader({
   title: string;
   /** Full path, for the hover tooltip. */
   titleTooltip?: string;
-  /** Given when clicking the title should name/rename the file. */
-  onRenameFile?: () => void;
+  /** The name the inline editor starts from; absent = the title is a label. */
+  renameValue?: string;
+  /** Commit an inline rename (Enter or blur). */
+  onRename?: (name: string) => void;
   /** Save-state chip beside the title (absent in stress mode). */
   status?: ReactNode;
   /** Row-2 left: the menu buttons, or null when there are none. */
@@ -38,6 +41,31 @@ export default function AppHeader({
   /** Row-2 right: the sim transport (absent in stress mode). */
   transport?: ReactNode;
 }) {
+  // Inline title editing (§39): click → a bordered field, exactly like a
+  // document editor. Enter or blur commits, Escape puts the old name back.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  /** Guards the double commit Enter-then-blur would otherwise fire. */
+  const settled = useRef(false);
+
+  const editTitle = () => {
+    settled.current = false;
+    setDraft(renameValue ?? "");
+    setEditing(true);
+  };
+
+  const commitTitle = () => {
+    if (settled.current) return;
+    settled.current = true;
+    setEditing(false);
+    const clean = draft.trim();
+    if (clean !== "" && clean !== (renameValue ?? "")) onRename?.(clean);
+  };
+
+  const cancelTitle = () => {
+    settled.current = true;
+    setEditing(false);
+  };
   return (
     <header className="appheader">
       {/* The app name stays in the accessibility tree; the bar itself is the
@@ -47,15 +75,33 @@ export default function AppHeader({
         <span className="app-logo" title="CircuitSim++">
           {logo}
         </span>
-        {onRenameFile === undefined ? (
+        {renameValue === undefined || onRename === undefined ? (
           <span className="app-title" title={titleTooltip ?? title}>
             {title}
           </span>
+        ) : editing ? (
+          <input
+            className="app-title app-title-input"
+            aria-label="File name"
+            autoFocus
+            value={draft}
+            size={Math.max(10, draft.length + 2)}
+            onChange={(e) => setDraft(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitTitle();
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                cancelTitle();
+              }
+            }}
+          />
         ) : (
           <button
             className="app-title app-title-editable"
             title={`${titleTooltip ?? title} — click to rename`}
-            onClick={onRenameFile}
+            onClick={editTitle}
           >
             {title}
           </button>

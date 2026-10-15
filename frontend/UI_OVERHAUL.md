@@ -1118,7 +1118,8 @@ Four follow-ups on saving and version history.
   stress mode keeps the plain label): clicking it opens the name dialog, renames
   the document (`CircuitDocument.rename` — marks dirty, bumps the revision) and
   then saves. That is Save-As semantics, so an existing file is left alone and
-  the title follows the chosen name.
+  the title follows the chosen name. (§39 later made the shell rename the file
+  **in place** instead, so nothing is left behind.)
 - **The version drawer lost its buttons.** Save a copy…, Name… and Delete are
   gone; a version is renamed by clicking its name (inline field: Enter commits,
   Escape cancels). The row's click target is a transparent overlay button, so the
@@ -1133,3 +1134,26 @@ Four follow-ups on saving and version history.
 **Acceptance:** 302 unit / 46 e2e green. New unit tests cover the diff
 (`versionDiff.test.ts`) and the browser handle reuse (`files.test.ts`) — the
 latter has no e2e because automation bypasses the picker entirely.
+
+## 39. Follow-up batch AD (2026-10-16): the title edits in place
+
+Clicking the file name in the header now behaves like a document editor: the
+label becomes a **bordered field with the whole name selected**, Enter or blur
+commits, Escape puts the old name back. No dialog.
+
+What committing does depends on what exists:
+
+- **A file on disk (shell)** → renamed **in place**. The new
+  `rename_circuit_file` command renames the file and moves its version-history
+  directory to the new path key: history is keyed by path (D1), so without that
+  the file would look like it had lost every version. The document's `name`
+  field is then written through the normal save path, so the `.csx` matches the
+  name it is filed under.
+- **No file yet** → naming it saves it (native picker in the shell, the File
+  System Access picker / download in the browser).
+- **The browser** cannot rename a file, so it names through Save-As.
+
+Enter-then-blur would commit twice; a ref makes the commit fire once.
+
+**Acceptance:** 302 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 15
+app (the new `history::rename` test included).

@@ -43,6 +43,7 @@ import {
   openCircuitFile,
   pickSavePath,
   readFileText,
+  renameCircuitFile,
   saveTextFile,
   statFile,
 } from "./files";
@@ -550,35 +551,51 @@ export default function App() {
     }
   }, [filePath, doc, doSave, onSaveAs, saveInBrowser, toast]);
 
+  /** What the inline title editor starts from (no `.csx`, no path). */
+  const renameValue = useMemo(
+    () => (filePath === null ? doc.name : baseName(filePath)).replace(/\.csx$/i, ""),
+    [doc, filePath],
+  );
+
   /**
-   * Click the title to name the file (§38). Naming writes a file, so this is
-   * Save-As semantics: an existing file is left untouched and the title follows
-   * whatever name/path is chosen.
+   * Commit the inline title edit (§39). In the shell a file that already exists
+   * is renamed in place — its version history moves with it — and the new name
+   * is written into the document. A document with no file yet (or the browser,
+   * which cannot rename) names itself through a save instead.
    */
-  const renameFile = useCallback(() => {
-    setNameDialog({
-      title: "Name this circuit file",
-      initial: (filePath === null ? doc.name : baseName(filePath)).replace(/\.csx$/i, ""),
-      submitLabel: "Save",
-      onSubmit: (name) => {
-        setNameDialog(null);
-        const clean = name.trim();
-        if (clean === "") return;
-        doc.rename(clean);
-        editorRef.current?.refresh();
-        const suggested = `${clean}.csx`;
-        if (isTauri()) {
-          void pickSavePath(suggested, null)
+  const renameFile = useCallback(
+    (name: string) => {
+      const clean = name.trim();
+      if (clean === "") return;
+      doc.rename(clean);
+      editorRef.current?.refresh();
+      const realPath = realPathOf(filePathRef.current);
+      if (isTauri()) {
+        if (realPath === null) {
+          void pickSavePath(`${clean}.csx`, null)
             .then((path) => {
               if (path !== null) void doSave(path);
             })
             .catch((err) => toast(`Save failed: ${String(err)}`));
-        } else {
-          void saveInBrowser(suggested, true).catch((err) => toast(`Save failed: ${String(err)}`));
+          return;
         }
-      },
-    });
-  }, [doc, filePath, doSave, saveInBrowser, toast]);
+        const dir = realPath.replace(/[\\/][^\\/]*$/, "");
+        void renameCircuitFile(realPath, `${dir}/${clean}.csx`)
+          .then((next) => {
+            setFilePath(next);
+            diskConflictRef.current = false;
+            void recordWriteStat(next);
+            void doSave(next); // the file's own `name` field follows
+            return next;
+          })
+          .then((next) => toast(`Renamed to ${baseName(next)}`))
+          .catch((err) => toast(`Rename failed: ${String(err)}`));
+        return;
+      }
+      void saveInBrowser(`${clean}.csx`, true).catch((err) => toast(`Save failed: ${String(err)}`));
+    },
+    [doc, doSave, recordWriteStat, saveInBrowser, toast],
+  );
 
   // ---- autosave: crash recovery + optional atomic file rewrite -------------
 
@@ -1267,7 +1284,8 @@ export default function App() {
         logo={<AppLogoIcon />}
         title={stress ? "stress harness — ?stress=1" : docTitle}
         titleTooltip={stress ? undefined : (filePath ?? undefined)}
-        onRenameFile={stress ? undefined : renameFile}
+        renameValue={stress ? undefined : renameValue}
+        onRename={stress ? undefined : renameFile}
         status={!stress ? <SaveIndicator state={saveState} autosaveOn={autosaveOn} /> : undefined}
         menus={!stress ? <MenuBar menus={menus} /> : undefined}
         transport={

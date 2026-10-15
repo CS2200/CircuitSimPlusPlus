@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Version history (UI_OVERHAUL §34/§35), browser/mock mode.
+ * Version history (UI_OVERHAUL §34/§38), browser/mock mode.
  *
  * The drawer overlays the right dock, previews the selected version on the
  * canvas, lists how it differs from the open document, and renames a version
