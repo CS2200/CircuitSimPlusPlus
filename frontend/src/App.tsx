@@ -2,15 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
-import {
-  HelpIcon,
-  InfoIcon,
-  MoonIcon,
-  RedoIcon,
-  SettingsIcon,
-  SunIcon,
-  UndoIcon,
-} from "./components/icons";
+import { MoonIcon, RedoIcon, SettingsIcon, SunIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
@@ -448,6 +440,8 @@ export default function App() {
           { kind: "sep" },
           { label: "Save", shortcut: "Ctrl+S", onSelect: onSave },
           { label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveAs },
+          { kind: "sep" },
+          { label: "Settings…", onSelect: () => setSettingsOpen(true) },
         ],
       },
       {
@@ -543,6 +537,13 @@ export default function App() {
         items: [
           { label: "New subcircuit…", onSelect: onNewSheet },
           { label: "Rename current…", onSelect: () => onRenameSheet(sheet) },
+        ],
+      },
+      {
+        label: "Help",
+        items: [
+          { label: "Keyboard shortcuts", shortcut: "?", onSelect: () => setShowHelp(true) },
+          { label: "About CircuitSim++", onSelect: () => setShowAbout(true) },
         ],
       },
     ];
@@ -683,22 +684,6 @@ export default function App() {
             onClick={toggleLightDark}
           >
             {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
-          </button>
-          <button
-            className="icon-btn"
-            aria-label="Help"
-            title="Keyboard & mouse"
-            onClick={() => setShowHelp(true)}
-          >
-            <HelpIcon />
-          </button>
-          <button
-            className="icon-btn"
-            aria-label="About"
-            title="About CircuitSim++"
-            onClick={() => setShowAbout(true)}
-          >
-            <InfoIcon />
           </button>
           <button
             className="icon-btn"

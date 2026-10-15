@@ -21,7 +21,8 @@ test("demo circuit renders consistently across themes", async ({ page }, testInf
   await expectScreenshot(shot, testInfo, "demo-oled.png", { maxDiffPixelRatio: 0.02 });
 
   const pick = async (id: "dark" | "light") => {
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "File", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Settings…" }).click();
     await page.locator(`[data-theme-option="${id}"]`).click();
     await page.keyboard.press("Escape");
     await page.waitForTimeout(400);

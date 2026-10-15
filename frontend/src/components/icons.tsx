@@ -61,26 +61,6 @@ export function MoonIcon() {
   );
 }
 
-export function HelpIcon() {
-  return (
-    <Svg>
-      <circle cx="10" cy="10" r="7" />
-      <path d="M7.9 7.7A2.2 2.2 0 0 1 12.3 8c0 1.5-2.3 1.8-2.3 3.2" />
-      <path d="M10 14h.01" />
-    </Svg>
-  );
-}
-
-export function InfoIcon() {
-  return (
-    <Svg>
-      <circle cx="10" cy="10" r="7" />
-      <path d="M10 9.3v4.3" />
-      <path d="M10 6.5h.01" />
-    </Svg>
-  );
-}
-
 export function SettingsIcon() {
   return (
     <Svg>

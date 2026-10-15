@@ -323,3 +323,47 @@ opens that group's components.
 **Acceptance:** `e2e/panels.spec.ts` covers rail hover/click switching,
 per-group icon coverage, and the resize numbers; the other suites
 (canvas geometry unchanged → baselines unchanged) stay green.
+
+## 9. Fourth pass (2026-10-15): VS Code-style top bar
+
+Team direction: title-bar layout; icons instead of text buttons.
+
+- The old app header (big "CircuitSim++" title + text buttons) is gone —
+  the menu row is now the window's title bar, flush at the top, on one
+  row: menus (File, Simulation, Subcircuits, Help) on the left, the
+  current file centered (front-truncated when long), window actions on the
+  right. Stress mode gets the same bar with just the animate + theme
+  controls.
+- Undo/redo are icon buttons (the live undo/redo labels stay in the
+  tooltips), as are the light/dark toggle, help (`?`), about and settings;
+  all keep aria-labels, titles, and disabled states. Glyphs live in
+  `components/icons.tsx` (16px strokes in `currentColor`, no icon package).
+- Help moved into a **Help** menu ("Keyboard shortcuts" — still `?` — and
+  "About CircuitSim++"); Settings is **File ▸ Settings…**. The `?` key and
+  Escape behavior are unchanged.
+- The **light/dark toggle** sits at the far right of the row: it flips
+  between the light theme and the last dark-family theme (OLED unless the
+  user picked dark) and persists through the normal theme preference.
+
+**Amendment (routing/top-bar merge, 2026-10-15):** the parallel worktree
+branch merged on top keeps this title-bar layout, the Help menu and
+**File ▸ Settings…**, but per the human's direction:
+
+- **rotate** is now a floating ↻ button drawn above the component selection
+  on the canvas (`R` still works) — no rotate icon in the bar;
+- there is **no delete icon** (Del and Edit ▸ Delete remain);
+- the top bar also carries the settings gear, about and help icons, and an
+  **Edit** menu (Undo/Redo/Copy/Paste/Rotate/Delete/Select All);
+- the Settings dialog gained the second-pass theme catalog (OLED/Dark/
+  Midnight/High contrast/Light/Paper), accent colors, and the pulse /
+  update-check toggles; `components/TopBarIcons.tsx` was removed.
+
+**Baselines:** dropping the header row makes the canvas ~39px taller, so
+every canvas screenshot changes. The Windows baselines were regenerated
+locally (untracked per the §4 convention) and the committed Linux baselines
+need one `npx playwright test --update-snapshots` re-bless before CI's
+visual suite goes green.
+
+**Acceptance:** smoke / settings / visual / update specs updated for the
+menu paths; new light/dark toggle test; lint / unit / build / 32-of-32 e2e
+green.

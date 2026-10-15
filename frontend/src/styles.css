@@ -284,7 +284,7 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  margin-left: 4px;
+  margin-left: auto;
   padding-bottom: 2px;
 }
 
@@ -597,12 +597,13 @@ body {
   margin-left: auto;
   margin-right: 8px;
   align-self: center;
+  text-align: center;
+  padding: 0 1rem;
   color: var(--text-dim);
   font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 45%;
   direction: rtl; /* long paths truncate at the FRONT, keeping the file name */
 }
 

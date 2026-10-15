@@ -164,25 +164,29 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   if (box === null) throw new Error("canvas not visible");
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
-  // input pin at the center: default placement is an INPUT (faces left).
-  // Placement anchors the body top-left to the cursor; the 2×1 pin body
-  // center is +16,+8 CSS px at the default zoom — click there to select it
-  // (the Inspector opens on the right).
+  // input pin placed world-anchored at [-4,0] (default is an INPUT, faces
+  // left); its 2×1 body center at (-3, 0.5) is clicked to select it (the
+  // Inspector opens on the right). World anchoring avoids sub-pixel
+  // snapping surprises when the chrome height changes.
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
-  await page.mouse.click(center.x - 60, center.y);
+  const pin1Spot = await world(page, -4, 0);
+  await page.mouse.click(pin1Spot.x, pin1Spot.y);
   await page.keyboard.press("Escape");
-  await page.mouse.click(center.x - 60 + 16, center.y + 8);
+  const pin1Body = await world(page, -3, 0.5);
+  await page.mouse.click(pin1Body.x, pin1Body.y);
   await expect(page.locator(".inspector-id")).toHaveText("c1");
   await page.getByPlaceholder("(unnamed)").fill("a");
   await page.getByPlaceholder("(unnamed)").press("Enter");
 
-  // second pin, made an OUTPUT via the Inspector (rot mirrors to W)
+  // second pin at [5,0], made an OUTPUT via the Inspector (rot mirrors to W)
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
-  await page.mouse.click(center.x + 60, center.y);
+  const pin2Spot = await world(page, 5, 0);
+  await page.mouse.click(pin2Spot.x, pin2Spot.y);
   await page.keyboard.press("Escape");
-  await page.mouse.click(center.x + 60 + 16, center.y + 8);
+  const pin2Body = await world(page, 6, 0.5);
+  await page.mouse.click(pin2Body.x, pin2Body.y);
   await expect(page.locator(".inspector-id")).toHaveText("c2"); // panel switched before typing
   await page.getByPlaceholder("(unnamed)").fill("y");
   await page.getByPlaceholder("(unnamed)").press("Enter");
@@ -220,19 +224,18 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
   page,
 }) => {
   await page.goto("/");
-  const box = await page.locator("canvas.circuit-canvas").boundingBox();
-  if (box === null) throw new Error("canvas not visible");
-  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
-  // PIN body lands at [-6,0] once placement snaps → terminal at (-4,0.5).
+  // PIN placed world-anchored at [-6,0] → terminal at (-4,0.5).
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
-  await page.mouse.click(c.x - 100, c.y - 8);
+  const pinSpot = await world(page, -6, 0);
+  await page.mouse.click(pinSpot.x, pinSpot.y);
   await page.keyboard.press("Escape");
-  // AND body lands at [1,-1] → in0 at (1,0).
+  // AND placed world-anchored at [1,-1] → in0 at (1,0).
   await openPaletteGroup(page, "Gates");
   await page.getByRole("button", { name: "AND", exact: true }).click();
-  await page.mouse.click(c.x + 20, c.y - 24);
+  const andSpot = await world(page, 1, -1);
+  await page.mouse.click(andSpot.x, andSpot.y);
   await page.keyboard.press("Escape");
 
   // wire: pin terminal → gate in0 (click-click). Aim at the ACTUAL placed
