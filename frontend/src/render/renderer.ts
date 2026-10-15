@@ -42,6 +42,8 @@ export interface StrokeStyle {
   readonly fill?: string;
   /** World units. */
   readonly lineWidth?: number;
+  /** 0..1 paint opacity (pulsing warnings; default 1). */
+  readonly alpha?: number;
 }
 
 export interface TextStyle {
@@ -92,5 +94,5 @@ export interface Renderer {
 
 /** Batching group key for a style. */
 export function styleKey(s: StrokeStyle): string {
-  return `${s.stroke ?? ""}${s.fill ?? ""}${s.lineWidth ?? 1}`;
+  return `${s.stroke ?? ""}${s.fill ?? ""}${s.lineWidth ?? 1}${s.alpha ?? 1}`;
 }

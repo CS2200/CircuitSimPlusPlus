@@ -5,7 +5,7 @@ import type { CircuitDocument } from "../model/document";
 /**
  * Slider notches at the "nice" clock values (slider exponents, where
  * hz = 10^(exp/10)): 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000 Hz. Decades get
- * a taller mark (UI_OVERHAUL §15).
+ * a taller mark (UI_OVERHAUL §19).
  */
 const SPEED_NOTCHES = [0, 3, 7, 10, 13, 17, 20, 23, 27, 30];
 const DECADE_EXPS = new Set([0, 10, 20, 30]);
@@ -87,21 +87,30 @@ export default function SimBar({
   return (
     <>
       <div className="simbar">
-        <button
-          className="sim-play"
-          title={running ? "Pause" : "Run"}
-          onClick={() => (running ? guard(ctl.pause()) : withLoadedDoc(() => ctl.play(hz)))}
-        >
-          {running ? "⏸" : "⏵"}
-        </button>
-        <button
-          className="secondary"
-          title="Step one tick (half clock cycle)"
-          onClick={() => withLoadedDoc(() => ctl.stepTick())}
-        >
-          tick
-        </button>
-        <span className="sim-runto">
+        <div className="sim-group">
+          <button
+            className="sim-play"
+            title={running ? "Pause" : "Run"}
+            onClick={() => (running ? guard(ctl.pause()) : withLoadedDoc(() => ctl.play(hz)))}
+          >
+            {running ? "⏸" : "⏵"}
+          </button>
+          <button
+            className="secondary"
+            title="Step one tick (half clock cycle)"
+            onClick={() => withLoadedDoc(() => ctl.stepTick())}
+          >
+            tick
+          </button>
+          <button
+            className="secondary"
+            title="Reset: fresh engine state; memory autoload files re-apply (§5.2)"
+            onClick={() => void onReset()}
+          >
+            reset
+          </button>
+        </div>
+        <div className="sim-group sim-runto">
           <input
             type="number"
             min={0}
@@ -121,8 +130,9 @@ export default function SimBar({
           >
             run to
           </button>
-        </span>
-        <label className="sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
+        </div>
+        <label className="sim-group sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
+          <span className="sim-speed-label">speed</span>
           <span className="sim-speed-slider">
             <input
               type="range"
@@ -137,12 +147,15 @@ export default function SimBar({
                 if (running) void guard(ctl.play(Math.round(10 ** (exp / 10))));
               }}
             />
+            {/* The notch strip is inset by the thumb radius and the slider's
+             *  thumb is a fixed 12px, so a notch at fraction f sits exactly
+             *  where the thumb centre lands (UI_OVERHAUL §19). */}
             <span className="sim-notches">
               {SPEED_NOTCHES.map((exp) => (
                 <span
                   key={exp}
                   className={`sim-notch${DECADE_EXPS.has(exp) ? " major" : ""}`}
-                  style={{ left: `${(exp / 30) * 100}%` }}
+                  style={{ left: `${((exp / 30) * 100).toFixed(3)}%` }}
                   title={`${Math.round(10 ** (exp / 10)).toLocaleString()} Hz`}
                 />
               ))}
@@ -150,13 +163,6 @@ export default function SimBar({
           </span>
           <span className="sim-speed-value">{hz.toLocaleString()} Hz</span>
         </label>
-        <button
-          className="secondary"
-          title="Reset: fresh engine state; memory autoload files re-apply (§5.2)"
-          onClick={() => void onReset()}
-        >
-          reset
-        </button>
         <span className="sim-status">
           {s.loaded ? (
             <>

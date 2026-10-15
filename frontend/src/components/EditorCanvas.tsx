@@ -105,6 +105,10 @@ export default forwardRef<
   const pulses = useMemo(() => new PulseTracker(), [doc]);
   const [pulsesLive, setPulsesLive] = useState(false);
   const lastPulseChanges = useRef<readonly unknown[] | null>(null);
+  // Width-mismatch warnings pulse, so the canvas keeps animating while any
+  // net disagrees (gated by the same animation pref as signal pulses, §19).
+  const [mismatchLive, setMismatchLive] = useState(false);
+  const mismatchRef = useRef(false);
   // Tools/scene read the CURRENT sheet through a ref so a sheet switch does
   // not rebuild the whole tool machine (doc identity still does).
   const sheetRef = useRef(sheetIdx);
@@ -157,6 +161,11 @@ export default forwardRef<
   const draw = useCallback<CanvasHostProps["draw"]>(
     (renderer, camera, view, theme, tMs) => {
       scene.sync(doc, sheetRef.current);
+      const hasMismatch = scene.hasMismatch();
+      if (hasMismatch !== mismatchRef.current) {
+        mismatchRef.current = hasMismatch;
+        setMismatchLive(hasMismatch);
+      }
       let simOverlay: SimOverlay | undefined;
       // net_map is root-sheet-only (contract v1.1): no sim overlay on
       // subcircuit sheets.
@@ -195,7 +204,16 @@ export default forwardRef<
           ),
         };
       }
-      scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay, gridOn);
+      scene.draw(
+        renderer,
+        theme,
+        camera,
+        view,
+        sel,
+        { ...tool.overlay(), now: pulsesOn ? tMs : undefined },
+        simOverlay,
+        gridOn,
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
     [
@@ -329,7 +347,7 @@ export default forwardRef<
     <CanvasHost
       draw={draw}
       revision={tick + simVersion}
-      animate={pulsesLive}
+      animate={pulsesLive || (pulsesOn && mismatchLive)}
       themeName={themeName}
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}

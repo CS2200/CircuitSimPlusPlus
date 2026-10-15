@@ -115,6 +115,8 @@ export interface SceneOverlay {
   boxRect: Rect | null;
   /** Shift-click wire info card: which wire + where to anchor the card. */
   wireInfo: { wireIdx: number; pos: Vec2 } | null;
+  /** Canvas clock (ms) for animated warnings; absent → static. */
+  now?: number;
 }
 
 const CELL = 8;
@@ -320,6 +322,11 @@ export class DocScene {
     return this.nets.wireToNet.get(wireIdx);
   }
 
+  /** True when any wire on this sheet has a declared-width mismatch (§19). */
+  hasMismatch(): boolean {
+    return this.wireMismatch.some(Boolean);
+  }
+
   netOfPin(compId: string, pin: string): number | undefined {
     return this.nets.pinToNet.get(`${compId}:${pin}`);
   }
@@ -512,11 +519,18 @@ export class DocScene {
       // bit buses read as clearly different weights beside a 1-bit wire.
       const width = wireWidthForBits(bits);
       // Halos nest: mismatch (widest) → selection → core. The mismatch ring is
-      // amber so it reads over any wire color or bus hue (UI_OVERHAUL §17);
-      // selection is an accent halo under the core so a color you just picked
-      // shows immediately (§15).
+      // amber so it reads over any wire color or bus hue (UI_OVERHAUL §17) and
+      // it PULSES while the canvas is animating (§19), so a width mismatch is
+      // impossible to miss; selection is an accent halo under the core so a
+      // color you just picked shows immediately (§15).
       if (this.wireMismatch[i]) {
-        renderer.drawPath(this.wirePaths[i], { stroke: theme.violation, lineWidth: width * 2.5 });
+        const t = overlay.now;
+        const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
+        renderer.drawPath(this.wirePaths[i], {
+          stroke: theme.violation,
+          lineWidth: width * (2.1 + 1.0 * phase),
+          alpha: 0.35 + 0.65 * phase,
+        });
       }
       if (selected) {
         renderer.drawPath(this.wirePaths[i], { stroke: theme.accent, lineWidth: width * 1.9 });

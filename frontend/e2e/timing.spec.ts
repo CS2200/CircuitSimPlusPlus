@@ -23,6 +23,8 @@ test.beforeEach(async ({ page }) => {
   // Pin the dark palette so the committed screenshots keep validating it
   // (UI_OVERHAUL §4; theme coverage lives in the visual/settings specs).
   await page.addInitScript(() => localStorage.setItem("csx.theme", "dark"));
+  // Freeze the pulsing width-mismatch warning for a deterministic baseline.
+  await page.addInitScript(() => localStorage.setItem("csx.pulses", "0"));
 });
 
 test("U7: T_obs banner toggles the critical-path highlight", async ({ page }, testInfo) => {

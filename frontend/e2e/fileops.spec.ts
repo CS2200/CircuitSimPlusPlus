@@ -291,7 +291,8 @@ test("sim transport bar: log slider with notches, run-to", async ({ page }) => {
   const status = page.locator(".sim-status");
   await expect(status).toContainText("cycle");
 
-  // Log scale: slider exponent 20 → 10^2 = 100 Hz, with marked notches.
+  // Log scale: slider exponent 20 → 10^2 = 100 Hz, with notches at the round
+  // values (UI_OVERHAUL §19).
   await expect(page.locator(".sim-notch")).toHaveCount(10);
   await expect(page.locator(".sim-notch.major")).toHaveCount(4);
   await page.locator(".sim-speed input[type=range]").fill("20");

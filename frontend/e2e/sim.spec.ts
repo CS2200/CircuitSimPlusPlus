@@ -30,6 +30,8 @@ test.beforeEach(async ({ page }) => {
   // rendering (UI_OVERHAUL §4 — theme-picker coverage lives in the
   // visual/settings specs).
   await page.addInitScript(() => localStorage.setItem("csx.theme", "dark"));
+  // Freeze the pulsing width-mismatch warning for a deterministic baseline.
+  await page.addInitScript(() => localStorage.setItem("csx.pulses", "0"));
   await page.goto("/?simdemo=1");
 });
 

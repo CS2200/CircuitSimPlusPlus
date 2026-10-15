@@ -338,11 +338,8 @@ export default function InspectorPanel({
         </label>
       )}
 
-      {fields.map((f, i) => (
+      {fields.map((f) => (
         <Fragment key={f.key}>
-          {f.group !== undefined && f.group !== fields[i - 1]?.group && (
-            <div className="inspector-group">{f.group}</div>
-          )}
           <FieldRow
             field={f}
             comp={comp}
