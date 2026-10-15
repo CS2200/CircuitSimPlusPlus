@@ -45,22 +45,24 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
   const keys = (type: string): string[] => editableAttrs(type).map((f) => f.key);
 
   it("exposes every attr the engine accepts, with format-v2 names", () => {
-    expect(keys("arith.shifter")).toEqual(["bitsize", "shift", "delay"]);
-    expect(keys("arith.bit-extender")).toEqual(["inBits", "outBits", "mode", "delay"]);
-    expect(keys("plexers.mux")).toEqual(["bitsize", "selectBits", "delay"]);
-    expect(keys("plexers.decoder")).toEqual(["inputBits", "delay"]);
-    expect(keys("wiring.probe")).toEqual(["bitsize", "radix", "delay"]);
-    expect(keys("wiring.splitter")).toEqual(["splits", "delay"]);
-    expect(keys("gate.and")).toEqual(["bitsize", "inputs", "negateInputs", "delay"]);
-    expect(keys("gate.not")).toEqual(["bitsize", "delay"]);
-    expect(keys("mem.ram")).toEqual(["bitsize", "depth", "delay"]);
-    expect(keys("io.button")).toEqual(["bitsize", "delay"]);
+    // No `delay`: timing is unit-wide (from the delay table), never a
+    // per-instance attr.
+    expect(keys("arith.shifter")).toEqual(["bitsize", "shift"]);
+    expect(keys("arith.bit-extender")).toEqual(["inBits", "outBits", "mode"]);
+    expect(keys("plexers.mux")).toEqual(["bitsize", "selectBits"]);
+    expect(keys("plexers.decoder")).toEqual(["inputBits"]);
+    expect(keys("wiring.probe")).toEqual(["bitsize", "radix"]);
+    expect(keys("wiring.splitter")).toEqual(["splits"]);
+    expect(keys("gate.and")).toEqual(["bitsize", "inputs", "negateInputs"]);
+    expect(keys("gate.not")).toEqual(["bitsize"]);
+    expect(keys("mem.ram")).toEqual(["bitsize", "depth"]);
+    expect(keys("io.button")).toEqual(["bitsize"]);
     expect(keys("subcircuit")).toEqual(["circuit"]);
   });
 
   it("groups fields for the Inspector", () => {
     const groups = editableAttrs("arith.bit-extender").map((f) => f.group);
-    expect(groups).toEqual(["Width", "Width", "Options", "Timing"]);
+    expect(groups).toEqual(["Width", "Width", "Options"]);
   });
 
   it("seeds the REQUIRED splitter mapping on placement", () => {

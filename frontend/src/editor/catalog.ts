@@ -666,17 +666,6 @@ const HEX_BITSIZE_FIELD: AttrField = {
   hint: "A hex display decodes four bits per digit.",
 };
 
-const DELAY_FIELD: AttrField = {
-  key: "delay",
-  label: "Delay override",
-  kind: "number",
-  min: 0,
-  max: 1_000_000,
-  placeholder: "auto",
-  group: "Timing",
-  hint: "Per-instance delay in raw timing units (format-v2 §6); blank uses the delay table.",
-};
-
 const RADIX_OPTIONS = [
   { value: "unsigned", label: "Unsigned" },
   { value: "signed", label: "Signed" },
@@ -685,8 +674,9 @@ const RADIX_OPTIONS = [
 
 /**
  * Every attribute format-v2 §4 defines for a type, grouped for the Inspector
- * (§18): Width / Options / Timing. Names and defaults mirror the engine's
- * `components.rs` so what the panel writes is exactly what loads.
+ * (§18): Width / Options. Names and defaults mirror the engine's
+ * `components.rs` so what the panel writes is exactly what loads. There is no
+ * per-instance delay field — timing is unit-wide, from the delay table (§6).
  */
 export function editableAttrs(type: string): AttrField[] {
   if (type.startsWith("gate.")) {
@@ -712,7 +702,6 @@ export function editableAttrs(type: string): AttrField[] {
         },
       );
     }
-    fields.push(DELAY_FIELD);
     return fields;
   }
   if (type.startsWith("arith.")) {
@@ -733,7 +722,6 @@ export function editableAttrs(type: string): AttrField[] {
               { value: "rr", label: "Rotate right" },
             ],
           },
-          DELAY_FIELD,
         ];
       case "arith.bit-extender":
         return [
@@ -756,10 +744,9 @@ export function editableAttrs(type: string): AttrField[] {
               { value: "sign", label: "Sign extend" },
             ],
           },
-          DELAY_FIELD,
         ];
       default:
-        return [BITSIZE_FIELD, DELAY_FIELD];
+        return [BITSIZE_FIELD];
     }
   }
   switch (type) {
@@ -774,7 +761,6 @@ export function editableAttrs(type: string): AttrField[] {
           hint: "An output pin is driven by this circuit; an input pin drives its net.",
         },
         { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-        DELAY_FIELD,
       ];
     case "wiring.constant":
       return [
@@ -787,10 +773,9 @@ export function editableAttrs(type: string): AttrField[] {
           group: "Options",
           hint: "Hex string; must fit the bit size.",
         },
-        DELAY_FIELD,
       ];
     case "wiring.clock":
-      return [DELAY_FIELD];
+      return [];
     case "wiring.splitter":
       return [
         {
@@ -801,13 +786,11 @@ export function editableAttrs(type: string): AttrField[] {
           group: "Options",
           hint: "One `pin: bit,bit` line per pin; every bus bit is used once. Bus width = highest bit + 1.",
         },
-        DELAY_FIELD,
       ];
     case "wiring.probe":
       return [
         BITSIZE_FIELD,
         { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-        DELAY_FIELD,
       ];
     case "plexers.mux":
     case "plexers.demux":
@@ -822,7 +805,6 @@ export function editableAttrs(type: string): AttrField[] {
           placeholder: "1",
           group: "Width",
         },
-        DELAY_FIELD,
       ];
     case "plexers.decoder":
       return [
@@ -835,10 +817,9 @@ export function editableAttrs(type: string): AttrField[] {
           placeholder: "2",
           group: "Width",
         },
-        DELAY_FIELD,
       ];
     case "mem.register":
-      return [BITSIZE_FIELD, DELAY_FIELD];
+      return [BITSIZE_FIELD];
     case "mem.ram":
     case "mem.rom":
       // `autoload` and `contents` are edited by the Inspector's Memory
@@ -855,15 +836,14 @@ export function editableAttrs(type: string): AttrField[] {
           group: "Width",
           hint: "Power of two, up to 2^20.",
         },
-        DELAY_FIELD,
       ];
     case "subcircuit":
       return [{ key: "circuit", label: "Circuit", kind: "select", group: "Options", options: [] }];
     case "io.hexdisplay":
-      return [HEX_BITSIZE_FIELD, DELAY_FIELD];
+      return [HEX_BITSIZE_FIELD];
     case "io.button":
     case "io.led":
-      return [BITSIZE_FIELD, DELAY_FIELD];
+      return [BITSIZE_FIELD];
     default:
       return [];
   }
