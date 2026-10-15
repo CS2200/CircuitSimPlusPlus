@@ -59,6 +59,21 @@ export function baseName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/**
+ * A path the shell can actually write to: it carries a directory separator.
+ * Windows answers with backslashes and POSIX with a slash — **both are real
+ * paths**, while the bare file name the browser works with is not (§40).
+ */
+export function isRealFilePath(path: string | null): path is string {
+  return path !== null && /[\\/]/.test(path);
+}
+
+/** `name` filed in the same directory as `path`, keeping its separator style. */
+export function siblingPath(path: string, name: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut < 0 ? name : `${path.slice(0, cut + 1)}${name}`;
+}
+
 /** Prompt for a circuit to open; null when the user cancels. */
 export async function openCircuitFile(): Promise<OpenedCircuit | null> {
   if (isTauri()) {

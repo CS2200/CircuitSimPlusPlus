@@ -33,14 +33,15 @@ async function placeAndGate(page: Page): Promise<void> {
   await page.keyboard.press("Escape");
 }
 
-test("autosave keeps a recovery copy 3 s after the last edit", async ({ page }) => {
+test("autosave keeps a recovery copy as soon as the edit happens", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(INDICATOR)).toHaveText("All changes saved");
 
   await placeAndGate(page);
-  await expect(page.locator(INDICATOR)).toHaveText("Unsaved changes");
-  // Browser mode cannot write the file, so the honest end state is a recovery
-  // copy only (named files in the Tauri shell read "All changes saved <time>").
+  // The change is persisted on the leading edge, so the indicator moves off
+  // "saved" immediately; browser mode cannot write a file, so the honest end
+  // state is a recovery copy only (the shell reads "All changes saved <time>").
+  await expect(page.locator(INDICATOR)).not.toHaveText("All changes saved");
   await expect(page.locator(INDICATOR)).toContainText("Autosaved locally", { timeout: 15000 });
 });
 

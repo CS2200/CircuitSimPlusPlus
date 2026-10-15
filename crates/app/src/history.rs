@@ -21,10 +21,81 @@ use crate::recovery::{fnv1a_hex, sanitize};
 
 const HISTORY_FORMAT: &str = "csim-history";
 const HISTORY_VERSION: u32 = 1;
-/// Automatic versions kept per document (named versions are never evicted).
-pub const KEEP_AUTO: usize = 50;
+/// Hard cap on automatic versions per document (named versions are never
+/// evicted). The age tiers below are what normally keeps a history small.
+pub const KEEP_AUTO: usize = 200;
 /// Per-document byte budget for automatic versions.
 pub const BUDGET_BYTES: u64 = 25 * 1024 * 1024;
+
+/// Age tiers for automatic versions: `(max_age_ms, min_gap_ms)`. Inside a tier a
+/// version survives when it is at least `min_gap_ms` older than the last one
+/// kept — so a working session keeps every step, while month-old history thins
+/// to about one entry a day (Google-Docs-style compression, §41).
+const TIERS: [(u64, u64); 4] = [
+    (60 * 60 * 1000, 0),                       // under an hour: every step
+    (24 * 60 * 60 * 1000, 5 * 60 * 1000),      // under a day: one per 5 min
+    (7 * 24 * 60 * 60 * 1000, 60 * 60 * 1000), // under a week: one per hour
+    (u64::MAX, 24 * 60 * 60 * 1000),           // older: one per day
+];
+
+fn tier_gap(age_ms: u64) -> u64 {
+    for (max_age, gap) in TIERS {
+        if age_ms < max_age {
+            return gap;
+        }
+    }
+    0
+}
+
+fn auto_count(index: &Index) -> usize {
+    index.versions.iter().filter(|v| !v.named).count()
+}
+
+fn auto_bytes(index: &Index) -> u64 {
+    index
+        .versions
+        .iter()
+        .filter(|v| !v.named)
+        .map(|v| v.bytes)
+        .sum()
+}
+
+/// Compress the history: thin automatic versions by age, then enforce the hard
+/// count/byte caps. Named versions are never evicted.
+fn prune(index: &mut Index, now_ms: u64) {
+    // Walk newest → oldest, keeping a version when the gap to the last kept one
+    // reaches its tier's spacing (0 = keep everything in that tier).
+    let mut kept: Vec<VersionMeta> = Vec::with_capacity(index.versions.len());
+    let mut last_auto_at: Option<u64> = None;
+    for version in index.versions.iter().rev() {
+        if version.named {
+            kept.push(version.clone());
+            continue;
+        }
+        let gap = tier_gap(now_ms.saturating_sub(version.at_ms));
+        let keep = if gap == 0 {
+            true
+        } else {
+            match last_auto_at {
+                None => true,
+                Some(previous) => previous.saturating_sub(version.at_ms) >= gap,
+            }
+        };
+        if keep {
+            last_auto_at = Some(version.at_ms);
+            kept.push(version.clone());
+        }
+    }
+    kept.reverse();
+    index.versions = kept;
+
+    while auto_count(index) > KEEP_AUTO || auto_bytes(index) > BUDGET_BYTES {
+        let Some(pos) = index.versions.iter().position(|v| !v.named) else {
+            break; // every remaining version is named — never evict those
+        };
+        index.versions.remove(pos);
+    }
+}
 
 /// One stored version.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -152,31 +223,6 @@ fn gc_blobs(base: &Path, key: &str, index: &Index) -> std::io::Result<()> {
     Ok(())
 }
 
-// -- retention --------------------------------------------------------------
-
-fn auto_count(index: &Index) -> usize {
-    index.versions.iter().filter(|v| !v.named).count()
-}
-
-fn auto_bytes(index: &Index) -> u64 {
-    index
-        .versions
-        .iter()
-        .filter(|v| !v.named)
-        .map(|v| v.bytes)
-        .sum()
-}
-
-/// Evict the oldest automatic versions until both caps are satisfied.
-fn prune(index: &mut Index) {
-    while auto_count(index) > KEEP_AUTO || auto_bytes(index) > BUDGET_BYTES {
-        let Some(pos) = index.versions.iter().position(|v| !v.named) else {
-            break; // every remaining version is named — never evict those
-        };
-        index.versions.remove(pos);
-    }
-}
-
 // -- operations -------------------------------------------------------------
 
 /// Record `text` (canonical `.csx`) as this document's newest version.
@@ -237,7 +283,7 @@ pub fn snapshot(
         hash,
         bytes,
     });
-    prune(&mut index);
+    prune(&mut index, at_ms);
     save_index(base, key, &index)?;
     gc_blobs(base, key, &index)?;
     Ok(Snapshot {
@@ -501,6 +547,50 @@ mod tests {
         assert_eq!(read(&base, "new", &a.id).unwrap(), doc("a"));
         // A key with no history is a no-op, not an error.
         assert!(!rename(&base, "missing", "elsewhere").unwrap());
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_day_old_history_thins_to_one_per_five_minutes() {
+        let base = tmp("tiers-day");
+        let hour = 60 * 60 * 1000u64;
+        let day = 24 * hour;
+        // One version a minute for half an hour, a day ago.
+        for i in 0..30u64 {
+            snapshot(
+                &base,
+                "k",
+                &doc(&format!("m{i}")),
+                "Edit",
+                10 * day + i * 60_000,
+                0,
+            )
+            .unwrap();
+        }
+        assert_eq!(list(&base, "k").len(), 30); // recent steps are all kept
+
+        // A save a day later compresses that minute-by-minute stretch.
+        snapshot(&base, "k", &doc("later"), "Edit", 11 * day, 0).unwrap();
+        let listed = list(&base, "k");
+        assert!(
+            (6..11).contains(&listed.len()),
+            "kept {} versions (expected ~one per 5 min)",
+            listed.len()
+        );
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_month_old_history_thins_to_one_a_day() {
+        let base = tmp("tiers-month");
+        let hour = 60 * 60 * 1000u64;
+        let day = 24 * hour;
+        for i in 0..20u64 {
+            snapshot(&base, "k", &doc(&format!("h{i}")), "Edit", i * hour, 0).unwrap();
+        }
+        snapshot(&base, "k", &doc("now"), "Edit", 30 * day, 0).unwrap();
+        let listed = list(&base, "k");
+        assert!(listed.len() <= 3, "kept {} versions", listed.len());
         std::fs::remove_dir_all(&base).ok();
     }
 

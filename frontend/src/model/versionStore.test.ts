@@ -60,14 +60,16 @@ describe("MemoryHistoryStore (browser/dev backend)", () => {
     const milestone = await store.snapshot(T, doc("keep"), "Milestone", 0, 0);
     expect(await store.name(T, milestone.id, "Before refactor")).toBe(true);
 
-    for (let i = 0; i < 60; i++) {
+    // Flood past the automatic-version cap (all these edits are "recent", so
+    // the age tiers keep every one of them until the hard cap bites).
+    for (let i = 0; i < 250; i++) {
       await store.snapshot(T, doc(`auto${i}`), "Edit", 10_000 + i, 0);
     }
     const listed = await store.list(T);
     const named = listed.filter((v) => v.named);
     expect(named).toHaveLength(1);
     expect(named[0].label).toBe("Before refactor");
-    expect(listed.length).toBeLessThanOrEqual(51);
+    expect(listed.length).toBeLessThanOrEqual(201);
   });
 
   it("removes one version and clears a whole history", async () => {

@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { forgetSavedFileHandle, hasSavedFileHandle, saveTextFile } from "./files";
+﻿import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  forgetSavedFileHandle,
+  hasSavedFileHandle,
+  isRealFilePath,
+  saveTextFile,
+  siblingPath,
+} from "./files";
 
 /**
- * Browser save (§38). The reuse rule — Ctrl+S writes the file it already has
- * instead of re-opening the picker — only exists in the browser and is skipped
+ * Browser save (Â§38). The reuse rule â€” Ctrl+S writes the file it already has
+ * instead of re-opening the picker â€” only exists in the browser and is skipped
  * under automation, so it is pinned here against a stubbed picker.
  */
 
@@ -90,5 +96,21 @@ describe("saveTextFile (browser mode)", () => {
     forgetSavedFileHandle();
     await saveTextFile("other.csx", "two");
     expect(picker).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("path helpers (Â§40)", () => {
+  it("treats Windows and POSIX paths as real, bare names as not", () => {
+    expect(isRealFilePath("C:\\Users\\me\\alu.csx")).toBe(true);
+    expect(isRealFilePath("/home/me/alu.csx")).toBe(true);
+    expect(isRealFilePath("alu.csx")).toBe(false);
+    expect(isRealFilePath("(unsaved)")).toBe(false);
+    expect(isRealFilePath(null)).toBe(false);
+  });
+
+  it("files a name beside the original, keeping its separator", () => {
+    expect(siblingPath("C:\\Users\\me\\alu.csx", "alu2.csx")).toBe("C:\\Users\\me\\alu2.csx");
+    expect(siblingPath("/home/me/alu.csx", "alu2.csx")).toBe("/home/me/alu2.csx");
+    expect(siblingPath("alu.csx", "alu2.csx")).toBe("alu2.csx");
   });
 });

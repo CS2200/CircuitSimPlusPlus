@@ -1157,3 +1157,25 @@ Enter-then-blur would commit twice; a ref makes the commit fire once.
 
 **Acceptance:** 302 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 15
 app (the new `history::rename` test included).
+
+## 41. Follow-up batch AE (2026-10-16): save every change, compress the history
+
+Google-Docs-style persistence.
+
+- **Autosave writes on every change.** The scheduler gained a leading edge: the
+  first edit after a quiet spell is flushed immediately, and further edits in
+  that burst coalesce into a trailing flush. The timing tightened from 3 s idle
+  / 30 s cap to **1 s idle / 10 s cap** (`DEFAULT_AUTOSAVE_TIMING`), so a change
+  reaches disk (or the recovery store) within about a second and a continuous
+  edit run is written at least every 10 s. Blur / close / explicit Save still
+  force a flush, and a queued write survives `dispose()`.
+- **History compresses by age** (`history::prune`, mirrored in the dev store):
+  under an hour keep every step, under a day one per 5 minutes, under a week one
+  per hour, older one per day — on top of the hard caps (200 automatic versions
+  or 25 MB per document, whichever bites first). Named versions are never
+  thinned. Blobs are content-addressed, so identical states still share one
+  file, and each save collects the blobs nothing references.
+
+**Acceptance:** 303 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 17
+app (two new tier tests: a day-old stretch thins to ~one per 5 minutes, a
+month-old one to one a day).

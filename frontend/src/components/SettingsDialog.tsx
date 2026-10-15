@@ -320,7 +320,7 @@ export default function SettingsDialog({
                 <h3>Autosave</h3>
                 {toggle(
                   "Autosave",
-                  "Keeps a crash-recovery copy 3 s after you stop editing.",
+                  "Keeps a crash-recovery copy as you edit — the first change after a pause is written at once.",
                   autosaveOn,
                   onAutosave,
                 )}

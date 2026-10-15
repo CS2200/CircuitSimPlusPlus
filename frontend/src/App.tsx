@@ -39,12 +39,14 @@ import {
   baseName,
   forgetSavedFileHandle,
   hasSavedFileHandle,
+  isRealFilePath,
   isTauri,
   openCircuitFile,
   pickSavePath,
   readFileText,
   renameCircuitFile,
   saveTextFile,
+  siblingPath,
   statFile,
 } from "./files";
 import { relativeAge } from "./lib/time";
@@ -87,7 +89,7 @@ const EMPTY_SELECTION_NUM: readonly number[] = [];
  * downloads and never learns a path).
  */
 function realPathOf(path: string | null): string | null {
-  return isTauri() && path !== null && path.includes("/") ? path : null;
+  return isTauri() && isRealFilePath(path) ? path : null;
 }
 
 /**
@@ -158,8 +160,9 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Autosave (autosave, phase 1): a crash-recovery copy 3 s after the last
-  // edit, plus — for named files, opt-out — an atomic rewrite of the file.
+  // Autosave (autosave, phase 1; every change since §41): a crash-recovery copy
+  // written as you edit, plus — for named files, opt-out — an atomic rewrite of
+  // the file. Timing lives in model/autosave.ts.
   const [autosaveOn, setAutosaveOn] = useState(() => loadBoolPref(PREF_AUTOSAVE, true));
   const [autosaveFileOn, setAutosaveFileOn] = useState(() =>
     loadBoolPref(PREF_AUTOSAVE_FILE, true),
@@ -527,7 +530,7 @@ export default function App() {
   const onSaveAs = useCallback(() => {
     const suggested = `${doc.name}.csx`;
     if (isTauri()) {
-      void pickSavePath(suggested, filePath !== null && filePath.includes("/") ? filePath : null)
+      void pickSavePath(suggested, isRealFilePath(filePath) ? filePath : null)
         .then((path) => {
           if (path !== null) void doSave(path);
         })
@@ -540,7 +543,7 @@ export default function App() {
   const onSave = useCallback(() => {
     // The Tauri shell writes to the known path; the browser writes to the file
     // it already has a handle for. Either way only the FIRST save asks where.
-    if (isTauri() && filePath !== null && filePath.includes("/")) {
+    if (isTauri() && isRealFilePath(filePath)) {
       void doSave(filePath);
     } else if (!isTauri() && hasSavedFileHandle()) {
       void saveInBrowser(`${doc.name}.csx`, false).catch((err) =>
@@ -579,8 +582,7 @@ export default function App() {
             .catch((err) => toast(`Save failed: ${String(err)}`));
           return;
         }
-        const dir = realPath.replace(/[\\/][^\\/]*$/, "");
-        void renameCircuitFile(realPath, `${dir}/${clean}.csx`)
+        void renameCircuitFile(realPath, siblingPath(realPath, `${clean}.csx`))
           .then((next) => {
             setFilePath(next);
             diskConflictRef.current = false;
@@ -592,7 +594,11 @@ export default function App() {
           .catch((err) => toast(`Rename failed: ${String(err)}`));
         return;
       }
-      void saveInBrowser(`${clean}.csx`, true).catch((err) => toast(`Save failed: ${String(err)}`));
+      // A browser cannot rename a file, so the new name is written into the
+      // file it already holds a handle for; only a first save asks where.
+      void saveInBrowser(`${clean}.csx`, false).catch((err) =>
+        toast(`Save failed: ${String(err)}`),
+      );
     },
     [doc, doSave, recordWriteStat, saveInBrowser, toast],
   );

@@ -14,10 +14,28 @@ import { isTauri } from "../lib/env";
 
 /** sessionStorage key for the browser/dev backend. */
 const MEMORY_KEY = "csx.history.memory";
-/** Automatic versions kept per document (named versions are never evicted). */
-const KEEP_AUTO = 50;
+/** Hard cap on automatic versions per document (named versions are never evicted). */
+const KEEP_AUTO = 200;
 /** Per-document byte budget for automatic versions. */
 const BUDGET_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Age tiers for automatic versions: `[maxAgeMs, minGapMs]`, mirroring
+ * `history.rs` — a session keeps every step, old history thins out (§41).
+ */
+const TIERS: [number, number][] = [
+  [60 * 60 * 1000, 0],
+  [24 * 60 * 60 * 1000, 5 * 60 * 1000],
+  [7 * 24 * 60 * 60 * 1000, 60 * 60 * 1000],
+  [Number.MAX_SAFE_INTEGER, 24 * 60 * 60 * 1000],
+];
+
+function tierGap(ageMs: number): number {
+  for (const [maxAge, gap] of TIERS) {
+    if (ageMs < maxAge) return gap;
+  }
+  return 0;
+}
 
 export interface VersionMeta {
   id: string;
@@ -186,7 +204,7 @@ export class MemoryHistoryStore implements HistoryStore {
       hash,
       text,
     });
-    this.prune(doc);
+    this.prune(doc, at);
     this.docs.set(key, doc);
     this.persist();
     return { id, deduped: false, coalesced: false };
@@ -233,8 +251,24 @@ export class MemoryHistoryStore implements HistoryStore {
     return { bytes, documents: this.docs.size };
   }
 
-  /** Evict oldest automatic versions until both caps are satisfied. */
-  private prune(doc: { versions: MemVersion[] }): void {
+  /** Compress: thin automatic versions by age, then enforce the hard caps. */
+  private prune(doc: { versions: MemVersion[] }, now: number): void {
+    const kept: MemVersion[] = [];
+    let lastAutoAt: number | null = null;
+    for (const version of [...doc.versions].reverse()) {
+      if (version.meta.named) {
+        kept.push(version);
+        continue;
+      }
+      const gap = tierGap(now - version.meta.at_ms);
+      const keep = gap === 0 || lastAutoAt === null || lastAutoAt - version.meta.at_ms >= gap;
+      if (keep) {
+        lastAutoAt = version.meta.at_ms;
+        kept.push(version);
+      }
+    }
+    doc.versions = kept.reverse();
+
     const autos = (): MemVersion[] => doc.versions.filter((v) => !v.meta.named);
     const bytes = (): number => autos().reduce((n, v) => n + v.text.length, 0);
     while (autos().length > KEEP_AUTO || bytes() > BUDGET_BYTES) {

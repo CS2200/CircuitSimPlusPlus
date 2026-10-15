@@ -1,14 +1,15 @@
 /**
- * Autosave scheduler (autosave, phase 1).
+ * Autosave scheduler (autosave, phase 1; "save every change" in §41).
  *
- * The trigger is *3 s of idle* after the last document change, plus a hard cap
- * so a long stretch of continuous editing still gets flushed, plus forced
- * flushes on window blur / close / explicit Save. Persisting is the injected
- * host's job, so this is pure timing logic — unit-tested with fake timers and
- * no React, no real filesystem.
+ * Every change is persisted: the first edit after a quiet spell is flushed
+ * immediately (leading edge), and a burst of edits coalesces into one trailing
+ * flush `idleMs` later. A hard cap bounds how long a continuously-dirty
+ * document may go unwritten, and window blur / close / explicit Save force a
+ * flush. Persisting is the injected host's job, so this is pure timing logic —
+ * unit-tested with fake timers and no React, no real filesystem.
  */
 
-export type FlushReason = "idle" | "blur" | "close" | "manual";
+export type FlushReason = "change" | "idle" | "blur" | "close" | "manual";
 
 export interface AutosaveHost {
   /** True when the document has unsaved changes. */
@@ -20,13 +21,13 @@ export interface AutosaveHost {
 }
 
 export interface AutosaveTiming {
-  /** Idle time after the last change before the debounce fires. */
+  /** Idle time after the last change before the trailing flush fires. */
   idleMs: number;
   /** Upper bound on how long a dirty document may go unflushed. */
   maxDirtyMs: number;
 }
 
-export const DEFAULT_AUTOSAVE_TIMING: AutosaveTiming = { idleMs: 3000, maxDirtyMs: 30000 };
+export const DEFAULT_AUTOSAVE_TIMING: AutosaveTiming = { idleMs: 1000, maxDirtyMs: 10_000 };
 
 export class AutosaveController {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -43,10 +44,11 @@ export class AutosaveController {
   ) {}
 
   /**
-   * Report a possible document change. Restarts the idle debounce while dirty
-   * (so continuous editing waits for a pause) and flushes at once once the
-   * dirty window hits the cap. Cheap to call on every editor status update:
-   * an unchanged revision is ignored.
+   * Report a possible document change. The first change after a quiet spell is
+   * flushed at once (leading edge), and further changes coalesce into a trailing
+   * flush `idleMs` later; a continuously-dirty document is flushed at the cap.
+   * Cheap to call on every editor status update: an unchanged revision is
+   * ignored.
    */
   notifyChanged(): void {
     if (this.disposed) return;
@@ -64,7 +66,11 @@ export class AutosaveController {
       void this.flush("idle");
       return;
     }
+    // Leading edge: with nothing pending, this change starts a burst, so it is
+    // written now rather than waiting out the window.
+    const startsBurst = this.timer === null;
     this.cancelTimer();
+    if (startsBurst) void this.flush("change");
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush("idle");
