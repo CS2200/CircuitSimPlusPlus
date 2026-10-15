@@ -90,6 +90,7 @@ export class Canvas2DRenderer implements Renderer {
 
   flush(): void {
     for (const { style, path } of this.batches.values()) {
+      this.ctx.globalAlpha = style.alpha ?? 1;
       if (style.fill !== undefined) {
         this.ctx.fillStyle = style.fill;
         this.ctx.fill(path as unknown as Path2D);
@@ -104,6 +105,7 @@ export class Canvas2DRenderer implements Renderer {
         this.stats.strokeBatches++;
       }
     }
+    this.ctx.globalAlpha = 1;
     for (const op of this.texts) {
       this.ctx.fillStyle = op.style.color;
       this.ctx.font = `${op.style.size}px system-ui, sans-serif`;

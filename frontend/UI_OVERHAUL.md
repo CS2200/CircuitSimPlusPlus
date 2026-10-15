@@ -604,3 +604,34 @@ one `--update-snapshots` run on Linux.
   they are deliberately left for their own pass.
 
 **Acceptance:** frontend lint / 262 unit / build / 35-of-35 e2e green.
+
+## 19. Follow-up batch J (2026-10-16): pulse, slider, sim bar, HUD, flat panel
+
+- **Width mismatches pulse.** The amber mismatch halo now animates (opacity and
+  ring weight oscillate) so it is impossible to miss even among colored wires;
+  the canvas keeps repainting while any net disagrees, gated by the same
+  _Animate signal pulses_ preference. `StrokeStyle` gained an `alpha` channel
+  (batched, like the other style keys), `SceneOverlay` gained `now`, and
+  `DocScene.hasMismatch()` tells the host when to animate. Visual-regression
+  specs set `csx.pulses=0` so their baselines stay deterministic (the halo is
+  then drawn at a fixed phase).
+- **Slider notches fixed.** They were positioned as a percentage of the input
+  while the thumb travels a shorter span, so they lined up with nothing (and
+  sat in a separate strip). The slider is now fully custom — a 4 px track and a
+  fixed 12 px thumb — and the notch strip is inset by the thumb radius, so a
+  notch at fraction `f` lands exactly where the thumb's centre does. Ten
+  notches at the round values (1, 2, 5, 10, … 1000 Hz), decades taller.
+- **Sim bar regrouped.** Transport (play/pause · tick · reset), run-to
+  (cycle N · run to) and speed (label · slider · Hz) are three bordered pills,
+  and the telemetry (`cycle N · mode chip · eff Hz`, then `T_obs`) is pushed to
+  the right edge, instead of seven loose controls in a row.
+- **HUD aligned.** The fps/status chip was floating 8 px inside the canvas; it
+  is now flush with the canvas's top-left corner, so it lines up with the
+  circuit tab above it.
+- **Inspector is flat again.** The Width / Options / Timing headings are gone
+  (the fields keep their order and hints); grouping is still tagged in the
+  catalog for future use.
+
+**Acceptance:** frontend lint / 262 unit / build / 35-of-35 e2e green (the
+fileops sim-bar test asserts the notch marks; the canvas screenshot specs
+freeze animations).

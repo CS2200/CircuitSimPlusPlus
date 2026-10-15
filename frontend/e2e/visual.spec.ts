@@ -10,6 +10,9 @@ import { expectScreenshot } from "./screenshots";
  * against the DLS reference look by eye (human sign-off per FRONTEND.md U4).
  */
 test("demo circuit renders consistently across themes", async ({ page }, testInfo) => {
+  // Freeze animations (the width-mismatch warning pulses) so the baseline is
+  // deterministic; the canvas is still drawn in full.
+  await page.addInitScript(() => localStorage.setItem("csx.pulses", "0"));
   await page.goto("/?demo=1");
   const canvas = page.locator("canvas.circuit-canvas");
   await expect(canvas).toBeVisible();
