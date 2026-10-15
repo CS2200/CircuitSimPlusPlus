@@ -62,23 +62,18 @@ function uintAttr(
 }
 
 /**
- * Standard n-input gate: inputs on the left, out on the right. Extra inputs
- * extend the INPUT side — the gate grows WIDER, never taller, so its body/shape
- * keeps its size and proportions (UI_OVERHAUL §43). Two-input gates are
- * unchanged (5×3); each input past two widens the gate by one cell.
+ * Standard n-input gate: inputs on the left, out on the right. The body grows
+ * TALLER with the input count so the pins keep their spacing, but the rounded /
+ * pointed OUTPUT cap stays a 2-input gate's size — only the flat input side
+ * grows (UI_OVERHAUL §44, see `shapes.ts`'s `CAP_H`).
  */
 function gateSpec(caption: string, minInputs: number): CompSpec {
-  const count = (attrs: Readonly<Record<string, unknown>>): number =>
-    Math.max(minInputs, numAttr(attrs, "inputs", 2));
-  const widthFor = (attrs: Readonly<Record<string, unknown>>): number =>
-    5 + Math.max(0, count(attrs) - 2);
   return {
-    width: widthFor,
-    height: () => 3,
+    width: () => 5,
+    height: (attrs) => Math.max(3, numAttr(attrs, "inputs", 2) + 1),
     pins: (attrs) => {
-      const n = count(attrs);
-      const h = 3;
-      const w = widthFor(attrs);
+      const n = Math.max(minInputs, numAttr(attrs, "inputs", 2));
+      const h = Math.max(3, n + 1);
       const width = bitsOf(attrs); // bitwise multi-bit gates (DLS-style)
       const pins: PinSpec[] = [];
       for (let i = 0; i < n; i++) {
@@ -90,7 +85,7 @@ function gateSpec(caption: string, minInputs: number): CompSpec {
           bitsize: width,
         });
       }
-      pins.push({ name: "out", dx: w, dy: h / 2, kind: "out", bitsize: width });
+      pins.push({ name: "out", dx: 5, dy: h / 2, kind: "out", bitsize: width });
       return pins;
     },
     caption: () => caption,

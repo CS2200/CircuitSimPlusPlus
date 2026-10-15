@@ -31,6 +31,13 @@ export function circlePath(cx: number, cy: number, r: number): PathCmd[] {
   ];
 }
 
+/**
+ * Height budget of a gate's fixed SYMBOL (UI_OVERHAUL §44): the AND/OR shape
+ * keeps a 2-input gate's size, and extra inputs hang on the straight input-edge
+ * line that grows with them instead of stretching the symbol.
+ */
+const CAP_H = 3;
+
 /** AND body: flat left, straight top/bottom, semicircular right side. */
 function andPath(x: number, y: number, w: number, h: number): PathCmd[] {
   const r = h / 2;
@@ -179,29 +186,38 @@ export function gateShape(
 ): GateShape | null {
   switch (type) {
     case "gate.and":
-      return { body: andPath(x, y, w, h), extra: [], outBubble: null };
     case "gate.nand":
-      return {
-        body: andPath(x, y, w - 2 * BUBBLE_R, h),
-        extra: [],
-        outBubble: { x: x + w - BUBBLE_R, y: y + h / 2 },
-      };
     case "gate.or":
-      return { body: orPath(x, y, w, h), extra: [], outBubble: null };
     case "gate.nor":
-      return {
-        body: orPath(x, y, w - 2 * BUBBLE_R, h),
-        extra: [],
-        outBubble: { x: x + w - BUBBLE_R, y: y + h / 2 },
-      };
     case "gate.xor":
-      return { body: orPath(x, y, w, h), extra: [xorBackPath(x, y, w, h)], outBubble: null };
-    case "gate.xnor":
+    case "gate.xnor": {
+      // The SYMBOL keeps a 2-input gate's size, vertically centred. Extra inputs
+      // never reshape it: they hang on a straight vertical input-edge line that
+      // grows to hold them all (UI_OVERHAUL §44).
+      const capH = Math.min(h, CAP_H);
+      const capY = y + (h - capH) / 2;
+      const negated = type === "gate.nand" || type === "gate.nor" || type === "gate.xnor";
+      const back = type === "gate.xor" || type === "gate.xnor";
+      const bw = w - (negated ? 2 * BUBBLE_R : 0);
+      const body =
+        type === "gate.and" || type === "gate.nand"
+          ? andPath(x, capY, bw, capH)
+          : orPath(x, capY, bw, capH);
+      const extra: PathCmd[][] = [];
+      if (back) extra.push(xorBackPath(x, capY, bw, capH));
+      if (h > capH) {
+        // The input edge: one straight line that every input pin attaches to.
+        extra.push([
+          { t: "M", x, y },
+          { t: "L", x, y: y + h },
+        ]);
+      }
       return {
-        body: orPath(x, y, w - 2 * BUBBLE_R, h),
-        extra: [xorBackPath(x, y, w - 2 * BUBBLE_R, h)],
-        outBubble: { x: x + w - BUBBLE_R, y: y + h / 2 },
+        body,
+        extra,
+        outBubble: negated ? { x: x + w - BUBBLE_R, y: y + h / 2 } : null,
       };
+    }
     case "gate.not":
       return {
         body: triPath(x, y, w - 2 * BUBBLE_R, h),

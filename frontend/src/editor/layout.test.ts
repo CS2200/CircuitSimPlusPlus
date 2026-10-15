@@ -22,9 +22,10 @@ describe("catalog", () => {
     expect(two.filter((p) => p.kind === "in")).toHaveLength(2);
     const four = compPins({ type: "gate.and", attrs: { inputs: 4 } });
     expect(four.filter((p) => p.kind === "in")).toHaveLength(4);
-    // Extra inputs widen the gate; the height never changes (UI_OVERHAUL §43).
-    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(3);
-    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).w).toBe(7);
+    // Extra inputs grow the body TALLER (the pins keep their spacing) while the
+    // output cap stays a 2-input gate's size (UI_OVERHAUL §44).
+    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(5);
+    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).w).toBe(5);
     expect(compSize({ type: "gate.and" }).w).toBe(5);
   });
 

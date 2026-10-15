@@ -1263,14 +1263,11 @@ Google-Docs-style persistence.
 app (two new tier tests: a day-old stretch thins to ~one per 5 minutes, a
 month-old one to one a day).
 
-## 43. Follow-up batch AH (2026-10-16): wider gates, the BUFFER tile
+## 43. Follow-up batch AH (2026-10-16): the BUFFER tile
 
-- **A gate grows wider, never taller.** `gateSpec` now fixes the body height at 3
-  and widens the gate by one cell per input past two (`width = 5 + max(0, n-2)`),
-  with the input pins distributed down the (fixed) left edge. Two-input gates are
-  byte-for-byte the same as before (5×3); the AND/OR arc no longer stretches into
-  a tall bulb as inputs climb (UI_OVERHAUL §43). `layout.test` pins the 4-input
-  size at 7×3.
+- **A gate stays its size; extra inputs extend its input edge.** First attempt
+  (superseded by §44): the body height was pinned at 3 and the gate widened with
+  the input count. See §44 for the shipped behaviour.
 - **Buf → BUFFER, with an enable.** The Gates palette's `BUF` tile is now
   **BUFFER**, placing the engine's tri-state `wiring.controlled-buffer`
   (`in`/`en`/`out`, `en` on the BOTTOM edge per §24) with a buffer triangle plus
@@ -1280,4 +1277,20 @@ month-old one to one a day).
   `docs/format-v2.md` §4's ⚠️¹ note.
 
 **Acceptance:** frontend lint / 302 unit / build green; 51-of-51 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean.
+
+## 44. Follow-up batch AI (2026-10-16): a gate keeps its shape; inputs hang on the input edge
+
+- **The gate symbol never reshapes.** A gate's AND/OR shape is drawn at a fixed
+  2-input size (`CAP_H = 3` in `shapes.ts`), vertically centred in the body. The
+  body still grows TALLER with `inputs` (so the pins keep their spacing — nothing
+  is compressed), and a **straight vertical input-edge line** at `x = 0` is drawn
+  spanning the whole body, so every input pin lands on one clean edge the length
+  of the input set. Negated variants keep their output bubble at the symbol's tip;
+  XOR/XNOR keep their back arc on the symbol. Width is 5 for every gate.
+- Two-input gates are byte-identical to before (height 3 = `CAP_H`, so no input
+  line is added). `layout.test` pins a 4-input AND at 5×5. `gateSpec` is back to
+  the original height growth; §43's "wider" attempt is superseded.
+
+**Acceptance:** frontend lint / 303 unit / build green; 51-of-51 e2e green; Rust
 171 core + 12 CLI + 8 golden, clippy/fmt clean.
