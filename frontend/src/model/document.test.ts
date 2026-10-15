@@ -302,6 +302,20 @@ describe("updateComponent", () => {
     expect(doc.toJson()).toBe(before);
   });
 
+  it("sets and clears a per-part name side (namePos)", () => {
+    const doc = CircuitDocument.create();
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    doc.updateComponent(0, a, { namePos: "S" });
+    const parsed = JSON.parse(doc.toJson()) as {
+      circuits: { components: Record<string, unknown>[] }[];
+    };
+    expect(parsed.circuits[0].components[0].namePos).toBe("S");
+    // "Default" (null) removes the override so the part follows the app default.
+    doc.updateComponent(0, a, { namePos: null });
+    expect(doc.circuit(0).components[0]).not.toHaveProperty("namePos");
+    expect(doc.toJson()).not.toContain("namePos");
+  });
+
   it("type swap and→or keeps wires (same pin names)", () => {
     const doc = withResolver(CircuitDocument.create());
     const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });

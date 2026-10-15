@@ -148,10 +148,13 @@ test("Settings: sectioned panel — new themes, accents and editing prefs persis
   await page.locator('[data-accent-option="cyan"]').click();
   await expect(page.locator(".app")).toHaveAttribute("data-accent", "cyan");
 
-  // Editing prefs seed new parts: 8-bit AND with 4 inputs.
+  // Editing prefs seed new parts: 8-bit AND with 4 inputs. The selects are app
+  // dropdowns (UI_OVERHAUL §28), so open them and click the option.
   await openSection(page, "Editing");
-  await page.getByLabel("Default bit width").selectOption("8");
-  await page.getByLabel("Default gate inputs").selectOption("4");
+  await page.getByLabel("Default bit width").click();
+  await page.getByRole("option", { name: "8 bits", exact: true }).click();
+  await page.getByLabel("Default gate inputs").click();
+  await page.getByRole("option", { name: "4 inputs", exact: true }).click();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "AND", exact: true }).click();
   const box = await page.locator("canvas.circuit-canvas").boundingBox();

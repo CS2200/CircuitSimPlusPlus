@@ -35,6 +35,13 @@ export interface CsxComponent {
   rot?: Rotation;
   /** Optional; REQUIRED on autograder-exposed parts (must be unique per circuit). */
   name?: string;
+  /**
+   * Cosmetic side for this part's name label (UI_OVERHAUL §28): one of
+   * `N`/`E`/`S`/`W`. Absent = follow the app's "Default name position"
+   * preference. The engine ignores it beyond round-tripping it
+   * (docs/format-v2.md §2).
+   */
+  namePos?: Rotation;
   attrs?: Record<string, unknown>;
 }
 

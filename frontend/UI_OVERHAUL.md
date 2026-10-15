@@ -830,7 +830,52 @@ filesystem stores in the Tauri shell.
 **Acceptance:** frontend lint / 291 unit / build / 43-of-43 e2e green; Rust 168
 core + 12 CLI + 8 golden + 14 app tests, clippy/fmt clean.
 
-## 28. Follow-up batch S (2026-10-16): Docs-style header
+## 28. Follow-up batch S (2026-10-16): roomier inspector, picker inputs, label side, app dropdowns
+
+Four requests on top of §25/§26, all in the Inspector and Settings panels.
+
+- **Roomier Inspector.** Rows breathe: `.inspector-row` margin 7 -> 11px,
+  `.inspector-field` 7 -> 12px, the picker grid gap 3 -> 4px and its cells a
+  touch taller. Nothing else changed shape, so the panel still does not resize
+  when you switch selection.
+- **Gate input count is a picker grid.** The old "Inputs" _number box_ is gone.
+  `NumberPicker` (`components/NumberPicker.tsx`) generalises the bit-width grid:
+  it takes an inclusive `min`/`max` and renders one cell per legal value, so
+  **bit size is 1..32** and **gate inputs are 2..32** — one click, and a value
+  can never be typed out of range. The catalog field kind `"bitsize"` became
+  `"picker"` (with optional `min`/`max`); `BitsizePicker.tsx` was deleted. The
+  cells carry `data-value` (the e2e targets moved from `data-bitsize`).
+- **Where a part's name is drawn.** A per-component field, `namePos`, alongside
+  `rot`/`name`: one of `N`/`E`/`S`/`W` (same compass letters as `rot`), **omitted
+  when unset** (`Option` + `skip_serializing_if`, exactly like a wire's `color`),
+  so files written before it stay byte-identical and old `.csx` files stay valid.
+  The engine ignores it beyond round-tripping it. The Inspector's **Label side**
+  select sets it (Above / Below / Left / Right, plus **Default** to clear the
+  override); Settings ▸ Canvas ▸ **Default name position** is the fallback for
+  parts with no override. `docScene`'s `labelAnchor()` reads
+  `comp.namePos ?? labelPos` and maps the side to an anchor + text alignment for
+  both box and shaped bodies. The per-pin value readout beside a pin is
+  unaffected.
+- **App dropdowns instead of native `<select>`.** A new `Select` component
+  (`components/Select.tsx`) renders a button (`aria-haspopup="listbox"`,
+  `aria-label`) plus an option list styled like the menu-bar popups, and is now
+  used for every select in the **Inspector** (Rotation, gate Type, and the
+  `select`-kind attrs: radix / shift / extend mode / subcircuit) and in the
+  **Settings** panel (default bit width / gate inputs / clock speed / default
+  name position). The list renders **inline** (not absolutely positioned): the dock
+  and the settings pane both scroll, and a floating popup would be clipped by
+  them. Escape and outside-click close it.
+- **Prettier `endOfLine: "auto"`** in `frontend/.prettierrc.json`. The Windows
+  checkout is CRLF (`core.autocrlf=true`, no `.gitattributes`) while Prettier
+  defaults to LF, so every CRLF file failed `prettier --check`. `auto` accepts
+  both, keeping the gate meaningful on this machine without rewriting the tree.
+
+**Acceptance:** frontend lint / 292 unit / build green; 44-of-44 e2e green; Rust
+170 core + 12 CLI + 8 golden tests, clippy/fmt clean. The two settings selects
+now click instead of `selectOption`, and `editor.spec` drives the Inspector's
+Label side select (writes/clears `namePos`) in place.
+
+## 29. Follow-up batch T (2026-10-16): Docs-style header
 
 The top bar became a two-row header modelled on Google Docs/Sheets. Chrome
 height is unchanged: the sim transport moved *into* the header's second row
@@ -861,8 +906,9 @@ instead of owning a row of its own.
   the run-to input were tightened so the row fits a 1280 px window with both the
   telemetry and the T_obs chip on screen.
 
-**Acceptance:** 291 unit / 45 e2e green. The header is taller than the old strip,
-so the canvas region shrank and the five committed screenshot baselines were
-re-blessed (`sim-lit`, `timing-path`, `timing-violation`, `demo-dark`,
-`demo-light`); the Linux copies need the same one-shot `--update-snapshots` run
-on CI.
+**Acceptance:** 292 unit / 45 e2e green; Rust 170 core + 12 CLI + 8 golden + 14
+app. The header is taller than the old strip and §28 moved component labels, so
+both the canvas region and the label anchors changed: the five screenshot
+baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
+`demo-dark`, `demo-light`). Their Linux copies need the same one-shot
+`--update-snapshots` run on CI.

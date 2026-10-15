@@ -12,7 +12,13 @@ import { expect, test, type Page } from "@playwright/test";
 interface CsxDoc {
   circuits: {
     name: string;
-    components: { id: string; type: string; pos: [number, number]; rot?: string }[];
+    components: {
+      id: string;
+      type: string;
+      pos: [number, number];
+      rot?: string;
+      namePos?: string;
+    }[];
     wires: {
       a: unknown;
       b: unknown;
@@ -70,10 +76,21 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   await expect(page.locator(".inspector-id")).toHaveText("c1");
   await page.getByLabel("Name").fill("my-and");
   await page.getByLabel("Name").press("Enter");
-  // Bit width is a 1..32 picker grid (UI_OVERHAUL §18).
-  await page.locator('.bitsize-grid[aria-label="Bit size"] [data-bitsize="8"]').click();
+  // Bit width is a 1..32 picker grid (UI_OVERHAUL §28).
+  await page.locator('.bitsize-grid[aria-label="Bit size"] [data-value="8"]').click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
+
+  // ---- per-part name side (UI_OVERHAUL §28): the app dropdown writes namePos ----
+  await page.getByLabel("Label side").click();
+  await page.getByRole("option", { name: "Below", exact: true }).click();
+  d = await doc(page);
+  expect(d.circuits[0].components[0]).toMatchObject({ namePos: "S" });
+  // Choosing "Default" clears the override (the part follows the app default).
+  await page.getByLabel("Label side").click();
+  await page.getByRole("option", { name: "Default", exact: true }).click();
+  d = await doc(page);
+  expect(d.circuits[0].components[0]).not.toHaveProperty("namePos");
 
   // ---- wire: AND.out (5,1.5) → NOT.in (10,1), routed with an escape
   // stub east + a Z jog, entering the input pin from the west ----

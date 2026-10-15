@@ -83,6 +83,13 @@ pub struct Component {
     /// `wiring.pin` components (they are the subcircuit interface).
     #[serde(default)]
     pub name: String,
+    /// Cosmetic side for this part's name label (UI_OVERHAUL §28): one of
+    /// `N`/`E`/`S`/`W` (the same compass letters as `rot`). Absent → the
+    /// app's display preference. Purely presentational: the engine ignores
+    /// it beyond round-tripping it. Omitted when unset so existing files stay
+    /// byte-identical.
+    #[serde(default, rename = "namePos", skip_serializing_if = "Option::is_none")]
+    pub name_pos: Option<Rotation>,
     /// Type-specific attributes, validated against the component registry.
     #[serde(default)]
     pub attrs: Map<String, Json>,
@@ -568,6 +575,35 @@ mod tests {
         assert!(out.contains("\"color\": \"#ff0000\""), "{out}");
         let reparsed = load_document(out.as_bytes()).expect("canonical color must reload");
         assert_eq!(reparsed, doc);
+    }
+
+    #[test]
+    fn name_pos_is_optional_and_roundtrips() {
+        let text = to_canonical_json(&sample_doc());
+        assert!(
+            !text.contains("\"namePos\""),
+            "unspecified labels must not emit namePos"
+        );
+
+        let mut v: Json = serde_json::from_str(&text).unwrap();
+        v["circuits"][0]["components"][3]["namePos"] = Json::String("S".into());
+        let sided = format!("{}\n", serde_json::to_string_pretty(&v).unwrap());
+
+        let doc = load_document(sided.as_bytes()).expect("a sided label must load");
+        let out = to_canonical_json(&doc);
+        assert!(out.contains("\"namePos\": \"S\""), "{out}");
+        let reparsed = load_document(out.as_bytes()).expect("canonical namePos must reload");
+        assert_eq!(reparsed, doc);
+    }
+
+    /// `namePos` reuses the compass enum, so an unknown side is a load error
+    /// (never a silently-ignored label).
+    #[test]
+    fn name_pos_rejects_unknown_side() {
+        let mut v: Json = serde_json::from_str(&to_canonical_json(&sample_doc())).unwrap();
+        v["circuits"][0]["components"][3]["namePos"] = Json::String("up".into());
+        let bad = format!("{}\n", serde_json::to_string_pretty(&v).unwrap());
+        assert!(load_document(bad.as_bytes()).is_err());
     }
 
     #[test]

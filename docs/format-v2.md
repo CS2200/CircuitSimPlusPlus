@@ -62,6 +62,7 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   "pos": [15, 10],             // grid coordinates of the origin
   "rot": "E",                  // "N" | "E" | "S" | "W" (default "E")
   "name": "",                  // optional; REQUIRED on autograder-exposed parts and on wiring.pin
+  "namePos": "N",              // optional label side; "N" | "E" | "S" | "W" (absent = UI default)
   "attrs": { /* per-type, see §4 */ }
 }
 ```
@@ -69,6 +70,11 @@ Circuit names are unique within a document. One circuit is conventionally `"main
 Pins have **no connectivity fields** — wires own connectivity (copper-first, §5.1). Unknown
 fields on any object in this section are rejected (`deny_unknown_fields`); unknown `attrs`
 keys are rejected per-type (a typo'd attr is an error, never silently ignored).
+
+- `namePos` (optional, UI_OVERHAUL §28): which side of the body a part's `name` label is
+  drawn on, reusing the compass letters of `rot`. **Purely presentational** — the engine
+  ignores it beyond round-tripping it — and omitted when unset (like a wire's `color`), so
+  files written before it existed stay byte-identical.
 
 ### Wire and endpoints
 
@@ -342,6 +348,7 @@ the schema constrains common shapes only.
                 },
                 "rot": { "enum": ["N", "E", "S", "W"], "default": "E" },
                 "name": { "type": "string", "default": "" },
+                "namePos": { "enum": ["N", "E", "S", "W"] },
                 "attrs": { "type": "object", "default": {} }
               }
             }
