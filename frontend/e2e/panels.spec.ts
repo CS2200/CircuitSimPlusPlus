@@ -78,7 +78,7 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await page.goto("/");
 
   // One rail tab per registry group (Subcircuits appears only with >1 circuit).
-  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(6);
+  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(7);
 
   // Gates is the default group.
   await expect(page.getByRole("button", { name: "AND", exact: true })).toBeVisible();
@@ -99,6 +99,7 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await checkGroup("Arithmetic", "ADD");
   await checkGroup("Memory", "RAM");
   await checkGroup("I/O", "LED");
+  await checkGroup("Misc", "TEXT");
   await checkGroup("Gates", "NAND");
 
   // Clicking also selects (touch/keyboard paths).

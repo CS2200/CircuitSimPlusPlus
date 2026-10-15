@@ -332,3 +332,40 @@ test("the header title names the file, and Save then writes without asking again
   await expect(page.locator(".app-title")).toHaveText("alu");
   await expect(page.locator(".app-title")).not.toHaveText("(unsaved)");
 });
+
+test("Misc: a text annotation stores and edits its text", async ({ page }) => {
+  await page.goto("/");
+
+  await openPaletteGroup(page, "Misc");
+  await page.getByRole("button", { name: "TEXT", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+
+  // Born with visible text (UI_OVERHAUL §37), then edited in the Inspector.
+  await expect(page.locator(".inspector-id")).toBeVisible();
+  await page.getByLabel("Text").fill("hello");
+  await page.getByLabel("Text").press("Enter");
+
+  const d = await doc(page);
+  const note = d.circuits[0].components.find((c) => c.type === "misc.text");
+  expect(note?.attrs?.text).toBe("hello");
+});
+
+test("Sheet tabs: middle-click offers Rename and Delete", async ({ page }) => {
+  await page.goto("/");
+
+  // Create a subcircuit through the strip's "+".
+  await page.getByRole("button", { name: "New subcircuit" }).click();
+  const dialog = page.locator(".name-dialog");
+  await dialog.getByRole("textbox").fill("sub1");
+  await dialog.getByRole("button", { name: "Create" }).click();
+
+  // Middle-click the subcircuit tab → our menu, not the browser default.
+  await page.getByRole("tab", { name: "sub1" }).click({ button: "middle" });
+  const menu = page.getByRole("menu", { name: "sub1 actions" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(page.getByRole("tab", { name: "sub1" })).toHaveCount(0);
+});

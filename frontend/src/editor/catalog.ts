@@ -245,6 +245,8 @@ export function defaultAttrs(type: string): Record<string, unknown> | undefined 
   // A constant always carries a value so it drives its net from the start
   // (UI_OVERHAUL §36): default 0.
   if (type === "wiring.constant") return { value: "0" };
+  // An annotation is born with visible text so it can be grabbed and edited.
+  if (type === "misc.text") return { text: "Text" };
   return undefined;
 }
 
@@ -546,6 +548,18 @@ const REGISTRY: Record<string, CompSpec> = {
     [{ name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH }],
     "HEX",
   ),
+
+  // Misc (UI_OVERHAUL §37): a free-form text annotation. No pins, no body box
+  // on the canvas; width tracks the text so selection/marquee match it.
+  "misc.text": {
+    width: (attrs) => {
+      const text = typeof attrs.text === "string" ? attrs.text : "";
+      return Math.max(4, Math.round(text.length * 0.6) + 2);
+    },
+    height: () => 2,
+    pins: () => [],
+    caption: () => "",
+  },
 };
 
 const FALLBACK = boxSpec(4, 3, [], "?");
@@ -619,6 +633,10 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   {
     group: "I/O",
     items: [{ type: "io.button" }, { type: "io.led" }, { type: "io.hexdisplay" }],
+  },
+  {
+    group: "Misc",
+    items: [{ type: "misc.text", label: "TEXT" }],
   },
 ];
 
@@ -798,6 +816,9 @@ function baseFields(type: string): AttrField[] {
       ];
     case "wiring.clock":
       return [];
+    case "misc.text":
+      // The annotation body IS this text (UI_OVERHAUL §37).
+      return [{ key: "text", label: "Text", kind: "text", placeholder: "note…", group: "Options" }];
     case "wiring.splitter":
       return [
         {

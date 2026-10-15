@@ -470,7 +470,7 @@ body {
   white-space: nowrap;
 }
 
-/* Clickable title (§37): looks like the label, invites a click to rename. */
+/* Clickable title (§38): looks like the label, invites a click to rename. */
 .app-title-editable {
   padding: 0.1rem 0.35rem;
   margin-left: -0.35rem;
@@ -893,6 +893,36 @@ body {
 
 .sheet-tab:hover {
   color: var(--text);
+  background: var(--grid);
+}
+
+/* Middle-click menu on a sheet tab (UI_OVERHAUL §37). */
+.sheet-tab-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.sheet-tab-menu button {
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.sheet-tab-menu button:hover {
   background: var(--grid);
 }
 
@@ -1998,7 +2028,7 @@ body {
 }
 
 /* A row is a plain container: the click target is an overlay button, so the
- * version's name (and its edit field) can sit above it (§37). */
+ * version's name (and its edit field) can sit above it (§38). */
 .history-row {
   position: relative;
   border-radius: 6px;
@@ -2089,7 +2119,7 @@ body {
   font-size: 0.72rem;
 }
 
-/* "This version vs the open document" (§37). */
+/* "This version vs the open document" (§38). */
 .history-diff {
   padding: 0.5rem 0.7rem;
   border-top: 1px solid var(--panel-border);
