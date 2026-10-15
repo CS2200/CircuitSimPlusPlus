@@ -6,7 +6,8 @@ import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
-import BitsizePicker from "./BitsizePicker";
+import NumberPicker from "./NumberPicker";
+import Select from "./Select";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -149,7 +150,7 @@ export default function InspectorPanel({
         </div>
         <div className="inspector-field">
           <span className="inspector-field-label">Width (bits)</span>
-          <BitsizePicker
+          <NumberPicker
             value={wire.info.bitsize}
             label="Width (bits)"
             onPick={(bits) => setWidth(bits)}
@@ -312,30 +313,31 @@ export default function InspectorPanel({
         />
       </label>
 
-      <label className="inspector-row">
+      <div className="inspector-row">
         <span>Rotation</span>
-        <select
+        <Select
+          label="Rotation"
           value={comp.rot ?? "E"}
-          onChange={(e) => commitRot(e.target.value as CsxComponent["rot"])}
-        >
-          <option value="E">East</option>
-          <option value="S">South</option>
-          <option value="W">West</option>
-          <option value="N">North</option>
-        </select>
-      </label>
+          options={[
+            { value: "E", label: "East" },
+            { value: "S", label: "South" },
+            { value: "W", label: "West" },
+            { value: "N", label: "North" },
+          ]}
+          onChange={(rot) => commitRot(rot as CsxComponent["rot"])}
+        />
+      </div>
 
       {comp.type.startsWith("gate.") && (
-        <label className="inspector-row">
+        <div className="inspector-row">
           <span>Type</span>
-          <select value={comp.type} onChange={(e) => commitType(e.target.value)}>
-            {GATE_TYPE_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t.slice(5).toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
+          <Select
+            label="Type"
+            value={comp.type}
+            options={GATE_TYPE_OPTIONS.map((t) => ({ value: t, label: t.slice(5).toUpperCase() }))}
+            onChange={(type) => commitType(type)}
+          />
+        </div>
       )}
 
       {fields.map((f) => (
@@ -506,15 +508,17 @@ function FieldRow({
     );
   }
 
-  if (field.kind === "bitsize") {
-    const n = typeof value === "number" ? value : (field.dflt ?? 1);
+  if (field.kind === "picker") {
+    const n = typeof value === "number" ? value : (field.dflt ?? field.min ?? 1);
     return (
       <div className="inspector-field">
         <span className="inspector-field-label">{field.label}</span>
-        <BitsizePicker
+        <NumberPicker
           value={n}
+          min={field.min ?? 1}
+          max={field.max ?? 32}
           label={field.label}
-          onPick={(bits) => onCommitAttr(field.key, bits)}
+          onPick={(v) => onCommitAttr(field.key, v)}
         />
       </div>
     );
@@ -545,19 +549,15 @@ function FieldRow({
 
   if (field.kind === "select") {
     return (
-      <label className="inspector-row">
+      <div className="inspector-row">
         <span>{field.label}</span>
-        <select
-          value={typeof value === "string" ? value : field.options[0].value}
-          onChange={(e) => onCommitAttr(field.key, e.target.value)}
-        >
-          {field.options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <Select
+          label={field.label}
+          value={typeof value === "string" ? value : (field.options[0]?.value ?? "")}
+          options={field.options}
+          onChange={(v) => onCommitAttr(field.key, v)}
+        />
+      </div>
     );
   }
 

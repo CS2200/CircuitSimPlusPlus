@@ -70,8 +70,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   await expect(page.locator(".inspector-id")).toHaveText("c1");
   await page.getByLabel("Name").fill("my-and");
   await page.getByLabel("Name").press("Enter");
-  // Bit width is a 1..32 picker grid (UI_OVERHAUL §18).
-  await page.locator('.bitsize-grid[aria-label="Bit size"] [data-bitsize="8"]').click();
+  // Bit width is a 1..32 picker grid (UI_OVERHAUL §28).
+  await page.locator('.bitsize-grid[aria-label="Bit size"] [data-value="8"]').click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
 

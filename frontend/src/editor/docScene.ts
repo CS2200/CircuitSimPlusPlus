@@ -149,6 +149,27 @@ const VALUE_REPEAT: ReadonlySet<string> = new Set([
   "mem.rom",
 ]);
 
+/** Side of the body a part's name label is drawn on (UI_OVERHAUL §28). */
+export type LabelPos = "N" | "S" | "W" | "E";
+
+/** Anchor (and text alignment) for a name label around a body rect. */
+function labelAnchor(
+  rect: Rect,
+  pos: LabelPos,
+): { x: number; y: number; align: "left" | "center" | "right" } {
+  switch (pos) {
+    case "S":
+      return { x: rect.x + rect.w / 2, y: rect.y + rect.h + 0.9, align: "center" };
+    case "W":
+      return { x: rect.x - 0.5, y: rect.y + rect.h / 2, align: "right" };
+    case "E":
+      return { x: rect.x + rect.w + 0.5, y: rect.y + rect.h / 2, align: "left" };
+    case "N":
+    default:
+      return { x: rect.x + rect.w / 2, y: rect.y - 0.9, align: "center" };
+  }
+}
+
 /** Point at arc-length fraction t ∈ [0,1] along a polyline. */
 function pointAlong(points: [number, number][], t: number): Vec2 {
   const first = points[0];
@@ -528,6 +549,7 @@ export class DocScene {
     sim?: SimOverlay,
     grid = false,
     showValues = true,
+    labelPos: LabelPos = "N",
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
@@ -658,12 +680,13 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), strokeStyle);
         }
-        // shaped bodies have no caption — a named part shows its name above
+        // shaped bodies have no caption — a named part shows its name beside it
         if (comp.name !== undefined && comp.name !== "") {
-          renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+          const na = labelAnchor(layout.rect, labelPos);
+          renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,
-            align: "center",
+            align: na.align,
           });
         }
       } else {
@@ -714,10 +737,11 @@ export class DocScene {
         }
         if (valueText !== null) caption = valueText;
         if (comp.name !== undefined && comp.name !== "") {
-          renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+          const na = labelAnchor(layout.rect, labelPos);
+          renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,
-            align: "center",
+            align: na.align,
           });
         }
         // The value is also repeated next to the pin it comes from, for the

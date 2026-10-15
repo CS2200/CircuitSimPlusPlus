@@ -1117,7 +1117,7 @@ body {
   grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 9.5rem);
   align-items: center;
   gap: 0.7rem;
-  margin: 7px 0;
+  margin: 11px 0;
   font-size: 0.85rem;
 }
 
@@ -1168,8 +1168,8 @@ body {
 .inspector-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin: 7px 0;
+  gap: 0.45rem;
+  margin: 12px 0;
   font-size: 0.85rem;
 }
 
@@ -1180,17 +1180,17 @@ body {
 .bitsize-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: 3px;
+  gap: 4px;
 }
 
 .bitsize-cell {
-  padding: 3px 0;
-  font-size: 0.72rem;
+  padding: 5px 0;
+  font-size: 0.74rem;
   font-variant-numeric: tabular-nums;
   background: var(--bg);
   color: var(--text-dim);
   border: 1px solid var(--panel-border);
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -1219,6 +1219,85 @@ body {
 .inspector-textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* ---- app dropdown (UI_OVERHAUL §28) ---- */
+
+.select {
+  min-width: 0;
+}
+
+.select-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.select-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-caret {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+/* Inline list: never clipped by the scrolling panel that owns it. */
+.select-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 9px;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.select-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.select-item:hover {
+  background: var(--grid);
+}
+
+.select-item.active {
+  color: var(--accent);
 }
 
 /* ---- inspector: memory image + wire styling (UI_OVERHAUL §11/§12) ---- */

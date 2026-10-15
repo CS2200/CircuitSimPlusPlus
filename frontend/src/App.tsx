@@ -21,6 +21,7 @@ import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { PALETTE, compPins, compSpec, defaultAttrs, editableAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
+import type { LabelPos } from "./editor/docScene";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
@@ -38,18 +39,21 @@ import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } fr
 import {
   loadBoolPref,
   loadNumPref,
+  loadStrPref,
   PREF_AUTOSAVE,
   PREF_AUTOSAVE_FILE,
   PREF_DEFAULT_BITS,
   PREF_DEFAULT_HZ,
   PREF_DEFAULT_INPUTS,
   PREF_GRID,
+  PREF_LABEL_POS,
   PREF_PULSES,
   PREF_SHOW_PERF,
   PREF_SHOW_VALUES,
   PREF_UPDATE_CHECK,
   saveBoolPref,
   saveNumPref,
+  saveStrPref,
 } from "./prefs";
 import {
   DEFAULT_ACCENT,
@@ -116,6 +120,11 @@ export default function App() {
   // Placement seeds (Settings → Editing) and the transport's start speed.
   const [defaultBits, setDefaultBits] = useState(() => loadNumPref(PREF_DEFAULT_BITS, 1));
   const [defaultInputs, setDefaultInputs] = useState(() => loadNumPref(PREF_DEFAULT_INPUTS, 2));
+  /** Where part names are drawn (Settings → Canvas, UI_OVERHAUL §28). */
+  const [labelPos, setLabelPos] = useState<LabelPos>(() => {
+    const stored = loadStrPref(PREF_LABEL_POS, "N");
+    return stored === "S" || stored === "W" || stored === "E" ? stored : "N";
+  });
   const [updateCheckOn, setUpdateCheckOn] = useState(() => loadBoolPref(PREF_UPDATE_CHECK, true));
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
@@ -295,6 +304,9 @@ export default function App() {
     saveNumPref(PREF_DEFAULT_HZ, hzExp);
   }, [hzExp]);
   useEffect(() => {
+    saveStrPref(PREF_LABEL_POS, labelPos);
+  }, [labelPos]);
+  useEffect(() => {
     saveBoolPref(PREF_UPDATE_CHECK, updateCheckOn);
   }, [updateCheckOn]);
   useEffect(() => {
@@ -326,6 +338,7 @@ export default function App() {
     setDefaultBits(1);
     setDefaultInputs(2);
     setHzExp(10);
+    setLabelPos("N");
     setUpdateCheckOn(true);
     setAutosaveOn(true);
     setAutosaveFileOn(true);
@@ -1359,6 +1372,7 @@ export default function App() {
                   gridOn={gridOn}
                   showValues={showValues}
                   showPerf={showPerf}
+                  labelPos={labelPos}
                 />
                 {/* Panel separators: edge overlays (no layout footprint). */}
                 <ResizeHandle
@@ -1457,6 +1471,7 @@ export default function App() {
           defaultBits={defaultBits}
           defaultInputs={defaultInputs}
           defaultHz={hzExp}
+          labelPos={labelPos}
           updateCheckOn={updateCheckOn}
           onTheme={setTheme}
           onAccent={setAccent}
@@ -1469,6 +1484,7 @@ export default function App() {
           onDefaultBits={setDefaultBits}
           onDefaultInputs={setDefaultInputs}
           onDefaultHz={setHzExp}
+          onLabelPos={setLabelPos}
           onUpdateCheck={setUpdateCheckOn}
           historyUsage={historyUsage}
           onClearHistory={() => void clearHistory()}

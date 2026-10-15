@@ -827,3 +827,42 @@ filesystem stores in the Tauri shell.
 
 **Acceptance:** frontend lint / 291 unit / build / 43-of-43 e2e green; Rust 168
 core + 12 CLI + 8 golden + 14 app tests, clippy/fmt clean.
+
+## 28. Follow-up batch S (2026-10-16): roomier inspector, picker inputs, label side, app dropdowns
+
+Four requests on top of §25/§26, all in the Inspector and Settings panels.
+
+- **Roomier Inspector.** Rows breathe: `.inspector-row` margin 7 -> 11px,
+  `.inspector-field` 7 -> 12px, the picker grid gap 3 -> 4px and its cells a
+  touch taller. Nothing else changed shape, so the panel still does not resize
+  when you switch selection.
+- **Gate input count is a picker grid.** The old "Inputs" *number box* is gone.
+  `NumberPicker` (`components/NumberPicker.tsx`) generalises the bit-width grid:
+  it takes an inclusive `min`/`max` and renders one cell per legal value, so
+  **bit size is 1..32** and **gate inputs are 2..32** — one click, and a value
+  can never be typed out of range. The catalog field kind `"bitsize"` became
+  `"picker"` (with optional `min`/`max`); `BitsizePicker.tsx` was deleted. The
+  cells carry `data-value` (the e2e targets moved from `data-bitsize`).
+- **Where a part's name is drawn.** Settings ▸ Canvas ▸ **Name position**
+  (Above / Below / Left / Right) chooses the side of the body the name label
+  sits on; `docScene`'s `labelAnchor()` maps it to an anchor + text alignment
+  for both box and shaped bodies. This is a **display preference**, stored as
+  `csx.labelPos` — deliberately *not* a per-component attribute, so the `.csx`
+  format is untouched and old files stay valid. The value readout beside a pin
+  is unaffected.
+- **App dropdowns instead of native `<select>`.** A new `Select` component
+  (`components/Select.tsx`) renders a button (`aria-haspopup="listbox"`,
+  `aria-label`) plus an option list styled like the menu-bar popups, and is now
+  used for every select in the **Inspector** (Rotation, gate Type, and the
+  `select`-kind attrs: radix / shift / extend mode / subcircuit) and in the
+  **Settings** panel (default bit width / gate inputs / clock speed / name
+  position). The list renders **inline** (not absolutely positioned): the dock
+  and the settings pane both scroll, and a floating popup would be clipped by
+  them. Escape and outside-click close it.
+- **Prettier `endOfLine: "auto"`** in `frontend/.prettierrc.json`. The Windows
+  checkout is CRLF (`core.autocrlf=true`, no `.gitattributes`) while Prettier
+  defaults to LF, so every CRLF file failed `prettier --check`. `auto` accepts
+  both, keeping the gate meaningful on this machine without rewriting the tree.
+
+**Acceptance:** frontend lint / 291 unit / build green; e2e re-run for the two
+settings selects that now click instead of `selectOption`.

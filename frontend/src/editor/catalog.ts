@@ -622,13 +622,16 @@ export type AttrField =
       group?: string;
       hint?: string;
     }
-  /** 1..32 picker (format-v2 widths). */
+  /** Integer picker grid (bit widths 1..32, gate inputs 2..32). */
   | {
       key: string;
       label: string;
-      kind: "bitsize";
+      kind: "picker";
       /** Effective default when the attr is absent (format-v2 §4). */
       dflt?: number;
+      /** Inclusive range offered (defaults 1..32). */
+      min?: number;
+      max?: number;
       group?: string;
       hint?: string;
     }
@@ -645,7 +648,7 @@ export type AttrField =
 const BITSIZE_FIELD: AttrField = {
   key: "bitsize",
   label: "Bit size",
-  kind: "bitsize",
+  kind: "picker",
   group: "Width",
 };
 
@@ -653,7 +656,7 @@ const BITSIZE_FIELD: AttrField = {
 const HEX_BITSIZE_FIELD: AttrField = {
   key: "bitsize",
   label: "Bit size",
-  kind: "bitsize",
+  kind: "picker",
   dflt: 4,
   group: "Width",
   hint: "A hex display decodes four bits per digit.",
@@ -684,10 +687,10 @@ function baseFields(type: string): AttrField[] {
       fields.push({
         key: "inputs",
         label: "Inputs",
-        kind: "number",
+        kind: "picker",
+        dflt: 2,
         min: 2,
         max: 32,
-        placeholder: "2",
         group: "Width",
       });
       // (Gate inputs are plain — `negateInputs` was removed, §24.)
@@ -715,11 +718,11 @@ function baseFields(type: string): AttrField[] {
         ];
       case "arith.bit-extender":
         return [
-          { key: "inBits", label: "In bits", kind: "bitsize", dflt: 8, group: "Width" },
+          { key: "inBits", label: "In bits", kind: "picker", dflt: 8, group: "Width" },
           {
             key: "outBits",
             label: "Out bits",
-            kind: "bitsize",
+            kind: "picker",
             dflt: 16,
             group: "Width",
             hint: "Wider than the input width (format-v2 §4).",

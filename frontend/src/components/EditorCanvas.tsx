@@ -12,7 +12,7 @@ import CanvasHost, { type CanvasHostProps } from "./CanvasHost";
 import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
-import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docScene";
+import { DocScene, type LabelPos, type SimOverlay, type ViolationMarker } from "../editor/docScene";
 import { ToolMachine } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
@@ -86,6 +86,8 @@ export default forwardRef<
     showValues?: boolean;
     /** Frame-rate overlay in the canvas corner (Settings → Canvas); default off. */
     showPerf?: boolean;
+    /** Side of each part its name label is drawn on (Settings → Canvas). */
+    labelPos?: LabelPos;
   }
 >(function EditorCanvas(
   {
@@ -102,6 +104,7 @@ export default forwardRef<
     gridOn = false,
     showValues = true,
     showPerf = false,
+    labelPos = "N",
   },
   ref,
 ) {
@@ -220,6 +223,7 @@ export default forwardRef<
         simOverlay,
         gridOn,
         showValues,
+        labelPos,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
@@ -237,6 +241,7 @@ export default forwardRef<
       pulsesOn,
       gridOn,
       showValues,
+      labelPos,
     ],
   );
 

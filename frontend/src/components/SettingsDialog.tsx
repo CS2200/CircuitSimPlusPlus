@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { bytesLabel } from "../lib/time";
 import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
 import type { HistoryUsage } from "../model/versionStore";
+import Select from "./Select";
+import type { LabelPos } from "../editor/docScene";
 
 /**
  * Settings panel (UI_OVERHAUL §25): a sectioned settings dialog — a nav
@@ -46,6 +48,7 @@ export default function SettingsDialog({
   defaultBits,
   defaultInputs,
   defaultHz,
+  labelPos,
   updateCheckOn,
   historyUsage,
   onClearHistory,
@@ -60,6 +63,7 @@ export default function SettingsDialog({
   onDefaultBits,
   onDefaultInputs,
   onDefaultHz,
+  onLabelPos,
   onUpdateCheck,
   onReset,
   onClose,
@@ -80,6 +84,8 @@ export default function SettingsDialog({
   defaultInputs: number;
   /** Default clock-speed exponent (hz = 10^(exp/10)). */
   defaultHz: number;
+  /** Which side of a part its name label is drawn on. */
+  labelPos: LabelPos;
   updateCheckOn: boolean;
   /** Version-history footprint, or null while it is loading. */
   historyUsage: HistoryUsage | null;
@@ -95,6 +101,7 @@ export default function SettingsDialog({
   onDefaultBits: (v: number) => void;
   onDefaultInputs: (v: number) => void;
   onDefaultHz: (v: number) => void;
+  onLabelPos: (v: LabelPos) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
   onReset: () => void;
@@ -141,19 +148,35 @@ export default function SettingsDialog({
     choices: { value: number; label: string }[],
     onPick: (v: number) => void,
   ): JSX.Element => (
-    <label className="settings-row">
+    <div className="settings-row">
       <span className="settings-row-label">
         {label}
         <span className="settings-hint">{hint}</span>
       </span>
-      <select value={value} onChange={(e) => onPick(Number(e.target.value))}>
-        {choices.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-    </label>
+      <Select label={label} value={value} options={choices} onChange={onPick} />
+    </div>
+  );
+
+  // Name labels are drawn around each body (UI_OVERHAUL §28); the choice is a
+  // display preference, so a global setting keeps the `.csx` format untouched.
+  const choosePos = (): JSX.Element => (
+    <div className="settings-row">
+      <span className="settings-row-label">
+        Name position
+        <span className="settings-hint">Which side of a part its name is drawn on.</span>
+      </span>
+      <Select
+        label="Name position"
+        value={labelPos}
+        options={[
+          { value: "N", label: "Above" },
+          { value: "S", label: "Below" },
+          { value: "W", label: "Left" },
+          { value: "E", label: "Right" },
+        ]}
+        onChange={onLabelPos}
+      />
+    </div>
   );
 
   return (
@@ -280,6 +303,7 @@ export default function SettingsDialog({
                   showPerf,
                   onShowPerf,
                 )}
+                {choosePos()}
               </section>
             )}
 

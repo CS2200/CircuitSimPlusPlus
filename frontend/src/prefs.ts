@@ -24,6 +24,8 @@ export const PREF_DEFAULT_BITS = "csx.defaultBits";
 export const PREF_DEFAULT_INPUTS = "csx.defaultInputs";
 /** Where the transport speed slider starts (exponent: hz = 10^(exp/10)). */
 export const PREF_DEFAULT_HZ = "csx.defaultHz";
+/** Where a part's name label sits relative to its body (N/S/W/E). */
+export const PREF_LABEL_POS = "csx.labelPos";
 
 export function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
@@ -59,6 +61,23 @@ export function loadNumPref(key: string, fallback: number): number {
 export function saveNumPref(key: string, value: number): void {
   try {
     localStorage.setItem(key, String(value));
+  } catch {
+    /* preference is best-effort */
+  }
+}
+
+/** String preference (enum-ish values); anything unreadable → the fallback. */
+export function loadStrPref(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveStrPref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
   } catch {
     /* preference is best-effort */
   }
