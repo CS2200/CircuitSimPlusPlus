@@ -59,6 +59,12 @@ export interface CsxWire {
   b: CsxEndpoint;
   /** Drawn path, INCLUDING both endpoint coordinates (first = a-side, last = b-side). */
   points: [number, number][];
+  /**
+   * Optional user-chosen stroke color (`#rrggbb`, UI_OVERHAUL §12). Absent =
+   * the renderer's state/bus colors. Purely cosmetic: the engine ignores it
+   * beyond round-tripping it (docs/format-v2.md §2).
+   */
+  color?: string;
 }
 
 export interface CsxCircuit {

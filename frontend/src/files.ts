@@ -104,3 +104,71 @@ export function downloadTextFile(name: string, text: string): void {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+// ---- memory images (UI_OVERHAUL §11) ----
+
+const HEX_FILTERS = [{ name: "Memory image", extensions: ["hex", "txt", "dat"] }];
+
+export interface PickedHexFile {
+  /** Real path (Tauri) or null (browser — paths are not exposed). */
+  path: string | null;
+  name: string;
+  text: string;
+}
+
+/**
+ * Pick a `.hex` memory image (rle-hex-v1). Tauri returns a REAL path, so the
+ * memory can `autoload` from it (resolved next to the circuit file); the
+ * browser reads the image and the caller embeds it as `contents` instead.
+ * Null on cancel.
+ */
+export async function pickHexFile(): Promise<PickedHexFile | null> {
+  if (isTauri()) {
+    const sel = await dialogOpen({ multiple: false, directory: false, filters: HEX_FILTERS });
+    if (sel === null) return null;
+    const text = await readTextFile(sel);
+    return { path: sel, name: baseName(sel), text };
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".hex,.txt,.dat,text/plain";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file === undefined) {
+        input.remove();
+        return resolve(null);
+      }
+      file.text().then(
+        (text) => {
+          input.remove();
+          resolve({ path: null, name: file.name, text });
+        },
+        () => {
+          input.remove();
+          resolve(null);
+        },
+      );
+    };
+    input.addEventListener("cancel", () => {
+      input.remove();
+      resolve(null);
+    });
+    setTimeout(() => input.click(), 0);
+  });
+}
+
+/**
+ * Path of `target` relative to the directory of `circuitPath`, or null when
+ * they are not on the same tree (the engine resolves autoloads relative to
+ * the circuit file, sandboxed to its directory — DESIGN.md §11).
+ */
+export function relativeToCircuit(circuitPath: string, target: string): string | null {
+  const norm = (p: string): string => p.replace(/\\/g, "/");
+  const dir = norm(circuitPath).replace(/\/[^/]*$/, "");
+  const t = norm(target);
+  if (dir === "" || !t.toLowerCase().startsWith(`${dir.toLowerCase()}/`)) return null;
+  return t.slice(dir.length + 1);
+}

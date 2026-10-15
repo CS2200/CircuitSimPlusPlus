@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CircuitDocument } from "../model/document";
-import type { CsxComponent } from "../model/csx";
-import { editableAttrs, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
+import type { CsxCircuit, CsxComponent } from "../model/csx";
+import { editableAttrs, compPins, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
+import { wireInfo } from "../model/wireInfo";
+import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
+import { pickHexFile, relativeToCircuit } from "../files";
+import MemContentsDialog from "./MemContentsDialog";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -28,13 +32,28 @@ type Patch = {
   attrs?: Record<string, unknown>;
 };
 
+/** Preset wire colors (UI_OVERHAUL §12); theme-independent by design. */
+const WIRE_COLORS = [
+  "#e5534b",
+  "#f0b43c",
+  "#4dd0e1",
+  "#40dc82",
+  "#b478e6",
+  "#f368a0",
+  "#8a8a8a",
+] as const;
+
 export default function InspectorPanel({
   doc,
   compId,
   selectionCount,
   circuitIdx = 0,
   circuits = [],
+  sheetCircuits = [],
+  wireIdx = null,
+  filePath = null,
   onEdit,
+  onNotify,
 }: {
   doc: CircuitDocument;
   /** The single selected component, or null when there is no single selection. */
@@ -45,8 +64,16 @@ export default function InspectorPanel({
   circuitIdx?: number;
   /** All circuit names — the subcircuit target picker needs them. */
   circuits?: readonly string[];
+  /** The document's circuits — pin geometry for subcircuit instances. */
+  sheetCircuits?: readonly CsxCircuit[];
+  /** The single selected wire (index in the current sheet), or null. */
+  wireIdx?: number | null;
+  /** Current circuit file path (autoload paths resolve next to it). */
+  filePath?: string | null;
   /** Called after any document mutation (canvas repaint + status refresh). */
   onEdit: () => void;
+  /** User-facing messages (toasts). */
+  onNotify?: (message: string) => void;
 }) {
   const circuit = doc.circuits[circuitIdx];
   const comp =
@@ -61,9 +88,109 @@ export default function InspectorPanel({
   // (the race that broke the e2e pin-rename flow). Stale drafts from other
   // components are always ignored by the `draft.key` checks anyway.
   const [draft, setDraft] = useState<{ key: string; text: string } | null>(null);
+  const [memOpen, setMemOpen] = useState(false);
   useEffect(() => {
     setDraft((d) => (d !== null && !d.key.startsWith(`${compId ?? ""}:`) ? null : d));
+    setMemOpen(false);
   }, [compId, circuitIdx]);
+
+  // Memory-image summary (words set in `attrs.contents`) — parsed only for
+  // reasonably sized images; the Inspector re-renders on hover.
+  const contentsImage =
+    comp !== undefined && (comp.type === "mem.ram" || comp.type === "mem.rom")
+      ? typeof comp.attrs?.contents === "string"
+        ? comp.attrs.contents
+        : undefined
+      : undefined;
+  const contentsWords = useMemo(() => {
+    if (contentsImage === undefined) return 0;
+    if (contentsImage.length > 8192) return -1; // large: skip the parse
+    try {
+      return parseRleHex(contentsImage).length;
+    } catch {
+      return -1;
+    }
+  }, [contentsImage]);
+
+  const wire =
+    comp === undefined && wireIdx !== null && circuit !== undefined
+      ? { idx: wireIdx, info: wireInfo(circuit, wireIdx, (c) => compPins(c, sheetCircuits)) }
+      : null;
+  const wireColor =
+    wire !== null && circuit !== undefined ? (circuit.wires[wire.idx]?.color ?? null) : null;
+
+  if (comp === undefined && wire !== null) {
+    const driver = wire.info.driver;
+    const target =
+      driver === null || circuit === undefined
+        ? undefined
+        : circuit.components.find((c) => c.id === driver.compId);
+    const setColor = (color: string | null) => {
+      doc.setWireColor(circuitIdx, wire.idx, color);
+      onEdit();
+    };
+    const setWidth = (bits: number) => {
+      if (driver === null || target === undefined) return;
+      const value = Math.max(1, Math.min(32, Math.round(bits) || 1));
+      doc.updateComponent(
+        circuitIdx,
+        driver.compId,
+        { attrs: { ...(target.attrs ?? {}), bitsize: value } },
+        `wirebits:${circuitIdx}:${driver.compId}`,
+      );
+      onEdit();
+    };
+    return (
+      <div className="inspector">
+        <div className="inspector-head">
+          <span className="inspector-id">wire {wire.idx}</span>
+          <span className="inspector-type">{wire.info.bitsize}-bit bus</span>
+        </div>
+        <label className="inspector-row">
+          <span>Width (bits)</span>
+          <input
+            type="number"
+            min={1}
+            max={32}
+            value={wire.info.bitsize}
+            disabled={driver === null}
+            title={
+              driver === null
+                ? "No driving pin found on this net"
+                : `Sets ${driver.compId}.${driver.pin} (the net's source)`
+            }
+            onChange={(e) => setWidth(Number(e.target.value))}
+          />
+        </label>
+        {driver !== null && (
+          <p className="settings-hint">
+            width comes from {driver.compId}.{driver.pin}
+          </p>
+        )}
+        <div className="inspector-row">
+          <span>Color</span>
+          <div className="wire-colors">
+            <button
+              className={`wire-swatch default${wireColor === null ? " active" : ""}`}
+              aria-label="Default color"
+              title="Default (state colors)"
+              onClick={() => setColor(null)}
+            />
+            {WIRE_COLORS.map((c) => (
+              <button
+                key={c}
+                className={`wire-swatch${wireColor === c ? " active" : ""}`}
+                style={{ background: c }}
+                aria-label={`Wire color ${c}`}
+                title={c}
+                onClick={() => setColor(c)}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (comp === undefined) {
     return (
@@ -117,6 +244,44 @@ export default function InspectorPanel({
 
   const unnamed = ADDRESSABLE.has(comp.type) && (comp.name ?? "") === "";
   const nameKey = `${comp.id}:name`;
+
+  // ---- memory images (UI_OVERHAUL §11): two loading methods ----
+  const isMemory = comp.type === "mem.ram" || comp.type === "mem.rom";
+  const memBits = typeof comp.attrs?.bitsize === "number" ? comp.attrs.bitsize : 1;
+  const memDepth = typeof comp.attrs?.depth === "number" ? comp.attrs.depth : 256;
+  const autoload = typeof comp.attrs?.autoload === "string" ? comp.attrs.autoload : "";
+
+  /** Embed an image (browser mode / file outside the circuit folder). */
+  const applyImage = (text: string, why: string) => {
+    const { words, error } = wordsFromPasted(text, memBits, Math.max(memDepth, 1));
+    if (error !== null) {
+      onNotify?.(`Memory image: ${error}`);
+      return;
+    }
+    commitAttr("contents", words.length === 0 ? null : encodeRleHex(words, hexWidthFor(memBits)));
+    onNotify?.(`Embedded ${words.length} word${words.length === 1 ? "" : "s"} from ${why}`);
+  };
+
+  const chooseAutoload = async () => {
+    let picked;
+    try {
+      picked = await pickHexFile();
+    } catch (err) {
+      onNotify?.(`File pick failed: ${String(err)}`);
+      return;
+    }
+    if (picked === null) return;
+    const rel =
+      picked.path !== null && filePath !== null ? relativeToCircuit(filePath, picked.path) : null;
+    if (rel !== null) {
+      commitAttr("autoload", rel);
+      onNotify?.(`Autoload: ${rel}`);
+      return;
+    }
+    // No usable path (browser mode, unsaved file, or outside the circuit
+    // folder): embed the image in the file so it works everywhere.
+    applyImage(picked.text, `${picked.name} (embedded)`);
+  };
 
   return (
     <div className="inspector">
@@ -180,6 +345,72 @@ export default function InspectorPanel({
           onCommitOutput={commitAsOutput}
         />
       ))}
+
+      {isMemory && (
+        <>
+          <div className="inspector-sep" />
+          <div className="inspector-row">
+            <span>Autoload</span>
+            <span
+              className="inspector-file"
+              title={autoload === "" ? "no autoload file" : autoload}
+            >
+              {autoload === "" ? "(none)" : autoload}
+            </span>
+          </div>
+          <div className="inspector-row">
+            <span />
+            <div className="inspector-buttons">
+              <button className="secondary" onClick={() => void chooseAutoload()}>
+                Choose file…
+              </button>
+              <button
+                className="secondary"
+                disabled={autoload === ""}
+                onClick={() => {
+                  commitAttr("autoload", null);
+                  onNotify?.("Autoload cleared");
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="inspector-row">
+            <span>Contents</span>
+            <span className="inspector-file inspector-mem-contents">
+              {contentsWords < 0
+                ? "large image"
+                : `${contentsWords} word${contentsWords === 1 ? "" : "s"}`}
+            </span>
+          </div>
+          <div className="inspector-row">
+            <span />
+            <div className="inspector-buttons">
+              <button className="secondary" onClick={() => setMemOpen(true)}>
+                Edit hex…
+              </button>
+            </div>
+          </div>
+          <p className="settings-hint">
+            Autoload a .hex image from next to the circuit, or paste values and embed them in the
+            file.
+          </p>
+        </>
+      )}
+
+      {memOpen && isMemory && (
+        <MemContentsDialog
+          depth={memDepth}
+          bitsize={memBits}
+          initial={contentsImage ?? null}
+          onApply={(image) => {
+            commitAttr("contents", image);
+            onEdit();
+          }}
+          onClose={() => setMemOpen(false)}
+        />
+      )}
 
       {unnamed && (
         <p className="inspector-note">

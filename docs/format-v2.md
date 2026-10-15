@@ -63,9 +63,16 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
 {
   "a": { "comp": "c17", "pin": "out" },              // pin endpoint
   "b": { "join": { "wire": 0, "segment": 1 } },       // junction endpoint
-  "points": [[18, 11], [30, 11], [30, 21]]            // drawn polyline, a → b
+  "points": [[18, 11], [30, 11], [30, 21]],           // drawn polyline, a → b
+  "color": "#ff0000"                                  // optional cosmetic stroke (§6)
 }
 ```
+
+- `color` (optional, UI_OVERHAUL §12): a `"#rrggbb"` string the UI may set
+  per wire to override the renderer's state/bus colors. **Purely
+  presentational** — the engine ignores it beyond round-tripping it — and it
+  is **omitted when unset**, so uncolored files stay byte-identical (§6
+  exception to "every field always emitted").
 
 - Every wire has exactly two endpoints; **at least one endpoint is a pin** (the other may be a
   junction onto another wire's segment). A junction renders as a dot.
@@ -165,7 +172,9 @@ Machine-written files use exactly one byte layout:
 
 - 2-space indent; object keys sorted (recursively); array order preserved (`components`,
   `wires`, `points`, …); every field always emitted (defaults are explicit, e.g. `"name":
-  ""`, `"points": []`); single trailing newline.
+  ""`, `"points": []`); single trailing newline. The one exception is the
+  optional cosmetic `wire.color` (§2): omitted when unset so uncolored files
+  stay byte-identical.
 
 Saving twice is byte-identical; parsing and re-saving is byte-identical. This is what makes
 student circuits diff-friendly in git.
@@ -336,6 +345,7 @@ the schema constrains common shapes only.
               "properties": {
                 "a": { "$ref": "#/$defs/endpoint" },
                 "b": { "$ref": "#/$defs/endpoint" },
+                "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
                 "points": {
                   "type": "array",
                   "default": [],

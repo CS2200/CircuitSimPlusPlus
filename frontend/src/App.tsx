@@ -7,11 +7,9 @@ import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
 import ResizeHandle from "./components/ResizeHandle";
-import RightDock, { type DockTab } from "./components/RightDock";
 import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
 import SimBar from "./components/SimBar";
-import WatchPanel from "./components/WatchPanel";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
@@ -39,6 +37,7 @@ import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types
 
 /** Stable empty selection while no status report has arrived yet. */
 const EMPTY_SELECTION: readonly string[] = [];
+const EMPTY_SELECTION_NUM: readonly number[] = [];
 
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
@@ -89,7 +88,6 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [dockTab, setDockTab] = useState<DockTab>("watch");
   // Palette activity rail (UI_OVERHAUL §8): which component group the body shows.
   const [paletteGroup, setPaletteGroup] = useState<string>(PALETTE[0].group);
   // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
@@ -171,17 +169,14 @@ export default function App() {
     setUpdateCheckOn(true);
   }, []);
 
-  // Right dock (UI_OVERHAUL §3.2): exactly one selected component opens the
-  // Inspector; an emptied selection hands the dock back to Watch.
+  // Inspector (UI_OVERHAUL §3.2): exactly one selected component — or one
+  // selected wire — drives the right dock. The Watch tab is retired for now
+  // (UI_OVERHAUL §11), so the dock is Inspector-only.
   const selectedComps = status?.selectedComponents ?? EMPTY_SELECTION;
+  const selectedWires = status?.selectedWires ?? EMPTY_SELECTION_NUM;
   const inspectorCompId = selectedComps.length === 1 ? selectedComps[0] : null;
-  const prevInspectorRef = useRef<string | null>(null);
-  useEffect(() => {
-    const prev = prevInspectorRef.current;
-    prevInspectorRef.current = inspectorCompId;
-    if (inspectorCompId !== null && prev === null) setDockTab("inspector");
-    else if (inspectorCompId === null && prev !== null) setDockTab("watch");
-  }, [inspectorCompId]);
+  const inspectorWireIdx =
+    selectedComps.length === 0 && selectedWires.length === 1 ? selectedWires[0] : null;
 
   // U7: the observed critical path (top-1) as document component ids —
   // only when its circuit is the current sheet (contract v1.1 filter).
@@ -387,6 +382,31 @@ export default function App() {
           }
         },
       });
+    },
+    [doc, toast],
+  );
+
+  /** Delete a circuit sheet (guarded in the document; undoable). */
+  const onDeleteSheet = useCallback(
+    (idx: number) => {
+      const c = doc.circuit(idx);
+      if (c.components.length > 0) {
+        const ok = window.confirm(
+          `Delete circuit "${c.name}" and its ${c.components.length} component${
+            c.components.length === 1 ? "" : "s"
+          }?`,
+        );
+        if (!ok) return;
+      }
+      try {
+        doc.removeCircuit(idx);
+      } catch (err) {
+        toast(String(err instanceof Error ? err.message : err));
+        return;
+      }
+      // Keep the active sheet pointed at a valid circuit.
+      setSheet((s) => (idx < s ? s - 1 : s === idx ? Math.max(0, idx - 1) : s));
+      editorRef.current?.refresh();
     },
     [doc, toast],
   );
@@ -704,6 +724,8 @@ export default function App() {
           onSwitch={setSheet}
           onNew={onNewSheet}
           onRename={onRenameSheet}
+          onDelete={onDeleteSheet}
+          inset={panelWidths.palette}
         />
       )}
       <main className="app-main">
@@ -804,7 +826,6 @@ export default function App() {
                 themeName={`${theme}|${accent}`}
                 sheetIdx={sheet}
                 onStatus={onStatus}
-                onEditComponent={() => setDockTab("inspector")}
                 onOpenSubcircuit={onOpenSubcircuit}
                 sim={sim}
                 pathIds={pathIds}
@@ -829,22 +850,20 @@ export default function App() {
                 onCommit={(w) => commitPanel("dock", w)}
               />
             </div>
-            <RightDock
-              tab={dockTab}
-              onTab={setDockTab}
-              width={panelWidths.dock}
-              inspector={
-                <InspectorPanel
-                  doc={doc}
-                  compId={inspectorCompId}
-                  selectionCount={selectedComps.length}
-                  circuitIdx={sheet}
-                  circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
-                  onEdit={() => editorRef.current?.refresh()}
-                />
-              }
-              watch={<WatchPanel ctl={sim} />}
-            />
+            <aside className="right-dock" aria-label="Details" style={{ width: panelWidths.dock }}>
+              <InspectorPanel
+                doc={doc}
+                compId={inspectorCompId}
+                selectionCount={selectedComps.length}
+                circuitIdx={sheet}
+                circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
+                sheetCircuits={doc.circuits}
+                wireIdx={inspectorWireIdx}
+                filePath={filePath}
+                onEdit={() => editorRef.current?.refresh()}
+                onNotify={toast}
+              />
+            </aside>
           </>
         )}
       </main>

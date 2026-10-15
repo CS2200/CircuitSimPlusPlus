@@ -4,7 +4,7 @@ import { expectScreenshot } from "./screenshots";
 /**
  * U5 acceptance (mock side): the full sim control loop against the in-page
  * mock core — load, step, run-to-N, play/pause with live cycle telemetry,
- * watch-panel values, wire state coloring, and the halt path (floating-read
+ * wire state coloring, and the halt path (floating-read
  * banner + component marker).
  *
  * The dev server picks up `VITE_MOCK_CORE=1` from `.env.development`; the
@@ -43,19 +43,13 @@ test("U5: full sim control loop over the mock core", async ({ page }) => {
     .toMatchObject({ loaded: true, cycle: 1 });
   await expect(page.locator(".sim-status")).toContainText("cycle 1");
 
-  // Watch panel: pc counted to 1, next_pc shows the adder's output.
-  await expect(page.locator('[data-watch="pc"] .watch-value')).toHaveText("0x00000001");
-  await expect(page.locator('[data-watch="next_pc"] .watch-value')).toHaveText("0x00000002");
-
-  // Display modes: cycle pc's row to unsigned.
-  await page.locator('[data-watch="pc"] .watch-mode').click();
-  await expect(page.locator('[data-watch="pc"] .watch-value')).toHaveText("1");
+  // (The Watch tab is retired for now — UI_OVERHAUL §11 — so there is no
+  // watch-panel value assertion here; the cycle counter is the telemetry.)
 
   // run-to-cycle-N.
   await page.locator(".sim-runto input").fill("42");
   await page.getByRole("button", { name: "run to" }).click();
   await expect.poll(() => simState(page)).toMatchObject({ cycle: 42 });
-  await expect(page.locator('[data-watch="pc"] .watch-value')).toHaveText("42");
 
   // Play: cycle advances on its own; pause freezes it.
   await page.locator(".sim-play").click();

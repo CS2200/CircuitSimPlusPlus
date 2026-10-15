@@ -219,6 +219,30 @@ export class CircuitDocument {
     this.exec(`rename circuit to "${name}"`, undefined, this.replaceCircuit(idx, { ...c, name }));
   }
 
+  /**
+   * Delete a circuit (a sheet). Guarded: the last circuit cannot be removed,
+   * and a circuit still instantiated by a `subcircuit` component elsewhere is
+   * refused — the reference would dangle (the engine would report it at
+   * load). Undoable like every other op.
+   */
+  removeCircuit(idx: number): void {
+    const c = this.circuit(idx);
+    if (this.data.circuits.length <= 1) {
+      throw new Error("a document needs at least one circuit");
+    }
+    const referenced = this.data.circuits.some((other) =>
+      other.components.some((comp) => comp.type === "subcircuit" && comp.attrs?.circuit === c.name),
+    );
+    if (referenced) {
+      throw new Error(`"${c.name}" is still instantiated — delete its instances first`);
+    }
+    this.exec(
+      `delete circuit "${c.name}"`,
+      undefined,
+      this.data.circuits.filter((_, i) => i !== idx),
+    );
+  }
+
   /** Place a component; returns its allocated id. */
   addComponent(circuitIdx: number, init: ComponentInit): string {
     const c = this.circuit(circuitIdx);
@@ -553,6 +577,30 @@ export class CircuitDocument {
         ...c,
         wires,
       }),
+    );
+  }
+
+  /**
+   * Set (or clear, with `null`) a wire's cosmetic color (UI_OVERHAUL §12).
+   * Cleared wires drop the key entirely so canonical files stay clean.
+   * Consecutive edits of one wire coalesce into a single undo step.
+   */
+  setWireColor(circuitIdx: number, wireIdx: number, color: string | null): void {
+    const c = this.circuit(circuitIdx);
+    const w = c.wires[wireIdx];
+    if (w === undefined) throw new RangeError(`no wire at index ${wireIdx}`);
+    if ((w.color ?? null) === color) return;
+    const wires = c.wires.map((x, i) => {
+      if (i !== wireIdx) return x;
+      const next: CsxWire = { ...x };
+      if (color === null) delete next.color;
+      else next.color = color;
+      return next;
+    });
+    this.exec(
+      color === null ? "clear wire color" : "wire color",
+      `color:${circuitIdx}:${wireIdx}`,
+      this.replaceCircuit(circuitIdx, { ...c, wires }),
     );
   }
 

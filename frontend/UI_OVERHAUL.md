@@ -367,3 +367,60 @@ visual suite goes green.
 **Acceptance:** smoke / settings / visual / update specs updated for the
 menu paths; new light/dark toggle test; lint / unit / build / 32-of-32 e2e
 green.
+
+## 10. Follow-up batch A (2026-10-16): placement, rotation, interaction
+
+- **Rotation alignment:** for N/S rotations the body rect swaps axes (h×w),
+  but the gate silhouette was still anchored at the *unrotated* origin, so it
+  rotated about the wrong point and drew offset from its pins (and from the
+  selection box / floating rotate button). The EAST-frame shape is now built
+  centered on the body rect.
+- **Placement:** components center on the cursor (matching palette
+  drag-drop), and the ghost carries the resolved body position, so the
+  preview is exactly where the click drops it.
+- **Placement preview:** the ghost draws the real part (gate silhouette,
+  mux/demux trapezoid, module box, pins) instead of a bounding rectangle.
+- **Wire gesture:** finishing a wire clears any wire selection and leaves no
+  drag state, so the next click starts a fresh gesture instead of re-routing
+  the wire just produced.
+- **Top/sim bar:** the Settings icon is gone from the title bar (File ▸
+  Settings… only), the file path sits on the right, the speed slider caps at
+  1 kHz (menu presets too), and the "cycle" step button/menu item is gone
+  (two `tick` clicks = one cycle; Ctrl+J/K/R unchanged).
+
+## 11. Follow-up batch B (2026-10-16): sheets, memory loading, retired Watch tab
+
+- **Circuit sheets:** each tab carries an "×" delete (`removeCircuit` in the
+  document; refused for the last circuit or one still instantiated by a
+  `subcircuit` component, undoable, confirm when non-empty), and the strip
+  left-insets to the palette width so tabs line up with the canvas grid.
+- **Memory loading in the Inspector** (`mem.ram`/`mem.rom`) replaces the raw
+  `autoload` text field with two methods:
+  1. **Paste hex** — a dialog (`MemContentsDialog`) with a paginated hex
+     table over the whole memory; applying writes canonical `rle-hex`
+     (`lib/rleHex.ts`, bounded expansion) to `attrs.contents`.
+  2. **Autoload file** — a real file picker (`files.pickHexFile`): the Tauri
+     shell stores a path relative to the circuit file (engine sandbox);
+     browser/mock mode embeds the image as `contents` instead, since
+     browsers expose no paths.
+- **Watch tab retired for now** (per the human): the right dock is
+  Inspector-only (component or, now, wire). `WatchPanel`/`MemoryInspector`
+  stay in the tree unrendered; their e2e coverage moved to the new
+  Inspector memory tests.
+
+## 12. Follow-up batch C (2026-10-16): wire styling
+
+- Selecting a wire opens the Inspector's **wire section**: a color swatch
+  row (plus "Default" to clear) and a **width** control. Width is a property
+  of the driving pin (format-v2 §5.2), so the control edits the source
+  component's `bitsize` (the Inspector shows which component/pin), and the
+  renderer now scales wire thickness with the bit count.
+- **Format:** wires gain an optional cosmetic `color` (`"#rrggbb"`) —
+  `docs/format-v2.md` §2/§6/§10, the Rust `Wire.color` field (ignored by the
+  engine, omitted when unset so uncolored files stay byte-identical), and
+  the frontend type/renderer/Inspector.
+
+**Acceptance:** `cargo fmt`/`clippy -D warnings`/`test` green (177 core + 8
+golden + 12 cli); frontend lint / 252 unit / build / 33-of-33 e2e green
+(new `wires.spec.ts` + rewritten `memory.spec.ts`; screenshot baselines
+unchanged).

@@ -56,7 +56,12 @@ export function buildMockDemoDoc(): CircuitDocument {
     name: "next_pc",
     attrs: { bitsize: 32 },
   });
-  doc.addComponent(c, { type: "mem.ram", pos: [2, 14], name: "imem" }); // unwired; U6 inspects it
+  doc.addComponent(c, {
+    type: "mem.ram",
+    pos: [2, 14],
+    name: "imem",
+    attrs: { bitsize: 32, depth: 256 },
+  }); // unwired; the Inspector edits its image (§11)
   const buffer = doc.addComponent(c, { type: "gate.buffer", pos: [2, 5], attrs: { bitsize: 8 } });
 
   const gateType = (i: number) => ["gate.and", "gate.or", "gate.xor"][i % 3];

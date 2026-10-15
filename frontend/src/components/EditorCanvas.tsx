@@ -33,6 +33,8 @@ export interface EditorStatus {
   selection: number;
   /** Selected component ids at report time (one → the Inspector shows it). */
   selectedComponents: readonly string[];
+  /** Selected wire indices at report time (one → the Inspector styles it). */
+  selectedWires: readonly number[];
   /** Document revision at report time (invalidates external edits/undo). */
   revision: number;
   dirty: boolean;
@@ -203,6 +205,7 @@ export default forwardRef<
       cursor: cursorRef.current,
       selection: sel.size,
       selectedComponents: [...sel.components],
+      selectedWires: [...sel.wires],
       revision: doc.revision,
       dirty: doc.dirty,
       placing: tool.placingType,

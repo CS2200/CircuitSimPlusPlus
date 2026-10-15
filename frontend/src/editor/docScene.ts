@@ -394,12 +394,19 @@ export class DocScene {
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
-      const isBus = this.wireBits[i] > 1;
+      const custom = this.wires[i]?.color ?? null;
+      const bits = Math.max(1, this.wireBits[i]);
+      const isBus = bits > 1;
       const hue = this.wireNetId[i] ?? i;
       const simVal = sim?.valueForWire(i);
+      const contested = simVal !== undefined && wireValueState(simVal) === "x";
       let stroke: string;
       if (selected) {
         stroke = theme.accent;
+      } else if (custom !== null && !contested) {
+        // A user-chosen color (UI_OVERHAUL §12) wins over state/bus hues —
+        // except contention, which stays red because it is an error signal.
+        stroke = custom;
       } else if (simVal !== undefined) {
         const state = wireValueState(simVal);
         stroke =
@@ -409,9 +416,13 @@ export class DocScene {
       } else {
         stroke = isBus ? theme.bus[hue % theme.bus.length] : theme.wire.disconnected;
       }
+      // Thickness ∝ width (UI_OVERHAUL §12): buses start heavier than
+      // single-bit wires and grow with the bit count, so 32-bit reads
+      // clearly wider than 16-bit.
+      const lineWidth = isBus ? WIRE_BUS + Math.min(30, bits - 2) * WIRE_W * 0.06 : WIRE_W;
       renderer.drawPath(this.wirePaths[i], {
         stroke,
-        lineWidth: selected ? WIRE_W * 1.8 : isBus ? WIRE_BUS : WIRE_W,
+        lineWidth: selected ? lineWidth * 1.6 : lineWidth,
       });
     }
     renderer.flush();

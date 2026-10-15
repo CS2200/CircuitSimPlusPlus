@@ -562,6 +562,8 @@ export function editableAttrs(type: string): AttrField[] {
       return [BITSIZE_FIELD];
     case "mem.ram":
     case "mem.rom":
+      // `autoload` and `contents` are edited by the Inspector's Memory
+      // section (file picker + hex-table dialog), not as plain text fields.
       return [
         BITSIZE_FIELD,
         {
@@ -572,7 +574,6 @@ export function editableAttrs(type: string): AttrField[] {
           max: 65536,
           placeholder: "256",
         },
-        { key: "autoload", label: "Autoload file", kind: "text" },
       ];
     case "subcircuit":
       return [{ key: "circuit", label: "Circuit", kind: "text" }];

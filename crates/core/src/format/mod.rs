@@ -125,6 +125,11 @@ pub struct Wire {
     /// before fractional support stay byte-identical.
     #[serde(default, with = "wire_points")]
     pub points: Vec<[f64; 2]>,
+    /// Optional cosmetic stroke color (`#rrggbb`, docs/format-v2.md §2).
+    /// Purely presentational: the engine ignores it beyond round-tripping
+    /// it. Omitted when unset so uncolored files stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 /// Serde wire-points codec: parses any finite JSON numbers, serializes
@@ -342,6 +347,28 @@ mod tests {
         assert_eq!(doc, doc2);
     }
 
+    /// Wire colors (docs/format-v2.md §2): purely cosmetic, absent when
+    /// unset (so uncolored files stay byte-identical) and round-tripped
+    /// when set.
+    #[test]
+    fn wire_color_is_optional_and_roundtrips() {
+        let text = to_canonical_json(&sample_doc());
+        assert!(
+            !text.contains("\"color\""),
+            "uncolored wires must not emit color"
+        );
+
+        let mut v: Json = serde_json::from_str(&text).unwrap();
+        v["circuits"][0]["wires"][0]["color"] = Json::String("#ff0000".into());
+        let colored = format!("{}\n", serde_json::to_string_pretty(&v).unwrap());
+
+        let doc = load_document(colored.as_bytes()).expect("a colored wire must load");
+        let out = to_canonical_json(&doc);
+        assert!(out.contains("\"color\": \"#ff0000\""), "{out}");
+        let reparsed = load_document(out.as_bytes()).expect("canonical color must reload");
+        assert_eq!(reparsed, doc);
+    }
+
     #[test]
     fn canonical_form_is_stable_and_sorted() {
         let doc = sample_doc();
@@ -388,6 +415,7 @@ mod tests {
                 pin: "in".into(),
             }),
             points: vec![[0.0, 0.0]; n],
+            color: None,
         };
         assert_eq!(w(0).segment_count(), 1);
         assert_eq!(w(2).segment_count(), 1);

@@ -647,6 +647,47 @@ body {
   border-color: var(--panel-border);
 }
 
+.sheet-tab-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+}
+
+.sheet-tab-wrap:hover {
+  background: var(--grid);
+}
+
+.sheet-tab-wrap.active {
+  background: var(--bg);
+  border-color: var(--panel-border);
+}
+
+.sheet-tab-wrap .sheet-tab,
+.sheet-tab-wrap .sheet-tab.active {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.3rem 0.35rem 0.3rem 0.9rem;
+}
+
+.sheet-tab-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 0.6rem 0 0.1rem;
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: 0 7px 0 0;
+}
+
+.sheet-tab-close:hover {
+  color: var(--wire-x);
+}
+
 .sheet-tab.sheet-new {
   color: var(--text-dim);
   padding: 0.3rem 0.7rem;
@@ -857,7 +898,146 @@ body {
   color: var(--violation);
 }
 
-/* ---- settings dialog ---- */
+/* ---- inspector: memory image + wire styling (UI_OVERHAUL §11/§12) ---- */
+
+.inspector-sep {
+  height: 1px;
+  background: var(--panel-border);
+  margin: 0.6rem 0;
+}
+
+.inspector-file {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.inspector-buttons button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.inspector-buttons button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.inspector-buttons button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.wire-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 9.5rem;
+}
+
+.wire-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.wire-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.wire-swatch.default {
+  background: linear-gradient(135deg, var(--wire-low), var(--wire-high) 55%, var(--wire-z));
+}
+
+/* ---- memory contents dialog (UI_OVERHAUL §11) ---- */
+
+.mem-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(52rem, calc(100vw - 2rem));
+  max-height: 84vh;
+}
+
+.mem-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.mem-paste textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.mem-table-wrap {
+  overflow: auto;
+  margin-top: 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+}
+
+.mem-table {
+  width: 100%;
+}
+
+.mem-table .mem-cell {
+  min-width: 3.6rem;
+}
+
+.mem-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.mem-dialog-spacer {
+  flex: 1;
+}
+
+.mem-dialog-foot button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.mem-dialog-foot button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.mem-dialog-foot button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 .settings-card {
   background: var(--panel);
