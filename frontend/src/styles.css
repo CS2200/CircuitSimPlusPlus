@@ -882,6 +882,36 @@ body {
   background: var(--grid);
 }
 
+/* Middle-click menu on a sheet tab (UI_OVERHAUL §37). */
+.sheet-tab-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.sheet-tab-menu button {
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.sheet-tab-menu button:hover {
+  background: var(--grid);
+}
+
 .sheet-tab.active {
   color: var(--text);
   background: var(--bg);

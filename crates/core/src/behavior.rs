@@ -316,6 +316,7 @@ impl Behavior {
             CompKind::Button => BehaviorKind::Button { pressed: false },
             CompKind::Led { .. } => BehaviorKind::Led,
             CompKind::HexDisplay { .. } => BehaviorKind::HexDisplay,
+            CompKind::Text => return None,
             CompKind::Subcircuit { .. } => return None,
         };
         Some(Behavior { kind })

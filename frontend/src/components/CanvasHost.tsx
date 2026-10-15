@@ -164,10 +164,19 @@ export default function CanvasHost({
     const canvas = canvasRef.current;
     if (el === null || canvas === null) return;
     const ro = new ResizeObserver(() => {
+      // Use the FRACTIONAL layout size (getBoundingClientRect) and the ACTUAL
+      // backing/CSS ratio. `clientWidth` rounds to an integer and
+      // `devicePixelRatio` is nominal, so on fractional DPRs (Windows 125%/150%)
+      // the transform scaled the drawing off the real CSS box — the grid landed
+      // a fraction of a pixel away from the chrome that shares its edge
+      // (UI_OVERHAUL §37).
+      const rect = el.getBoundingClientRect();
+      const w = Math.max(1, rect.width);
+      const h = Math.max(1, rect.height);
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.round(el.clientWidth * dpr));
-      canvas.height = Math.max(1, Math.round(el.clientHeight * dpr));
-      viewportRef.current = { width: el.clientWidth, height: el.clientHeight, dpr };
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      viewportRef.current = { width: w, height: h, dpr: canvas.width / w };
       dirtyRef.current = true;
     });
     ro.observe(el);

@@ -1076,3 +1076,31 @@ demo/theme screenshot specs stay within their 2% `maxDiffPixelRatio`).
   direction is chosen by which tile you place.
 
 **Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
+
+## 37. Follow-up batch AB (2026-10-16): text annotations, grid edge, middle-click tabs
+
+- **A Misc tab with a text annotation.** New component type `misc.text` — a
+  free-form label with **no pins and no behavior** (like a subcircuit in
+  `behavior.rs`: `CompKind::Text => return None`). The engine validates a single
+  `text` attr (§4 registry row) so a typo is still a load error; the frontend
+  paints the string on the canvas with no body box (a thin accent outline only
+  while selected), seeds it with `{ text: "Text" }`, sizes its hit box from the
+  text width, and offers a **Text** field in the Inspector. The palette gains a
+  **Misc** group with a **TEXT** tile.
+- **Grid edge aligned to the chrome.** `CanvasHost` sized the canvas from
+  integer `clientWidth`/`clientHeight` and scaled the transform by nominal
+  `devicePixelRatio`; on fractional DPRs (Windows 125%/150%) `round()` makes the
+  backing/CSS ratio differ, so the drawing was scaled a fraction of a pixel off
+  the real CSS box — the grid's edge line drifted from the sheet-tab strip that
+  shares its edge. The viewport now uses the **fractional**
+  `getBoundingClientRect()` size and the **actual** backing/CSS ratio
+  (`canvas.width / width`), and the background fill covers a pixel of slack so no
+  sliver is left unfilled.
+- **Middle-click a sheet tab → Rename / Delete.** `SheetTabs` opens a small menu
+  on middle-button `mousedown` (its `preventDefault` also suppresses Chromium's
+  autoscroll/gesture default, which is what surfaced as a stray browser panel).
+  The menu reuses the popup styling, closes on outside-click/Escape, and mirrors
+  the "×" affordance. `fileops.spec` covers it.
+
+**Acceptance:** frontend lint / 292 unit / build green; 47-of-47 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean.

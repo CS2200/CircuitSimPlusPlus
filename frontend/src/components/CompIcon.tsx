@@ -47,6 +47,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   "plexers.decoder": "DECODER",
   "wiring.constant": "1",
   "io.hexdisplay": "8",
+  "misc.text": "T",
 };
 
 /** Outward stub direction for a pin (edge inferred from its position). */

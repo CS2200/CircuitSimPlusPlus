@@ -190,6 +190,8 @@ pub enum CompKind {
     },
     /// Clock source (`wiring.clock`); single 1-bit output.
     Clock,
+    /// Text annotation (`misc.text`); a label with no pins and no behavior.
+    Text,
     /// Split pin name → bus bit indices (array position = split-pin bit),
     /// sorted by pin name; `bus_width` covers the highest mapped bit + 1.
     Splitter {
@@ -992,6 +994,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 CompKind::HexDisplay { bitsize: b },
             )
         }
+        // Text annotation (UI_OVERHAUL §37): a free-form label the editor draws
+        // on the sheet. No pins, no behavior; `text` may be empty.
+        "misc.text" => {
+            let mut c = AttrCheck::new(attrs, &["text"]);
+            let _ = c.string("text", "");
+            c.finish();
+            (Vec::new(), c, CompKind::Text)
+        }
         _ => return None,
     };
     Some((pins, c.issues, kind))
@@ -1061,6 +1071,18 @@ mod tests {
         let attrs = attrs.as_object().unwrap().clone();
         let p = validate_component("main", 0, "c0", type_, &attrs, &mut errors);
         (p.map(|v| v.into_iter().map(|s| s.name).collect()), errors)
+    }
+
+    #[test]
+    fn text_annotation_has_no_pins_and_validates_text() {
+        let (p, e) = pins("misc.text", json!({ "text": "note" }));
+        assert_eq!(p.unwrap(), Vec::<String>::new());
+        assert!(e.is_empty());
+
+        // A typo'd attr on an annotation is still a load error.
+        let (_, e) = pins("misc.text", json!({ "txt": "typo" }));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("unknown attr 'txt'"), "{:?}", e);
     }
 
     #[test]

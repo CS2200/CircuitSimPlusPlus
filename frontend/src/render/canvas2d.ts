@@ -51,7 +51,9 @@ export class Canvas2DRenderer implements Renderer {
 
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.ctx.fillStyle = background;
-    this.ctx.fillRect(0, 0, width, height);
+    // Cover the whole backing store even when the effective dpr rounds the
+    // other axis by a sub-pixel (never leave an unfilled sliver at the edge).
+    this.ctx.fillRect(0, 0, width + 1, height + 1);
     this.ctx.setTransform(
       dpr * camera.scale,
       0,

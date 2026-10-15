@@ -718,6 +718,25 @@ export class DocScene {
       const layout = this.layouts.get(comp.id)!;
       if (!rectIntersects(layout.rect, visible)) continue;
       const selected = selection.hasComponent(comp.id);
+      // A text annotation: no body box and no pins — just the label, sitting at
+      // the rect's left, vertically centred (UI_OVERHAUL §37). A selection
+      // outlines the (invisible) hit box so the annotation can be grabbed.
+      if (comp.type === "misc.text") {
+        const text = typeof comp.attrs?.text === "string" ? comp.attrs.text : "";
+        if (selected) {
+          renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+            stroke: theme.accent,
+            lineWidth: 0.06,
+          });
+        }
+        renderer.drawText(layout.rect.x + 0.3, layout.rect.y + layout.rect.h / 2, text, {
+          color: theme.text,
+          size: 1.2,
+          align: "left",
+        });
+        renderer.flush();
+        continue;
+      }
       // Family tint (UI_OVERHAUL §21): a hint of the part's family on its body
       // and a stronger hint on its outline, so pins/memory/arithmetic read
       // apart at a glance without shouting.
