@@ -456,19 +456,6 @@ export default function App() {
           { label: "Paste", shortcut: "Ctrl+V", onSelect: () => editorRef.current?.paste() },
           { kind: "sep" },
           {
-            label: "Rotate",
-            shortcut: "R",
-            disabled: (status?.selection ?? 0) === 0,
-            onSelect: () => editorRef.current?.rotate(),
-          },
-          {
-            label: "Delete",
-            shortcut: "Del",
-            disabled: (status?.selection ?? 0) === 0,
-            onSelect: () => editorRef.current?.deleteSelection(),
-          },
-          { kind: "sep" },
-          {
             label: "Select All",
             shortcut: "Ctrl+A",
             onSelect: () => editorRef.current?.selectAll(),
@@ -479,13 +466,8 @@ export default function App() {
       // transport bar owns step/reset/run-to, the speed slider owns the clock
       // (the Hz preset list was redundant), the T_obs chip toggles the
       // critical-path highlight, and the status chip switches delay/zero mode.
-      {
-        label: "Subcircuits",
-        items: [
-          { label: "New subcircuit…", onSelect: onNewSheet },
-          { label: "Rename current…", onSelect: () => onRenameSheet(sheet) },
-        ],
-      },
+      // The Subcircuits menu is retired too (UI_OVERHAUL §16): a new subcircuit
+      // is the tab strip's "+" and renaming is a double-click on its tab.
       {
         label: "Help",
         items: [

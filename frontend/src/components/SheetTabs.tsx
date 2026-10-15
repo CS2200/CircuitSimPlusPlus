@@ -24,13 +24,19 @@ export default function SheetTabs({
   return (
     <div className="sheet-tabs" role="tablist" aria-label="Circuits">
       {sheets.map((name, i) => (
-        <div key={`${i}:${name}`} className={`sheet-tab-wrap${i === active ? " active" : ""}`}>
+        <div
+          key={`${i}:${name}`}
+          className={`sheet-tab-wrap${i === active ? " active" : ""}`}
+          // Double-click ANYWHERE on the tab (label, padding or gap) to rename
+          // (UI_OVERHAUL §16) — the strip's only rename affordance now that the
+          // Subcircuits menu is gone.
+          onDoubleClick={() => onRename(i)}
+        >
           <button
             role="tab"
             aria-selected={i === active}
             className={`sheet-tab${i === active ? " active" : ""}`}
             onClick={() => onSwitch(i)}
-            onDoubleClick={() => onRename(i)}
             title={
               i === 0
                 ? `${name} — top level (double-click to rename)`
@@ -45,6 +51,7 @@ export default function SheetTabs({
               aria-label={`Delete ${name}`}
               title={`Delete "${name}"`}
               onClick={() => onDelete(i)}
+              onDoubleClick={(e) => e.stopPropagation()}
             >
               ×
             </button>

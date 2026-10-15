@@ -5,7 +5,9 @@ import { join } from "node:path";
 
 /**
  * File menu + menu bar acceptance (browser/mock mode): New / Open / Save-As
- * round-trip the document through the UI; the Subcircuits menu manages
+ * round-trip the document through the UI; the tab strip's "+" adds a
+ * subcircuit and double-clicking a tab renames one (the Subcircuits menu is
+ * retired — UI_OVERHAUL §16) and the palette manages
  * sheets. The Tauri shell path (native dialogs + engine-side file writes)
  * is covered by manual smoke — CI drives the browser fallbacks
  * (input[type=file] + download), which share all document logic.
@@ -141,8 +143,8 @@ test("Subcircuits: tabs create, switch, rename", async ({ page }) => {
   await page.getByRole("tab", { name: "main" }).click();
   await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");
 
-  // ---- rename the main circuit (double-click its tab) ----
-  await page.getByRole("tab", { name: "main" }).dblclick();
+  // ---- rename the main circuit (double-click ANYWHERE on its tab) ----
+  await page.locator(".sheet-tab-wrap", { hasText: "main" }).dblclick({ position: { x: 4, y: 4 } });
   await dialog.getByRole("textbox").fill("toplevel");
   await dialog.getByRole("button", { name: "Rename" }).click();
   d = await doc(page);
@@ -154,8 +156,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.goto("/");
 
   // ---- new subcircuit "alu" with an input pin a and an output pin y ----
-  await openMenu(page, "Subcircuits");
-  await page.getByRole("menuitem", { name: "New subcircuit…" }).click();
+  await page.getByRole("button", { name: "New subcircuit" }).click();
   const dialog = page.locator(".name-dialog");
   await dialog.getByRole("textbox").fill("alu");
   await dialog.getByRole("button", { name: "Create" }).click();
@@ -261,8 +262,7 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
 
 test("Subcircuits: right-click an instance jumps to its definition tab", async ({ page }) => {
   await page.goto("/");
-  await openMenu(page, "Subcircuits");
-  await page.getByRole("menuitem", { name: "New subcircuit…" }).click();
+  await page.getByRole("button", { name: "New subcircuit" }).click();
   const dialog = page.locator(".name-dialog");
   await dialog.getByRole("textbox").fill("alu");
   await dialog.getByRole("button", { name: "Create" }).click();

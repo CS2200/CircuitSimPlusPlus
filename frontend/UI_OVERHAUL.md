@@ -504,3 +504,31 @@ drag-wiring `wires.spec.ts` test, grid-based `memory.spec.ts`, a mock
 baselines changed on purpose** (declared-width drawing) and were regenerated
 locally (win32); the committed Linux baselines need one `--update-snapshots`
 run on Linux.
+
+## 16. Follow-up batch G (2026-10-16): menus, tabs, and the hex grid
+
+- **Subcircuits menu retired**: the tab strip owns sheets now — the "+" tab
+  creates one (new subcircuits are also in the palette's Subcircuits group) and
+  **double-clicking anywhere on a tab** (label, padding, or the gap around it,
+  not just the text) opens the rename dialog. The ✕ swallows double-clicks so
+  it can't accidentally trigger a rename.
+- **Edit menu trimmed**: Rotate and Delete are gone from it (the R and Del
+  shortcuts still work, as does the floating rotate button and each component's
+  Rotation field in the Inspector).
+- **Create/rename dialog restyled**: `NameDialog` is now a compact
+  settings-style card — same head + ✕ close, hint-free single field, and
+  Cancel/accent-submit buttons as the Settings dialog, instead of the old
+  bare `help-card`.
+- **Tabs align with the canvas**: the strip has no left padding, so the first
+  tab's edge lines up with the grid edge (it already sat above the canvas
+  column only, per §15).
+- **Hex grid editing**: the memory dialog's table no longer stretches while its
+  inputs stay narrow — inputs fill their cell (`width: 100%`, `minWidth` of one
+  word) so the _whole_ cell is clickable/editable, not just the left part.
+- **`DEC` → `DECODER`**: the plexers palette tile (label and icon glyph) now
+  reads DECODER. Canvas bodies are unaffected — shaped bodies draw no caption
+  unless the part is named.
+
+**Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green (the
+subcircuit e2e now drives creation through the "+" tab and rename through a
+double-click on the tab box; the palette rail test asserts DECODER).

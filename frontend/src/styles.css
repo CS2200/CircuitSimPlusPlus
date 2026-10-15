@@ -630,7 +630,9 @@ body {
   display: flex;
   align-items: stretch;
   gap: 2px;
-  padding: 2px 0.5rem 0;
+  /* No left padding: the first tab's edge lines up with the canvas grid
+   * (UI_OVERHAUL §16). */
+  padding: 2px 0 0;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
   overflow-x: auto;
@@ -715,26 +717,62 @@ body {
   font-weight: bold;
 }
 
-/* ---- name dialog (sheet names, run-to cycle) ---- */
+/* ---- name dialog (sheet names): compact settings-style card ---- */
+
+.name-dialog {
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: none;
+}
 
 .name-dialog form {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 0.9rem;
 }
 
 .name-dialog input {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
   font-size: 0.9rem;
 }
 
 .name-dialog input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.name-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.name-actions button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.name-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.name-actions button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.name-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .app-statusbar {
@@ -1042,6 +1080,9 @@ body {
   border-radius: 8px;
 }
 
+/* The table fills the dialog; the INPUT fills its cell (UI_OVERHAUL §16).
+ * Previously the table stretched while the inputs stayed narrow, so each cell
+ * had dead space to the right of its input and only part of it was editable. */
 .mem-table {
   width: 100%;
 }
@@ -1055,6 +1096,7 @@ body {
 }
 
 .mem-cell-input {
+  width: 100%;
   background: transparent;
   color: var(--text);
   border: none;

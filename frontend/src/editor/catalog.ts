@@ -290,7 +290,7 @@ const REGISTRY: Record<string, CompSpec> = {
   // Plexers (pin sets scale with attrs.selBits: n = 2^selBits data lines)
   "plexers.mux": plexerSpec("MUX", "in"),
   "plexers.demux": plexerSpec("DEMUX", "out"),
-  "plexers.decoder": plexerSpec("DEC", "out-no-in"),
+  "plexers.decoder": plexerSpec("DECODER", "out-no-in"),
 
   // Arithmetic
   "arith.adder": boxSpec(

@@ -187,7 +187,9 @@ export default function MemContentsDialog({
                           className="mem-cell-input"
                           data-addr={addr}
                           value={cellText(addr)}
-                          style={{ width: `${Math.max(3, width + 1)}ch` }}
+                          // Width comes from CSS (fills the cell); minWidth
+                          // keeps a column at least as wide as its word.
+                          style={{ minWidth: `${Math.max(3, width + 1)}ch` }}
                           spellCheck={false}
                           autoComplete="off"
                           aria-label={`word ${addr}`}

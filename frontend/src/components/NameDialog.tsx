@@ -40,9 +40,22 @@ export default function NameDialog({
   };
 
   return (
-    <div className="help-overlay" onClick={onCancel}>
-      <div className="help-card name-dialog" onClick={(e) => e.stopPropagation()}>
-        <h2>{title}</h2>
+    <div
+      className="help-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onCancel}
+    >
+      {/* Compact settings-style card (UI_OVERHAUL §16) — same head/close and
+       * button language as the Settings dialog. */}
+      <div className="settings-card name-dialog" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-head">
+          <h2>{title}</h2>
+          <button className="settings-close" aria-label="Close" onClick={onCancel}>
+            ✕
+          </button>
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -55,7 +68,7 @@ export default function NameDialog({
             onChange={(e) => setValue(e.target.value)}
             aria-label={title}
           />
-          <div className="prop-actions">
+          <div className="name-actions">
             <button type="button" className="secondary" onClick={onCancel}>
               Cancel
             </button>
