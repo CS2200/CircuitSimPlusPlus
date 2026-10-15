@@ -10,6 +10,14 @@ import RightDock, { type DockTab } from "./components/RightDock";
 import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
 import SimBar from "./components/SimBar";
+import {
+  IconMoon,
+  IconRedo,
+  IconRotate,
+  IconSun,
+  IconTrash,
+  IconUndo,
+} from "./components/TopBarIcons";
 import WatchPanel from "./components/WatchPanel";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
@@ -43,6 +51,16 @@ export default function App() {
   // Theme is a persisted per-machine preference (UI_OVERHAUL §2); OLED is
   // the default for fresh installs.
   const [theme, setTheme] = useState<ThemeId>(loadThemePref);
+  // Light/dark toggle (UI_OVERHAUL §9): flips between the light theme and
+  // the last dark-family theme chosen (OLED unless the user picked dark).
+  const isLight = theme === "light";
+  const lastDarkThemeRef = useRef<ThemeId>(theme === "light" ? "oled" : theme);
+  useEffect(() => {
+    if (theme !== "light") lastDarkThemeRef.current = theme;
+  }, [theme]);
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === "light" ? lastDarkThemeRef.current : "light"));
+  }, []);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
@@ -387,6 +405,8 @@ export default function App() {
           { kind: "sep" },
           { label: "Save", shortcut: "Ctrl+S", onSelect: onSave },
           { label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveAs },
+          { kind: "sep" },
+          { label: "Settings…", onSelect: () => setSettingsOpen(true) },
         ],
       },
       {
@@ -438,6 +458,13 @@ export default function App() {
         items: [
           { label: "New subcircuit…", onSelect: onNewSheet },
           { label: "Rename current…", onSelect: () => onRenameSheet(sheet) },
+        ],
+      },
+      {
+        label: "Help",
+        items: [
+          { label: "Keyboard shortcuts", shortcut: "?", onSelect: () => setShowHelp(true) },
+          { label: "About CircuitSim++", onSelect: () => setShowAbout(true) },
         ],
       },
     ];
@@ -535,58 +562,74 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [onOpen, onSave, onSaveAs]);
 
-  return (
-    <div className="app" data-theme={theme}>
-      <header className="app-header">
-        <h1>CircuitSim++</h1>
-        <div className="header-actions">
-          {!stress && (
-            <>
-              <button
-                className="secondary"
-                disabled={status?.canUndo === false}
-                onClick={() => editorRef.current?.undo()}
-                title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
-              >
-                Undo
-              </button>
-              <button
-                className="secondary"
-                disabled={status?.canRedo === false}
-                onClick={() => editorRef.current?.redo()}
-                title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
-              >
-                Redo
-              </button>
-              <button className="secondary" onClick={() => editorRef.current?.rotate()}>
-                Rotate (R)
-              </button>
-              <button className="secondary" onClick={() => editorRef.current?.deleteSelection()}>
-                Delete (Del)
-              </button>
-            </>
-          )}
-          {stress && (
-            <button onClick={() => setAnimate(!animate)}>
-              {animate ? "Pause states" : "Animate states"}
-            </button>
-          )}
-          <button className="secondary" onClick={() => setShowHelp(true)}>
-            ?
-          </button>
-          <button className="secondary" onClick={() => setShowAbout(true)}>
-            About
+  // Title-bar actions (UI_OVERHAUL §9): icon buttons on the right of the
+  // menu row; the light/dark toggle sits at the far right.
+  const topBarActions = (
+    <div className="menubar-actions">
+      {stress ? (
+        <button
+          className="topbar-text-btn"
+          onClick={() => setAnimate(!animate)}
+          title="Pause or resume the canvas animation"
+        >
+          {animate ? "Pause states" : "Animate states"}
+        </button>
+      ) : (
+        <>
+          <button
+            className="topbar-btn"
+            aria-label="Undo"
+            title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
+            disabled={status?.canUndo === false}
+            onClick={() => editorRef.current?.undo()}
+          >
+            <IconUndo />
           </button>
           <button
-            className="secondary"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings — theme and appearance"
+            className="topbar-btn"
+            aria-label="Redo"
+            title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
+            disabled={status?.canRedo === false}
+            onClick={() => editorRef.current?.redo()}
           >
-            Settings
+            <IconRedo />
           </button>
-        </div>
-      </header>
-      {!stress && <MenuBar menus={menus} pathLabel={filePath} />}
+          <button
+            className="topbar-btn"
+            aria-label="Rotate selection"
+            title="Rotate selection (R)"
+            onClick={() => editorRef.current?.rotate()}
+          >
+            <IconRotate />
+          </button>
+          <button
+            className="topbar-btn"
+            aria-label="Delete selection"
+            title="Delete selection (Del)"
+            onClick={() => editorRef.current?.deleteSelection()}
+          >
+            <IconTrash />
+          </button>
+        </>
+      )}
+      <button
+        className="topbar-btn"
+        aria-label={isLight ? "Switch to dark theme" : "Switch to light theme"}
+        title={isLight ? "Switch to dark theme" : "Switch to light theme"}
+        onClick={toggleTheme}
+      >
+        {isLight ? <IconMoon /> : <IconSun />}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="app" data-theme={theme}>
+      {stress ? (
+        <div className="menubar">{topBarActions}</div>
+      ) : (
+        <MenuBar menus={menus} pathLabel={filePath} right={topBarActions} />
+      )}
       {!stress && (
         <SimBar
           ctl={sim}

@@ -143,40 +143,6 @@ body {
   background: var(--bg);
 }
 
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.45rem 1rem;
-  background: var(--panel);
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.app-header h1 {
-  font-size: 1.05rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  margin: 0;
-}
-
-.header-actions button {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 0.35rem 0.8rem;
-  cursor: pointer;
-}
-
-.header-actions button:hover:not(:disabled) {
-  filter: brightness(1.1);
-}
-
-.header-actions button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
 .app-main {
   flex: 1;
   min-height: 0; /* allow the flex child to shrink to its container */
@@ -465,15 +431,66 @@ body {
 }
 
 .menubar-path {
-  margin-left: auto;
+  flex: 1;
+  min-width: 0;
   align-self: center;
+  text-align: center;
+  padding: 0 1rem;
   color: var(--text-dim);
   font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 45%;
   direction: rtl; /* long paths truncate at the FRONT, keeping the file name */
+}
+
+/* Right-aligned window actions in the title bar (UI_OVERHAUL §9). */
+.menubar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 0.4rem;
+}
+
+.topbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.topbar-btn:hover:not(:disabled) {
+  background: var(--grid);
+}
+
+.topbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.topbar-text-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.topbar-text-btn:hover {
+  border-color: var(--accent);
+}
+
+.topbar-icon {
+  display: block;
 }
 
 /* ---- circuit tabs (one per circuit in the file) ---- */

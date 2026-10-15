@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
- * Application menu bar (File / Simulation / Subcircuits). Keeps the sim
- * transport bar for the constantly-used controls and gives everything else
- * a home. Pure presentation: menus arrive as data from App.
+ * Application top bar (UI_OVERHAUL.md §9): menu buttons (File / Simulation /
+ * Subcircuits / Help) on the left, the current file centered, and the window
+ * actions (`right`) at the far end — all on one row, VS Code-style. Pure
+ * presentation: menus arrive as data from App.
  */
 
 export type MenuItem =
@@ -29,10 +30,13 @@ export interface MenuDef {
 export default function MenuBar({
   menus,
   pathLabel,
+  right,
 }: {
   menus: MenuDef[];
-  /** Current file (right-aligned); null = unsaved. */
+  /** Current file (centered); null = unsaved. */
   pathLabel: string | null;
+  /** Right-aligned window actions (undo/redo icons, theme toggle, …). */
+  right?: ReactNode;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -110,6 +114,7 @@ export default function MenuBar({
       <span className="menubar-path" title={pathLabel ?? "unsaved"}>
         {pathLabel ?? "(unsaved)"}
       </span>
+      {right !== undefined && <div className="menubar-actions">{right}</div>}
     </div>
   );
 }

@@ -36,14 +36,15 @@ test("U8: nudge appears when behind, dismissal persists per version", async ({ p
 test("U8: offline check fails silently (no dialog, no crash)", async ({ page }) => {
   await page.route("https://api.github.com/**", (route) => void route.abort());
   await page.goto("/?updateRepo=o/r");
-  await expect(page.locator("h1")).toHaveText("CircuitSim++");
+  await expect(page.getByRole("button", { name: "File", exact: true })).toBeVisible();
   await page.waitForTimeout(400);
   await expect(page.locator(".update-nudge")).toHaveCount(0);
 });
 
 test("U8: About card shows version + unsigned-build workaround", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "About" }).click();
+  await page.getByRole("button", { name: "Help", exact: true }).click();
+  await page.getByRole("menuitem", { name: "About CircuitSim++" }).click();
   const card = page.locator(".help-card");
   await expect(card).toContainText("Version 0.1.0");
   await expect(card).toContainText("unsigned");
