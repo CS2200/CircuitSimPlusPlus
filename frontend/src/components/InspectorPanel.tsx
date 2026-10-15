@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
-import { editableAttrs, compPins, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
+import { editableAttrs, compPins, type AttrField } from "../editor/catalog";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
@@ -14,7 +14,7 @@ import Select from "./Select";
  * docked on the right and driven by the canvas selection. Replaces the
  * double-click modal (PropertiesDialog) — edits apply live:
  *
- *  - selects / checkboxes / rotation / gate type: committed immediately;
+ *  - selects / checkboxes / rotation: committed immediately;
  *  - text + numbers: committed on Enter/blur (numbers also commit when the
  *    typed/spun value is in range, so steppers feel immediate);
  *  - every commit is one undoable op, and consecutive commits on the same
@@ -28,7 +28,6 @@ import Select from "./Select";
 const ADDRESSABLE = new Set(["mem.ram", "mem.rom", "mem.register", "wiring.probe"]);
 
 type Patch = {
-  type?: string;
   rot?: CsxComponent["rot"];
   name?: string;
   namePos?: CsxComponent["namePos"] | null;
@@ -226,9 +225,6 @@ export default function InspectorPanel({
     if (side === (comp.namePos ?? "N")) return;
     commit({ namePos: side === "N" ? null : side }, "namePos");
   };
-  const commitType = (type: string) => {
-    if (type !== comp.type) commit({ type }, "type");
-  };
   const commitAttr = (key: string, value: unknown) => {
     if ((comp.attrs ?? {})[key] === value) return;
     commit({ attrs: { ...(comp.attrs ?? {}), [key]: value } }, `attr:${key}`);
@@ -349,18 +345,6 @@ export default function InspectorPanel({
           onChange={(side) => commitNamePos(side as Rotation)}
         />
       </div>
-
-      {comp.type.startsWith("gate.") && (
-        <div className="inspector-row">
-          <span>Type</span>
-          <Select
-            label="Type"
-            value={comp.type}
-            options={GATE_TYPE_OPTIONS.map((t) => ({ value: t, label: t.slice(5).toUpperCase() }))}
-            onChange={(type) => commitType(type)}
-          />
-        </div>
-      )}
 
       {fields.map((f) => (
         <Fragment key={f.key}>

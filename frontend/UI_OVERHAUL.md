@@ -166,7 +166,7 @@ Apply/Cancel:
 | ------------------------------------------------- | ---------------------------------------------------------------- |
 | Name, autoload path, text attrs                   | Enter or blur (draft while focused)                              |
 | Numbers (bitsize, inputs, selBits, depth, value…) | Enter/blur, or immediately when the typed/spun value is in range |
-| Rotation, gate type, selects, checkboxes          | Immediately                                                      |
+| Rotation, selects, checkboxes                     | Immediately                                                      |
 
 - Each commit is **one undoable op**. Consecutive commits on the _same field_
   coalesce (`coalesceKey = edit:<circuit>:<id>:<field>`) so a typing burst or
@@ -859,7 +859,7 @@ Four requests on top of §25/§26, all in the Inspector and Settings panels.
 - **App dropdowns instead of native `<select>`.** A new `Select` component
   (`components/Select.tsx`) renders a button (`aria-haspopup="listbox"`,
   `aria-label`) plus an option list styled like the menu-bar popups, and is now
-  used for every select in the **Inspector** (Rotation, gate Type, and the
+  used for every select in the **Inspector** (Rotation and the
   `select`-kind attrs: radix / shift / extend mode / subcircuit) and in the
   **Settings** panel (default bit width / gate inputs / clock speed). The list renders **inline** (not absolutely positioned): the dock
   and the settings pane both scroll. (Superseded by §29: the list is now a
@@ -969,5 +969,17 @@ baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
   `eq`, `>` by `gt` — so the part reads as a comparator at a glance. The
   catalog's family mark stays `=` (it still drives the palette tile and the
   `catalog.test` marks list).
+
+**Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
+
+## 32. Follow-up batch W (2026-10-16): the Inspector no longer swaps a part's type
+
+- **No more gate Type dropdown.** The Inspector's `Type` select (AND ↔ OR ↔ NAND
+  ↔ …) is gone. To use a different part, place it from the **palette drawer** on
+  the left — the palette is the single place a component's type is chosen. This
+  drops the last "edit the type in place" control; `GATE_TYPE_OPTIONS` and the
+  panel's `commitType` were removed with it.
+- The document op is unchanged: `updateComponent({ type })` still exists (the
+  engine and `document.test` exercise it), the panel just no longer offers it.
 
 **Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.

@@ -842,18 +842,6 @@ function baseFields(type: string): AttrField[] {
   }
 }
 
-/** Gate types the dialog's type swapper offers (same pin names, De Morgan family). */
-export const GATE_TYPE_OPTIONS = [
-  "gate.and",
-  "gate.or",
-  "gate.xor",
-  "gate.nand",
-  "gate.nor",
-  "gate.xnor",
-  "gate.not",
-  "gate.buffer",
-] as const;
-
 export function compSize(
   comp: Pick<CsxComponent, "type" | "attrs">,
   circuits?: readonly CsxCircuit[],
