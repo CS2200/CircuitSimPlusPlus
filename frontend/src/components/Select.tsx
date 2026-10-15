@@ -35,6 +35,10 @@ export default function Select<T extends string | number>({
     maxHeight: number;
   } | null>(null);
   const current = options.find((o) => o.value === value);
+  // Portal inside `.app` (which carries data-theme/data-accent), NOT the body:
+  // a body-level portal would miss the `[data-accent]` override and fall back
+  // to the theme's default accent colour.
+  const portalTarget = btnRef.current?.closest(".app") ?? document.body;
 
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
@@ -129,7 +133,7 @@ export default function Select<T extends string | number>({
               </button>
             ))}
           </div>,
-          document.body,
+          portalTarget,
         )}
     </div>
   );

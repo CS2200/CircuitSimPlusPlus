@@ -90,12 +90,15 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   await expect(page.getByRole("option", { name: "Below", exact: true })).toBeVisible();
   // Overlay, not inline: the panel's content height is unchanged while open.
   expect(await sidebar.evaluate((el) => el.scrollHeight)).toBe(heightBefore);
+  // Portaled inside `.app` (which carries data-accent), so it keeps the chosen
+  // accent colour instead of the theme default.
+  await expect(page.locator(".app .select-pop")).toHaveCount(1);
   await page.getByRole("option", { name: "Below", exact: true }).click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ namePos: "S" });
-  // Choosing "Default" clears the override (the part follows the app default).
+  // Above is the default, so picking it writes nothing at all.
   await page.getByLabel("Label side").click();
-  await page.getByRole("option", { name: "Default", exact: true }).click();
+  await page.getByRole("option", { name: "Above", exact: true }).click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).not.toHaveProperty("namePos");
 

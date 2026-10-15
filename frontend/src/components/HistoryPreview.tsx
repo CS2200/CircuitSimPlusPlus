@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from "react";
 import CanvasHost, { type CanvasHostProps } from "./CanvasHost";
-import { DocScene, type LabelPos, type SceneOverlay } from "../editor/docScene";
+import { DocScene, type SceneOverlay } from "../editor/docScene";
 import { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 
 /**
- * Read-only render of one stored version (version history, UI_OVERHAUL §31).
+ * Read-only render of one stored version (version history, UI_OVERHAUL §33).
  *
  * The version's canonical `.csx` is parsed into a throwaway document and drawn
  * on its OWN `DocScene`/`CanvasHost`. Nothing here touches the editor's
@@ -28,14 +28,12 @@ export default function HistoryPreview({
   themeName,
   gridOn,
   showValues,
-  labelPos,
 }: {
   /** Canonical `.csx` of the version to draw. */
   text: string;
   themeName: string;
   gridOn: boolean;
   showValues: boolean;
-  labelPos: LabelPos;
 }) {
   const scene = useMemo(() => {
     const built = new DocScene();
@@ -57,10 +55,9 @@ export default function HistoryPreview({
         undefined,
         gridOn,
         showValues,
-        labelPos,
       );
     },
-    [scene, selection, gridOn, showValues, labelPos],
+    [scene, selection, gridOn, showValues],
   );
 
   return (

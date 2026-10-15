@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CircuitDocument } from "../model/document";
-import type { CsxCircuit, CsxComponent } from "../model/csx";
-import { editableAttrs, compPins, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
+import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
+import { editableAttrs, compPins, type AttrField } from "../editor/catalog";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
@@ -14,7 +14,7 @@ import Select from "./Select";
  * docked on the right and driven by the canvas selection. Replaces the
  * double-click modal (PropertiesDialog) — edits apply live:
  *
- *  - selects / checkboxes / rotation / gate type: committed immediately;
+ *  - selects / checkboxes / rotation: committed immediately;
  *  - text + numbers: committed on Enter/blur (numbers also commit when the
  *    typed/spun value is in range, so steppers feel immediate);
  *  - every commit is one undoable op, and consecutive commits on the same
@@ -28,7 +28,6 @@ import Select from "./Select";
 const ADDRESSABLE = new Set(["mem.ram", "mem.rom", "mem.register", "wiring.probe"]);
 
 type Patch = {
-  type?: string;
   rot?: CsxComponent["rot"];
   name?: string;
   namePos?: CsxComponent["namePos"] | null;
@@ -220,13 +219,11 @@ export default function InspectorPanel({
   const commitRot = (rot: CsxComponent["rot"]) => {
     if (rot !== (comp.rot ?? "E")) commit({ rot }, "rot");
   };
-  /** Per-part name-label side; empty selection clears the override (§28). */
-  const commitNamePos = (side: CsxComponent["namePos"] | null) => {
-    if (side === (comp.namePos ?? null)) return;
-    commit({ namePos: side }, "namePos");
-  };
-  const commitType = (type: string) => {
-    if (type !== comp.type) commit({ type }, "type");
+  /** Per-part name-label side (§28/§31): Above (N) is the default and is
+   * stored as "absent" so a default part writes nothing. */
+  const commitNamePos = (side: Rotation) => {
+    if (side === (comp.namePos ?? "N")) return;
+    commit({ namePos: side === "N" ? null : side }, "namePos");
   };
   const commitAttr = (key: string, value: unknown) => {
     if ((comp.attrs ?? {})[key] === value) return;
@@ -338,29 +335,16 @@ export default function InspectorPanel({
         <span>Label side</span>
         <Select
           label="Label side"
-          value={comp.namePos ?? ""}
+          value={comp.namePos ?? "N"}
           options={[
-            { value: "", label: "Default" },
             { value: "N", label: "Above" },
             { value: "S", label: "Below" },
             { value: "W", label: "Left" },
             { value: "E", label: "Right" },
           ]}
-          onChange={(side) => commitNamePos(side === "" ? null : (side as CsxComponent["namePos"]))}
+          onChange={(side) => commitNamePos(side as Rotation)}
         />
       </div>
-
-      {comp.type.startsWith("gate.") && (
-        <div className="inspector-row">
-          <span>Type</span>
-          <Select
-            label="Type"
-            value={comp.type}
-            options={GATE_TYPE_OPTIONS.map((t) => ({ value: t, label: t.slice(5).toUpperCase() }))}
-            onChange={(type) => commitType(type)}
-          />
-        </div>
-      )}
 
       {fields.map((f) => (
         <Fragment key={f.key}>
