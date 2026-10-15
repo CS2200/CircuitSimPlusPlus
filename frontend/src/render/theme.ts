@@ -35,8 +35,8 @@ export const FALLBACK_THEME: Theme = {
     high: "#40dc82",
     x: "#e5534b",
     z: "#8a8a8a",
-    // The DEFAULT wire color: a wire with no signal yet (nothing simulated).
-    // Kept clearly visible — it is what you see while drawing (UI_OVERHAUL §17).
+    // Neutral for junction dots and other off/undriven marks. Idle WIRES no
+    // longer use it — they show a dull tint of their identity colour (§35).
     disconnected: "#6b6b80",
   },
   bus: ["#f0b43c", "#b478e6", "#4dd0e1", "#f368a0", "#b8e34d"],

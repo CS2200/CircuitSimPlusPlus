@@ -470,7 +470,7 @@ body {
   white-space: nowrap;
 }
 
-/* Clickable title (§35): looks like the label, invites a click to rename. */
+/* Clickable title (§36): looks like the label, invites a click to rename. */
 .app-title-editable {
   padding: 0.1rem 0.35rem;
   margin-left: -0.35rem;
@@ -1995,7 +1995,7 @@ body {
 }
 
 /* A row is a plain container: the click target is an overlay button, so the
- * version's name (and its edit field) can sit above it (§35). */
+ * version's name (and its edit field) can sit above it (§36). */
 .history-row {
   position: relative;
   border-radius: 6px;
@@ -2086,7 +2086,7 @@ body {
   font-size: 0.72rem;
 }
 
-/* "This version vs the open document" (§35). */
+/* "This version vs the open document" (§36). */
 .history-diff {
   padding: 0.5rem 0.7rem;
   border-top: 1px solid var(--panel-border);

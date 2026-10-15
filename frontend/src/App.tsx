@@ -446,7 +446,7 @@ export default function App() {
     if (!confirmDiscard()) return;
     sim.unload();
     adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
-    forgetSavedFileHandle(); // a new document must not overwrite the last file (§35)
+    forgetSavedFileHandle(); // a new document must not overwrite the last file (§36)
     toast("New circuit");
   }, [confirmDiscard, adoptDoc, sim, toast]);
 
@@ -468,7 +468,7 @@ export default function App() {
       return;
     }
     adoptDoc(d, opened.path ?? opened.name);
-    forgetSavedFileHandle(); // opened a different file (§35)
+    forgetSavedFileHandle(); // opened a different file (§36)
     // Engine side: path-load in the shell (autoloads resolve next to the
     // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
     // in the sim banner via the store.
@@ -504,7 +504,7 @@ export default function App() {
   );
 
   /**
-   * Browser save (§35): with a file already chosen this writes straight to it,
+   * Browser save (§36): with a file already chosen this writes straight to it,
    * so Ctrl+S behaves like a real save instead of re-asking for a name. Only
    * "Save As" (or the first save) opens the picker.
    */
@@ -551,7 +551,7 @@ export default function App() {
   }, [filePath, doc, doSave, onSaveAs, saveInBrowser, toast]);
 
   /**
-   * Click the title to name the file (§35). Naming writes a file, so this is
+   * Click the title to name the file (§36). Naming writes a file, so this is
    * Save-As semantics: an existing file is left untouched and the title follows
    * whatever name/path is chosen.
    */
@@ -819,7 +819,7 @@ export default function App() {
     return selectedVersion.label !== "" ? `${when} · ${selectedVersion.label}` : when;
   }, [selectedVersion]);
 
-  /** How the previewed version differs from the open document (§35). */
+  /** How the previewed version differs from the open document (§36). */
   const versionDiff = useMemo(() => {
     if (!historyOpen || historyPreview === null) return null;
     try {
@@ -903,7 +903,7 @@ export default function App() {
   );
 
   /** Save a version to a new file (Tauri: dialog + engine write; browser: download). */
-  /** Rename a version in place (the drawer's click-the-name edit, §35). */
+  /** Rename a version in place (the drawer's click-the-name edit, §36). */
   const renameVersion = useCallback(
     (id: string, label: string) => {
       void historyStore()
