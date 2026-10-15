@@ -10,13 +10,11 @@
 
 import { open as dialogOpen, save as dialogSave } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { isTauri } from "./lib/env";
 
 const CSX_FILTERS = [{ name: "CircuitSim++ circuit", extensions: ["csx"] }];
 
-/** True inside the Tauri webview (the plugins' bridge is present). */
-export function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
+export { isTauri };
 
 export interface OpenedCircuit {
   /** Real path (Tauri) or null (browser — file paths are not exposed). */

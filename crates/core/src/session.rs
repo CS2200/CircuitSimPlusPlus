@@ -521,30 +521,14 @@ impl Sim for Session {
     }
 
     fn save_circuit(&mut self, path: &str, document: &serde_json::Value) -> SaveResult {
-        let fail = |errors: Vec<LoadError>| SaveResult { ok: false, errors };
-        let one = |kind: LoadErrorKind, message: String| {
-            fail(vec![LoadError {
-                kind,
-                message,
-                circuit: String::new(),
-                comp_id: None,
-                wire_idx: None,
-            }])
-        };
-        let doc: Document = match serde_json::from_value(document.clone()) {
-            Ok(d) => d,
-            Err(e) => return one(LoadErrorKind::Parse, format!("invalid document: {e}")),
-        };
-        let errors = format::validate::validate(&doc);
-        if !errors.is_empty() {
-            return fail(errors);
-        }
-        match std::fs::write(path, format::to_canonical_json(&doc)) {
+        // One shared implementation: parse → validate → canonicalize → atomic
+        // write (autosave uses the same path, so bytes are identical).
+        match format::save_json_atomic(path, document) {
             Ok(()) => SaveResult {
                 ok: true,
                 errors: Vec::new(),
             },
-            Err(e) => one(LoadErrorKind::Io, format!("{path}: {e}")),
+            Err(errors) => SaveResult { ok: false, errors },
         }
     }
 

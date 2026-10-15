@@ -317,6 +317,85 @@ pub fn to_canonical_json(doc: &Document) -> String {
     s
 }
 
+/// Write `contents` to `path` **atomically**: a sibling temp file is written,
+/// flushed to disk, then renamed over the target. A crash (or a full disk)
+/// can therefore never leave a truncated `.csx` — the old bytes survive until
+/// the rename replaces them, and the temp file is removed on failure.
+///
+/// The temp file lives in the target's own directory so the rename stays on
+/// one filesystem (rename is only atomic within one).
+pub fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let tmp: std::path::PathBuf = match dir {
+        Some(d) => d.join(temp_file_name(path)),
+        None => std::path::PathBuf::from(temp_file_name(path)),
+    };
+    let do_write = || -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()?; // durability before the rename publishes it
+        Ok(())
+    };
+    if let Err(e) = do_write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    // Best-effort: fsync the directory so the rename itself is durable.
+    // (Opening a directory as a File fails on Windows — skipped there.)
+    if let Some(d) = dir {
+        if let Ok(f) = std::fs::File::open(d) {
+            let _ = f.sync_all();
+        }
+    }
+    Ok(())
+}
+
+/// Unique sibling temp name: `.<name>.<pid>.<n>.tmp`.
+fn temp_file_name(path: &std::path::Path) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let stem = path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "circuit.csx".to_string());
+    format!(
+        ".{stem}.{}.{}.tmp",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// The single save implementation: parse, validate, canonicalize, and write a
+/// document JSON value to `path` atomically. Used by `session::save_circuit`
+/// and the shell's autosave command, so both paths are byte-identical.
+pub fn save_json_atomic(path: &str, document: &Json) -> Result<(), Vec<LoadError>> {
+    let doc: Document = match serde_json::from_value(document.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Err(vec![parse_error(format!("invalid document: {e}"))]);
+        }
+    };
+    let errors = validate::validate(&doc);
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    write_atomic(std::path::Path::new(path), &to_canonical_json(&doc)).map_err(|e| {
+        vec![LoadError {
+            kind: LoadErrorKind::Io,
+            message: format!("{path}: {e}"),
+            circuit: String::new(),
+            comp_id: None,
+            wire_idx: None,
+        }]
+    })
+}
+
 /// Recursively sort object keys; arrays keep their order.
 fn canonicalize(v: &mut Json) {
     match v {
@@ -381,6 +460,49 @@ mod tests {
         let text = to_canonical_json(&doc);
         let doc2: Document = serde_json::from_str(&text).unwrap();
         assert_eq!(doc, doc2);
+    }
+
+    /// `write_atomic` replaces the target in one step and never litters the
+    /// directory with temp files (a crash-safe save is the point).
+    #[test]
+    fn atomic_write_replaces_and_leaves_no_temp_files() {
+        let dir = std::env::temp_dir().join(format!("csim-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.csx");
+
+        write_atomic(&path, "first contents\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first contents\n");
+        // Overwrite: the old bytes are fully replaced (a shorter write must
+        // not leave a tail of the previous content).
+        write_atomic(&path, "x\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "x\n");
+
+        let leftover: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "temp files left behind: {leftover:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `save_json_atomic` validates *before* touching the target, so a bad
+    /// in-memory document cannot clobber a good file on disk.
+    #[test]
+    fn save_json_atomic_validates_before_writing() {
+        let dir = std::env::temp_dir().join(format!("csim-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.csx");
+        let text = to_canonical_json(&sample_doc());
+        write_atomic(&path, &text).unwrap();
+
+        let bad = serde_json::json!({ "format": "not-circuitsim" });
+        let errors = save_json_atomic(path.to_str().unwrap(), &bad).unwrap_err();
+        assert!(!errors.is_empty());
+        // The existing file is untouched.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// v2 → v3 migration: a v2 file's `settings.delayModel` and any

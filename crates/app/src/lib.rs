@@ -12,12 +12,14 @@
 
 use std::sync::Mutex;
 
+mod recovery;
+
 use csim_core::api::{
     CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimStatus, TimingUpdate,
     WireValue,
 };
 use csim_core::session::Session;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Tauri event names (frontend subscribes to these — see `docs/ipc.md`).
 pub mod events {
@@ -140,6 +142,56 @@ fn sim_run_until(state: State<SimState>, cycle: u64) -> Result<(), String> {
     Ok(())
 }
 
+// --- Crash-recovery store (autosave, phase 1) -----------------------------
+//
+// Filesystem work lives in `recovery`; these commands only resolve the app
+// data directory. Routing writes through Rust (rather than granting the
+// webview `fs:allow-write-*`) keeps the sandbox narrow.
+
+/// The app data directory the recovery store lives under.
+fn recovery_base(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {e}"))
+}
+
+/// Write the recovery copy for an open document; returns its storage key
+/// (pass it back to `autosave_recover_read`/`_discard`).
+#[tauri::command]
+fn autosave_recover_write(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+    name: String,
+    label: String,
+    at_ms: u64,
+    document: serde_json::Value,
+) -> Result<String, String> {
+    let base = recovery_base(&app)?;
+    let key = recovery::key_for(path.as_deref(), &doc_key);
+    let envelope = recovery::envelope(path, name, label, at_ms, document);
+    recovery::write(&base, &key, &envelope).map_err(|e| e.to_string())?;
+    Ok(key)
+}
+
+/// Every recovery copy on disk, newest first.
+#[tauri::command]
+fn autosave_recover_list(app: AppHandle) -> Result<Vec<recovery::RecoveryMeta>, String> {
+    Ok(recovery::list(&recovery_base(&app)?))
+}
+
+/// The stored `.csx` document for `key` (`None` when absent/unreadable).
+#[tauri::command]
+fn autosave_recover_read(app: AppHandle, key: String) -> Result<Option<String>, String> {
+    Ok(recovery::read(&recovery_base(&app)?, &key))
+}
+
+/// Remove one recovery copy (`true` when a file was removed).
+#[tauri::command]
+fn autosave_recover_discard(app: AppHandle, key: String) -> Result<bool, String> {
+    recovery::discard(&recovery_base(&app)?, &key).map_err(|e| e.to_string())
+}
+
 /// Fresh power-on state; every memory's autoload image re-applies
 /// (DESIGN.md §5.2 / G6).
 #[tauri::command]
@@ -212,6 +264,10 @@ pub fn run() {
             sim_step_cycles,
             sim_run_until,
             sim_reset,
+            autosave_recover_write,
+            autosave_recover_list,
+            autosave_recover_read,
+            autosave_recover_discard,
             poke,
             mem_read,
             mem_write,

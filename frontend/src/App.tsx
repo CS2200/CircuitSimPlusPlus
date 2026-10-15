@@ -6,13 +6,17 @@ import { MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
+import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
+import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
 import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
 import SimBar from "./components/SimBar";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
+import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
+import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { PALETTE, compPins, compSpec, defaultAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
@@ -21,7 +25,15 @@ import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, isTauri, openCircuitFile, pickSavePath, saveTextFile } from "./files";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
-import { loadBoolPref, PREF_GRID, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
+import {
+  loadBoolPref,
+  PREF_AUTOSAVE,
+  PREF_AUTOSAVE_FILE,
+  PREF_GRID,
+  PREF_PULSES,
+  PREF_UPDATE_CHECK,
+  saveBoolPref,
+} from "./prefs";
 import {
   DEFAULT_ACCENT,
   DEFAULT_THEME,
@@ -89,6 +101,15 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Autosave (autosave, phase 1): a crash-recovery copy 3 s after the last
+  // edit, plus — for named files, opt-out — an atomic rewrite of the file.
+  const [autosaveOn, setAutosaveOn] = useState(() => loadBoolPref(PREF_AUTOSAVE, true));
+  const [autosaveFileOn, setAutosaveFileOn] = useState(() =>
+    loadBoolPref(PREF_AUTOSAVE_FILE, true),
+  );
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "clean" });
+  const [recoveries, setRecoveries] = useState<RecoveryMeta[]>([]);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   // Palette activity rail (UI_OVERHAUL §8): which component group the body shows.
   const [paletteGroup, setPaletteGroup] = useState<string>(PALETTE[0].group);
   // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
@@ -115,6 +136,30 @@ export default function App() {
   const [filePath, setFilePath] = useState<string | null>(null);
   // Current sheet (circuit) index — subcircuits live on their own sheets.
   const [sheet, setSheet] = useState(0);
+
+  // ---- autosave plumbing (the scheduler itself is created further down) ----
+  // Refs mirror the mutable state its host reads at flush time, so the
+  // controller never closes over a stale document or path.
+  const autosaveRef = useRef<AutosaveController | null>(null);
+  const docRef = useRef(doc);
+  const filePathRef = useRef(filePath);
+  const autosaveOnRef = useRef(autosaveOn);
+  const autosaveFileRef = useRef(autosaveFileOn);
+  const undoLabelRef = useRef<string | null>(null);
+  const docKeyRef = useRef(newDocKey());
+  const recoveryKeyRef = useRef<string | null>(null);
+
+  /** Drop the rolling recovery copy (after a successful save to disk). */
+  const discardRecovery = useCallback(async () => {
+    const key = recoveryKeyRef.current;
+    if (key === null) return;
+    recoveryKeyRef.current = null;
+    try {
+      await recoveryStore().discard(key);
+    } catch {
+      /* best-effort: a stale recovery copy is harmless */
+    }
+  }, []);
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
   const [hzExp, setHzExp] = useState(10); // clock speed exponent: hz = 10^(exp/10)
   const [nameDialog, setNameDialog] = useState<{
@@ -152,6 +197,12 @@ export default function App() {
   useEffect(() => {
     saveBoolPref(PREF_UPDATE_CHECK, updateCheckOn);
   }, [updateCheckOn]);
+  useEffect(() => {
+    saveBoolPref(PREF_AUTOSAVE, autosaveOn);
+  }, [autosaveOn]);
+  useEffect(() => {
+    saveBoolPref(PREF_AUTOSAVE_FILE, autosaveFileOn);
+  }, [autosaveFileOn]);
 
   // Light/dark icon toggle: flips to the light side and back to whatever
   // theme was last used on the dark side (not a hard-coded pair).
@@ -171,6 +222,8 @@ export default function App() {
     setPulsesOn(true);
     setGridOn(false);
     setUpdateCheckOn(true);
+    setAutosaveOn(true);
+    setAutosaveFileOn(true);
   }, []);
 
   // Inspector (UI_OVERHAUL §3.2): exactly one selected component — or one
@@ -242,7 +295,14 @@ export default function App() {
     }
   }, [doc, sim, toast]);
 
-  const onStatus = useCallback((s: EditorStatus) => setStatus(s), []);
+  const onStatus = useCallback((s: EditorStatus) => {
+    setStatus(s);
+    // Rising edge of "dirty": the indicator says so until autosave catches up.
+    setSaveState((prev) =>
+      s.dirty && (prev.kind === "clean" || prev.kind === "saved") ? { kind: "dirty" } : prev,
+    );
+    autosaveRef.current?.notifyChanged();
+  }, []);
 
   // ---- file operations (File menu) ----
 
@@ -304,6 +364,8 @@ export default function App() {
         doc.markClean();
         setFilePath(path);
         editorRef.current?.refresh(); // re-report the dirty flag
+        setSaveState({ kind: "saved", at: Date.now() });
+        void discardRecovery(); // the file on disk is now the truth
         toast(`Saved ${baseName(path)}`);
       } catch (err) {
         toast(`Save failed: ${String(err)}`);
@@ -342,6 +404,183 @@ export default function App() {
       onSaveAs();
     }
   }, [filePath, doSave, onSaveAs]);
+
+  // ---- autosave: crash recovery + optional atomic file rewrite -------------
+
+  /**
+   * One flush = (1) always a crash-recovery copy while dirty, (2) for a named
+   * file with file-autosave on, an atomic rewrite of the real `.csx`. Quiet on
+   * success (the indicator shows it); loud on failure.
+   */
+  const flushAutosave = useCallback(async () => {
+    const d = docRef.current;
+    const path = filePathRef.current;
+    // A real, writable path only exists in the Tauri shell.
+    const realPath = isTauri() && path !== null && path.includes("/") ? path : null;
+    setSaveState({ kind: "saving" });
+    try {
+      const key = await recoveryStore().write({
+        path: realPath,
+        docKey: docKeyRef.current,
+        name: d.name,
+        label: undoLabelRef.current ?? "",
+        at: Date.now(),
+        document: JSON.parse(d.toJson()) as unknown,
+      });
+      // A moved/renamed/restored document leaves its old copy behind — drop it.
+      if (recoveryKeyRef.current !== null && recoveryKeyRef.current !== key) {
+        void recoveryStore()
+          .discard(recoveryKeyRef.current)
+          .catch(() => undefined);
+      }
+      recoveryKeyRef.current = key;
+
+      if (realPath !== null && autosaveFileRef.current) {
+        const res = await sim.save(d, realPath);
+        if (!res.ok) {
+          setSaveState({ kind: "error", message: res.errors[0]?.message ?? "save failed" });
+          return;
+        }
+        d.markClean();
+        editorRef.current?.refresh();
+        await discardRecovery();
+        setSaveState({ kind: "saved", at: Date.now() });
+        return;
+      }
+      // Recovery-only (unnamed doc, browser, or file-autosave off).
+      setSaveState({ kind: "recovered", at: Date.now() });
+    } catch (err) {
+      setSaveState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }, [sim, discardRecovery]);
+
+  // Keep the host's refs current (read at flush time, never at render time).
+  useEffect(() => {
+    docRef.current = doc;
+  }, [doc]);
+  useEffect(() => {
+    filePathRef.current = filePath;
+  }, [filePath]);
+  useEffect(() => {
+    autosaveOnRef.current = autosaveOn;
+  }, [autosaveOn]);
+  useEffect(() => {
+    autosaveFileRef.current = autosaveFileOn;
+  }, [autosaveFileOn]);
+  useEffect(() => {
+    undoLabelRef.current = status?.undoLabel ?? null;
+  }, [status]);
+
+  // One controller for the app lifetime (the stress harness has no document to
+  // protect). `flush` returns its promise so a close can await the write.
+  if (autosaveRef.current === null && !stress) {
+    autosaveRef.current = new AutosaveController({
+      // Autosave off ⇒ never dirty, as far as the scheduler is concerned.
+      isDirty: () => autosaveOnRef.current && docRef.current.dirty,
+      revision: () => docRef.current.revision,
+      flush: () => flushAutosave(),
+    });
+  }
+
+  // Flush on blur — losing focus is a natural "done for now" point.
+  useEffect(() => {
+    const onBlur = () => void autosaveRef.current?.flush("blur");
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
+
+  // Flush before the window closes: intercept, write, then really close.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow()
+          .onCloseRequested(async (e) => {
+            e.preventDefault();
+            try {
+              await autosaveRef.current?.flush("close");
+            } finally {
+              await getCurrentWindow().destroy();
+            }
+          })
+          .then((u) => {
+            unlisten = u;
+          }),
+      )
+      .catch(() => undefined);
+    return () => unlisten?.();
+  }, []);
+
+  // Recovery on launch: offer any autosaved copies from a previous session.
+  useEffect(() => {
+    if (stress) return;
+    void recoveryStore()
+      .list()
+      .then((entries) => {
+        if (entries.length === 0) return;
+        setRecoveries(entries);
+        setRecoveryOpen(true);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on launch
+  }, []);
+
+  const restoreRecovery = useCallback(
+    async (key: string) => {
+      let text: string | null = null;
+      try {
+        text = await recoveryStore().read(key);
+      } catch {
+        text = null;
+      }
+      if (text === null) {
+        toast("That autosaved copy is no longer available");
+        setRecoveries((rs) => rs.filter((r) => r.key !== key));
+        return;
+      }
+      let restored: CircuitDocument;
+      try {
+        restored = initDoc(CircuitDocument.fromJson(text));
+      } catch (err) {
+        toast(`Could not restore: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      const entry = recoveries.find((r) => r.key === key);
+      // It came from unsaved work, so it comes back dirty — autosave and the
+      // unsaved-changes prompt must protect it again. An unnamed copy stays
+      // unnamed (no path) so Save still goes through Save As…
+      restored.markDirty();
+      adoptDoc(restored, entry?.path ?? null);
+      void sim.load(restored);
+      docKeyRef.current = newDocKey();
+      recoveryKeyRef.current = key; // replaced (and discarded) on the next flush
+      const label = entry?.path != null ? baseName(entry.path) : restored.name;
+      const left = recoveries.filter((r) => r.key !== key);
+      setRecoveries(left);
+      if (left.length === 0) setRecoveryOpen(false);
+      toast(`Recovered ${label}`);
+    },
+    [recoveries, adoptDoc, sim, toast],
+  );
+
+  const discardRecoveries = useCallback(
+    async (key: string | "all") => {
+      const store = recoveryStore();
+      const keys = key === "all" ? recoveries.map((r) => r.key) : [key];
+      await Promise.all(keys.map((k) => store.discard(k).catch(() => false)));
+      if (
+        key === "all" ||
+        (recoveryKeyRef.current !== null && keys.includes(recoveryKeyRef.current))
+      ) {
+        recoveryKeyRef.current = null;
+      }
+      const left = recoveries.filter((r) => !keys.includes(r.key));
+      setRecoveries(left);
+      if (left.length === 0) setRecoveryOpen(false);
+    },
+    [recoveries],
+  );
 
   // ---- sheet (subcircuit) operations (Subcircuits menu) ----
 
@@ -788,8 +1027,9 @@ export default function App() {
       <footer className="app-statusbar">
         <span>
           {doc.name}
-          {status?.dirty ? " •" : ""}
+          {status?.dirty && !autosaveOn ? " •" : ""}
         </span>
+        {!stress && <SaveIndicator state={saveState} autosaveOn={autosaveOn} />}
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}
@@ -824,14 +1064,26 @@ export default function App() {
           accent={accent}
           pulsesOn={pulsesOn}
           gridOn={gridOn}
+          autosaveOn={autosaveOn}
+          autosaveFileOn={autosaveFileOn}
           updateCheckOn={updateCheckOn}
           onTheme={setTheme}
           onAccent={setAccent}
           onPulses={setPulsesOn}
           onGrid={setGridOn}
+          onAutosave={setAutosaveOn}
+          onAutosaveFile={setAutosaveFileOn}
           onUpdateCheck={setUpdateCheckOn}
           onReset={resetAppearance}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {recoveryOpen && recoveries.length > 0 && (
+        <RecoveryDialog
+          entries={recoveries}
+          onRestore={(key) => void restoreRecovery(key)}
+          onDiscard={(key) => void discardRecoveries(key)}
+          onClose={() => setRecoveryOpen(false)}
         />
       )}
       <UpdateNudge enabled={updateCheckOn} />

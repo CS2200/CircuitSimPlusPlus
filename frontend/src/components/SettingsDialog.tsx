@@ -3,8 +3,9 @@ import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
 
 /**
  * Settings dialog (top-bar revamp): Appearance (themes + accent color),
- * Canvas (signal-pulse animation) and Startup (update check). Every switch
- * applies live and persists per machine — no Apply button.
+ * Canvas (signal-pulse animation / grid), Autosave (crash recovery + file
+ * rewrite) and Startup (update check). Every switch applies live and persists
+ * per machine — no Apply button.
  *
  * Pure presentation: all state lives in App.
  */
@@ -13,11 +14,15 @@ export default function SettingsDialog({
   accent,
   pulsesOn,
   gridOn,
+  autosaveOn,
+  autosaveFileOn,
   updateCheckOn,
   onTheme,
   onAccent,
   onPulses,
   onGrid,
+  onAutosave,
+  onAutosaveFile,
   onUpdateCheck,
   onReset,
   onClose,
@@ -27,11 +32,17 @@ export default function SettingsDialog({
   pulsesOn: boolean;
   /** Coarse canvas grid overlay (default off). */
   gridOn: boolean;
+  /** Autosave: crash-recovery copy + (named docs) periodic file write. */
+  autosaveOn: boolean;
+  /** Autosave rewrites the real `.csx` for named documents (default on). */
+  autosaveFileOn: boolean;
   updateCheckOn: boolean;
   onTheme: (id: ThemeId) => void;
   onAccent: (id: AccentId) => void;
   onPulses: (v: boolean) => void;
   onGrid: (v: boolean) => void;
+  onAutosave: (v: boolean) => void;
+  onAutosaveFile: (v: boolean) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
   onReset: () => void;
@@ -141,6 +152,37 @@ export default function SettingsDialog({
               </span>
             </span>
             <input type="checkbox" checked={gridOn} onChange={(e) => onGrid(e.target.checked)} />
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Autosave</h3>
+          <label className="settings-toggle">
+            <span>
+              Autosave
+              <span className="settings-hint">
+                Keeps a crash-recovery copy 3 s after you stop editing.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={autosaveOn}
+              onChange={(e) => onAutosave(e.target.checked)}
+            />
+          </label>
+          <label className="settings-toggle">
+            <span>
+              Also save the file automatically
+              <span className="settings-hint">
+                Named files only, written atomically. Save As… is still available.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={autosaveFileOn}
+              disabled={!autosaveOn}
+              onChange={(e) => onAutosaveFile(e.target.checked)}
+            />
           </label>
         </section>
 

@@ -147,6 +147,16 @@ export class CircuitDocument {
     this._dirty = false;
   }
 
+  /**
+   * Mark the document unsaved without a structural change — used when an
+   * imported/restored document must be protected by autosave and the
+   * unsaved-changes prompt (e.g. restoring a crash-recovery copy).
+   */
+  markDirty(): void {
+    this._dirty = true;
+    this._revision++;
+  }
+
   /** Drop undo/redo stacks (e.g. after loading a document from disk). */
   clearHistory(): void {
     this.history.clear();

@@ -9,6 +9,10 @@ export const PREF_PULSES = "csx.pulses";
 export const PREF_UPDATE_CHECK = "csx.updateCheck";
 /** Canvas grid overlay (UI_OVERHAUL §15) — off by default. */
 export const PREF_GRID = "csx.grid";
+/** Autosave: crash-recovery copy + (named docs) periodic file write. */
+export const PREF_AUTOSAVE = "csx.autosave";
+/** Autosave also rewrites the real `.csx` (named documents only). */
+export const PREF_AUTOSAVE_FILE = "csx.autosave.file";
 
 export function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
