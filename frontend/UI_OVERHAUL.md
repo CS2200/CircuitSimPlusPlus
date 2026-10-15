@@ -1157,3 +1157,23 @@ Enter-then-blur would commit twice; a ref makes the commit fire once.
 
 **Acceptance:** 302 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 15
 app (the new `history::rename` test included).
+
+## 40. Follow-up batch AE (2026-10-16): text styling, probe preview + value
+
+- **Text annotations lose Name / Label side.** For `misc.text` the Inspector
+  hides both rows (an annotation's body _is_ its text) and instead offers
+  **Color** and **Font** alongside **Text** (UI_OVERHAUL §40). The engine now
+  validates `color` ("" = theme text, else `#rrggbb`) and `font`
+  (`"sans" | "serif" | "mono"`); `TextStyle` gained an optional `font`, and the
+  Inspector's new `color` field kind renders a native swatch.
+- **The probe preview matches the part.** The pointed-hexagon body moved into
+  `shapes.ts` as `probePath(x, y, w, h)`, shared by the placed body, the
+  placement **ghost** (which used to preview a plain rectangle) and the palette
+  icon — so what you drag out is what you get.
+- **A probe shows what it is wired to.** With no live sim value a probe now
+  falls back to `DocScene.staticProbeValue()`: it reads the configured value of a
+  `wiring.constant` on the same net, so a probe on a constant reads `0` (or its
+  value) before/without a run. A live sim value still wins.
+
+**Acceptance:** frontend lint / 302 unit / build green; 48-of-48 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean.

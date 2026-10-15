@@ -54,9 +54,36 @@ describe("diffDocuments (current → version)", () => {
   });
 
   it("counts wires as a multiset, so identical wires cancel out", () => {
-    const shared: Wire = { points: [[0, 0], [1, 0]] };
-    const current = doc([], [shared, { points: [[2, 0], [3, 0]] }]);
-    const version = doc([], [shared, { points: [[4, 0], [5, 0]] }]);
+    const shared: Wire = {
+      points: [
+        [0, 0],
+        [1, 0],
+      ],
+    };
+    const current = doc(
+      [],
+      [
+        shared,
+        {
+          points: [
+            [2, 0],
+            [3, 0],
+          ],
+        },
+      ],
+    );
+    const version = doc(
+      [],
+      [
+        shared,
+        {
+          points: [
+            [4, 0],
+            [5, 0],
+          ],
+        },
+      ],
+    );
     const diff = diffDocuments(current, version);
     expect(diff.wiresAdded).toBe(1);
     expect(diff.wiresRemoved).toBe(1);

@@ -666,6 +666,7 @@ export type AttrField =
       hint?: string;
     }
   | { key: string; label: string; kind: "boolean"; group?: string; hint?: string }
+  | { key: string; label: string; kind: "color"; group?: string; hint?: string }
   | {
       key: string;
       label: string;
@@ -817,8 +818,22 @@ function baseFields(type: string): AttrField[] {
     case "wiring.clock":
       return [];
     case "misc.text":
-      // The annotation body IS this text (UI_OVERHAUL §37).
-      return [{ key: "text", label: "Text", kind: "text", placeholder: "note…", group: "Options" }];
+      // The annotation body IS this text (UI_OVERHAUL §37/§40).
+      return [
+        { key: "text", label: "Text", kind: "text", placeholder: "note…", group: "Options" },
+        { key: "color", label: "Color", kind: "color", group: "Options" },
+        {
+          key: "font",
+          label: "Font",
+          kind: "select",
+          group: "Options",
+          options: [
+            { value: "sans", label: "Sans" },
+            { value: "serif", label: "Serif" },
+            { value: "mono", label: "Mono" },
+          ],
+        },
+      ];
     case "wiring.splitter":
       return [
         {

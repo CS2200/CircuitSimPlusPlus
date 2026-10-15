@@ -291,23 +291,27 @@ export default function InspectorPanel({
         <span className="inspector-type">{comp.type}</span>
       </div>
 
-      <label className="inspector-row">
-        <span>Name</span>
-        <input
-          value={draft?.key === nameKey ? draft.text : (comp.name ?? "")}
-          placeholder="(unnamed)"
-          onChange={(e) => setDraft({ key: nameKey, text: e.target.value })}
-          onBlur={() => {
-            if (draft?.key === nameKey) {
-              commitName(draft.text);
-              setDraft(null);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-      </label>
+      {/* A text annotation has no name/position label — its body IS the text
+       * (UI_OVERHAUL §40). */}
+      {comp.type !== "misc.text" && (
+        <label className="inspector-row">
+          <span>Name</span>
+          <input
+            value={draft?.key === nameKey ? draft.text : (comp.name ?? "")}
+            placeholder="(unnamed)"
+            onChange={(e) => setDraft({ key: nameKey, text: e.target.value })}
+            onBlur={() => {
+              if (draft?.key === nameKey) {
+                commitName(draft.text);
+                setDraft(null);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
+      )}
 
       <div className="inspector-row">
         <span>Rotation</span>
@@ -324,20 +328,22 @@ export default function InspectorPanel({
         />
       </div>
 
-      <div className="inspector-row">
-        <span>Label side</span>
-        <Select
-          label="Label side"
-          value={comp.namePos ?? "N"}
-          options={[
-            { value: "N", label: "Above" },
-            { value: "S", label: "Below" },
-            { value: "W", label: "Left" },
-            { value: "E", label: "Right" },
-          ]}
-          onChange={(side) => commitNamePos(side as Rotation)}
-        />
-      </div>
+      {comp.type !== "misc.text" && (
+        <div className="inspector-row">
+          <span>Label side</span>
+          <Select
+            label="Label side"
+            value={comp.namePos ?? "N"}
+            options={[
+              { value: "N", label: "Above" },
+              { value: "S", label: "Below" },
+              { value: "W", label: "Left" },
+              { value: "E", label: "Right" },
+            ]}
+            onChange={(side) => commitNamePos(side as Rotation)}
+          />
+        </div>
+      )}
 
       {fields.map((f) => (
         <Fragment key={f.key}>
@@ -548,6 +554,21 @@ function FieldRow({
           onChange={(v) => onCommitAttr(field.key, v)}
         />
       </div>
+    );
+  }
+
+  if (field.kind === "color") {
+    // A native swatch; empty (theme default) shows the app's text colour.
+    const current = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : "#e6e6f0";
+    return (
+      <label className="inspector-row">
+        <span>{field.label}</span>
+        <input
+          type="color"
+          value={current}
+          onChange={(e) => onCommitAttr(field.key, e.target.value)}
+        />
+      </label>
     );
   }
 
