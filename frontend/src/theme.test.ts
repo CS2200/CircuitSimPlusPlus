@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  ACCENTS,
+  DEFAULT_ACCENT,
   DEFAULT_THEME,
   THEMES,
+  isAccentId,
+  isLightTheme,
   isThemeId,
+  loadAccentPref,
   loadThemePref,
+  saveAccentPref,
   saveThemePref,
   type ThemeId,
 } from "./theme";
@@ -93,5 +99,63 @@ describe("theme preference", () => {
     delete g.localStorage;
     expect(loadThemePref()).toBe("oled");
     expect(() => saveThemePref("dark")).not.toThrow();
+  });
+});
+
+describe("light/dark classification", () => {
+  it("marks exactly the light-side themes", () => {
+    expect(isLightTheme("light")).toBe(true);
+    expect(isLightTheme("paper")).toBe(true);
+    expect(isLightTheme("oled")).toBe(false);
+    expect(isLightTheme("dark")).toBe(false);
+    expect(isLightTheme("midnight")).toBe(false);
+    expect(isLightTheme("contrast")).toBe(false);
+  });
+
+  it("catalog carries at least one theme per side", () => {
+    expect(THEMES.some((t) => t.light === true)).toBe(true);
+    expect(THEMES.some((t) => t.light !== true)).toBe(true);
+  });
+});
+
+describe("accent catalog", () => {
+  it("has unique ids and includes the default (auto)", () => {
+    const ids = ACCENTS.map((a) => a.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain(DEFAULT_ACCENT);
+    expect(DEFAULT_ACCENT).toBe("auto");
+  });
+
+  it("isAccentId accepts exactly the catalog ids", () => {
+    for (const a of ACCENTS) expect(isAccentId(a.id)).toBe(true);
+    for (const bad of ["", "purple", 7, null, undefined, {}]) {
+      expect(isAccentId(bad)).toBe(false);
+    }
+  });
+});
+
+describe("accent preference", () => {
+  it("defaults to auto when nothing is stored", () => {
+    expect(loadAccentPref()).toBe("auto");
+  });
+
+  it("round-trips a stored choice", () => {
+    saveAccentPref("violet");
+    expect(loadAccentPref()).toBe("violet");
+  });
+
+  it("falls back on unknown values and stays silent on storage errors", () => {
+    g.localStorage!.setItem("csx.accent", "chartreuse");
+    expect(loadAccentPref()).toBe("auto");
+    g.localStorage = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+      setItem: () => {
+        throw new Error("denied");
+      },
+    } as unknown as FakeStorage;
+    expect(loadAccentPref()).toBe("auto");
+    expect(() => saveAccentPref("rose")).not.toThrow();
   });
 });

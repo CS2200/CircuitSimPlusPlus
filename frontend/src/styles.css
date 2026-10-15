@@ -90,6 +90,118 @@
   --accent: #7aa2ff;
 }
 
+/* Midnight: deep navy with a soft blue glow (Settings pass). */
+[data-theme="midnight"] {
+  color-scheme: dark;
+
+  --bg: #0a0f1e;
+  --grid: #16203a;
+  --panel: #101728;
+  --panel-border: #223052;
+  --text: #e8ecf7;
+  --text-dim: #8f9cb8;
+
+  --wire-low: #4f8fe0;
+  --wire-high: #34d399;
+  --wire-x: #f87171;
+  --wire-z: #64748b;
+  --wire-disconnected: #1a2338;
+
+  --bus-a: #fbbf24;
+  --bus-b: #a78bfa;
+  --bus-c: #22d3ee;
+  --bus-d: #f472b6;
+  --bus-e: #a3e635;
+
+  --violation: #fb923c;
+
+  --accent: #6d9eff;
+}
+
+/* High contrast: stark black + yellow, tuned for maximum luminance
+ * separation (the D8 accessibility palette drop-in). */
+[data-theme="contrast"] {
+  color-scheme: dark;
+
+  --bg: #000000;
+  --grid: #1c1c1c;
+  --panel: #0c0c0c;
+  --panel-border: #6e6e6e;
+  --text: #ffffff;
+  --text-dim: #d0d0d0;
+
+  --wire-low: #5aa7ff;
+  --wire-high: #ffd400;
+  --wire-x: #ff4d4d;
+  --wire-z: #b8b8b8;
+  --wire-disconnected: #3a3a3a;
+
+  --bus-a: #ffd400;
+  --bus-b: #6ee7ff;
+  --bus-c: #b388ff;
+  --bus-d: #ff8ad8;
+  --bus-e: #b2ff59;
+
+  --violation: #ff9e40;
+
+  --accent: #ffd400;
+}
+
+/* Paper: warm, low-glare light workspace (Settings pass). */
+[data-theme="paper"] {
+  color-scheme: light;
+
+  --bg: #f7f4ec;
+  --grid: #e9e3d3;
+  --panel: #fffdf8;
+  --panel-border: #ddd5c2;
+  --text: #2a2620;
+  --text-dim: #6b6353;
+
+  --wire-low: #6f9bd1;
+  --wire-high: #2f9e44;
+  --wire-x: #d64541;
+  --wire-z: #9a9288;
+  --wire-disconnected: #d8d2c4;
+
+  --bus-a: #c08a1e;
+  --bus-b: #8a5cc4;
+  --bus-c: #1f9aa8;
+  --bus-d: #c25f8a;
+  --bus-e: #6f9a33;
+
+  --violation: #c86a1e;
+
+  --accent: #b25a2a;
+}
+
+/* Accent color overrides (Settings → Accent color). Declared after all
+ * theme blocks so the single `data-accent` attribute selector wins; "auto"
+ * sets no block and keeps the theme's own accent. */
+[data-accent="blue"] {
+  --accent: #5b8def;
+}
+
+[data-accent="violet"] {
+  --accent: #8b5cf6;
+}
+
+[data-accent="teal"] {
+  --accent: #14b8a6;
+}
+
+[data-accent="green"] {
+  --accent: #22c55e;
+}
+
+[data-accent="amber"] {
+  --accent: #f59e0b;
+}
+
+[data-accent="rose"] {
+  --accent: #f43f5e;
+}
+
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -143,38 +255,75 @@ body {
   background: var(--bg);
 }
 
-.app-header {
+/* ---- top bar (VSCode-style: menus left, action icons right) ---- */
+
+.topbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.45rem 1rem;
+  align-items: stretch;
+  padding: 2px 6px 0;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
+  user-select: none;
 }
 
-.app-header h1 {
-  font-size: 1.05rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  margin: 0;
+/* The app title stays in the accessibility tree but is not drawn (the
+ * top bar itself is the chrome, VSCode-style). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.header-actions button {
-  background: var(--accent);
-  color: #fff;
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding-bottom: 2px;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
   border: none;
-  border-radius: 8px;
-  padding: 0.35rem 0.8rem;
+  border-radius: 6px;
   cursor: pointer;
 }
 
-.header-actions button:hover:not(:disabled) {
-  filter: brightness(1.1);
+.icon-btn:hover:not(:disabled) {
+  background: var(--grid);
 }
 
-.header-actions button:active:not(:disabled) {
+.icon-btn:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-btn svg {
+  display: block;
+}
+
+.topbar-sep {
+  width: 1px;
+  align-self: center;
+  height: 16px;
+  background: var(--panel-border);
+  margin: 0 4px;
 }
 
 .app-main {
@@ -184,36 +333,40 @@ body {
 }
 
 .palette {
-  width: 190px;
+  width: 244px;
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--panel-border);
-  padding: 8px;
+  padding: 10px;
 }
 
 .palette-group {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .palette-group-title {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--text-dim);
-  margin: 4px 2px;
+  margin: 6px 3px 6px;
 }
 
 .palette-item {
   display: inline-block;
-  margin: 2px;
-  padding: 4px 10px;
-  min-width: 52px;
+  margin: 3px;
+  padding: 0.55rem 0.6rem;
+  min-width: 102px;
+  min-height: 2.5rem;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: grab;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
 .palette-item:hover {
@@ -231,35 +384,15 @@ body {
   position: relative;
 }
 
-.header-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.header-actions button.secondary {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-}
-
-.header-actions button.secondary:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.header-actions button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* ---- menu bar ---- */
+/* ---- menu bar (inside the top bar) ---- */
 
 .menubar {
   display: flex;
   align-items: stretch;
   gap: 2px;
-  padding: 0 0.5rem;
-  background: var(--panel);
-  border-bottom: 1px solid var(--panel-border);
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
   user-select: none;
 }
 
@@ -348,6 +481,7 @@ body {
 
 .menubar-path {
   margin-left: auto;
+  margin-right: 8px;
   align-self: center;
   color: var(--text-dim);
   font-size: 0.8rem;
@@ -614,8 +748,8 @@ body {
   border: 1px solid var(--panel-border);
   border-radius: 12px;
   padding: 1rem 1.2rem 1.2rem;
-  width: min(30rem, calc(100vw - 2rem));
-  max-height: min(80vh, 34rem);
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: min(85vh, 40rem);
   overflow-y: auto;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
 }
@@ -720,6 +854,119 @@ body {
   right: 0.5rem;
   color: var(--accent);
   font-size: 0.8rem;
+}
+
+/* Accent color swatches (Settings → Appearance). */
+.accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.accent-swatch {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--grid);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.accent-swatch:hover {
+  border-color: var(--accent);
+}
+
+.accent-swatch.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Toggle rows (Settings → Canvas / Startup). */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  margin: 0 0 0.45rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.settings-toggle:hover {
+  border-color: var(--accent);
+}
+
+.settings-toggle input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 2rem;
+  height: 1.1rem;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--grid);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.settings-toggle input::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transform: translateY(-50%);
+  transition:
+    left 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.settings-toggle input:checked {
+  background: color-mix(in srgb, var(--accent) 35%, var(--bg));
+  border-color: var(--accent);
+}
+
+.settings-toggle input:checked::after {
+  left: calc(100% - 0.9rem);
+  background: var(--accent);
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--panel-border);
+}
+
+.settings-foot button {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.settings-foot button:hover {
+  border-color: var(--accent);
 }
 
 .canvas-host {

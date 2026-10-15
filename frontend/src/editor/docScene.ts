@@ -1,5 +1,5 @@
 import type { CircuitDocument } from "../model/document";
-import type { CsxCircuit, CsxComponent, CsxWire } from "../model/csx";
+import type { CsxCircuit, CsxComponent, CsxWire, Rotation } from "../model/csx";
 import { isPinEndpoint } from "../model/csx";
 import { deriveNets, type NetDerivation, type NetInfo } from "../model/nets";
 import type { SelectionModel } from "../model/selection";
@@ -12,7 +12,7 @@ import {
   type Rect,
   type Vec2,
 } from "../render/geom";
-import { rectPath, roundedPath } from "../render/paths";
+import { rectPath, roundedPath, wirePath } from "../render/paths";
 import type { PathCmd, Renderer, WireState } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
@@ -124,6 +124,7 @@ const WIRE_BUS = 0.3;
 const PIN_R = 0.22;
 const PICK_TOL = 0.45;
 const PIN_TOL = 0.55;
+const CORNER_TOL = 0.4;
 
 export class DocScene {
   private circuitIdx = -1;
@@ -152,18 +153,22 @@ export class DocScene {
     this.components = c.components;
     this.wires = c.wires;
     this.layouts = new Map(c.components.map((x) => [x.id, compLayout(x, this.circuits)]));
-    this.wirePaths = c.wires.map((w) => roundedPath(w.points.map(p2v), WIRE_RADIUS));
-    this.junctionDots = [];
-    for (const w of c.wires) {
-      if (!isPinEndpoint(w.b)) this.junctionDots.push(p2v(w.points[w.points.length - 1]));
-      if (!isPinEndpoint(w.a)) this.junctionDots.push(p2v(w.points[0]));
-    }
+    // Spatial index first: crossing hops for the wire paths need it.
     this.wireIndex = new UniformGrid(CELL);
     c.wires.forEach((w, i) => {
       for (let s = 0; s + 1 < w.points.length; s++) {
         this.wireIndex.insert(i, pointsBounds([p2v(w.points[s]), p2v(w.points[s + 1])]));
       }
     });
+    // Wire paths, with a hop where this wire crosses an earlier one
+    // (crossing ≠ junction; the hop makes that visible, DESIGN.md §5.2).
+    const hops = this.crossingHops(c.wires);
+    this.wirePaths = c.wires.map((w, i) => wirePath(w.points.map(p2v), WIRE_RADIUS, hops[i]));
+    this.junctionDots = [];
+    for (const w of c.wires) {
+      if (!isPinEndpoint(w.b)) this.junctionDots.push(p2v(w.points[w.points.length - 1]));
+      if (!isPinEndpoint(w.a)) this.junctionDots.push(p2v(w.points[0]));
+    }
     this.nets = deriveNets(c);
     this.wireNetId = c.wires.map((_, i) => this.nets.wireToNet.get(i));
     this.wireBits = c.wires.map((_, i) => {
@@ -257,6 +262,102 @@ export class DocScene {
 
   wiresInNet(netId: number): readonly number[] {
     return this.nets.nets[netId]?.wires ?? [];
+  }
+
+  // ---- routing support (editor/route.ts inputs) ----
+
+  /** Outward facing of a pin (which body edge it sits on); null if gone. */
+  pinFacing(compId: string, pin: string): Rotation | null {
+    const layout = this.layouts.get(compId);
+    return layout?.pins.find((p) => p.name === pin)?.facing ?? null;
+  }
+
+  /** Component body rect in world units; null if the component is gone. */
+  rectOf(compId: string): Rect | null {
+    return this.layouts.get(compId)?.rect ?? null;
+  }
+
+  /** Endpoints of one wire segment (junction approach directions). */
+  segmentPoints(wireIdx: number, segment: number): { a: Vec2; b: Vec2 } | null {
+    const w = this.wires[wireIdx];
+    if (w === undefined || segment < 0 || segment + 1 >= w.points.length) return null;
+    return { a: p2v(w.points[segment]), b: p2v(w.points[segment + 1]) };
+  }
+
+  /** Nearest interior bend point of a wire (corner-drag handles). */
+  pickWireCorner(
+    world: Vec2,
+    tol = CORNER_TOL,
+  ): { wireIdx: number; pointIdx: number; point: Vec2 } | null {
+    const candidates = this.wireIndex.queryRect(inflateRect(pointRect(world), tol));
+    let best: { d: number; wireIdx: number; pointIdx: number } | null = null;
+    for (const i of candidates) {
+      const pts = this.wires[i].points;
+      for (let k = 1; k + 1 < pts.length; k++) {
+        const d = Math.hypot(world.x - pts[k][0], world.y - pts[k][1]);
+        if (d <= tol && (best === null || d < best.d)) {
+          best = { d, wireIdx: i, pointIdx: k };
+        }
+      }
+    }
+    if (best === null) return null;
+    return {
+      wireIdx: best.wireIdx,
+      pointIdx: best.pointIdx,
+      point: p2v(this.wires[best.wireIdx].points[best.pointIdx]),
+    };
+  }
+
+  /**
+   * Floating rotate button above the current component selection: centered
+   * over the selection's bounding box, one grid unit above its top edge.
+   * Null for an empty/invalid selection (the caller draws and hit-tests it).
+   */
+  rotateButtonFor(ids: Iterable<string>): { center: Vec2; r: number } | null {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let any = false;
+    for (const id of ids) {
+      const rect = this.layouts.get(id)?.rect;
+      if (rect === undefined) continue;
+      any = true;
+      minX = Math.min(minX, rect.x);
+      maxX = Math.max(maxX, rect.x + rect.w);
+      minY = Math.min(minY, rect.y);
+    }
+    if (!any) return null;
+    return { center: { x: (minX + maxX) / 2, y: minY - 1.15 }, r: 0.62 };
+  }
+
+  /**
+   * Crossing points per wire index: where wire `i` crosses wire `j > i` at
+   * a strict interior of both segments, the later wire `j` gets a hop
+   * (rendering only; connectivity is untouched). Shared endpoints and
+   * junction meeting points never hop.
+   */
+  private crossingHops(wires: readonly CsxWire[]): { at: Vec2; axis: "h" | "v" }[][] {
+    const hops: { at: Vec2; axis: "h" | "v" }[][] = wires.map(() => []);
+    const seen = new Set<string>();
+    wires.forEach((wi, i) => {
+      for (let s = 0; s + 1 < wi.points.length; s++) {
+        const a = p2v(wi.points[s]);
+        const b = p2v(wi.points[s + 1]);
+        for (const j of this.wireIndex.queryRect(pointsBounds([a, b]))) {
+          if (j <= i) continue;
+          const wj = wires[j];
+          for (let t = 0; t + 1 < wj.points.length; t++) {
+            const hit = crossingPoint(a, b, p2v(wj.points[t]), p2v(wj.points[t + 1]));
+            if (hit === null) continue;
+            const key = `${j}:${hit.at.x}:${hit.at.y}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            hops[j].push(hit);
+          }
+        }
+      }
+    });
+    return hops;
   }
 
   // ---- drawing ----
@@ -447,6 +548,36 @@ export class DocScene {
 
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);
+
+    // Corner handles on selected wires (bend dragging).
+    if (selection.wires.size > 0) {
+      const corners: Vec2[] = [];
+      for (const i of selection.wires) {
+        const pts = this.wires[i]?.points;
+        if (pts === undefined) continue;
+        for (let k = 1; k + 1 < pts.length; k++) corners.push(p2v(pts[k]));
+      }
+      if (corners.length > 0) renderer.drawDots(corners, PIN_R * 0.8, theme.accent);
+    }
+
+    // Floating rotate button above the component selection (hidden while
+    // wiring/placing, when a click on it would be ambiguous).
+    if (overlay.wireInProgress === null && overlay.placing === null) {
+      const btn = this.rotateButtonFor(selection.components);
+      if (btn !== null) {
+        renderer.drawPath(circlePath(btn.center.x, btn.center.y, btn.r), { fill: theme.panel });
+        renderer.drawPath(circlePath(btn.center.x, btn.center.y, btn.r), {
+          stroke: theme.accent,
+          lineWidth: 0.12,
+        });
+        renderer.drawText(btn.center.x, btn.center.y + 0.04, "↻", {
+          color: theme.accent,
+          size: btn.r * 1.3,
+          align: "center",
+        });
+        renderer.flush();
+      }
+    }
 
     // Propagation pulses (U7): a dot traveling each changed wire.
     if (sim?.pulses != null && sim.pulses.length > 0) {
@@ -642,6 +773,35 @@ function inferNetBits(
 
 function p2v(p: [number, number]): Vec2 {
   return { x: p[0], y: p[1] };
+}
+
+/**
+ * Strict-interior crossing of two axis-aligned segments, if any. `axis` is
+ * the axis of the second segment (the wire that will hop: horizontal wires
+ * bump up, vertical wires bump right). Parallel, degenerate (legacy
+ * diagonal) and endpoint-touching configurations return null.
+ */
+function crossingPoint(a: Vec2, b: Vec2, c: Vec2, d: Vec2): { at: Vec2; axis: "h" | "v" } | null {
+  const EPS = 1e-6;
+  const abH = Math.abs(a.y - b.y) < 1e-9;
+  const abV = Math.abs(a.x - b.x) < 1e-9;
+  const cdH = Math.abs(c.y - d.y) < 1e-9;
+  const cdV = Math.abs(c.x - d.x) < 1e-9;
+  if (abH && cdV) {
+    const x = c.x;
+    const y = a.y;
+    const inA = x > Math.min(a.x, b.x) + EPS && x < Math.max(a.x, b.x) - EPS;
+    const inC = y > Math.min(c.y, d.y) + EPS && y < Math.max(c.y, d.y) - EPS;
+    return inA && inC ? { at: { x, y }, axis: "v" } : null;
+  }
+  if (abV && cdH) {
+    const x = a.x;
+    const y = c.y;
+    const inA = y > Math.min(a.y, b.y) + EPS && y < Math.max(a.y, b.y) - EPS;
+    const inC = x > Math.min(c.x, d.x) + EPS && x < Math.max(c.x, d.x) - EPS;
+    return inA && inC ? { at: { x, y }, axis: "h" } : null;
+  }
+  return null;
 }
 
 /** Rotate one point about a center (same convention as layout.ts). */

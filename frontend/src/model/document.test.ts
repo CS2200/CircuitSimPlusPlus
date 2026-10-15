@@ -108,20 +108,122 @@ describe("component ops", () => {
     expect(doc.addComponent(0, { type: "gate.xor", pos: [8, 0] })).toBe("c3");
   });
 
-  it("moveComponent translates pos and glues attached wire endpoints", () => {
+  it("moveComponent translates pos and repairs attached wire endpoints", () => {
     const { doc, c, and, not, w0, w1 } = fixture();
     doc.moveComponent(c, and, { x: 2, y: 3 });
     const circuit = doc.circuit(c);
     expect(circuit.components.find((x) => x.id === and)?.pos).toEqual([7, 8]);
-    // w0's a-side point is glued to the moved component; b-side is not
+    // w0's a-side point is glued to the moved component; the adjacent bend
+    // is slid so the wire still leaves the pin orthogonally (no diagonals)
     expect(circuit.wires[w0].points[0]).toEqual([10, 9]);
-    expect(circuit.wires[w0].points[1]).toEqual([15, 6]);
-    // w1 is attached to `not`, not `and` — untouched
+    expect(circuit.wires[w0].points[1]).toEqual([15, 9]);
+    // w1 junctions onto w0[0]: its terminal follows the moved segment
+    // (re-projected onto (10,9)→(15,9), end segment stays square)
     expect(circuit.wires[w1].points).toEqual([
       [16, 6],
-      [10, 6],
+      [16, 9],
+      [10, 9],
     ]);
     void not;
+  });
+
+  it("dragging diagonally keeps a bent wire orthogonal (bend slides)", () => {
+    const doc = CircuitDocument.create();
+    const and = doc.addComponent(0, { type: "gate.and", pos: [5, 5] });
+    const not = doc.addComponent(0, { type: "gate.not", pos: [15, 5] });
+    doc.addWire(0, {
+      a: { comp: and, pin: "out" },
+      b: { comp: not, pin: "in" },
+      points: [
+        [8, 6],
+        [12, 6],
+        [12, 10],
+      ],
+    });
+    doc.moveComponent(0, and, { x: 2, y: 3 });
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [10, 9],
+      [12, 9],
+      [12, 10],
+    ]);
+  });
+
+  it("dragging a 2-point wire diagonally splices in a corner", () => {
+    const doc = CircuitDocument.create();
+    const and = doc.addComponent(0, { type: "gate.and", pos: [5, 5] });
+    const not = doc.addComponent(0, { type: "gate.not", pos: [15, 5] });
+    doc.addWire(0, {
+      a: { comp: and, pin: "out" },
+      b: { comp: not, pin: "in" },
+      points: [
+        [8, 6],
+        [15, 6],
+      ],
+    });
+    doc.moveComponent(0, and, { x: 2, y: 3 });
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [10, 9],
+      [15, 9],
+      [15, 6],
+    ]);
+  });
+
+  it("rotating a component follows its pins (pinGeometry hook)", () => {
+    const doc = CircuitDocument.create();
+    const and = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const not = doc.addComponent(0, { type: "gate.not", pos: [10, 0] });
+    doc.addWire(0, {
+      a: { comp: and, pin: "out" },
+      b: { comp: not, pin: "in" },
+      points: [
+        [5, 1.5],
+        [10, 1.5],
+        [10, 1],
+      ],
+    });
+    // Editor knowledge (fake): on S the out pin jumps to the bottom edge.
+    doc.pinGeometry = (comp, pin) =>
+      pin === "out"
+        ? comp.rot === "S"
+          ? { pos: [1.5, 5] as [number, number], facing: "S" as const }
+          : { pos: [5, 1.5] as [number, number], facing: "E" as const }
+        : null;
+    doc.rotateComponents(0, new Set([and]));
+    const pts = doc.circuit(0).wires[0].points;
+    expect(pts[0]).toEqual([1.5, 5]); // re-anchored to the new pin position
+    expect(pts.at(-1)).toEqual([10, 1]); // far end untouched
+    for (let i = 1; i < pts.length; i++) {
+      const dx = pts[i][0] - pts[i - 1][0];
+      const dy = pts[i][1] - pts[i - 1][1];
+      expect(dx === 0 || dy === 0, "stays orthogonal").toBe(true);
+      expect(dx !== 0 || dy !== 0, "no zero-length segments").toBe(true);
+    }
+  });
+
+  it("rotating without the pinGeometry hook leaves wires untouched", () => {
+    const { doc, c, and, w0 } = fixture();
+    const before = JSON.stringify(doc.circuit(c).wires[w0].points);
+    doc.rotateComponents(c, new Set([and]));
+    expect(JSON.stringify(doc.circuit(c).wires[w0].points)).toBe(before);
+  });
+
+  it("editing a route re-projects junction children onto the changed segment", () => {
+    const { doc, c, w0, w1, w2 } = fixture();
+    doc.updateWirePoints(c, w0, [
+      [8, 8],
+      [15, 8],
+    ]);
+    // child terminal lands on the new segment; its end segment stays square
+    expect(doc.circuit(c).wires[w1].points).toEqual([
+      [16, 6],
+      [16, 8],
+      [10, 8],
+    ]);
+    // grandchild joins the child — its point is still a valid target
+    expect(doc.circuit(c).wires[w2].points).toEqual([
+      [30, 11],
+      [16, 6],
+    ]);
   });
 
   it("consecutive moves of the same component coalesce into one undo step", () => {

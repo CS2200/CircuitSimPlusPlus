@@ -28,4 +28,29 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "light");
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.locator('[data-theme-option="light"]')).toHaveAttribute("aria-checked", "true");
+
+  // Accent color applies through data-accent and persists.
+  await page.locator('[data-accent-option="violet"]').click();
+  await expect(page.locator(".app")).toHaveAttribute("data-accent", "violet");
+  expect(await page.evaluate(() => localStorage.getItem("csx.accent"))).toBe("violet");
+
+  // Behavior toggles persist too (pulses off).
+  await page.getByLabel("Animate signal pulses").uncheck();
+  expect(await page.evaluate(() => localStorage.getItem("csx.pulses"))).toBe("0");
+
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await expect(page.locator(".app")).toHaveAttribute("data-accent", "violet");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator('[data-accent-option="violet"]')).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(page.getByLabel("Animate signal pulses")).not.toBeChecked();
+
+  // Reset to defaults restores the shipped appearance.
+  await page.getByRole("button", { name: "Reset to defaults" }).click();
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled");
+  await expect(page.locator(".app")).toHaveAttribute("data-accent", "auto");
+  await expect(page.getByLabel("Animate signal pulses")).toBeChecked();
 });

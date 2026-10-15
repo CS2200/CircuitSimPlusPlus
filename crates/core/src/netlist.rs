@@ -725,6 +725,11 @@ impl<'a> Expander<'a> {
 /// per consecutive `points` pair; a single fallback segment when `points`
 /// is empty, per the Manhattan endpoint-distance rule — see
 /// docs/delay-table.md).
+///
+/// Fractional (sub-grid) coordinates — component pins may sit on
+/// half/finer positions — are quantized to whole grid units here: the
+/// transport delay is a documented approximation ("≈ 1 ns per N grid
+/// units") and all engine timing math is integer-ns throughout.
 fn wire_segments(
     circuit: &Circuit,
     by_id: &BTreeMap<&str, usize>,
@@ -734,7 +739,10 @@ fn wire_segments(
         return wire
             .points
             .windows(2)
-            .map(|w| w[0][0].abs_diff(w[1][0]) + w[0][1].abs_diff(w[1][1]))
+            .map(|w| {
+                let manhattan = (w[1][0] - w[0][0]).abs() + (w[1][1] - w[0][1]).abs();
+                manhattan.round() as u32
+            })
             .collect();
     }
     let pos = |ep: &Endpoint| -> Option<[i32; 2]> {
@@ -1024,6 +1032,25 @@ mod tests {
         }"##;
         let nl = build_json(json).unwrap();
         assert_eq!(nl.nets[0].wire_len, 0);
+    }
+
+    #[test]
+    fn fractional_wire_geometry_quantizes_to_whole_units() {
+        // Half-grid points: [0,0]→[5,0] = 5 exactly; [5,0]→[5,1.5] = 1.5
+        // quantized to 2 (transport delay is integer-ns approximate).
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
+            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
+                {"id":"p","type":"wiring.probe","pos":[10,0]}
+            ], "wires": [
+                {"a":{"comp":"src","pin":"pin"},"b":{"comp":"p","pin":"in"},
+                 "points":[[0,0],[5,0],[5,1.5]]}
+            ]}]
+        }"##;
+        let nl = build_json(json).unwrap();
+        assert_eq!(nl.nets[0].wire_len, 5 + 2);
     }
 
     use super::*;

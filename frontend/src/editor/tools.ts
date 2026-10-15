@@ -1,5 +1,5 @@
 import type { CircuitDocument } from "../model/document";
-import type { CsxComponent, CsxEndpoint, CsxWire } from "../model/csx";
+import type { CsxComponent, CsxEndpoint, CsxWire, Rotation } from "../model/csx";
 import { isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
@@ -7,6 +7,7 @@ import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation } from "./layout";
 import type { DocScene, Hit, SceneOverlay } from "./docScene";
+import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } from "./route";
 
 /**
  * ToolMachine (FRONTEND.md U3): the editor interaction state machine,
@@ -19,13 +20,18 @@ import type { DocScene, Hit, SceneOverlay } from "./docScene";
  *  - click component/wire      select (Shift toggles)
  *  - drag component body       move selection, wires glued (one undo step)
  *  - click a pin               start wiring: every further CLICK plants a
- *                              bend exactly where clicked; finish on a pin,
- *                              or drop onto a wire → junction dot; Esc /
- *                              right-click cancels. Dragging from a pin is
- *                              the same as clicking it — releasing the
- *                              button never commits anything (click-driven
- *                              routing only; UX decision).
+ *                              bend exactly where clicked; the route leaves
+ *                              pins along their facing and enters targets
+ *                              from the correct side (editor/route.ts);
+ *                              X flips the corner preference; finish on a
+ *                              pin, or drop onto a wire → junction dot;
+ *                              Esc / right-click cancels. Dragging from a
+ *                              pin is the same as clicking it — releasing
+ *                              the button never commits anything
+ *                              (click-driven routing only; UX decision).
  *  - drag from a wire          start wiring with a junction at the press point
+ *  - drag a wire bend          re-route the two adjacent legs through the
+ *                              dragged point (corner handles select the wire)
  *  - R rotate · Del delete · Ctrl+C/V copy-paste · Ctrl+A select all
  *    (undo/redo and key dispatch live in EditorCanvas/App)
  *
@@ -42,19 +48,26 @@ type DragState =
       wireStart: { wireIdx: number; segment: number; point: Vec2 } | null;
     }
   | { kind: "dragging"; start: Vec2; applied: Vec2 }
+  | { kind: "wire-bend"; wireIdx: number; pointIdx: number; original: [number, number][] }
   | { kind: "boxing"; start: Vec2; current: Vec2; additive: boolean };
 
 interface WiringState {
   from: CsxEndpoint;
+  /** Start-end routing context: pin facing + body, or junction exit dir. */
+  startDir: Rotation | null;
+  startBody: Rect | null;
   /** Planted anchor points (first = the from-endpoint coordinate). */
   anchors: Vec2[];
   cursor: Vec2;
+  /** X key while routing: prefer turning early (corner flip). */
+  flip: boolean;
 }
 
 /**
- * Orthogonal route between two anchors: zero points when already aligned,
- * else one corner — horizontal-first when |dx| ≥ |dy| (wires look
- * circuit-like, never diagonal).
+ * Orthogonal route between two free anchors: zero points when already
+ * aligned, else one corner — horizontal-first when |dx| ≥ |dy|. Superseded
+ * by editor/route.ts for all editor legs; kept for its unit contract and
+ * for callers that genuinely have no facing/obstacle context.
  */
 export function manhattanRoute(a: Vec2, b: Vec2): Vec2[] {
   const dx = b.x - a.x;
@@ -63,13 +76,23 @@ export function manhattanRoute(a: Vec2, b: Vec2): Vec2[] {
   return Math.abs(dx) >= Math.abs(dy) ? [{ x: b.x, y: a.y }] : [{ x: a.x, y: b.y }];
 }
 
-function dedupPoints(points: Vec2[]): Vec2[] {
-  const out: Vec2[] = [];
-  for (const p of points) {
-    const last = out.at(-1);
-    if (last === undefined || last.x !== p.x || last.y !== p.y) out.push(p);
-  }
-  return out;
+/** Direction of travel between the last two points (null when unknown). */
+function incomingDir(points: readonly Vec2[]): Rotation | null {
+  const n = points.length;
+  if (n < 2) return null;
+  const p = points[n - 2];
+  const q = points[n - 1];
+  if (Math.abs(q.y - p.y) < 1e-9) return q.x > p.x ? "E" : "W";
+  if (Math.abs(q.x - p.x) < 1e-9) return q.y > p.y ? "S" : "N";
+  return null;
+}
+
+function dot2(a: Vec2, b: Vec2): number {
+  return a.x * b.x + a.y * b.y;
+}
+
+function p2v(p: [number, number]): Vec2 {
+  return { x: p[0], y: p[1] };
 }
 
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
@@ -173,12 +196,42 @@ export class ToolMachine {
       return;
     }
 
+    // Floating rotate button above the selection (drawn by DocScene; the
+    // hit area mirrors it — checked before pins so it always wins).
+    const rot = this.scene.rotateButtonFor(this.selection.components);
+    if (rot !== null && Math.hypot(world.x - rot.center.x, world.y - rot.center.y) <= rot.r) {
+      this.rotateSelection();
+      return;
+    }
+
     const pin = this.scene.pickPin(world);
     if (pin !== null) {
       this.wiring = {
         from: { comp: pin.compId, pin: pin.pin },
+        startDir: this.scene.pinFacing(pin.compId, pin.pin),
+        startBody: this.scene.rectOf(pin.compId),
         anchors: [pin.pos],
         cursor: pin.pos,
+        flip: false,
+      };
+      this.changed();
+      return;
+    }
+
+    // Interior bend points of existing wires drag directly (before the
+    // wire-body check, so grabbing a corner never starts a junction wire).
+    const corner = this.scene.pickWireCorner(world);
+    if (corner !== null && !info.shiftKey) {
+      if (!this.selection.hasWire(corner.wireIdx)) {
+        this.selection.set([], [corner.wireIdx]);
+      }
+      this.drag = {
+        kind: "wire-bend",
+        wireIdx: corner.wireIdx,
+        pointIdx: corner.pointIdx,
+        original: this.doc
+          .circuit(this.circuitIdx())
+          .wires[corner.wireIdx].points.map((p) => [p[0], p[1]] as [number, number]),
       };
       this.changed();
       return;
@@ -238,12 +291,25 @@ export class ToolMachine {
         const d = Math.hypot(world.x - this.drag.start.x, world.y - this.drag.start.y);
         if (d <= DRAG_THRESHOLD) break;
         if (this.drag.wireStart !== null) {
-          // drag off a wire → wire starting at a junction on it
+          // drag off a wire → wire starting at a junction on it; the exit
+          // direction is decided once, at gesture start (stable preview)
           const ws = this.drag.wireStart;
+          const seg = this.scene.segmentPoints(ws.wireIdx, ws.segment);
+          const dirs = seg === null ? null : perpendicularDirs(seg.a, seg.b);
+          const dragVec = { x: world.x - ws.point.x, y: world.y - ws.point.y };
+          const startDir =
+            dirs === null
+              ? null
+              : dirs.reduce((best, dir) =>
+                  dot2(dirVector(dir), dragVec) > dot2(dirVector(best), dragVec) ? dir : best,
+                );
           this.wiring = {
             from: { join: { wire: ws.wireIdx, segment: ws.segment } },
+            startDir,
+            startBody: null,
             anchors: [ws.point],
             cursor: world,
+            flip: false,
           };
           this.drag = { kind: "idle" };
         } else {
@@ -262,9 +328,49 @@ export class ToolMachine {
         if (delta.x !== 0 || delta.y !== 0) {
           if (this.selection.components.size > 0) {
             this.doc.moveComponents(this.circuitIdx(), this.selection.components, delta);
+            this.changed();
           }
           this.drag = { ...this.drag, applied: total };
         }
+        break;
+      }
+      case "wire-bend": {
+        // Slide one interior bend point. A corner has no free axis (its
+        // neighbours pin both coordinates), so dragging it re-routes the two
+        // adjacent legs through the new point — recomputed from the drag's
+        // original snapshot every event (stable, orthogonal, pin-aware).
+        const d = this.drag;
+        const circuit = this.doc.circuit(this.circuitIdx());
+        const w = circuit.wires[d.wireIdx];
+        if (w === undefined || d.pointIdx <= 0 || d.pointIdx + 1 >= d.original.length) break;
+        const p = snapPoint(world, 1);
+        const prev = d.original[d.pointIdx - 1];
+        const next = d.original[d.pointIdx + 1];
+        const cur = d.original[d.pointIdx];
+        const stuck =
+          (p.x === prev[0] && p.y === prev[1]) ||
+          (p.x === next[0] && p.y === next[1]) ||
+          (p.x === cur[0] && p.y === cur[1]);
+        if (stuck) break; // keep every segment non-zero-length
+        // Facing/body context when the neighbour IS a wire endpoint (a pin).
+        const ctxA: LegEnd =
+          d.pointIdx === 1 && isPinEndpoint(w.a)
+            ? { dir: this.scene.pinFacing(w.a.comp, w.a.pin), body: this.scene.rectOf(w.a.comp) }
+            : { dir: null, body: null };
+        const ctxB: LegEnd =
+          d.pointIdx === d.original.length - 2 && isPinEndpoint(w.b)
+            ? { dir: this.scene.pinFacing(w.b.comp, w.b.pin), body: this.scene.rectOf(w.b.comp) }
+            : { dir: null, body: null };
+        const leg1 = routeLeg(p2v(prev), ctxA, p, { dir: null, body: null });
+        const leg2 = routeLeg(p, { dir: null, body: null }, p2v(next), ctxB);
+        const points: [number, number][] = cleanPolyline([
+          ...d.original.slice(0, d.pointIdx).map(p2v),
+          ...leg1.slice(1),
+          ...leg2.slice(1),
+          ...d.original.slice(d.pointIdx + 1).map(p2v),
+        ]).map((q) => [q.x, q.y]);
+        this.doc.updateWirePoints(this.circuitIdx(), d.wireIdx, points);
+        this.changed();
         break;
       }
       case "boxing":
@@ -409,12 +515,67 @@ export class ToolMachine {
 
   // ---- internals ----
 
-  /** The ghost route: planted anchors + manhattan-routed segment to the cursor. */
+  /** X while routing: flip the corner preference of the leg being drawn. */
+  flipRoute(): void {
+    if (this.wiring === null) return;
+    this.wiring.flip = !this.wiring.flip;
+    this.changed();
+  }
+
+  /** The ghost route: planted anchors + the leg to the cursor/target. */
   private routePreview(): Vec2[] {
-    const w = this.wiring!;
+    return this.buildRoute(this.wiring!, this.wiring!.cursor).points;
+  }
+
+  /**
+   * Route through the planted anchors to `world`. Finishing on a pin uses
+   * the pin's facing; dropping onto a wire enters perpendicular to it;
+   * otherwise the leg follows the snapped cursor.
+   */
+  private buildRoute(
+    w: WiringState,
+    world: Vec2,
+  ): { points: Vec2[]; finish: { b: CsxEndpoint; endPos: Vec2 } | null } {
     const last = w.anchors.at(-1)!;
-    const cursor = snapPoint(w.cursor, 1);
-    return dedupPoints([...w.anchors, ...manhattanRoute(last, cursor), cursor]);
+    const firstLeg = w.anchors.length === 1;
+    const aEnd: LegEnd = firstLeg
+      ? { dir: w.startDir, body: w.startBody }
+      : { dir: null, body: null };
+    const incoming = incomingDir(w.anchors);
+
+    const pin = this.scene.pickPin(world);
+    if (
+      pin !== null &&
+      !(isPinEndpoint(w.from) && w.from.comp === pin.compId && w.from.pin === pin.pin)
+    ) {
+      const bEnd: LegEnd = {
+        dir: this.scene.pinFacing(pin.compId, pin.pin),
+        body: this.scene.rectOf(pin.compId),
+      };
+      const leg = routeLeg(last, aEnd, pin.pos, bEnd, { flip: w.flip, incoming });
+      return {
+        points: cleanPolyline([...w.anchors, ...leg.slice(1)]),
+        finish: { b: { comp: pin.compId, pin: pin.pin }, endPos: pin.pos },
+      };
+    }
+    const wire = this.scene.pickWire(world);
+    if (wire !== null) {
+      const seg = this.scene.segmentPoints(wire.wireIdx, wire.segment);
+      const dirs = seg === null ? null : perpendicularDirs(seg.a, seg.b);
+      const ends: LegEnd[] =
+        dirs === null ? [{ dir: null, body: null }] : dirs.map((dir) => ({ dir, body: null }));
+      const leg = routeLeg(last, aEnd, wire.point, ends, { flip: w.flip, incoming });
+      return {
+        points: cleanPolyline([...w.anchors, ...leg.slice(1)]),
+        finish: {
+          b: { join: { wire: wire.wireIdx, segment: wire.segment } },
+          endPos: wire.point,
+        },
+      };
+    }
+    const cursor = snapPoint(world, 1);
+    const leg = routeLeg(last, aEnd, cursor, { dir: null, body: null }, { flip: w.flip, incoming });
+    return { points: cleanPolyline([...w.anchors, ...leg.slice(1)]), finish: null };
   }
 
   /** Click while wiring: finish on a pin/wire, else plant a bend. */
@@ -424,42 +585,24 @@ export class ToolMachine {
 
   /**
    * Finish the wire when `world` is on a valid target (a pin that isn't the
-   * start pin, or a wire → junction); otherwise plant a bend.
+   * start pin, or a wire → junction); otherwise plant a waypoint.
    */
   private finishOrBend(world: Vec2): void {
     const w = this.wiring!;
-    // finish on a pin (but never the pin we started from)?
-    const pin = this.scene.pickPin(world);
-    if (
-      pin !== null &&
-      !(isPinEndpoint(w.from) && w.from.comp === pin.compId && w.from.pin === pin.pin)
-    ) {
-      this.commitWire(w, { comp: pin.compId, pin: pin.pin }, pin.pos);
+    const { points, finish } = this.buildRoute(w, world);
+    if (finish !== null) {
+      this.commitWire(w, finish.b, points);
       return;
     }
-    // finish by dropping onto a wire (junction dot, DESIGN.md §5.2)?
-    const wire = this.scene.pickWire(world);
-    if (wire !== null) {
-      this.commitWire(w, { join: { wire: wire.wireIdx, segment: wire.segment } }, wire.point);
-      return;
-    }
-    // otherwise plant a bend (the full manhattan-routed segment)
-    const last = w.anchors.at(-1)!;
-    const cursor = snapPoint(world, 1);
-    w.anchors.push(...manhattanRoute(last, cursor), cursor);
+    w.anchors.push(...points.slice(1));
     this.changed();
   }
 
-  private commitWire(w: WiringState, b: CsxEndpoint, endPos: Vec2): void {
-    const last = w.anchors.at(-1)!;
-    const points: [number, number][] = dedupPoints([
-      ...w.anchors,
-      ...manhattanRoute(last, endPos),
-      endPos,
-    ]).map((p) => [p.x, p.y]);
-    if (points.length >= 2) {
+  private commitWire(w: WiringState, b: CsxEndpoint, points: readonly Vec2[]): void {
+    const pts: [number, number][] = points.map((p) => [p.x, p.y]);
+    if (pts.length >= 2) {
       try {
-        this.doc.addWire(this.circuitIdx(), { a: w.from, b, points });
+        this.doc.addWire(this.circuitIdx(), { a: w.from, b, points: pts });
       } catch {
         // invalid wire (e.g. onto itself): abort quietly
       }

@@ -56,6 +56,7 @@ export interface EditorHandle {
   deleteSelection(): void;
   copy(): void;
   paste(): void;
+  selectAll(): void;
 }
 
 export default forwardRef<
@@ -75,6 +76,8 @@ export default forwardRef<
     pathIds?: readonly string[] | null;
     /** Setup/hold violation markers for the current sheet (U7). */
     violations?: readonly ViolationMarker[] | null;
+    /** Signal-pulse animation (Settings → Canvas); default on. */
+    pulsesOn?: boolean;
   }
 >(function EditorCanvas(
   {
@@ -87,6 +90,7 @@ export default forwardRef<
     sim,
     pathIds,
     violations,
+    pulsesOn = true,
   },
   ref,
 ) {
@@ -155,10 +159,13 @@ export default forwardRef<
         const store = sim.store;
         const highlight = sim.haltHighlight();
         // Pulse spawn: once per flushed frame, in delay mode at low speed
-        // (manual steps always qualify — that's the teaching view).
+        // (manual steps always qualify — that's the teaching view); gated
+        // by the Settings → Canvas toggle.
         const st = store.status;
         const pulseOk =
-          st?.mode !== "zero" && (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
+          pulsesOn &&
+          st?.mode !== "zero" &&
+          (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
         if (pulseOk && store.lastChanged !== lastPulseChanges.current) {
           lastPulseChanges.current = store.lastChanged;
           if (store.lastChanged.length > 0) {
@@ -188,7 +195,7 @@ export default forwardRef<
       scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
-    [doc, scene, sel, tool, sim, simVersion, pathIds, violations, pulses, pulsesLive],
+    [doc, scene, sel, tool, sim, simVersion, pathIds, violations, pulses, pulsesLive, pulsesOn],
   );
 
   const report = useCallback(() => {
@@ -231,6 +238,7 @@ export default forwardRef<
       else if (e.key === "Escape") tool.cancel();
       else if (e.key === "Delete" || e.key === "Backspace") tool.deleteSelection();
       else if (e.key.toLowerCase() === "r" && !mod) tool.rotateSelection();
+      else if (e.key.toLowerCase() === "x" && !mod) tool.flipRoute();
       else handled = false;
       if (handled) {
         e.preventDefault();
@@ -290,6 +298,10 @@ export default forwardRef<
       },
       paste: () => {
         tool.paste();
+        bump();
+      },
+      selectAll: () => {
+        tool.selectAll();
         bump();
       },
     }),

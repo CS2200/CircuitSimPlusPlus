@@ -12,10 +12,11 @@ import { APP_VERSION, checkForUpdate, dismiss, type UpdateInfo } from "../update
  * release body), opened from the header.
  */
 
-export function UpdateNudge() {
+export function UpdateNudge({ enabled = true }: { enabled?: boolean }) {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     void checkForUpdate().then((u) => {
       if (!cancelled) setInfo(u);
@@ -23,7 +24,7 @@ export function UpdateNudge() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   if (info === null) return null;
   return (

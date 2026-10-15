@@ -117,8 +117,58 @@ pub struct Wire {
     /// Drawn polyline from endpoint `a` to endpoint `b` (absolute grid
     /// coordinates, endpoints' attachment points included). Empty means a
     /// straight line between the computed attachment points.
-    #[serde(default)]
-    pub points: Vec<[i32; 2]>,
+    ///
+    /// Coordinates are fractional-friendly: component pins can sit on
+    /// half-grid (or finer) positions, so drawn geometry is not
+    /// integer-only. Canonical serialization still emits whole values as
+    /// JSON integers (`[[1, 2]]`, never `[[1.0, 2.0]]`) so files written
+    /// before fractional support stay byte-identical.
+    #[serde(default, with = "wire_points")]
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Serde wire-points codec: parses any finite JSON numbers, serializes
+/// whole values as integers (canonical-form stability).
+mod wire_points {
+    use serde::de::Error as _;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    /// One coordinate; whole values serialize as JSON integers.
+    struct Coord(f64);
+
+    impl Serialize for Coord {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            if self.0.fract() == 0.0 && self.0.abs() < 9.0e15 {
+                s.serialize_i64(self.0 as i64)
+            } else {
+                s.serialize_f64(self.0)
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Coord {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            let v = f64::deserialize(d)?;
+            if !v.is_finite() {
+                return Err(D::Error::custom("wire coordinate must be finite"));
+            }
+            Ok(Coord(v))
+        }
+    }
+
+    pub fn serialize<S: Serializer>(points: &[[f64; 2]], s: S) -> Result<S::Ok, S::Error> {
+        let mut seq = s.serialize_seq(Some(points.len()))?;
+        for p in points {
+            seq.serialize_element(&(Coord(p[0]), Coord(p[1])))?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<[f64; 2]>, D::Error> {
+        let raw = Vec::<[Coord; 2]>::deserialize(d)?;
+        Ok(raw.into_iter().map(|p| [p[0].0, p[1].0]).collect())
+    }
 }
 
 impl Wire {
@@ -337,10 +387,68 @@ mod tests {
                 comp: "y".into(),
                 pin: "in".into(),
             }),
-            points: vec![[0, 0]; n],
+            points: vec![[0.0, 0.0]; n],
         };
         assert_eq!(w(0).segment_count(), 1);
         assert_eq!(w(2).segment_count(), 1);
         assert_eq!(w(4).segment_count(), 3);
+    }
+
+    #[test]
+    fn fractional_wire_points_roundtrip_with_integral_canonical_form() {
+        // Half-grid coordinates parse; whole values canonicalize as
+        // integers, so pre-fractional files stay byte-identical.
+        let json = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 2,
+            "name": "frac",
+            "settings": { "delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[2, 0.5], [4, 0.5], [4, 1]] }
+                ]
+            }]
+        }"#;
+        let doc = load_document(json.as_bytes()).expect("fractional points must load");
+        assert_eq!(doc.circuits[0].wires[0].points[1], [4.0, 0.5]);
+        let text = to_canonical_json(&doc);
+        // Whole values emit as JSON integers; fractional ones as floats.
+        let v: Json = serde_json::from_str(&text).unwrap();
+        let pts = v["circuits"][0]["wires"][0]["points"].clone();
+        assert_eq!(pts[0][0].as_i64(), Some(2));
+        assert_eq!(pts[1][0].as_i64(), Some(4));
+        assert_eq!(pts[1][1].as_f64(), Some(0.5));
+        let back = load_document(text.as_bytes()).expect("canonical output must reload");
+        assert_eq!(doc, back);
+    }
+
+    #[test]
+    fn non_finite_wire_points_are_rejected() {
+        // JSON has no NaN/Infinity literals, but out-of-f64-range numbers
+        // must fail parsing rather than silently saturate.
+        let json = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 2,
+            "name": "bad",
+            "settings": { "delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[1e999, 0]] }
+                ]
+            }]
+        }"#;
+        assert!(load_document(json.as_bytes()).is_err());
     }
 }

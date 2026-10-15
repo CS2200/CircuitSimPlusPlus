@@ -1,20 +1,35 @@
 import { useEffect } from "react";
-import { THEMES, type ThemeId } from "../theme";
+import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
 
 /**
- * Settings dialog (frontend/UI_OVERHAUL.md §2): today, the Appearance
- * section with the preconfigured theme picker. Selecting a card applies
- * live (the caller updates `data-theme` + persists) — no Apply button.
+ * Settings dialog (top-bar revamp): Appearance (themes + accent color),
+ * Canvas (signal-pulse animation) and Startup (update check). Every switch
+ * applies live and persists per machine — no Apply button.
  *
- * Pure presentation: theme state lives in App.
+ * Pure presentation: all state lives in App.
  */
 export default function SettingsDialog({
   theme,
+  accent,
+  pulsesOn,
+  updateCheckOn,
   onTheme,
+  onAccent,
+  onPulses,
+  onUpdateCheck,
+  onReset,
   onClose,
 }: {
   theme: ThemeId;
+  accent: AccentId;
+  pulsesOn: boolean;
+  updateCheckOn: boolean;
   onTheme: (id: ThemeId) => void;
+  onAccent: (id: AccentId) => void;
+  onPulses: (v: boolean) => void;
+  onUpdateCheck: (v: boolean) => void;
+  /** Back to the shipped defaults (theme, accent, toggles). */
+  onReset: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -43,11 +58,10 @@ export default function SettingsDialog({
             ✕
           </button>
         </div>
+
         <section className="settings-section">
-          <h3>Appearance</h3>
-          <p className="settings-hint">
-            Theme — applies instantly and is remembered on this machine.
-          </p>
+          <h3>Theme</h3>
+          <p className="settings-hint">Applies instantly and is remembered on this machine.</p>
           <div className="theme-grid" role="radiogroup" aria-label="Theme">
             {THEMES.map((t) => (
               <button
@@ -75,6 +89,63 @@ export default function SettingsDialog({
             ))}
           </div>
         </section>
+
+        <section className="settings-section">
+          <h3>Accent color</h3>
+          <p className="settings-hint">Focus rings, selection and highlights.</p>
+          <div className="accent-row" role="radiogroup" aria-label="Accent color">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.id}
+                className={`accent-swatch${accent === a.id ? " active" : ""}`}
+                data-accent-option={a.id}
+                role="radio"
+                aria-checked={accent === a.id}
+                aria-label={a.name}
+                title={a.name}
+                style={
+                  a.hex !== null
+                    ? { background: a.hex, color: "rgba(255, 255, 255, 0.92)" }
+                    : {
+                        background: "linear-gradient(90deg, var(--accent) 50%, var(--grid) 50%)",
+                      }
+                }
+                onClick={() => onAccent(a.id)}
+              >
+                {accent === a.id ? "✓" : ""}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h3>Canvas</h3>
+          <label className="settings-toggle">
+            <span>Animate signal pulses</span>
+            <input
+              type="checkbox"
+              checked={pulsesOn}
+              onChange={(e) => onPulses(e.target.checked)}
+            />
+          </label>
+        </section>
+
+        <section className="settings-section">
+          <h3>Startup</h3>
+          <label className="settings-toggle">
+            <span>Check for updates on launch</span>
+            <input
+              type="checkbox"
+              checked={updateCheckOn}
+              onChange={(e) => onUpdateCheck(e.target.checked)}
+            />
+          </label>
+        </section>
+
+        <div className="settings-foot">
+          <button onClick={onReset}>Reset to defaults</button>
+          <span className="settings-hint">Preferences are stored on this machine</span>
+        </div>
       </div>
     </div>
   );

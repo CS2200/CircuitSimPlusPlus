@@ -7,6 +7,7 @@ import {
   type CsxDocument,
   type CsxEndpoint,
   type CsxWire,
+  type Rotation,
 } from "./csx";
 import { UndoHistory, type Command, type HistoryEvent } from "./history";
 
@@ -81,6 +82,17 @@ export class CircuitDocument {
    * wires whose pins disappear after a type/attr change.
    */
   pinResolver?: (comp: CsxComponent) => string[];
+
+  /**
+   * Editor-injected pin geometry: world position + outward facing of a
+   * named pin (editor/layout.compLayout). Set by the editor so rotation
+   * can re-anchor glued wire ends and re-stub them along the new facing.
+   * Without it, rotation leaves wire geometry untouched.
+   */
+  pinGeometry?: (
+    comp: CsxComponent,
+    pin: string,
+  ) => { pos: [number, number]; facing: Rotation } | null;
 
   static create(name = "untitled"): CircuitDocument {
     return new CircuitDocument({
@@ -262,16 +274,33 @@ export class CircuitDocument {
         ? { ...x, pos: [x.pos[0] + delta.x, x.pos[1] + delta.y] as [number, number] }
         : x,
     );
-    const wires = c.wires.map((w) => {
+    const movedWires: number[] = [];
+    const wiresMoved = c.wires.map((w, i) => {
       const glueA = isPinEndpoint(w.a) && ids.has(w.a.comp);
       const glueB = isPinEndpoint(w.b) && ids.has(w.b.comp);
       if (!glueA && !glueB) return w;
-      const points = w.points.map((p, i) => {
+      movedWires.push(i);
+      // The end segment's axis BEFORE the move: after translating the
+      // endpoint, that segment may turn diagonal — repairEnd() slides the
+      // adjacent bend so the wire keeps leaving the pin orthogonally
+      // ("routes stretch", never skew). Both ends glued = the whole wire
+      // translates rigidly (already orthogonal) — nothing to repair.
+      const axisA = glueA ? segmentAxis(w.points[0], w.points[1]) : null;
+      const axisB = glueB
+        ? segmentAxis(w.points[w.points.length - 1], w.points[w.points.length - 2])
+        : null;
+      const translated = w.points.map((p, i) => {
         const glued = (i === 0 && glueA) || (i === w.points.length - 1 && glueB);
         return glued ? ([p[0] + delta.x, p[1] + delta.y] as [number, number]) : p;
       });
+      let points = translated;
+      if (glueA && !glueB) points = repairEnd(points, "a", axisA);
+      if (glueB && !glueA) points = repairEnd(points, "b", axisB);
       return { ...w, points };
     });
+    // Moved parents stretch their junction children's targets with them.
+    let wires = wiresMoved;
+    for (const i of movedWires) wires = reprojectJunctionDependents(wires, i);
     const key = `move:${circuitIdx}:${[...ids].sort().join(",")}`;
     const label = ids.size === 1 ? `move ${[...ids][0]}` : `move ${ids.size} components`;
     this.exec(label, key, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
@@ -282,8 +311,59 @@ export class CircuitDocument {
     if (ids.size === 0) return;
     const c = this.circuit(circuitIdx);
     const components = c.components.map((x) => (ids.has(x.id) ? { ...x, rot: nextRot(x.rot) } : x));
+    // Pins rotate about the body center: wires glued to a rotated component
+    // must follow (re-anchored + re-stubbed along the new facing). Requires
+    // the editor's `pinGeometry` hook; without it, geometry stays untouched.
+    let wires = c.wires;
+    if (this.pinGeometry !== undefined) {
+      const geom = this.pinGeometry;
+      const byId = new Map(components.map((x) => [x.id, x]));
+      wires = c.wires.map((w) => this.reanchorRotatedWire(w, ids, byId, geom));
+    }
     const label = ids.size === 1 ? `rotate ${[...ids][0]}` : `rotate ${ids.size} components`;
-    this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components }));
+    this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
+  }
+
+  /** Follow a rotated component's pins: re-anchor the wire ends + repair. */
+  private reanchorRotatedWire(
+    w: CsxWire,
+    ids: ReadonlySet<string>,
+    byId: ReadonlyMap<string, CsxComponent>,
+    geom: NonNullable<CircuitDocument["pinGeometry"]>,
+  ): CsxWire {
+    const ends: ("a" | "b")[] = [];
+    if (isPinEndpoint(w.a) && ids.has(w.a.comp)) ends.push("a");
+    if (isPinEndpoint(w.b) && ids.has(w.b.comp)) ends.push("b");
+    if (ends.length === 0) return w;
+    let points = w.points.map((p) => [p[0], p[1]] as [number, number]);
+    for (const end of ends) {
+      const ep = end === "a" ? w.a : w.b;
+      if (!isPinEndpoint(ep)) continue;
+      const comp = byId.get(ep.comp);
+      if (comp === undefined) continue;
+      const g = geom(comp, ep.pin);
+      if (g === null) continue; // orphan endpoint: leave geometry alone
+      const idx = end === "a" ? 0 : points.length - 1;
+      points[idx] = [g.pos[0], g.pos[1]];
+      // A 180° rotation puts the pin on the opposite edge: nudge the
+      // adjacent bend onto the (new) facing side so the stub never dives
+      // back through the body.
+      if (points.length >= 3) {
+        const adjIdx = end === "a" ? 1 : points.length - 2;
+        const adj = points[adjIdx];
+        const v = FACING_VEC[g.facing];
+        const along = (adj[0] - g.pos[0]) * v.x + (adj[1] - g.pos[1]) * v.y;
+        if (along < 0) {
+          if (v.x !== 0) {
+            adj[0] = g.pos[0] + v.x * Math.max(Math.abs(adj[0] - g.pos[0]), 0.5);
+          } else {
+            adj[1] = g.pos[1] + v.y * Math.max(Math.abs(adj[1] - g.pos[1]), 0.5);
+          }
+        }
+      }
+      points = repairEnd(points, end, facingAxis(g.facing));
+    }
+    return { ...w, points };
   }
 
   /** Delete a selection (components + their wires + selected wires) as ONE command. */
@@ -450,13 +530,22 @@ export class CircuitDocument {
     return c.wires.length;
   }
 
-  /** Replace a wire's polyline (bend drags in U3; consecutive edits coalesce). */
+  /**
+   * Replace a wire's polyline (bend/segment drags; consecutive edits of the
+   * same wire coalesce into one undo step). Junction dependents follow:
+   * their terminal points are re-projected onto the (clamped) target
+   * segment and their end segments repaired — see
+   * [`reprojectJunctionDependents`].
+   */
   updateWirePoints(circuitIdx: number, wireIdx: number, points: [number, number][]): void {
     const c = this.circuit(circuitIdx);
     const w = c.wires[wireIdx];
     if (w === undefined) throw new RangeError(`no wire at index ${wireIdx}`);
     if (points.length < 2) throw new Error("a wire needs at least 2 points");
-    const wires = c.wires.map((x, i) => (i === wireIdx ? { ...x, points } : x));
+    let wires = c.wires.map((x, i) =>
+      i === wireIdx ? { ...x, points: points.map((p) => [p[0], p[1]] as [number, number]) } : x,
+    );
+    wires = reprojectJunctionDependents(wires, wireIdx);
     this.exec(
       "edit wire route",
       `points:${circuitIdx}:${wireIdx}`,
@@ -677,4 +766,129 @@ function nextRot(rot: CsxComponent["rot"]): CsxComponent["rot"] {
     case "N":
       return "E";
   }
+}
+
+// ---- wire-geometry repair (keeps routes orthogonal across edits) ----
+
+const REPAIR_EPS = 1e-9;
+
+const FACING_VEC: Record<Rotation, { x: number; y: number }> = {
+  N: { x: 0, y: -1 },
+  E: { x: 1, y: 0 },
+  S: { x: 0, y: 1 },
+  W: { x: -1, y: 0 },
+};
+
+/** Axis a pin's escape stub runs along for a given facing. */
+function facingAxis(facing: Rotation): "h" | "v" {
+  return facing === "E" || facing === "W" ? "h" : "v";
+}
+
+/** Axis of an axis-aligned segment; null when diagonal or zero-length. */
+function segmentAxis(a: [number, number], b: [number, number]): "h" | "v" | null {
+  if (Math.abs(a[1] - b[1]) < REPAIR_EPS && Math.abs(a[0] - b[0]) < REPAIR_EPS) return null;
+  if (Math.abs(a[1] - b[1]) < REPAIR_EPS) return "h";
+  if (Math.abs(a[0] - b[0]) < REPAIR_EPS) return "v";
+  return null;
+}
+
+/**
+ * Re-establish orthogonality after one endpoint of a wire moved. Walks
+ * inward from that end, alternating segment axes h/v (the pattern every
+ * generated route follows): each segment is forced onto its expected axis
+ * by sliding the next break point's perpendicular coordinate; the far
+ * endpoint never moves — when the walk reaches it, a corner is spliced in
+ * instead. Pure; returns a new point list.
+ */
+export function repairEnd(
+  points: readonly [number, number][],
+  end: "a" | "b",
+  axis: "h" | "v" | null,
+): [number, number][] {
+  const pts = points.map((p) => [p[0], p[1]] as [number, number]);
+  if (axis === null || pts.length < 2) return pts;
+  const forward = end === "a";
+  const at = (i: number) => (forward ? i : pts.length - 1 - i);
+  let want: "h" | "v" = axis;
+  let i = 0;
+  let guard = pts.length + 2;
+  while (i + 1 < pts.length && guard-- > 0) {
+    const p = pts[at(i)];
+    const q = pts[at(i + 1)];
+    if (segmentAxis(p, q) !== want) {
+      if (at(i + 1) === (forward ? pts.length - 1 : 0)) {
+        // The far end is the other wire endpoint — splice in a corner.
+        const corner: [number, number] = want === "h" ? [q[0], p[1]] : [p[0], q[1]];
+        pts.splice(forward ? at(i + 1) : at(i), 0, corner);
+        return pts;
+      }
+      if (want === "h") q[1] = p[1];
+      else q[0] = p[0];
+      if (Math.abs(q[0] - p[0]) < REPAIR_EPS && Math.abs(q[1] - p[1]) < REPAIR_EPS) {
+        pts.splice(at(i + 1), 1); // collapsed onto p — drop it, retry the same axis
+        continue;
+      }
+    }
+    want = want === "h" ? "v" : "h";
+    i++;
+  }
+  return pts;
+}
+
+/** Closest point on segment ab (clamped projection). */
+function nearestOnSegment(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number],
+): [number, number] {
+  const abx = b[0] - a[0];
+  const aby = b[1] - a[1];
+  const lenSq = abx * abx + aby * aby;
+  if (lenSq === 0) return [a[0], a[1]];
+  let t = ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return [a[0] + t * abx, a[1] + t * aby];
+}
+
+/**
+ * Junction geometry invariant: a join endpoint must lie on its target
+ * segment. After a wire's polyline changed, every LATER wire joining onto a
+ * moved wire gets its terminal point re-projected onto the (clamped)
+ * segment, its segment reference fixed up, and its end segment repaired.
+ * Parents always precede children (a join only targets earlier wires), so a
+ * single forward pass suffices. Pure.
+ */
+export function reprojectJunctionDependents(
+  wires: readonly CsxWire[],
+  movedIdx: number,
+): CsxWire[] {
+  const out: CsxWire[] = wires.slice();
+  const moved = new Set<number>([movedIdx]);
+  for (let i = movedIdx + 1; i < wires.length; i++) {
+    const w = out[i];
+    let next: CsxWire | null = null;
+    for (const end of ["a", "b"] as const) {
+      const ep = (next ?? w)[end];
+      if (isPinEndpoint(ep) || !moved.has(ep.join.wire)) continue;
+      const parent = out[ep.join.wire];
+      if (parent === undefined || parent.points.length < 2) continue;
+      if (next === null) {
+        next = { ...w, points: w.points.map((p) => [p[0], p[1]] as [number, number]) };
+      }
+      const segment = Math.max(0, Math.min(ep.join.segment, parent.points.length - 2));
+      next[end] = { join: { wire: ep.join.wire, segment } };
+      const pts = next.points;
+      const idx = end === "a" ? 0 : pts.length - 1;
+      const adjIdx = end === "a" ? 1 : pts.length - 2;
+      if (pts.length < 2) continue;
+      const axis = segmentAxis(pts[idx], pts[adjIdx]);
+      pts[idx] = nearestOnSegment(pts[idx], parent.points[segment], parent.points[segment + 1]);
+      next.points = repairEnd(pts, end, axis);
+    }
+    if (next !== null) {
+      out[i] = next;
+      moved.add(i);
+    }
+  }
+  return out;
 }

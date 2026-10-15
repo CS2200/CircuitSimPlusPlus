@@ -74,7 +74,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
 
-  // ---- wire: AND.out (5,1.5) → NOT.in (10,1), orthogonally routed ----
+  // ---- wire: AND.out (5,1.5) → NOT.in (10,1), routed with an escape
+  // stub east + a Z jog, entering the input pin from the west ----
   await clickWorld(page, 5, 1.5);
   await clickWorld(page, 10, 1);
   d = await doc(page);
@@ -83,7 +84,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].wires[0].b).toEqual({ comp: not, pin: "in" });
   expect(d.circuits[0].wires[0].points).toEqual([
     [5, 1.5],
-    [10, 1.5],
+    [9, 1.5],
+    [9, 1],
     [10, 1],
   ]);
 
@@ -110,9 +112,10 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].wires[0].points[0]).toEqual([8, 1.5]);
 
   // ---- delete-branch: selecting the parent wire + Del cascades to the junction wire ----
-  const [px, py] = d.circuits[0].wires[0].points[0];
-  const [qx, qy] = d.circuits[0].wires[0].points[1];
-  await clickWorld(page, (px + qx) / 2, (py + qy) / 2);
+  // Click the parent's bend point (corner handles select the wire; the
+  // midpoint of the short stub segment is within pin pickup range).
+  const bend = d.circuits[0].wires[0].points[1];
+  await clickWorld(page, bend[0], bend[1]);
   await page.keyboard.press("Delete");
   d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(0); // junction child went with its parent

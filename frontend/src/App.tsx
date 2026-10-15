@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
+import {
+  HelpIcon,
+  InfoIcon,
+  MoonIcon,
+  RedoIcon,
+  SettingsIcon,
+  SunIcon,
+  UndoIcon,
+} from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
@@ -13,12 +22,24 @@ import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
 import { PALETTE, compPins, compSpec } from "./editor/catalog";
+import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
-import { loadThemePref, saveThemePref, type ThemeId } from "./theme";
+import { loadBoolPref, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
+import {
+  DEFAULT_ACCENT,
+  DEFAULT_THEME,
+  isLightTheme,
+  loadAccentPref,
+  loadThemePref,
+  saveAccentPref,
+  saveThemePref,
+  type AccentId,
+  type ThemeId,
+} from "./theme";
 import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
 
 /** Stable empty selection while no status report has arrived yet. */
@@ -27,19 +48,31 @@ const EMPTY_SELECTION: readonly string[] = [];
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
   d.pinResolver = (comp) => compPins(comp, d.circuits).map((p) => p.name);
+  // Pin geometry (position + facing): lets rotation re-anchor glued wire
+  // ends and re-stub them along the new facing (wire-routing pass).
+  d.pinGeometry = (comp, pin) => {
+    const p = compLayout(comp, d.circuits).pins.find((x) => x.name === pin);
+    return p === undefined ? null : { pos: [p.x, p.y], facing: p.facing };
+  };
   return d;
 }
 
 /**
- * App shell: header + menu bar + sim transport + palette + canvas + right
- * dock (Inspector / Watch) + statusbar. The circuit editor is the default
- * view; the U1 stress harness stays reachable at ?stress=1, the U4 visual
- * showcase at ?demo=1, and the U5 mock-core demo circuit at ?simdemo=1.
+ * App shell: VSCode-style top bar (menus + action icons) + sim transport +
+ * palette + canvas + right dock (Inspector / Watch) + statusbar. The
+ * circuit editor is the default view; the U1 stress harness stays reachable
+ * at ?stress=1, the U4 visual showcase at ?demo=1, and the U5 mock-core
+ * demo circuit at ?simdemo=1.
  */
 export default function App() {
   // Theme is a persisted per-machine preference (UI_OVERHAUL §2); OLED is
   // the default for fresh installs.
   const [theme, setTheme] = useState<ThemeId>(loadThemePref);
+  // Appearance/behavior preferences (Settings): accent color, canvas pulse
+  // animation, startup update check — per machine, all persisted.
+  const [accent, setAccent] = useState<AccentId>(loadAccentPref);
+  const [pulsesOn, setPulsesOn] = useState(() => loadBoolPref(PREF_PULSES, true));
+  const [updateCheckOn, setUpdateCheckOn] = useState(() => loadBoolPref(PREF_UPDATE_CHECK, true));
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
@@ -83,10 +116,38 @@ export default function App() {
   // Current sheet name (safe while a doc/sheet swap is mid-render).
   const sheetName = doc.circuits[sheet]?.name;
 
-  // Theme preference persistence (best-effort; non-fatal without storage).
+  // Preference persistence (best-effort; non-fatal without storage).
   useEffect(() => {
     saveThemePref(theme);
   }, [theme]);
+  useEffect(() => {
+    saveAccentPref(accent);
+  }, [accent]);
+  useEffect(() => {
+    saveBoolPref(PREF_PULSES, pulsesOn);
+  }, [pulsesOn]);
+  useEffect(() => {
+    saveBoolPref(PREF_UPDATE_CHECK, updateCheckOn);
+  }, [updateCheckOn]);
+
+  // Light/dark icon toggle: flips to the light side and back to whatever
+  // theme was last used on the dark side (not a hard-coded pair).
+  const lastByMode = useRef<Record<"light" | "dark", ThemeId>>({
+    light: "light",
+    dark: DEFAULT_THEME,
+  });
+  useEffect(() => {
+    lastByMode.current[isLightTheme(theme) ? "light" : "dark"] = theme;
+  }, [theme]);
+  const toggleLightDark = useCallback(() => {
+    setTheme(isLightTheme(theme) ? lastByMode.current.dark : lastByMode.current.light);
+  }, [theme]);
+  const resetAppearance = useCallback(() => {
+    setTheme(DEFAULT_THEME);
+    setAccent(DEFAULT_ACCENT);
+    setPulsesOn(true);
+    setUpdateCheckOn(true);
+  }, []);
 
   // Right dock (UI_OVERHAUL §3.2): exactly one selected component opens the
   // Inspector; an emptied selection hands the dock back to Watch.
@@ -360,6 +421,50 @@ export default function App() {
         ],
       },
       {
+        label: "Edit",
+        items: [
+          {
+            label: "Undo",
+            shortcut: "Ctrl+Z",
+            disabled: status?.canUndo === false,
+            onSelect: () => editorRef.current?.undo(),
+          },
+          {
+            label: "Redo",
+            shortcut: "Ctrl+Shift+Z",
+            disabled: status?.canRedo === false,
+            onSelect: () => editorRef.current?.redo(),
+          },
+          { kind: "sep" },
+          {
+            label: "Copy",
+            shortcut: "Ctrl+C",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => editorRef.current?.copy(),
+          },
+          { label: "Paste", shortcut: "Ctrl+V", onSelect: () => editorRef.current?.paste() },
+          { kind: "sep" },
+          {
+            label: "Rotate",
+            shortcut: "R",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => editorRef.current?.rotate(),
+          },
+          {
+            label: "Delete",
+            shortcut: "Del",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => editorRef.current?.deleteSelection(),
+          },
+          { kind: "sep" },
+          {
+            label: "Select All",
+            shortcut: "Ctrl+A",
+            onSelect: () => editorRef.current?.selectAll(),
+          },
+        ],
+      },
+      {
         label: "Simulation",
         items: [
           {
@@ -417,6 +522,7 @@ export default function App() {
     sheet,
     hz,
     pathOn,
+    status,
     onNew,
     onOpen,
     onSave,
@@ -506,57 +612,74 @@ export default function App() {
   }, [onOpen, onSave, onSaveAs]);
 
   return (
-    <div className="app" data-theme={theme}>
-      <header className="app-header">
-        <h1>CircuitSim++</h1>
-        <div className="header-actions">
-          {!stress && (
-            <>
-              <button
-                className="secondary"
-                disabled={status?.canUndo === false}
-                onClick={() => editorRef.current?.undo()}
-                title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
-              >
-                Undo
-              </button>
-              <button
-                className="secondary"
-                disabled={status?.canRedo === false}
-                onClick={() => editorRef.current?.redo()}
-                title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
-              >
-                Redo
-              </button>
-              <button className="secondary" onClick={() => editorRef.current?.rotate()}>
-                Rotate (R)
-              </button>
-              <button className="secondary" onClick={() => editorRef.current?.deleteSelection()}>
-                Delete (Del)
-              </button>
-            </>
-          )}
+    <div className="app" data-theme={theme} data-accent={accent}>
+      <div className="topbar">
+        <h1 className="sr-only">CircuitSim++</h1>
+        {!stress && <MenuBar menus={menus} pathLabel={filePath} />}
+        {stress && <span className="menubar-path">stress harness — ?stress=1</span>}
+        <div className="topbar-actions">
           {stress && (
-            <button onClick={() => setAnimate(!animate)}>
+            <button className="secondary" onClick={() => setAnimate(!animate)}>
               {animate ? "Pause states" : "Animate states"}
             </button>
           )}
-          <button className="secondary" onClick={() => setShowHelp(true)}>
-            ?
-          </button>
-          <button className="secondary" onClick={() => setShowAbout(true)}>
-            About
+          {!stress && (
+            <>
+              <button
+                className="icon-btn"
+                aria-label="Undo"
+                title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
+                disabled={status?.canUndo === false}
+                onClick={() => editorRef.current?.undo()}
+              >
+                <UndoIcon />
+              </button>
+              <button
+                className="icon-btn"
+                aria-label="Redo"
+                title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
+                disabled={status?.canRedo === false}
+                onClick={() => editorRef.current?.redo()}
+              >
+                <RedoIcon />
+              </button>
+            </>
+          )}
+          <span className="topbar-sep" aria-hidden="true" />
+          <button
+            className="icon-btn"
+            aria-label={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
+            title={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
+            onClick={toggleLightDark}
+          >
+            {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
           </button>
           <button
-            className="secondary"
-            onClick={() => setSettingsOpen(true)}
-            title="Settings — theme and appearance"
+            className="icon-btn"
+            aria-label="Help"
+            title="Keyboard & mouse"
+            onClick={() => setShowHelp(true)}
           >
-            Settings
+            <HelpIcon />
+          </button>
+          <button
+            className="icon-btn"
+            aria-label="About"
+            title="About CircuitSim++"
+            onClick={() => setShowAbout(true)}
+          >
+            <InfoIcon />
+          </button>
+          <button
+            className="icon-btn"
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SettingsIcon />
           </button>
         </div>
-      </header>
-      {!stress && <MenuBar menus={menus} pathLabel={filePath} />}
+      </div>
       {!stress && (
         <SimBar
           ctl={sim}
@@ -580,7 +703,7 @@ export default function App() {
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
-            <StressCanvas scene={stressScene} themeName={theme} animate={animate} />
+            <StressCanvas scene={stressScene} themeName={`${theme}|${accent}`} animate={animate} />
           </div>
         ) : (
           <>
@@ -637,7 +760,7 @@ export default function App() {
               <EditorCanvas
                 ref={editorRef}
                 doc={doc}
-                themeName={theme}
+                themeName={`${theme}|${accent}`}
                 sheetIdx={sheet}
                 onStatus={onStatus}
                 onEditComponent={() => setDockTab("inspector")}
@@ -645,6 +768,7 @@ export default function App() {
                 sim={sim}
                 pathIds={pathIds}
                 violations={violationMarkers}
+                pulsesOn={pulsesOn}
               />
             </div>
             <RightDock
@@ -699,9 +823,20 @@ export default function App() {
       </div>
       {showAbout && <AboutCard onClose={() => setShowAbout(false)} />}
       {settingsOpen && (
-        <SettingsDialog theme={theme} onTheme={setTheme} onClose={() => setSettingsOpen(false)} />
+        <SettingsDialog
+          theme={theme}
+          accent={accent}
+          pulsesOn={pulsesOn}
+          updateCheckOn={updateCheckOn}
+          onTheme={setTheme}
+          onAccent={setAccent}
+          onPulses={setPulsesOn}
+          onUpdateCheck={setUpdateCheckOn}
+          onReset={resetAppearance}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
-      <UpdateNudge />
+      <UpdateNudge enabled={updateCheckOn} />
       {showHelp && (
         <div className="help-overlay" onClick={() => setShowHelp(false)}>
           <div className="help-card" onClick={(e) => e.stopPropagation()}>
@@ -710,7 +845,15 @@ export default function App() {
               <tbody>
                 <tr>
                   <td>Click a pin</td>
-                  <td>start a wire (clicks place bends)</td>
+                  <td>start a wire (each click plants a bend)</td>
+                </tr>
+                <tr>
+                  <td>X (while wiring)</td>
+                  <td>flip the corner direction</td>
+                </tr>
+                <tr>
+                  <td>Drag a wire bend</td>
+                  <td>move that corner point</td>
                 </tr>
                 <tr>
                   <td>Drop on a wire</td>
@@ -731,6 +874,10 @@ export default function App() {
                 <tr>
                   <td>Drag component</td>
                   <td>move selection (wires follow)</td>
+                </tr>
+                <tr>
+                  <td>↻ above a selection</td>
+                  <td>rotate it (same as R)</td>
                 </tr>
                 <tr>
                   <td>Drag empty space</td>

@@ -74,7 +74,10 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
   `k − 1` segments (0-based); a wire with empty `points` has exactly one implied straight
   segment (`segment` must be `0`).
 - `points` is the drawn path in absolute grid coordinates, ordered from endpoint `a` to
-  endpoint `b`, attachment points included. Empty `points` means a straight line between the
+  endpoint `b`, attachment points included. Coordinates may be fractional: component pins can
+  sit on half-grid (or finer) positions, so drawn geometry is not integer-only. Canonical
+  serialization emits whole values as JSON integers (`[[1, 2]]`, never `[[1.0, 2.0]]`), which
+  keeps pre-fractional files byte-identical. Empty `points` means a straight line between the
   computed attachment points (the UI derives pin positions from `pos`/`rot`).
 - Fan-out = multiple wires sharing one source pin. Buses have no width of their own — width
   is a property of the driving pin (§5.2).
@@ -338,7 +341,7 @@ the schema constrains common shapes only.
                   "default": [],
                   "items": {
                     "type": "array",
-                    "prefixItems": [{ "type": "integer" }, { "type": "integer" }],
+                    "prefixItems": [{ "type": "number" }, { "type": "number" }],
                     "minItems": 2,
                     "maxItems": 2
                   }

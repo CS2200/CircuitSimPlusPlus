@@ -18,6 +18,33 @@ export interface PinLayout {
   y: number;
   kind: PinKind;
   bitsize: number;
+  /**
+   * Outward direction of the pin: the body edge it sits on, in world
+   * orientation. Wire routing uses this to leave a pin perpendicular to
+   * its edge and to approach a target pin from the correct side
+   * (editor/route.ts).
+   */
+  facing: Rotation;
+}
+
+/** Pin facing from its offset within the (unrotated) body: nearest edge. */
+function pinFacing(dx: number, dy: number, w: number, h: number): Rotation {
+  const dL = dx;
+  const dR = w - dx;
+  const dT = dy;
+  const dB = h - dy;
+  const min = Math.min(dL, dR, dT, dB);
+  if (min === dL) return "W";
+  if (min === dR) return "E";
+  if (min === dT) return "N";
+  return "S";
+}
+
+/** Rotate a compass direction with the component's rotation (E→S→W→N cycle). */
+function rotateDir(dir: Rotation, rot: Rotation): Rotation {
+  const order: Rotation[] = ["E", "S", "W", "N"];
+  const steps = order.indexOf(rot);
+  return order[(order.indexOf(dir) + steps) % 4];
 }
 
 export interface CompLayout {
@@ -60,7 +87,14 @@ export function compLayout(comp: CsxComponent, circuits?: readonly CsxCircuit[])
         ry = -ox;
         break;
     }
-    return { name: p.name, x: cx + rx, y: cy + ry, kind: p.kind, bitsize: p.bitsize ?? 1 };
+    return {
+      name: p.name,
+      x: cx + rx,
+      y: cy + ry,
+      kind: p.kind,
+      bitsize: p.bitsize ?? 1,
+      facing: rotateDir(pinFacing(p.dx, p.dy, w, h), rot),
+    };
   });
   return { rect, pins };
 }

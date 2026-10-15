@@ -18,6 +18,7 @@ interface CsxDoc {
     components: {
       id: string;
       type: string;
+      pos: [number, number];
       name?: string;
       rot?: string;
       attrs?: Record<string, unknown>;
@@ -165,7 +166,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.mouse.click(center.x - 60, center.y);
   await page.keyboard.press("Escape");
   await page.mouse.click(center.x - 60 + 16, center.y + 8);
-  await expect(page.locator(".inspector-id")).toBeVisible();
+  await expect(page.locator(".inspector-id")).toHaveText("c1");
   await page.getByPlaceholder("(unnamed)").fill("a");
   await page.getByPlaceholder("(unnamed)").press("Enter");
 
@@ -174,6 +175,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.mouse.click(center.x + 60, center.y);
   await page.keyboard.press("Escape");
   await page.mouse.click(center.x + 60 + 16, center.y + 8);
+  await expect(page.locator(".inspector-id")).toHaveText("c2");
   await page.getByPlaceholder("(unnamed)").fill("y");
   await page.getByPlaceholder("(unnamed)").press("Enter");
   await page.getByRole("checkbox").check();
@@ -221,12 +223,18 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
   await page.mouse.click(c.x + 20, c.y - 24);
   await page.keyboard.press("Escape");
 
-  // wire: pin terminal → gate in0 (click-click). Aim at the terminal's
-  // WORLD position: placement snaps to the grid, so raw pixel offsets are
-  // only ~0.01 units inside the pin tolerance.
-  const terminal = await world(page, -4, 0.5);
+  // wire: pin terminal → gate in0 (click-click). Aim at the ACTUAL placed
+  // pin positions read back from the document — placement snapping depends
+  // on sub-pixel layout, so hard-coded world offsets are brittle.
+  const placed = await doc(page);
+  const pinComp = placed.circuits[0].components.find((c) => c.type === "wiring.pin");
+  const andComp = placed.circuits[0].components.find((c) => c.type === "gate.and");
+  if (pinComp === undefined || andComp === undefined) throw new Error("placements missing");
+  const terminalWorld = { x: pinComp.pos[0] + 2, y: pinComp.pos[1] + 0.5 }; // terminal dx=2 dy=0.5
+  const in0World = { x: andComp.pos[0], y: andComp.pos[1] + 1 }; // in0 dx=0 dy=1
+  const terminal = await world(page, terminalWorld.x, terminalWorld.y);
   await page.mouse.click(terminal.x, terminal.y);
-  const in0 = await world(page, 1, 0);
+  const in0 = await world(page, in0World.x, in0World.y);
   await page.mouse.click(in0.x, in0.y);
 
   const d = await doc(page);

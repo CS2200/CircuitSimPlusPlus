@@ -69,7 +69,7 @@ describe("placing", () => {
 });
 
 describe("wiring", () => {
-  it("routes pin → pin orthogonally (no diagonals)", () => {
+  it("routes pin → pin orthogonally with a facing escape + Z jog", () => {
     const { doc, tool, and, not } = setup();
     tool.down({ x: 15, y: 11.5 }, PI()); // and.out
     tool.up(PI());
@@ -79,10 +79,11 @@ describe("wiring", () => {
     expect(wires).toHaveLength(1);
     expect(wires[0].a).toEqual({ comp: and, pin: "out" });
     expect(wires[0].b).toEqual({ comp: not, pin: "in" });
-    // manhattan: |dx|>|dy| → horizontal first, then vertical
+    // leaves the output east, jogs late, enters the input pin from the west
     expect(wires[0].points).toEqual([
       [15, 11.5],
-      [20, 11.5],
+      [19, 11.5],
+      [19, 11],
       [20, 11],
     ]);
   });
@@ -92,15 +93,16 @@ describe("wiring", () => {
     tool.down({ x: 15, y: 11.5 }, PI());
     tool.up(PI());
     tool.move({ x: 17, y: 11 });
-    tool.down({ x: 17, y: 8 }, PI()); // bend: V-first (|dy|>|dx|)
+    tool.down({ x: 17, y: 8 }, PI()); // waypoint above-right of the out pin
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI()); // finish on not.in
     tool.up(PI());
     expect(doc.circuit(0).wires[0].points).toEqual([
       [15, 11.5],
-      [15, 8],
+      [17, 11.5],
       [17, 8],
-      [20, 8],
+      [19, 8],
+      [19, 11],
       [20, 11],
     ]);
   });
@@ -122,21 +124,23 @@ describe("wiring", () => {
     expect(tool.isWiring).toBe(false);
   });
 
-  it("after a drag, a click plants the bend where clicked and keeps routing", () => {
+  it("after a drag, a click plants the waypoint where clicked and keeps routing", () => {
     const { doc, tool } = setup();
     tool.down({ x: 15, y: 11.5 }, PI());
     tool.move({ x: 15, y: 6 }); // drag the ghost out
     tool.up(PI()); // release: still wiring, nothing planted
     expect(tool.isWiring).toBe(true);
     expect(doc.circuit(0).wires).toHaveLength(0);
-    tool.down({ x: 15, y: 6 }, PI()); // click plants the bend
+    tool.down({ x: 15, y: 6 }, PI()); // click plants the waypoint
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI()); // click finishes
     tool.up(PI());
     expect(doc.circuit(0).wires[0].points).toEqual([
       [15, 11.5],
+      [16, 11.5],
+      [16, 6],
       [15, 6],
-      [20, 6],
+      [15, 11],
       [20, 11],
     ]);
   });
@@ -181,6 +185,58 @@ describe("wiring", () => {
     expect(wires).toHaveLength(2);
     expect(wires[1].a).toEqual({ join: { wire: 0, segment: 0 } });
     expect(wires[1].b).toEqual({ comp: not, pin: "out" });
+  });
+
+  it("X flips the corner preference while routing", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.flipRoute(); // flip the Z: turn early instead of late
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [15, 11.5],
+      [16, 11.5],
+      [16, 11],
+      [20, 11],
+    ]);
+  });
+
+  it("dragging a wire bend re-routes the adjacent legs (one undo step)", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    // wire is now [[15,11.5],[19,11.5],[19,11],[20,11]]
+    const depth = doc.historyDepth;
+    tool.down({ x: 19, y: 11.5 }, PI()); // grab the first bend
+    tool.move({ x: 21, y: 9 }); // drag it up-right
+    tool.up(PI());
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [15, 11.5],
+      [21, 11.5],
+      [21, 9],
+      [19, 9],
+      [19, 11],
+      [20, 11],
+    ]);
+    expect(doc.historyDepth).toBe(depth + 1);
+    // no component was dragged by the gesture
+    expect(doc.circuit(0).components).toHaveLength(2);
+  });
+
+  it("a bend drag that cannot move does not change the wire", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    const before = JSON.stringify(doc.circuit(0).wires[0].points);
+    tool.down({ x: 19, y: 11.5 }, PI());
+    tool.move({ x: 19, y: 11.4 }); // snaps onto the next bend → refused
+    tool.up(PI());
+    expect(JSON.stringify(doc.circuit(0).wires[0].points)).toBe(before);
   });
 
   it("Esc cancels an in-progress wire", () => {
@@ -292,6 +348,19 @@ describe("selection + drag", () => {
     tool.move({ x: 25, y: 14 });
     tool.up(PI({ ctrlKey: true }));
     expect(sel.components.size).toBe(2); // AND kept + NOT added
+  });
+
+  it("the floating rotate button above the selection rotates it", () => {
+    const { doc, scene, tool } = setup();
+    tool.down({ x: 12, y: 11 }, PI()); // select the AND (body 10,10 → 15,13)
+    tool.up(PI());
+    expect(scene.rotateButtonFor([])).toBeNull();
+    // Button center = (midX, top − 1.15) = (12.5, 8.85), radius 0.62.
+    tool.down({ x: 12.5, y: 8.85 }, PI());
+    tool.up(PI());
+    expect(doc.circuit(0).components[0].rot).toBe("S");
+    // The click did not clear the selection.
+    expect(doc.circuit(0).components).toHaveLength(2);
   });
 });
 

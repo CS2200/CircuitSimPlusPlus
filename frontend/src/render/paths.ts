@@ -63,3 +63,90 @@ export function polylinePath(points: readonly Vec2[]): PathCmd[] {
 export function dotPath(x: number, y: number, halfSize: number): PathCmd[] {
   return rectPath(x - halfSize, y - halfSize, 2 * halfSize, 2 * halfSize);
 }
+
+/** Crossing-hop bump radius in grid units (quarter-unit: exact in binary). */
+const HOP_RADIUS = 0.25;
+
+/**
+ * Wire path with rounded corners AND "crossing hops": where this wire
+ * crosses another, it arcs over it with a small quadratic bump, so a
+ * crossing can never be mistaken for a junction — junction dots stay the
+ * only connectivity cue (DESIGN.md §5.2 copper-first). Hops must lie on
+ * straight runs clear of corners; anything too close to a corner or end is
+ * skipped (the path stays valid). `axis` is the axis of the wire's own
+ * segment the hop sits on (horizontal = bump up, vertical = bump right).
+ */
+export function wirePath(
+  points: readonly Vec2[],
+  radius: number,
+  hops: readonly { at: Vec2; axis: "h" | "v" }[] = [],
+): PathCmd[] {
+  const base = roundedPath(points, radius);
+  if (hops.length === 0 || points.length < 2) return base;
+  const out: PathCmd[] = [];
+  let cur: Vec2 | null = null;
+  for (const cmd of base) {
+    if (cmd.t === "M") {
+      cur = { x: cmd.x, y: cmd.y };
+      out.push(cmd);
+      continue;
+    }
+    if (cmd.t === "Q") {
+      cur = { x: cmd.x, y: cmd.y };
+      out.push(cmd);
+      continue;
+    }
+    if (cmd.t === "Z") {
+      out.push(cmd);
+      continue;
+    }
+    if (cur === null) {
+      cur = { x: cmd.x, y: cmd.y };
+      out.push(cmd);
+      continue;
+    }
+    const from = cur;
+    const to = { x: cmd.x, y: cmd.y };
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) {
+      out.push(cmd);
+      cur = to;
+      continue;
+    }
+    const ux = dx / len;
+    const uy = dy / len;
+    const onRun: { t: number; hop: { at: Vec2; axis: "h" | "v" } }[] = [];
+    for (const hop of hops) {
+      const t = (hop.at.x - from.x) * ux + (hop.at.y - from.y) * uy;
+      const off = Math.abs((hop.at.x - from.x) * uy - (hop.at.y - from.y) * ux);
+      if (off > 1e-6) continue; // not on this straight run
+      if (t <= HOP_RADIUS + 1e-6 || t >= len - HOP_RADIUS - 1e-6) continue; // too close to an end
+      onRun.push({ t, hop });
+    }
+    if (onRun.length === 0) {
+      out.push(cmd);
+      cur = to;
+      continue;
+    }
+    onRun.sort((a, b) => a.t - b.t);
+    for (const { hop } of onRun) {
+      const pre = { x: hop.at.x - ux * HOP_RADIUS, y: hop.at.y - uy * HOP_RADIUS };
+      const post = { x: hop.at.x + ux * HOP_RADIUS, y: hop.at.y + uy * HOP_RADIUS };
+      out.push({ t: "L", x: pre.x, y: pre.y });
+      const bx = hop.axis === "h" ? 0 : 2 * HOP_RADIUS;
+      const by = hop.axis === "h" ? -2 * HOP_RADIUS : 0;
+      out.push({
+        t: "Q",
+        cx: hop.at.x + bx,
+        cy: hop.at.y + by,
+        x: post.x,
+        y: post.y,
+      });
+    }
+    out.push({ t: "L", x: to.x, y: to.y });
+    cur = to;
+  }
+  return out;
+}
