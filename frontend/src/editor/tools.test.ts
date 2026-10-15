@@ -35,13 +35,15 @@ function setup() {
 }
 
 describe("placing", () => {
-  it("places components on clicks, snapped to grid; Esc cancels", () => {
+  it("places components centered on the click (grid-rounded); Esc cancels", () => {
     const { doc, tool } = setup();
     tool.startPlacing("gate.or");
     tool.hover({ x: 30.4, y: 20.6 });
+    // gate.or is 5×3: the body's CENTER lands on the cursor
+    expect(tool.overlay().placing?.pos).toEqual({ x: 28, y: 19 });
     tool.down({ x: 30.4, y: 20.6 }, PI());
-    expect(doc.circuit(0).components.at(-1)).toMatchObject({ type: "gate.or", pos: [30, 21] });
-    // one placement per palette pick — the next click is just a click
+    expect(doc.circuit(0).components.at(-1)).toMatchObject({ type: "gate.or", pos: [28, 19] });
+    // one placement per palette pick - the next click is just a click
     tool.down({ x: 40, y: 30 }, PI());
     expect(doc.circuit(0).components).toHaveLength(3);
     expect(tool.placingType).toBeNull();

@@ -49,7 +49,7 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
   await page.keyboard.press("Escape");
   await page.reload();
   await expect(page.locator(".app")).toHaveAttribute("data-accent", "violet");
-  await page.getByRole("button", { name: "Settings" }).click();
+  await openSettings(page);
   await expect(page.locator('[data-accent-option="violet"]')).toHaveAttribute(
     "aria-checked",
     "true",

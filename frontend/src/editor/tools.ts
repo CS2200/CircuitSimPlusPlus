@@ -1,8 +1,9 @@
 import type { CircuitDocument } from "../model/document";
-import type { CsxComponent, CsxEndpoint, CsxWire, Rotation } from "../model/csx";
+import type { CsxCircuit, CsxComponent, CsxEndpoint, CsxWire, Rotation } from "../model/csx";
 import { isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
+import { compSize } from "./catalog";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation } from "./layout";
@@ -98,6 +99,20 @@ function p2v(p: [number, number]): Vec2 {
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
 const PASTE_OFFSET = 1;
 
+/**
+ * Body top-left for a placement whose CENTER sits at `pos` (UI_OVERHAUL §10):
+ * the ghost follows the cursor under its middle — like the palette drag-drop
+ * path — instead of hanging the body's top-left off the pointer. Rounded to
+ * whole grid units because `.csx` positions are integers.
+ */
+function placementBodyPos(
+  p: { type: string; pos: Vec2; attrs?: Record<string, unknown> },
+  circuits: readonly CsxCircuit[],
+): Vec2 {
+  const { w, h } = compSize({ type: p.type, attrs: p.attrs ?? {} }, circuits);
+  return { x: Math.round(p.pos.x - w / 2), y: Math.round(p.pos.y - h / 2) };
+}
+
 export class ToolMachine {
   private drag: DragState = { kind: "idle" };
   private wiring: WiringState | null = null;
@@ -178,9 +193,10 @@ export class ToolMachine {
 
     if (this.placing !== null) {
       const p = this.placing;
+      const body = placementBodyPos(p, this.doc.circuits);
       this.doc.addComponent(this.circuitIdx(), {
         type: p.type,
-        pos: [snap(p.pos.x, 1), snap(p.pos.y, 1)],
+        pos: [body.x, body.y],
         rot: p.rot,
         ...(p.attrs !== undefined && { attrs: p.attrs }),
       });
@@ -495,7 +511,12 @@ export class ToolMachine {
     return {
       hoverHit: this.hoverHit,
       wireInProgress: this.wiring !== null ? this.routePreview() : null,
-      placing: this.placing,
+      // The ghost carries the RESOLVED body position, so what you see while
+      // hovering is exactly where the click will drop it (centered).
+      placing:
+        this.placing === null
+          ? null
+          : { ...this.placing, pos: placementBodyPos(this.placing, this.doc.circuits) },
       boxRect: this.drag.kind === "boxing" ? normRect(this.drag.start, this.drag.current) : null,
       wireInfo: this.wireInfo,
     };

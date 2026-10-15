@@ -34,8 +34,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("U5: full sim control loop over the mock core", async ({ page }) => {
-  // First command auto-loads the document into the core.
-  await page.getByRole("button", { name: "cycle", exact: true }).click();
+  // First command auto-loads the document into the core; two ticks = one
+  // full clock cycle in delay mode (the old "cycle" button is gone).
+  await page.getByRole("button", { name: "tick", exact: true }).click();
+  await page.getByRole("button", { name: "tick", exact: true }).click();
   await expect
     .poll(() => simState(page), { message: "loaded, one cycle stepped" })
     .toMatchObject({ loaded: true, cycle: 1 });

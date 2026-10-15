@@ -170,7 +170,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   // snapping surprises when the chrome height changes.
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
-  const pin1Spot = await world(page, -4, 0);
+  const pin1Spot = await world(page, -3, 0.5); // center → body [-4,0]
   await page.mouse.click(pin1Spot.x, pin1Spot.y);
   await page.keyboard.press("Escape");
   const pin1Body = await world(page, -3, 0.5);
@@ -182,7 +182,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   // second pin at [5,0], made an OUTPUT via the Inspector (rot mirrors to W)
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
-  const pin2Spot = await world(page, 5, 0);
+  const pin2Spot = await world(page, 6, 0.5); // center → body [5,0]
   await page.mouse.click(pin2Spot.x, pin2Spot.y);
   await page.keyboard.press("Escape");
   const pin2Body = await world(page, 6, 0.5);
@@ -275,7 +275,7 @@ test("Subcircuits: right-click an instance jumps to its definition tab", async (
   const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await openPaletteGroup(page, "Subcircuits");
   await page.locator(".palette-group .palette-item").first().click();
-  await page.mouse.click(c.x - 64, c.y - 32); // body top-left; center at c
+  await page.mouse.click(c.x, c.y); // instance body centered on the canvas center
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");
 

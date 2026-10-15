@@ -504,6 +504,8 @@ body {
   display: flex;
   align-items: stretch;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
   padding: 0;
   background: transparent;
   border-bottom: none;
@@ -597,7 +599,7 @@ body {
   margin-left: auto;
   margin-right: 8px;
   align-self: center;
-  text-align: center;
+  text-align: right;
   padding: 0 1rem;
   color: var(--text-dim);
   font-size: 0.8rem;

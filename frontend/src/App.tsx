@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
-import { MoonIcon, RedoIcon, SettingsIcon, SunIcon, UndoIcon } from "./components/icons";
+import { MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
@@ -430,7 +430,7 @@ export default function App() {
 
   const menus: MenuDef[] = useMemo(() => {
     const mode = sim.store.status?.mode ?? "delay";
-    const speedPresets = [1, 10, 100, 1_000, 10_000, 100_000];
+    const speedPresets = [1, 10, 100, 1_000];
     return [
       {
         label: "File",
@@ -496,7 +496,6 @@ export default function App() {
             shortcut: "Ctrl+J",
             onSelect: () => void simCmd(() => sim.stepTick()),
           },
-          { label: "Step cycle", onSelect: () => void simCmd(() => sim.stepCycle()) },
           { label: "Run to cycle…", onSelect: onRunTo },
           {
             label: "Reset (autoload re-applies)",
@@ -684,14 +683,6 @@ export default function App() {
             onClick={toggleLightDark}
           >
             {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
-          </button>
-          <button
-            className="icon-btn"
-            aria-label="Settings"
-            title="Settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <SettingsIcon />
           </button>
         </div>
       </div>

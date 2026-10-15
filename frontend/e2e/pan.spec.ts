@@ -87,7 +87,8 @@ test("right-click without movement still cancels placement", async ({ page }) =>
 
 test("Shift+click without movement still toggles selection", async ({ page }) => {
   await page.goto("/");
-  // Place AND at (0,0) and NOT at (10,0); body centers are (2.5,1.5)/(11.5,1).
+  // Place AND centered so its body lands at [0,0] (center 2.5,1.5), NOT at
+  // [10,0] (center 11.5,1); body centers are (2.5,1.5)/(11.5,1).
   await page.getByRole("button", { name: "AND", exact: true }).click();
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
@@ -96,11 +97,11 @@ test("Shift+click without movement still toggles selection", async ({ page }) =>
     x: box.x + box.width / 2 + (wx - cam.x) * cam.scale,
     y: box.y + box.height / 2 + (wy - cam.y) * cam.scale,
   });
-  const and = w2s(0, 0);
+  const and = w2s(2.5, 1.5);
   await page.mouse.click(and.x, and.y);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "NOT", exact: true }).click();
-  const not = w2s(10, 0);
+  const not = w2s(11.5, 1);
   await page.mouse.click(not.x, not.y);
   await page.keyboard.press("Escape");
 

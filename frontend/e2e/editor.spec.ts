@@ -50,12 +50,12 @@ async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
 test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", async ({ page }) => {
   await page.goto("/");
 
-  // ---- place: AND at world (0,0), NOT at (10,0) via palette ----
+  // ---- place: AND centered at world (2.5,1.5) → body [0,0]; NOT likewise ----
   await page.getByRole("button", { name: "AND", exact: true }).click();
-  await clickWorld(page, 0, 0);
+  await clickWorld(page, 2.5, 1.5);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "NOT", exact: true }).click();
-  await clickWorld(page, 10, 0);
+  await clickWorld(page, 11.5, 1);
   await page.keyboard.press("Escape");
 
   let d = await doc(page);

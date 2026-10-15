@@ -82,7 +82,7 @@ test("U6: autoload → poke-modify → reset restores the image (with toast)", a
 
 test("U6: inspector is read-only while running", async ({ page }) => {
   await page.goto("/?simdemo=1");
-  await page.getByRole("button", { name: "cycle", exact: true }).click(); // load
+  await page.getByRole("button", { name: "tick", exact: true }).click(); // load
   await page.locator('[data-watch="imem"] .watch-mem').click();
   const inspector = page.locator('.memory-inspector[data-mem="imem"]');
   await expect(inspector).toBeVisible();

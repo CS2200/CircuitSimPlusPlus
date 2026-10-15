@@ -96,13 +96,6 @@ export default function SimBar({
         >
           tick
         </button>
-        <button
-          className="secondary"
-          title="Step one full clock cycle"
-          onClick={() => withLoadedDoc(() => ctl.stepCycle())}
-        >
-          cycle
-        </button>
         <span className="sim-runto">
           <input
             type="number"
@@ -128,7 +121,7 @@ export default function SimBar({
           <input
             type="range"
             min={0}
-            max={60}
+            max={30}
             value={hzExp}
             onChange={(e) => {
               const exp = Number(e.target.value);
