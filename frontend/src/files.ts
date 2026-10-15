@@ -62,7 +62,7 @@ export function baseName(path: string): string {
 /**
  * A path the shell can actually write to: it carries a directory separator.
  * Windows answers with backslashes and POSIX with a slash — **both are real
- * paths**, while the bare file name the browser works with is not (§40).
+ * paths**, while the bare file name the browser works with is not (§43).
  */
 export function isRealFilePath(path: string | null): path is string {
   return path !== null && /[\\/]/.test(path);

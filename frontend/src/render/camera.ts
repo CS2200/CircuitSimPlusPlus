@@ -38,6 +38,19 @@ export class Camera {
     };
   }
 
+  /**
+   * Nudge `x`/`y` so the viewport's TOP-LEFT corner sits exactly on a grid line
+   * (a multiple of `step` in world units). Parts stay on the grid — they share
+   * this transform — but the canvas edge stops cutting a partial cell, so the
+   * grid's edge line lines up with the chrome beside it (UI_OVERHAUL §41).
+   */
+  alignToGrid(view: ViewSize, step: number): void {
+    const halfW = view.width / (2 * this.scale);
+    const halfH = view.height / (2 * this.scale);
+    this.x = Math.round((this.x - halfW) / step) * step + halfW;
+    this.y = Math.round((this.y - halfH) / step) * step + halfH;
+  }
+
   /** Pan by a screen-space delta (e.g. pointer drag). */
   panByScreen(dx: number, dy: number): void {
     this.x -= dx / this.scale;

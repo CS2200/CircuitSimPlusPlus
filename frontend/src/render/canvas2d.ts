@@ -110,7 +110,7 @@ export class Canvas2DRenderer implements Renderer {
     this.ctx.globalAlpha = 1;
     for (const op of this.texts) {
       this.ctx.fillStyle = op.style.color;
-      this.ctx.font = `${op.style.size}px system-ui, sans-serif`;
+      this.ctx.font = `${op.style.size}px ${op.style.font ?? "system-ui, sans-serif"}`;
       this.ctx.textAlign = op.style.align ?? "left";
       this.ctx.textBaseline = "middle";
       this.ctx.fillText(op.text, op.x, op.y);

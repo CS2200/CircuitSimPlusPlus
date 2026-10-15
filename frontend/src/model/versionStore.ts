@@ -21,7 +21,7 @@ const BUDGET_BYTES = 25 * 1024 * 1024;
 
 /**
  * Age tiers for automatic versions: `[maxAgeMs, minGapMs]`, mirroring
- * `history.rs` — a session keeps every step, old history thins out (§41).
+ * `history.rs` — a session keeps every step, old history thins out (§44).
  */
 const TIERS: [number, number][] = [
   [60 * 60 * 1000, 0],

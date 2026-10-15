@@ -1,5 +1,5 @@
 /**
- * Autosave scheduler (autosave, phase 1; "save every change" in §41).
+ * Autosave scheduler (autosave, phase 1; "save every change" in §44).
  *
  * Every change is persisted: the first edit after a quiet spell is flushed
  * immediately (leading edge), and a burst of edits coalesces into one trailing

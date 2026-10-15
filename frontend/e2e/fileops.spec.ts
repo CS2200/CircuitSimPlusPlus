@@ -355,12 +355,20 @@ test("Misc: a text annotation stores and edits its text", async ({ page }) => {
 
   // Born with visible text (UI_OVERHAUL §37), then edited in the Inspector.
   await expect(page.locator(".inspector-id")).toBeVisible();
+  // A text annotation is just its text: no Name / Rotation / Label-side rows
+  // (§40/§42), but it does offer Font.
+  await expect(page.getByLabel("Name")).toHaveCount(0);
+  await expect(page.getByLabel("Rotation")).toHaveCount(0);
+  await expect(page.getByLabel("Label side")).toHaveCount(0);
   await page.getByLabel("Text").fill("hello");
   await page.getByLabel("Text").press("Enter");
+  await page.getByLabel("Font").click();
+  await page.getByRole("option", { name: "Serif", exact: true }).click();
 
   const d = await doc(page);
   const note = d.circuits[0].components.find((c) => c.type === "misc.text");
   expect(note?.attrs?.text).toBe("hello");
+  expect(note?.attrs?.font).toBe("serif");
 });
 
 test("Sheet tabs: middle-click offers Rename and Delete", async ({ page }) => {

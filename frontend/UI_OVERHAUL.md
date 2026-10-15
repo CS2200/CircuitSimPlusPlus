@@ -553,10 +553,11 @@ double-click on the tab box; the palette rail test asserts DECODER).
   input/select/button group lines up down the panel instead of drifting with
   its label.
 - **Bitsize mismatch, clearly visible**: a net whose pins disagree (format-v2
-  width rules) gets an **amber halo under the wire core** and a **⚠ width
-  badge** once per net — color-independent, so it reads over bus hues and
-  custom wire colors (the old "turn it yellow" recolor was lost once wires got
-  colors). Selecting such a wire also shows the exact widths in the Inspector
+  width rules) gets a halo under the wire core once per net — color-independent,
+  so it reads over bus hues and custom wire colors (the old "turn it yellow"
+  recolor was lost once wires got colors). (Superseded by §42: the halo is no
+  longer amber — it blinks in the wire's own color.) Selecting such a wire also
+  shows the exact widths in the Inspector
   ("this net mixes 1 / 32-bit pins — the engine reports it at load").
 - **Default wire color**: wires with **no signal yet** (nothing simulated, or a
   wire added after the current sim load) were drawn in the near-black
@@ -611,8 +612,9 @@ one `--update-snapshots` run on Linux.
 
 ## 19. Follow-up batch J (2026-10-16): pulse, slider, sim bar, HUD, flat panel
 
-- **Width mismatches pulse.** The amber mismatch halo now animates (opacity and
-  ring weight oscillate) so it is impossible to miss even among colored wires;
+- **Width mismatches pulse.** The mismatch halo now animates (opacity and
+  ring weight oscillate) so it is impossible to miss even among colored wires
+  (superseded by §42: the blink is now the wire's own color, not amber);
   the canvas keeps repainting while any net disagrees, gated by the same
   _Animate signal pulses_ preference. `StrokeStyle` gained an `alpha` channel
   (batched, like the other style keys), `SceneOverlay` gained `now`, and
@@ -655,8 +657,9 @@ freeze animations).
   `.csx` and looked like a successful save); and `doSave` refuses a blank path.
   Cancel now writes nothing, marks nothing clean and toasts nothing.
 - **Width mismatch: the pulse is the whole signal.** The "⚠ width" text badge
-  is gone; the pulsing amber ring (which reads over any wire color) is it. The
-  Inspector still spells out the mixed widths when such a wire is selected.
+  is gone; the pulsing ring is it (superseded by §42: it blinks in the wire's own
+  color). The Inspector still spells out the mixed widths when such a wire is
+  selected.
 - **Arrow-key rotation.** ← / → rotate the selection and the placement ghost
   counter-clockwise / clockwise (R stays clockwise; the reverse cycle is a new
   `prevRotation`, and a CCW rotate is still one undoable op). The canvas key
@@ -1158,7 +1161,87 @@ Enter-then-blur would commit twice; a ref makes the commit fire once.
 **Acceptance:** 302 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 15
 app (the new `history::rename` test included).
 
-## 41. Follow-up batch AE (2026-10-16): save every change, compress the history
+## 40. Follow-up batch AE (2026-10-16): text styling, probe preview + value
+
+- **Text annotations lose Name / Label side.** For `misc.text` the Inspector
+  hides both rows (an annotation's body _is_ its text) and instead offers
+  **Color** and **Font** alongside **Text** (UI_OVERHAUL §40). The engine now
+  validates `color` ("" = theme text, else `#rrggbb`) and `font`
+  (`"sans" | "serif" | "mono"`); `TextStyle` gained an optional `font`, and the
+  Inspector's new `color` field kind renders a native swatch.
+- **The probe preview matches the part.** The pointed-hexagon body moved into
+  `shapes.ts` as `probePath(x, y, w, h)`, shared by the placed body, the
+  placement **ghost** (which used to preview a plain rectangle) and the palette
+  icon — so what you drag out is what you get.
+- **A probe shows what it is wired to.** With no live sim value a probe now
+  falls back to `DocScene.staticProbeValue()`: it reads the configured value of a
+  `wiring.constant` on the same net, so a probe on a constant reads `0` (or its
+  value) before/without a run. A live sim value still wins.
+
+**Acceptance:** frontend lint / 302 unit / build green; 48-of-48 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean.
+
+## 41. Follow-up batch AF (2026-10-16): grid-edge alignment, probe value, splitter editor
+
+- **The grid's edge line meets the chrome.** The camera now snaps so the
+  canvas's **top-left corner lands exactly on a grid line** (`Camera.alignToGrid`,
+  a multiple of the current grid step). Parts stay on the grid — they share the
+  camera transform — but the canvas edge no longer cuts a partial cell, so the
+  grid line under the sheet-tab strip lines up with it. It aligns on the first
+  sizing, on debounced resizes, and (debounced) after a wheel zoom; a **pan**
+  release re-aligns too. The nudge is skipped when it would exceed ~8 px, so a
+  high-zoom gesture never lurches. `editor.spec` checks the invariant;
+  `pan.spec`'s delta assertions now allow the ≤½-cell snap.
+- **A probe's value is only inside the probe.** `wiring.probe` left
+  `VALUE_REPEAT`, so its live value is painted once, on the body — never
+  repeated next to its pin outside the part.
+- **Splitter editor, not a text box.** The `splits` field is now a structured
+  editor (`SplitsField`): one row per split pin with a name and its bus-bit
+  indices, add/remove, and a `N pins · bus M bits` summary. Text edits commit on
+  blur/Enter (a per-keystroke rename would drop the old pin and prune its
+  wires); add/remove commit immediately. `editor.spec` covers it.
+
+**Acceptance:** frontend lint / 302 unit / build green; 50-of-50 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean. The camera nudge shifts the
+canvas a few px, so the sim/timing screenshot baselines were re-blessed locally
+(`--update-snapshots`); their committed Linux copies need the same pass on CI.
+
+## 42. Follow-up batch AG (2026-10-16): mismatch blink, no text rotation, grid toggle repaint
+
+- **Settings/View toggles repaint an idle canvas.** Changing a render-affecting
+  preference (e.g. **Show grid**) produced a new `draw` closure but never marked
+  the canvas dirty, so an idle canvas kept its old frame — the grid toggle
+  appeared to do nothing. `CanvasHost` now marks dirty when `draw` changes
+  (UI_OVERHAUL §42); `settings.spec` checks the pixels actually change.
+- **The text annotation drops Rotation too.** `misc.text` now hides Name,
+  Rotation and Label side — a free text label is placed and typed, not aimed — so
+  its Inspector is only Text / Color / Font (UI_OVERHAUL §40).
+- **The mismatch halo is the wire's own color, not amber.** A net whose pin
+  widths disagree no longer draws a fixed `theme.violation` ring; the halo under
+  the core uses the wire's computed color (`stroke` — custom color, bus hue, or
+  state color) and **blinks** it (opacity 0.3→1 and ring weight 2.1→3.1× at
+  ~170 ms), so the part you drew pulses in its own color. `theme.violation`
+  stays for the setup/hold violation markers (§U7), which are a different signal.
+
+**Acceptance:** frontend lint / 302 unit / build green; 50-of-50 e2e green. The
+sim/timing screenshot baselines were re-blessed locally for the new halo color;
+their committed Linux copies need the same `--update-snapshots` pass on CI.
+
+## 43. Follow-up batch AH (2026-10-16): real paths on Windows
+
+`path.includes("/")` was the app's test for "the shell handed us a real file",
+and on Windows every path is `C:\…\file.csx` — so the shell treated **every**
+saved file as pathless. Ctrl+S and a title rename therefore re-opened the save
+dialog, file-autosave never rewrote anything, version history was keyed by the
+session instead of the path, and the external-change guard never armed.
+
+`files.ts` now owns the two helpers: `isRealFilePath` (either separator) and
+`siblingPath` (same directory, same separator style). Both are unit-tested, and
+`realPathOf`, `onSave`, `onSaveAs` and the rename all use them. Renaming in
+the browser also stopped re-opening the picker: the new name is written into the
+file it already holds a handle for, since a browser cannot rename a file.
+
+## 44. Follow-up batch AI (2026-10-16): save every change, compress the history
 
 Google-Docs-style persistence.
 

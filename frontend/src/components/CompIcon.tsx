@@ -1,5 +1,5 @@
 import { compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
-import { bubblePaths, gateShape } from "../editor/shapes";
+import { probePath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
 
 /**
@@ -122,6 +122,9 @@ export default function CompIcon({
           <path d="M0.15 1.25 L0.5 1.25 L0.5 0.75 L1.0 0.75 L1.0 1.25 L1.5 1.25 L1.5 0.75 L1.85 0.75" />
         ) : type === "io.led" ? (
           <circle cx={w / 2} cy={h / 2} r={0.38} fill="currentColor" fillOpacity={0.2} />
+        ) : type === "wiring.probe" ? (
+          // the probe's pointed hexagon (UI_OVERHAUL §40) — same as on canvas
+          <path d={d(probePath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
         ) : (
           <>
             <rect
@@ -143,10 +146,6 @@ export default function CompIcon({
                 rx={BOX_RX}
                 strokeOpacity={0.35}
               />
-            )}
-            {type === "wiring.probe" && (
-              // probe pulse
-              <path d="M0.4 0.68 L0.4 0.32 L0.8 0.32 L0.8 0.68 L1.2 0.68 L1.2 0.32 L1.6 0.32 L1.6 0.68" />
             )}
             {type === "io.button" && (
               <circle cx={w / 2} cy={h / 2} r={0.34} fill="currentColor" fillOpacity={0.2} />

@@ -154,7 +154,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `mem.rom` | `addr`, `out` | same as `mem.ram` |
 | `subcircuit` | from target circuit's named pins | `circuit` (required) |
 | `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless |
-| `misc.text` | — (no pins) | `text` ("") — free-form annotation label, no behavior |
+| `misc.text` | — (no pins) | `text` ("") — free-form annotation; `color` ("" = theme text, else `#rrggbb`); `font` ("sans" \| "serif" \| "mono") |
 
 ⚠️¹ `wiring.controlled-buffer` is required by BACKEND.md B4 ("controlled buffer (tri-state)")
 and §4.1's tri-state semantics but is absent from the pinned registry list in

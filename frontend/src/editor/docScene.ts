@@ -20,7 +20,7 @@ import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
-import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
+import { BUBBLE_R, circlePath, gateShape, probePath, rotatePath } from "./shapes";
 
 /**
  * DocScene (FRONTEND.md U3): draws a CircuitDocument circuit and answers
@@ -131,24 +131,6 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
-/** Pointed hexagon body for the probe (UI_OVERHAUL §36) — a shape that says
- * "probe" without a type word. */
-function probeBodyPath(r: Rect): PathCmd[] {
-  const k = Math.min(r.h, r.w / 2);
-  return roundedPath(
-    [
-      { x: r.x + k / 2, y: r.y },
-      { x: r.x + r.w - k / 2, y: r.y },
-      { x: r.x + r.w, y: r.y + r.h / 2 },
-      { x: r.x + r.w - k / 2, y: r.y + r.h },
-      { x: r.x + k / 2, y: r.y + r.h },
-      { x: r.x, y: r.y + r.h / 2 },
-      { x: r.x + k / 2, y: r.y },
-    ],
-    0.08,
-  );
-}
-
 /** A clock face (dial + two hands) drawn instead of a type word (§36). */
 function drawClockGlyph(renderer: Renderer, theme: Theme, cx: number, cy: number): void {
   const r = 0.6;
@@ -198,13 +180,16 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "io.hexdisplay": "in",
 };
 
-/** Parts that also repeat their value next to the source pin (§21). */
-const VALUE_REPEAT: ReadonlySet<string> = new Set([
-  "wiring.probe",
-  "mem.register",
-  "mem.ram",
-  "mem.rom",
-]);
+/** Parts that also repeat their value next to the source pin (§21). The probe
+ * is NOT here: its value belongs inside its body (UI_OVERHAUL §41). */
+const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register", "mem.ram", "mem.rom"]);
+
+/** CSS font stacks for the text annotation's `font` attr (UI_OVERHAUL §40). */
+const TEXT_FONTS: Readonly<Record<string, string>> = {
+  sans: "system-ui, sans-serif",
+  serif: "Georgia, 'Times New Roman', serif",
+  mono: "ui-monospace, monospace",
+};
 
 /** Side of the body a part's name label is drawn on (UI_OVERHAUL §28). */
 export type LabelPos = "N" | "S" | "W" | "E";
@@ -488,6 +473,27 @@ export class DocScene {
     return this.nets.nets[netId]?.wires ?? [];
   }
 
+  /**
+   * Value a probe reads with no live sim value (UI_OVERHAUL §40): the
+   * configured value of a `wiring.constant` on the same net, else null. Lets a
+   * probe show "the value of the item it is connected to" before/without a run.
+   */
+  staticProbeValue(comp: CsxComponent): string | null {
+    const netId = this.netOfPin(comp.id, "in");
+    if (netId === undefined) return null;
+    const net = this.nets.nets[netId];
+    if (net === undefined) return null;
+    for (const key of net.pins) {
+      const cid = key.slice(0, key.indexOf(":"));
+      const other = this.components.find((c) => c.id === cid);
+      if (other?.type === "wiring.constant") {
+        const v = other.attrs?.value;
+        if (typeof v === "string" && v !== "") return v;
+      }
+    }
+    return null;
+  }
+
   // ---- routing support (editor/route.ts inputs) ----
 
   /** Outward facing of a pin (which body edge it sits on); null if gone. */
@@ -679,18 +685,18 @@ export class DocScene {
       // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
       // bit buses read as clearly different weights beside a 1-bit wire.
       const width = wireWidthForBits(bits);
-      // Halos nest: mismatch (widest) → selection → core. The mismatch ring is
-      // amber so it reads over any wire color or bus hue (UI_OVERHAUL §17) and
-      // it PULSES while the canvas is animating (§19), so a width mismatch is
-      // impossible to miss; selection is an accent halo under the core so a
-      // color you just picked shows immediately (§15).
+      // Halos nest: mismatch (widest) → selection → core. A width mismatch
+      // BLINKS in the wire's OWN color (UI_OVERHAUL §42) — a pulsing glow rather
+      // than a fixed amber ring — while the canvas is animating (§19); selection
+      // is an accent halo under the core so a color you just picked shows
+      // immediately (§15).
       if (this.wireMismatch[i]) {
         const t = overlay.now;
         const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
         renderer.drawPath(this.wirePaths[i], {
-          stroke: theme.violation,
+          stroke,
           lineWidth: width * (2.1 + 1.0 * phase),
-          alpha: 0.35 + 0.65 * phase,
+          alpha: 0.3 + 0.7 * phase,
         });
       }
       if (selected) {
@@ -722,7 +728,13 @@ export class DocScene {
       // the rect's left, vertically centred (UI_OVERHAUL §37). A selection
       // outlines the (invisible) hit box so the annotation can be grabbed.
       if (comp.type === "misc.text") {
-        const text = typeof comp.attrs?.text === "string" ? comp.attrs.text : "";
+        const attrs = comp.attrs ?? {};
+        const text = typeof attrs.text === "string" ? attrs.text : "";
+        const color =
+          typeof attrs.color === "string" && /^#[0-9a-f]{6}$/i.test(attrs.color)
+            ? attrs.color
+            : theme.text;
+        const font = TEXT_FONTS[typeof attrs.font === "string" ? attrs.font : "sans"];
         if (selected) {
           renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
             stroke: theme.accent,
@@ -730,9 +742,10 @@ export class DocScene {
           });
         }
         renderer.drawText(layout.rect.x + 0.3, layout.rect.y + layout.rect.h / 2, text, {
-          color: theme.text,
+          color,
           size: 1.2,
           align: "left",
+          font,
         });
         renderer.flush();
         continue;
@@ -793,7 +806,7 @@ export class DocScene {
         const outPin = comp.type === "wiring.pin" && comp.attrs?.isOutput === true;
         const bodyPath =
           comp.type === "wiring.probe"
-            ? probeBodyPath(layout.rect)
+            ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
             : outPin
               ? roundedPath(
                   [
@@ -838,6 +851,15 @@ export class DocScene {
           }
         }
         if (valueText !== null) caption = valueText;
+        // Static fallback (UI_OVERHAUL §40): with no live sim value, a probe
+        // still reads what it is wired to (a directly connected constant).
+        if (valueText === null && comp.type === "wiring.probe") {
+          const staticVal = this.staticProbeValue(comp);
+          if (staticVal !== null) {
+            valueText = staticVal;
+            valuePin = "in";
+          }
+        }
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
@@ -1091,7 +1113,13 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), stroke);
         }
       } else {
-        renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+        // Match the placed body: the probe's silhouette is its hexagon, so the
+        // ghost must not draw a plain rectangle (UI_OVERHAUL §40).
+        const body =
+          ghost.type === "wiring.probe"
+            ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+            : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+        renderer.drawPath(body, {
           ...stroke,
           fill: "rgba(91,141,239,0.10)",
         });

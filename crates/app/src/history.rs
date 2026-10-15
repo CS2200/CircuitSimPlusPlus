@@ -30,7 +30,7 @@ pub const BUDGET_BYTES: u64 = 25 * 1024 * 1024;
 /// Age tiers for automatic versions: `(max_age_ms, min_gap_ms)`. Inside a tier a
 /// version survives when it is at least `min_gap_ms` older than the last one
 /// kept — so a working session keeps every step, while month-old history thins
-/// to about one entry a day (Google-Docs-style compression, §41).
+/// to about one entry a day (Google-Docs-style compression, §44).
 const TIERS: [(u64, u64); 4] = [
     (60 * 60 * 1000, 0),                       // under an hour: every step
     (24 * 60 * 60 * 1000, 5 * 60 * 1000),      // under a day: one per 5 min

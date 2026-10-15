@@ -160,7 +160,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Autosave (autosave, phase 1; every change since §41): a crash-recovery copy
+  // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
   // written as you edit, plus — for named files, opt-out — an atomic rewrite of
   // the file. Timing lives in model/autosave.ts.
   const [autosaveOn, setAutosaveOn] = useState(() => loadBoolPref(PREF_AUTOSAVE, true));

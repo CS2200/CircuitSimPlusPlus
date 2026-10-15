@@ -40,14 +40,24 @@ async function drag(
   if (modifier !== undefined) await page.keyboard.up(modifier);
 }
 
+/**
+ * Pan moves the camera by the drag delta, give or take the grid snap (< half a
+ * cell) applied when the gesture ends (UI_OVERHAUL §41).
+ */
+function expectPanned(actual: number, expected: number): void {
+  expect(Math.abs(actual - expected)).toBeLessThan(0.6);
+}
+
 test("right-drag pans the camera", async ({ page }) => {
   await page.goto("/");
   const c = await center(page);
   const before = await camera(page);
   await drag(page, c, 120, 60, "right");
   const after = await camera(page);
-  expect(after.x).toBeCloseTo(before.x - 120 / before.scale, 1);
-  expect(after.y).toBeCloseTo(before.y - 60 / before.scale, 1);
+  // The camera snaps the canvas edge onto a grid line when the gesture ends
+  // (UI_OVERHAUL §41), so the delta is the drag ± up to half a cell.
+  expectPanned(after.x, before.x - 120 / before.scale);
+  expectPanned(after.y, before.y - 60 / before.scale);
 });
 
 test("Shift+left-drag pans without touching the selection", async ({ page }) => {
@@ -56,8 +66,8 @@ test("Shift+left-drag pans without touching the selection", async ({ page }) => 
   const before = await camera(page);
   await drag(page, c, -96, 48, "left", "Shift");
   const after = await camera(page);
-  expect(after.x).toBeCloseTo(before.x + 96 / before.scale, 1);
-  expect(after.y).toBeCloseTo(before.y - 48 / before.scale, 1);
+  expectPanned(after.x, before.x + 96 / before.scale);
+  expectPanned(after.y, before.y - 48 / before.scale);
   await expect(page.locator(".app-statusbar")).not.toContainText("selected");
 });
 
@@ -67,7 +77,7 @@ test("middle-drag still pans (regression guard)", async ({ page }) => {
   const before = await camera(page);
   await drag(page, c, 96, 0, "middle");
   const after = await camera(page);
-  expect(after.x).toBeCloseTo(before.x - 96 / before.scale, 1);
+  expectPanned(after.x, before.x - 96 / before.scale);
 });
 
 test("right-click without movement still cancels placement", async ({ page }) => {

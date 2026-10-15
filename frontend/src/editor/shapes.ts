@@ -1,5 +1,6 @@
 import type { PathCmd } from "../render/renderer";
 import type { Vec2 } from "../render/geom";
+import { roundedPath } from "../render/paths";
 
 /**
  * Distinctive gate shapes (DESIGN.md §6 visual language: "a NAND is
@@ -138,6 +139,27 @@ export interface GateShape {
   extra: PathCmd[][];
   /** Output bubble center, if the output is negated (NAND/NOR/XNOR/NOT). */
   outBubble: Vec2 | null;
+}
+
+/**
+ * Pointed-hexagon body for the probe (UI_OVERHAUL §40): a shape that reads as
+ * "probe" without a type word. Shared by the placed body, the placement ghost
+ * and the palette icon, so the preview matches the part you get.
+ */
+export function probePath(x: number, y: number, w: number, h: number): PathCmd[] {
+  const k = Math.min(h, w / 2);
+  return roundedPath(
+    [
+      { x: x + k / 2, y },
+      { x: x + w - k / 2, y },
+      { x: x + w, y: y + h / 2 },
+      { x: x + w - k / 2, y: y + h },
+      { x: x + k / 2, y: y + h },
+      { x, y: y + h / 2 },
+      { x: x + k / 2, y },
+    ],
+    0.08,
+  );
 }
 
 /**

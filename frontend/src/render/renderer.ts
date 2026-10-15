@@ -51,6 +51,8 @@ export interface TextStyle {
   /** Font size in world units (scales with zoom). */
   readonly size: number;
   readonly align?: CanvasTextAlign;
+  /** CSS font-family (defaults to the app's system stack). */
+  readonly font?: string;
 }
 
 export interface Viewport extends ViewSize {

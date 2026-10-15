@@ -995,10 +995,19 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         // Text annotation (UI_OVERHAUL §37): a free-form label the editor draws
-        // on the sheet. No pins, no behavior; `text` may be empty.
+        // on the sheet. No pins, no behavior; `text` may be empty, `color` is
+        // "" (theme default) or `#rrggbb`, `font` picks a family (§40).
         "misc.text" => {
-            let mut c = AttrCheck::new(attrs, &["text"]);
+            let mut c = AttrCheck::new(attrs, &["text", "color", "font"]);
             let _ = c.string("text", "");
+            let color = c.string("color", "");
+            if !color.is_empty() && !is_hex_color(&color) {
+                c_issue(
+                    &mut c,
+                    format!("attr 'color' must be a #rrggbb string, got '{color}'"),
+                );
+            }
+            let _ = c.enumeration("font", &["sans", "serif", "mono"], "sans");
             c.finish();
             (Vec::new(), c, CompKind::Text)
         }
@@ -1009,6 +1018,12 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
 
 fn c_issue(c: &mut AttrCheck, message: String) {
     c.issues.push(message);
+}
+
+/// `#rrggbb` (exactly) — used for the text annotation's `color` attr.
+fn is_hex_color(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
 }
 
 /// Pin signatures for a component instance (lenient: invalid attrs fall
@@ -1075,9 +1090,20 @@ mod tests {
 
     #[test]
     fn text_annotation_has_no_pins_and_validates_text() {
-        let (p, e) = pins("misc.text", json!({ "text": "note" }));
+        let (p, e) = pins(
+            "misc.text",
+            json!({ "text": "note", "color": "#ff0000", "font": "serif" }),
+        );
         assert_eq!(p.unwrap(), Vec::<String>::new());
         assert!(e.is_empty());
+
+        // A non-hex colour and an unknown font are load errors.
+        let (_, e) = pins("misc.text", json!({ "color": "red" }));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("'color'"), "{:?}", e);
+        let (_, e) = pins("misc.text", json!({ "font": "comic" }));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("'font'"), "{:?}", e);
 
         // A typo'd attr on an annotation is still a load error.
         let (_, e) = pins("misc.text", json!({ "txt": "typo" }));

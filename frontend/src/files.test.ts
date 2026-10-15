@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   forgetSavedFileHandle,
   hasSavedFileHandle,
@@ -8,8 +8,8 @@ import {
 } from "./files";
 
 /**
- * Browser save (Â§38). The reuse rule â€” Ctrl+S writes the file it already has
- * instead of re-opening the picker â€” only exists in the browser and is skipped
+ * Browser save (§38). The reuse rule — Ctrl+S writes the file it already has
+ * instead of re-opening the picker — only exists in the browser and is skipped
  * under automation, so it is pinned here against a stubbed picker.
  */
 
@@ -99,7 +99,7 @@ describe("saveTextFile (browser mode)", () => {
   });
 });
 
-describe("path helpers (Â§40)", () => {
+describe("path helpers (§43)", () => {
   it("treats Windows and POSIX paths as real, bare names as not", () => {
     expect(isRealFilePath("C:\\Users\\me\\alu.csx")).toBe(true);
     expect(isRealFilePath("/home/me/alu.csx")).toBe(true);
