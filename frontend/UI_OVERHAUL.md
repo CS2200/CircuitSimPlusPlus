@@ -781,8 +781,48 @@ baselines regenerated: they now include live readouts).
   two sections.
 - **No delay field.** The Inspector no longer offers the per-instance `delay`
   override for any part (§25 had just added it). Timing is presented as
-  unit-wide, matching the course model. The attr itself stays in the format
-  (`format-v2` §4/§6) and the engine still accepts it — a file that carries one
-  still loads; the panel simply doesn't offer it, so no doc change is needed.
+  unit-wide, matching the course model. (The attr no longer exists in the format
+  at all — v3 dropped per-instance delays and the engine rejects one as an
+  unknown attr (`format-v2` §4/§6); the panel simply doesn't offer it.)
 
 **Acceptance:** frontend lint / 263 unit / build / 37-of-37 e2e green.
+
+## 27. Follow-up batch R (2026-10-16): autosave + version history
+
+Phases 0-3 of the autosave plan: a scheduler in the frontend, two small
+filesystem stores in the Tauri shell.
+
+- **Atomic saves.** `format::write_atomic` (sibling temp file -> fsync ->
+  rename) and `format::save_json_atomic` are now the one save path, shared by
+  `save_circuit` and the shell, so an interrupted autosave can never truncate a
+  `.csx`.
+- **Autosave (phase 1).** `model/autosave.ts` debounces **3 s of idle** after the
+  last edit, caps a continuously-dirty document at 30 s, and force-flushes on
+  window blur, window close and explicit Save. While dirty, the document is
+  copied to the crash-recovery store (`crates/app/src/recovery.rs`: one rolling
+  envelope per document under the app data dir, keyed by a hash of its path — or
+  a per-session id before the first save). On launch an orphaned copy offers
+  **Recover unsaved work** (Restore comes back dirty; Discard throws it away).
+  Named files with "also save the file" on are also rewritten atomically;
+  unnamed documents and the browser stay recovery-only.
+- **Version history (phases 2-3).** Every successful save records a version
+  (`crates/app/src/history.rs`: content-addressed canonical snapshots plus a
+  small per-document index, same document key as recovery). Automatic versions
+  coalesce inside 60 s, so one editing burst is one entry. **File ▸ Version
+  history…** (Ctrl+Alt+H) lists them newest-first, previews the selected one and
+  offers Restore (becomes the new head — history is never rewritten), Save a
+  copy…, Name… (exempt from retention) and Delete. Retention: named versions are
+  kept forever; automatic ones are capped at 50 per document and 25 MB.
+- **External-change guard (phase 4).** Autosave compares the file's mtime+size
+  with what it last wrote; if something changed underneath us it refuses to
+  overwrite, says so, and points at **File ▸ Reload from disk**. An explicit Save
+  still wins — that is the user's intent.
+- **Settings ▸ Autosave** carries the two toggles plus the version-history
+  footprint and "Clear this file's history".
+- **Scope.** History lives in the app data directory keyed by file path, so it
+  does not follow a moved or renamed file; the browser/dev build mirrors both
+  stores in `sessionStorage` (so the flows are e2e-testable) but that is not a
+  substitute for the Tauri stores.
+
+**Acceptance:** frontend lint / 291 unit / build / 43-of-43 e2e green; Rust 168
+core + 12 CLI + 8 golden + 14 app tests, clippy/fmt clean.

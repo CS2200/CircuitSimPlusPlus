@@ -12,6 +12,7 @@
 
 use std::sync::Mutex;
 
+mod history;
 mod recovery;
 
 use csim_core::api::{
@@ -192,6 +193,151 @@ fn autosave_recover_discard(app: AppHandle, key: String) -> Result<bool, String>
     recovery::discard(&recovery_base(&app)?, &key).map_err(|e| e.to_string())
 }
 
+// --- Version store (autosave phase 2) -------------------------------------
+//
+// Same document key as the recovery store, so history and recovery agree on
+// what "this document" is. The canonical text is produced Rust-side (via
+// csim-core), so a snapshot is byte-identical to a save and dedupes by content.
+
+/// The history entry key for a document, from its path or per-session id.
+fn history_key(path: Option<&str>, doc_key: &str) -> String {
+    recovery::key_for(path, doc_key)
+}
+
+/// Canonicalize the document, then record it as the document's newest version.
+/// `coalesce_ms > 0` folds the write into a recent automatic version.
+#[tauri::command]
+fn history_snapshot(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+    document: serde_json::Value,
+    label: String,
+    at_ms: u64,
+    coalesce_ms: u64,
+) -> Result<history::Snapshot, String> {
+    let text = csim_core::format::canonical_document(&document).map_err(|errors| {
+        errors
+            .first()
+            .map(|e| e.message.clone())
+            .unwrap_or_default()
+    })?;
+    let key = history_key(path.as_deref(), &doc_key);
+    history::snapshot(
+        &recovery_base(&app)?,
+        &key,
+        &text,
+        &label,
+        at_ms,
+        coalesce_ms,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Every version for a document, newest first.
+#[tauri::command]
+fn history_list(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+) -> Result<Vec<history::VersionMeta>, String> {
+    Ok(history::list(
+        &recovery_base(&app)?,
+        &history_key(path.as_deref(), &doc_key),
+    ))
+}
+
+/// The canonical `.csx` text of one version.
+#[tauri::command]
+fn history_read(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+    id: String,
+) -> Result<Option<String>, String> {
+    Ok(history::read(
+        &recovery_base(&app)?,
+        &history_key(path.as_deref(), &doc_key),
+        &id,
+    ))
+}
+
+/// Promote a version to "named" (exempt from retention).
+#[tauri::command]
+fn history_name(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+    id: String,
+    label: String,
+) -> Result<bool, String> {
+    history::name(
+        &recovery_base(&app)?,
+        &history_key(path.as_deref(), &doc_key),
+        &id,
+        &label,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Delete one version.
+#[tauri::command]
+fn history_delete(
+    app: AppHandle,
+    path: Option<String>,
+    doc_key: String,
+    id: String,
+) -> Result<bool, String> {
+    history::delete(
+        &recovery_base(&app)?,
+        &history_key(path.as_deref(), &doc_key),
+        &id,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Drop a document's whole history.
+#[tauri::command]
+fn history_clear(app: AppHandle, path: Option<String>, doc_key: String) -> Result<bool, String> {
+    history::clear(
+        &recovery_base(&app)?,
+        &history_key(path.as_deref(), &doc_key),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Total version-history footprint (the Settings readout).
+#[tauri::command]
+fn history_usage(app: AppHandle) -> Result<history::Usage, String> {
+    Ok(history::usage(&recovery_base(&app)?))
+}
+
+/// Size + mtime of a file (`None` when it does not exist). Used by the
+/// frontend's external-change guard: autosave refuses to overwrite a file that
+/// changed underneath it.
+#[derive(serde::Serialize)]
+struct FileStat {
+    mtime_ms: u64,
+    size: u64,
+}
+
+#[tauri::command]
+fn file_stat(path: String) -> Result<Option<FileStat>, String> {
+    match std::fs::metadata(&path) {
+        Ok(meta) => Ok(Some(FileStat {
+            mtime_ms: meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            size: meta.len(),
+        })),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Fresh power-on state; every memory's autoload image re-applies
 /// (DESIGN.md §5.2 / G6).
 #[tauri::command]
@@ -268,6 +414,14 @@ pub fn run() {
             autosave_recover_list,
             autosave_recover_read,
             autosave_recover_discard,
+            history_snapshot,
+            history_list,
+            history_read,
+            history_name,
+            history_delete,
+            history_clear,
+            history_usage,
+            file_stat,
             poke,
             mem_read,
             mem_write,

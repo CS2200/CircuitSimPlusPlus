@@ -10,11 +10,31 @@
 
 import { open as dialogOpen, save as dialogSave } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "./lib/env";
 
 const CSX_FILTERS = [{ name: "CircuitSim++ circuit", extensions: ["csx"] }];
 
 export { isTauri };
+
+/**
+ * Size + mtime of an on-disk file (Tauri only; `null` when absent or outside
+ * the shell). The autosave guard uses this to notice edits another program
+ * made underneath us.
+ */
+export async function statFile(path: string): Promise<{ mtime_ms: number; size: number } | null> {
+  if (!isTauri()) return null;
+  try {
+    return await invoke<{ mtime_ms: number; size: number } | null>("file_stat", { path });
+  } catch {
+    return null;
+  }
+}
+
+/** Read a file's text by path (Tauri only). Throws when unreadable. */
+export function readFileText(path: string): Promise<string> {
+  return readTextFile(path);
+}
 
 export interface OpenedCircuit {
   /** Real path (Tauri) or null (browser — file paths are not exposed). */

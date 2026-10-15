@@ -159,7 +159,7 @@ fn normalize(path: &str) -> String {
     }
 }
 
-fn sanitize(s: &str) -> String {
+pub(crate) fn sanitize(s: &str) -> String {
     let cleaned: String = s
         .chars()
         .map(|c| {
@@ -178,7 +178,7 @@ fn sanitize(s: &str) -> String {
 }
 
 /// FNV-1a 64-bit, hex — a short, stable, dependency-free path hash.
-fn fnv1a_hex(bytes: &[u8]) -> String {
+pub(crate) fn fnv1a_hex(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {
         h ^= u64::from(*b);

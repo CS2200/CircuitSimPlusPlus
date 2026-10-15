@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { baseName } from "../files";
+import { relativeAge } from "../lib/time";
 import type { RecoveryMeta } from "../model/recovery";
 
 /**
@@ -8,18 +9,6 @@ import type { RecoveryMeta } from "../model/recovery";
  * Restore loads it into the editor (it comes back dirty, so autosave/Save
  * protect it again); Discard throws the copy away.
  */
-
-/** Relative age for the dialog — recent copies matter, exact times don't. */
-function ageLabel(at: number, now = Date.now()): string {
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 45) return "just now";
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h} h ago`;
-  const d = new Date(at);
-  return d.toLocaleDateString();
-}
 
 export default function RecoveryDialog({
   entries,
@@ -64,7 +53,7 @@ export default function RecoveryDialog({
                 <span className="recovery-meta">
                   <strong>{e.path !== null ? baseName(e.path) : e.name}</strong>
                   <span className="settings-hint">
-                    {ageLabel(e.at_ms)}
+                    {relativeAge(e.at_ms)}
                     {e.label !== "" ? ` · ${e.label}` : ""}
                   </span>
                 </span>

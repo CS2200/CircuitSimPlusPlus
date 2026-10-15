@@ -6,6 +6,7 @@ import { MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
+import HistoryDialog from "./components/HistoryDialog";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -17,13 +18,22 @@ import { StressScene } from "./render/stressScene";
 import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
+import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { PALETTE, compPins, compSpec, defaultAttrs, editableAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
-import { baseName, isTauri, openCircuitFile, pickSavePath, saveTextFile } from "./files";
+import {
+  baseName,
+  isTauri,
+  openCircuitFile,
+  pickSavePath,
+  readFileText,
+  saveTextFile,
+  statFile,
+} from "./files";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import {
   loadBoolPref,
@@ -57,6 +67,20 @@ import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types
 /** Stable empty selection while no status report has arrived yet. */
 const EMPTY_SELECTION: readonly string[] = [];
 const EMPTY_SELECTION_NUM: readonly number[] = [];
+
+/**
+ * A real, writable file path only exists in the Tauri shell (the browser saves
+ * downloads and never learns a path).
+ */
+function realPathOf(path: string | null): string | null {
+  return isTauri() && path !== null && path.includes("/") ? path : null;
+}
+
+/**
+ * Automatic version snapshots coalesce inside this window, so one burst of
+ * editing becomes one history entry; an explicit Save always makes a new one.
+ */
+const VERSION_COALESCE_MS = 60_000;
 
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
@@ -123,6 +147,12 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveState>({ kind: "clean" });
   const [recoveries, setRecoveries] = useState<RecoveryMeta[]>([]);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  // Version history (autosave phase 3): the dialog's own little state.
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<VersionMeta[]>([]);
+  const [historySelectedId, setHistorySelectedId] = useState<string | null>(null);
+  const [historyPreview, setHistoryPreview] = useState<string | null>(null);
+  const [historyUsage, setHistoryUsage] = useState<HistoryUsage | null>(null);
   // Palette activity rail (UI_OVERHAUL §8): which component group the body shows.
   const [paletteGroup, setPaletteGroup] = useState<string>(PALETTE[0].group);
   // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
@@ -161,6 +191,10 @@ export default function App() {
   const undoLabelRef = useRef<string | null>(null);
   const docKeyRef = useRef(newDocKey());
   const recoveryKeyRef = useRef<string | null>(null);
+  /** Size+mtime we last wrote, for the external-change guard. */
+  const lastWriteRef = useRef<{ path: string; mtime_ms: number; size: number } | null>(null);
+  /** Set while a disk conflict is unresolved, so we warn only once. */
+  const diskConflictRef = useRef(false);
 
   /** Drop the rolling recovery copy (after a successful save to disk). */
   const discardRecovery = useCallback(async () => {
@@ -173,6 +207,44 @@ export default function App() {
       /* best-effort: a stale recovery copy is harmless */
     }
   }, []);
+
+  /** What the recovery/version stores key this document by. */
+  const historyTarget = useCallback(
+    (): { path: string | null; docKey: string } => ({
+      path: realPathOf(filePathRef.current),
+      docKey: docKeyRef.current,
+    }),
+    [],
+  );
+
+  /** Remember what we just wrote, so the guard can spot later external edits. */
+  const recordWriteStat = useCallback(async (path: string) => {
+    const stat = await statFile(path);
+    lastWriteRef.current = stat !== null ? { path, ...stat } : null;
+  }, []);
+
+  /**
+   * Record the current document as a version. `coalesceMs > 0` folds it into a
+   * recent automatic version, so a burst of autosaves becomes one entry.
+   * History is a convenience — a failure never blocks the save itself.
+   */
+  const takeVersion = useCallback(
+    async (coalesceMs: number) => {
+      const d = docRef.current;
+      try {
+        await historyStore().snapshot(
+          historyTarget(),
+          JSON.parse(d.toJson()) as unknown,
+          undoLabelRef.current ?? "Edit",
+          Date.now(),
+          coalesceMs,
+        );
+      } catch {
+        /* best-effort */
+      }
+    },
+    [historyTarget],
+  );
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
   const [hzExp, setHzExp] = useState(() => loadNumPref(PREF_DEFAULT_HZ, 10)); // hz = 10^(exp/10)
   const [nameDialog, setNameDialog] = useState<{
@@ -399,12 +471,15 @@ export default function App() {
         editorRef.current?.refresh(); // re-report the dirty flag
         setSaveState({ kind: "saved", at: Date.now() });
         void discardRecovery(); // the file on disk is now the truth
+        diskConflictRef.current = false;
+        void recordWriteStat(path);
+        void takeVersion(0); // an explicit save is always its own version
         toast(`Saved ${baseName(path)}`);
       } catch (err) {
         toast(`Save failed: ${String(err)}`);
       }
     },
-    [doc, sim, toast],
+    [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion],
   );
 
   const onSaveAs = useCallback(() => {
@@ -423,10 +498,13 @@ export default function App() {
         doc.markClean();
         setFilePath(doc.name);
         editorRef.current?.refresh();
+        setSaveState({ kind: "saved", at: Date.now() });
+        void discardRecovery();
+        void takeVersion(0);
         toast(`Saved ${suggested}`);
       });
     }
-  }, [doc, filePath, doSave, toast]);
+  }, [doc, filePath, doSave, toast, discardRecovery, takeVersion]);
 
   const onSave = useCallback(() => {
     // Only the Tauri shell can write to a known path; outside it Save is
@@ -449,7 +527,7 @@ export default function App() {
     const d = docRef.current;
     const path = filePathRef.current;
     // A real, writable path only exists in the Tauri shell.
-    const realPath = isTauri() && path !== null && path.includes("/") ? path : null;
+    const realPath = realPathOf(path);
     setSaveState({ kind: "saving" });
     try {
       const key = await recoveryStore().write({
@@ -469,6 +547,22 @@ export default function App() {
       recoveryKeyRef.current = key;
 
       if (realPath !== null && autosaveFileRef.current) {
+        // External-change guard: never silently overwrite a file that changed
+        // underneath us (another editor, a git checkout, a dropbox sync).
+        const known = lastWriteRef.current;
+        if (known !== null && known.path === realPath) {
+          const stat = await statFile(realPath);
+          if (stat !== null && (stat.mtime_ms !== known.mtime_ms || stat.size !== known.size)) {
+            if (!diskConflictRef.current) {
+              diskConflictRef.current = true;
+              toast(
+                "That file changed on disk — autosave is paused. Save As… to keep your version, or File ▸ Reload from disk.",
+              );
+            }
+            setSaveState({ kind: "error", message: "file changed on disk — autosave paused" });
+            return;
+          }
+        }
         const res = await sim.save(d, realPath);
         if (!res.ok) {
           setSaveState({ kind: "error", message: res.errors[0]?.message ?? "save failed" });
@@ -476,7 +570,10 @@ export default function App() {
         }
         d.markClean();
         editorRef.current?.refresh();
+        diskConflictRef.current = false;
         await discardRecovery();
+        void recordWriteStat(realPath);
+        void takeVersion(VERSION_COALESCE_MS);
         setSaveState({ kind: "saved", at: Date.now() });
         return;
       }
@@ -485,7 +582,7 @@ export default function App() {
     } catch (err) {
       setSaveState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
     }
-  }, [sim, discardRecovery]);
+  }, [sim, discardRecovery, recordWriteStat, takeVersion, toast]);
 
   // Keep the host's refs current (read at flush time, never at render time).
   useEffect(() => {
@@ -615,6 +712,196 @@ export default function App() {
     [recoveries],
   );
 
+  // ---- version history (File ▸ Version history…) ----
+
+  /** Reload the dialog's list + usage (also used after every action). */
+  const refreshHistory = useCallback(async () => {
+    try {
+      const [list, usage] = await Promise.all([
+        historyStore().list(historyTarget()),
+        historyStore().usage(),
+      ]);
+      setVersions(list);
+      setHistoryUsage(usage);
+      setHistorySelectedId((cur) =>
+        cur !== null && list.some((v) => v.id === cur) ? cur : (list[0]?.id ?? null),
+      );
+    } catch {
+      toast("Version history is unavailable");
+    }
+  }, [historyTarget, toast]);
+
+  const openHistory = useCallback(async () => {
+    setHistoryOpen(true);
+    await refreshHistory();
+  }, [refreshHistory]);
+
+  // The preview follows the selection (read on demand — versions can be large).
+  useEffect(() => {
+    if (!historyOpen || historySelectedId === null) {
+      setHistoryPreview(null);
+      return;
+    }
+    let cancelled = false;
+    void historyStore()
+      .read(historyTarget(), historySelectedId)
+      .then((text) => {
+        if (!cancelled) setHistoryPreview(text);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [historyOpen, historySelectedId, historyTarget]);
+
+  // Settings shows the footprint; refresh it whenever that dialog opens.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    void historyStore()
+      .usage()
+      .then(setHistoryUsage)
+      .catch(() => undefined);
+  }, [settingsOpen]);
+
+  /** Restore a version: it becomes the new head; history is never rewritten. */
+  const restoreVersion = useCallback(
+    async (id: string) => {
+      const target = historyTarget();
+      const text = await historyStore()
+        .read(target, id)
+        .catch(() => null);
+      if (text === null) {
+        toast("That version is no longer available");
+        void refreshHistory();
+        return;
+      }
+      let restored: CircuitDocument;
+      try {
+        restored = initDoc(CircuitDocument.fromJson(text));
+      } catch (err) {
+        toast(`Could not restore: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      const version = versions.find((v) => v.id === id);
+      const label =
+        version?.label !== undefined && version.label !== "" ? version.label : "version";
+      try {
+        await historyStore().snapshot(
+          target,
+          JSON.parse(text) as unknown,
+          `Restored ${label}`,
+          Date.now(),
+          0,
+        );
+      } catch {
+        /* best-effort */
+      }
+      // Comes back dirty: the snapshot is unsaved work until the next save.
+      restored.markDirty();
+      adoptDoc(restored, realPathOf(filePathRef.current));
+      void sim.load(restored);
+      setHistoryOpen(false);
+      toast(`Restored ${label}`);
+    },
+    [historyTarget, versions, adoptDoc, sim, toast, refreshHistory],
+  );
+
+  /** Save a version to a new file (Tauri: dialog + engine write; browser: download). */
+  const saveVersionCopy = useCallback(
+    async (id: string) => {
+      const text = await historyStore()
+        .read(historyTarget(), id)
+        .catch(() => null);
+      if (text === null) {
+        toast("That version is no longer available");
+        return;
+      }
+      const suggested = `${docRef.current.name}-v${id}.csx`;
+      if (isTauri()) {
+        const path = await pickSavePath(suggested, null);
+        if (path === null) return;
+        try {
+          const d = initDoc(CircuitDocument.fromJson(text));
+          const res = await sim.save(d, path);
+          if (!res.ok) {
+            toast(`Save failed: ${res.errors[0]?.message ?? "unknown error"}`);
+            return;
+          }
+          toast(`Saved ${baseName(path)}`);
+        } catch (err) {
+          toast(`Save failed: ${String(err)}`);
+        }
+      } else {
+        await saveTextFile(suggested, text);
+        toast(`Downloaded ${suggested}`);
+      }
+    },
+    [historyTarget, sim, toast],
+  );
+
+  const nameVersion = useCallback(
+    (id: string) => {
+      const version = versions.find((v) => v.id === id);
+      setNameDialog({
+        title: "Name this version",
+        initial: version?.label ?? "",
+        submitLabel: "Name",
+        onSubmit: (label) => {
+          setNameDialog(null);
+          void historyStore()
+            .name(historyTarget(), id, label)
+            .then(() => refreshHistory())
+            .catch(() => undefined);
+        },
+      });
+    },
+    [versions, historyTarget, refreshHistory],
+  );
+
+  const deleteVersion = useCallback(
+    async (id: string) => {
+      if (!window.confirm("Delete this version? The document itself is not affected.")) return;
+      await historyStore()
+        .remove(historyTarget(), id)
+        .catch(() => false);
+      void refreshHistory();
+    },
+    [historyTarget, refreshHistory],
+  );
+
+  const clearHistory = useCallback(async () => {
+    if (!window.confirm("Delete this file's version history? The file itself is not affected.")) {
+      return;
+    }
+    await historyStore()
+      .clear(historyTarget())
+      .catch(() => false);
+    await refreshHistory();
+    toast("Version history cleared");
+  }, [historyTarget, refreshHistory, toast]);
+
+  /** Re-read the file from disk, discarding in-editor changes (conflict escape). */
+  const reloadFromDisk = useCallback(async () => {
+    const path = realPathOf(filePathRef.current);
+    if (path === null) {
+      toast("Reload needs a saved file — use File ▸ Open… instead");
+      return;
+    }
+    try {
+      const text = await readFileText(path);
+      const reloaded = initDoc(CircuitDocument.fromJson(text));
+      adoptDoc(reloaded, path);
+      void sim.loadFromPath(reloaded, path);
+      diskConflictRef.current = false;
+      await recordWriteStat(path);
+      toast(`Reloaded ${baseName(path)}`);
+    } catch (err) {
+      toast(`Reload failed: ${String(err)}`);
+    }
+  }, [adoptDoc, sim, toast, recordWriteStat]);
+
   // ---- sheet (subcircuit) operations (Subcircuits menu) ----
 
   // Live readouts from the start (UI_OVERHAUL §23): load the document into the
@@ -734,6 +1021,9 @@ export default function App() {
           { kind: "sep" },
           { label: "Save", shortcut: "Ctrl+S", onSelect: onSave },
           { label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveAs },
+          { label: "Reload from disk", onSelect: () => void reloadFromDisk() },
+          { kind: "sep" },
+          { label: "Version history…", shortcut: "Ctrl+Alt+H", onSelect: () => void openHistory() },
           { kind: "sep" },
           { label: "Settings…", onSelect: () => setSettingsOpen(true) },
         ],
@@ -796,6 +1086,8 @@ export default function App() {
     onNewSheet,
     onRenameSheet,
     onReset,
+    openHistory,
+    reloadFromDisk,
     sim,
     simVersion,
   ]);
@@ -867,12 +1159,17 @@ export default function App() {
         else onSave();
         return;
       }
+      if (mod && e.altKey && e.key.toLowerCase() === "h") {
+        e.preventDefault();
+        void openHistory();
+        return;
+      }
       if (e.key === "?") setShowHelp((v) => !v);
       if (e.key === "Escape") setShowHelp(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onOpen, onSave, onSaveAs]);
+  }, [onOpen, onSave, onSaveAs, openHistory]);
 
   return (
     <div className="app" data-theme={theme} data-accent={accent}>
@@ -1108,6 +1405,20 @@ export default function App() {
         )}
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
+      {historyOpen && (
+        <HistoryDialog
+          versions={versions}
+          selectedId={historySelectedId}
+          preview={historyPreview}
+          usage={historyUsage}
+          onSelect={setHistorySelectedId}
+          onRestore={(id) => void restoreVersion(id)}
+          onSaveCopy={(id) => void saveVersionCopy(id)}
+          onName={nameVersion}
+          onDelete={(id) => void deleteVersion(id)}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
       {nameDialog !== null && (
         <NameDialog
           title={nameDialog.title}
@@ -1151,6 +1462,8 @@ export default function App() {
           onDefaultInputs={setDefaultInputs}
           onDefaultHz={setHzExp}
           onUpdateCheck={setUpdateCheckOn}
+          historyUsage={historyUsage}
+          onClearHistory={() => void clearHistory()}
           onReset={resetAppearance}
           onClose={() => setSettingsOpen(false)}
         />

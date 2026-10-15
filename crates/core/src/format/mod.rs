@@ -375,6 +375,23 @@ fn temp_file_name(path: &std::path::Path) -> String {
 /// document JSON value to `path` atomically. Used by `session::save_circuit`
 /// and the shell's autosave command, so both paths are byte-identical.
 pub fn save_json_atomic(path: &str, document: &Json) -> Result<(), Vec<LoadError>> {
+    let text = canonical_document(document)?;
+    write_atomic(std::path::Path::new(path), &text).map_err(|e| {
+        vec![LoadError {
+            kind: LoadErrorKind::Io,
+            message: format!("{path}: {e}"),
+            circuit: String::new(),
+            comp_id: None,
+            wire_idx: None,
+        }]
+    })
+}
+
+/// Parse, validate, and canonicalize a document JSON value into `.csx` text.
+///
+/// The version store uses this so history snapshots are byte-identical to what
+/// a save would write (and therefore dedupe by content hash).
+pub fn canonical_document(document: &Json) -> Result<String, Vec<LoadError>> {
     let doc: Document = match serde_json::from_value(document.clone()) {
         Ok(d) => d,
         Err(e) => {
@@ -385,15 +402,7 @@ pub fn save_json_atomic(path: &str, document: &Json) -> Result<(), Vec<LoadError
     if !errors.is_empty() {
         return Err(errors);
     }
-    write_atomic(std::path::Path::new(path), &to_canonical_json(&doc)).map_err(|e| {
-        vec![LoadError {
-            kind: LoadErrorKind::Io,
-            message: format!("{path}: {e}"),
-            circuit: String::new(),
-            comp_id: None,
-            wire_idx: None,
-        }]
-    })
+    Ok(to_canonical_json(&doc))
 }
 
 /// Recursively sort object keys; arrays keep their order.

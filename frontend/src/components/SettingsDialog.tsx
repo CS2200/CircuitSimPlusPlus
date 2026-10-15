@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { bytesLabel } from "../lib/time";
 import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
+import type { HistoryUsage } from "../model/versionStore";
 
 /**
  * Settings panel (UI_OVERHAUL §25): a sectioned settings dialog — a nav
@@ -45,6 +47,8 @@ export default function SettingsDialog({
   defaultInputs,
   defaultHz,
   updateCheckOn,
+  historyUsage,
+  onClearHistory,
   onTheme,
   onAccent,
   onPulses,
@@ -77,6 +81,9 @@ export default function SettingsDialog({
   /** Default clock-speed exponent (hz = 10^(exp/10)). */
   defaultHz: number;
   updateCheckOn: boolean;
+  /** Version-history footprint, or null while it is loading. */
+  historyUsage: HistoryUsage | null;
+  onClearHistory: () => void;
   onTheme: (id: ThemeId) => void;
   onAccent: (id: AccentId) => void;
   onPulses: (v: boolean) => void;
@@ -307,8 +314,8 @@ export default function SettingsDialog({
                   onDefaultHz,
                 )}
                 <p className="settings-hint">
-                  Everything else about running a circuit — play, tick, run-to, reset — lives in
-                  the transport bar above the canvas.
+                  Everything else about running a circuit — play, tick, run-to, reset — lives in the
+                  transport bar above the canvas.
                 </p>
               </section>
             )}
@@ -329,6 +336,14 @@ export default function SettingsDialog({
                   onAutosaveFile,
                   !autosaveOn,
                 )}
+                <p className="settings-hint">
+                  {historyUsage !== null
+                    ? `Version history: ${bytesLabel(historyUsage.bytes)} across ${historyUsage.documents} file(s), kept on this machine per file path.`
+                    : "Version history is kept on this machine, per file path."}
+                </p>
+                <button className="settings-action" onClick={onClearHistory}>
+                  Clear this file's history
+                </button>
               </section>
             )}
 
