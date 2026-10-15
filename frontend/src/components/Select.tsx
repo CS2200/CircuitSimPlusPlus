@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
- * App dropdown (UI_OVERHAUL §28): a button plus an INLINE option list styled
- * like the menu-bar popups, so selects look native to the app instead of the
- * OS. Inline (not absolutely positioned) on purpose — the Inspector and the
- * settings pane both scroll, and a floating popup would be clipped by them.
+ * App dropdown (UI_OVERHAUL §28/§29): a button plus an option list styled like
+ * the menu-bar popups. The list is **portaled to the body** and positioned with
+ * `position: fixed`, so it OVERLAYS the surrounding UI instead of pushing it
+ * down, and it is never clipped by the scrolling panel that owns the button
+ * (the Inspector dock and the settings pane both scroll). It flips above the
+ * button when there is not enough room below.
  */
 export default function Select<T extends string | number>({
   value,
@@ -21,13 +24,42 @@ export default function Select<T extends string | number>({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{
+    left: number;
+    minWidth: number;
+    maxWidth: number;
+    top?: number;
+    bottom?: number;
+    maxHeight: number;
+  } | null>(null);
   const current = options.find((o) => o.value === value);
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r === undefined) return;
+    const gap = 4;
+    // Prefer below; flip above only when the space below is tight and there
+    // is more room above.
+    const below = window.innerHeight - r.bottom >= 180 || r.top < 180;
+    setPos({
+      left: r.left,
+      minWidth: r.width,
+      maxWidth: window.innerWidth - r.left - 8,
+      top: below ? r.bottom + gap : undefined,
+      bottom: below ? undefined : window.innerHeight - r.top + gap,
+      maxHeight: (below ? window.innerHeight - r.bottom : r.top) - gap - 8,
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
+    place();
     const onDown = (e: MouseEvent) => {
-      if (ref.current !== null && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) === true || popRef.current?.contains(t) === true) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -35,17 +67,22 @@ export default function Select<T extends string | number>({
         setOpen(false);
       }
     };
-    document.addEventListener("mousedown", onDown);
+    document.addEventListener("mousedown", onDown, true);
     document.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
     return () => {
-      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
     };
-  }, [open]);
+  }, [open, place]);
 
   return (
-    <div className="select" ref={ref}>
+    <div className="select">
       <button
+        ref={btnRef}
         type="button"
         className="select-btn"
         aria-haspopup="listbox"
@@ -59,25 +96,41 @@ export default function Select<T extends string | number>({
           ▾
         </span>
       </button>
-      {open && (
-        <div className="select-pop" role="listbox" aria-label={label}>
-          {options.map((o) => (
-            <button
-              key={String(o.value)}
-              type="button"
-              role="option"
-              aria-selected={o.value === value}
-              className={`select-item${o.value === value ? " active" : ""}`}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        pos !== null &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="select-pop"
+            role="listbox"
+            aria-label={label}
+            style={{
+              left: pos.left,
+              minWidth: pos.minWidth,
+              maxWidth: pos.maxWidth,
+              top: pos.top,
+              bottom: pos.bottom,
+              maxHeight: pos.maxHeight,
+            }}
+          >
+            {options.map((o) => (
+              <button
+                key={String(o.value)}
+                type="button"
+                role="option"
+                aria-selected={o.value === value}
+                className={`select-item${o.value === value ? " active" : ""}`}
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

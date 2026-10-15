@@ -1308,17 +1308,19 @@ body {
   font-size: 0.7rem;
 }
 
-/* Inline list: never clipped by the scrolling panel that owns it. */
+/* Fixed-position overlay (§29): portaled to the body so it floats over the
+ * panel instead of reflowing it, and is never clipped by a scrolling parent. */
 .select-pop {
+  position: fixed;
+  z-index: 200;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-top: 4px;
   padding: 3px;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 9px;
-  max-height: 15rem;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   overflow-y: auto;
 }
 
@@ -1365,6 +1367,26 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* Full-width action row (memory image): buttons share the whole column so the
+ * panel reads as tidy stacked rows instead of a lopsided label/control grid. */
+.inspector-buttons-full {
+  margin: 0.35rem 0 0;
+}
+
+.inspector-buttons-full button {
+  flex: 1;
+  text-align: center;
+}
+
+/* Small dim heading that separates the memory-image controls from the fields. */
+.inspector-subhead {
+  margin: 0.35rem 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .inspector-buttons button {

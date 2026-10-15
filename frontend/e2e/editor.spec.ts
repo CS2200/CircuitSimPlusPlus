@@ -81,8 +81,15 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
 
-  // ---- per-part name side (UI_OVERHAUL §28): the app dropdown writes namePos ----
-  await page.getByLabel("Label side").click();
+  // ---- per-part name side (UI_OVERHAUL §28): the app dropdown writes namePos
+  // and OVERLAYS the panel — opening it must not push the rows down (§29) ----
+  const sideBtn = page.getByLabel("Label side");
+  const sidebar = page.locator(".inspector");
+  const heightBefore = await sidebar.evaluate((el) => el.scrollHeight);
+  await sideBtn.click();
+  await expect(page.getByRole("option", { name: "Below", exact: true })).toBeVisible();
+  // Overlay, not inline: the panel's content height is unchanged while open.
+  expect(await sidebar.evaluate((el) => el.scrollHeight)).toBe(heightBefore);
   await page.getByRole("option", { name: "Below", exact: true }).click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ namePos: "S" });

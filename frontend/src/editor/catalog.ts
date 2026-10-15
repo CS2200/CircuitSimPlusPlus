@@ -821,13 +821,13 @@ function baseFields(type: string): AttrField[] {
         BITSIZE_FIELD,
         {
           key: "depth",
-          label: "Depth (words)",
+          label: "Depth",
           kind: "number",
           min: 1,
           max: 1_048_576,
           placeholder: "256",
           group: "Width",
-          hint: "Power of two, up to 2^20.",
+          hint: "Words — a power of two, up to 2^20.",
         },
       ];
     case "subcircuit":
