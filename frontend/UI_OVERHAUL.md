@@ -467,3 +467,40 @@ unchanged).
 **Acceptance:** frontend lint / 254 unit / build / 34-of-34 e2e green (new
 drag-wiring `wires.spec.ts` test, grid-based `memory.spec.ts`, a mock
 `contents` test); screenshot baselines unchanged.
+
+## 15. Follow-up batch F (2026-10-16): transport bar, grid, wire widths
+
+- **Simulation menu retired** (human decision; it was read as "the simulation
+  tab"): its Hz speed presets were redundant with the slider, so the whole menu
+  is gone. Nothing is lost: step tick / reset / run-to live in the transport
+  bar, the `T_obs` chip toggles the critical-path highlight, and the **status
+  chip now switches delay ↔ zero mode** (`ctl.setMode`), which was the only
+  control the menu owned. Keyboard shortcuts are unchanged.
+- **Speed slider**: already exponential (`hz = 10^(exp/10)`, exp 0…30 = 1 Hz…
+  1 kHz); it now shows **notches** at the round values (1, 2, 5, 10, 20, 50,
+  100, 200, 500, 1000 Hz; decades taller) so the log scale is legible.
+- **Canvas grid** (Settings ▸ Canvas ▸ "Show grid", off by default, persisted
+  as `csx.grid`): lines are drawn in **groups** — `gridStepFor(scale)` doubles
+  the step (1, 2, 4, 8… cells) until neighbours are ≥ 14 px apart — so the grid
+  stays evenly spaced and readable at every zoom instead of collapsing into a
+  wash. Drawn behind everything at 1 CSS px; `theme.grid` is the line color.
+- **Wire color while selected**: selection is now an accent **halo** under the
+  core stroke instead of repainting the wire, so a color you just picked shows
+  immediately (previously the accent hid it until you deselected).
+- **Wire width now follows the bit width**: `DocScene` uses the **widest
+  declared pin width on the net** (`inferNetBits`) rather than collapsing a
+  conflicting net to 1 bit, and thickness grows with √bits (32-bit ≈ 3.5× a
+  1-bit wire). A width edit is therefore visible at once — and a net whose ends
+  disagree now _draws_ as the bus it declares, which surfaces real
+  width-mismatch mistakes (the engine reports them at load).
+- **Panels/layout**: the circuit tabs moved above the **canvas column** only,
+  so the palette and dock run the full height — the dead strip above the
+  palette (the reported "gap") is gone and the tab `inset` prop is retired. The
+  right dock gained padding, the rail got spacing between its icons, and tab
+  labels are centered in their tabs.
+
+**Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green (rewritten
+`fileops` sim-bar test, new `grid.test.ts` + settings grid test). **Screenshot
+baselines changed on purpose** (declared-width drawing) and were regenerated
+locally (win32); the committed Linux baselines need one `--update-snapshots`
+run on Linux.

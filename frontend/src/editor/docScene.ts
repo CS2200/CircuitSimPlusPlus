@@ -120,11 +120,31 @@ export interface SceneOverlay {
 const CELL = 8;
 const WIRE_RADIUS = 0.12;
 const WIRE_W = 0.16;
-const WIRE_BUS = 0.3;
 const PIN_R = 0.22;
 const PICK_TOL = 0.45;
 const PIN_TOL = 0.55;
 const CORNER_TOL = 0.4;
+
+/**
+ * Rendered wire thickness for a bit width (UI_OVERHAUL §15): 1-bit wires keep
+ * the base width, buses grow with the SQUARE ROOT of the bit count so 8, 16
+ * and 32-bit are each clearly heavier (32-bit ≈ 3.5× a 1-bit wire) without a
+ * wide bus swallowing the drawing.
+ */
+function wireWidthForBits(bits: number): number {
+  return WIRE_W * (1 + 0.55 * (Math.sqrt(Math.max(1, bits)) - 1));
+}
+
+/**
+ * Canvas grid spacing in grid cells for a zoom level (UI_OVERHAUL §15): the
+ * smallest power-of-two GROUP of cells that keeps neighbouring lines at least
+ * `minPx` apart on screen, so the grid stays readable at every zoom.
+ */
+export function gridStepFor(scale: number, minPx = 14): number {
+  let step = 1;
+  while (step * scale < minPx) step *= 2;
+  return step;
+}
 
 export class DocScene {
   private circuitIdx = -1;
@@ -175,7 +195,11 @@ export class DocScene {
       const netId = this.nets.wireToNet.get(i);
       const net = netId !== undefined ? this.nets.nets[netId] : undefined;
       const inf = inferNetBits(net, this.layouts);
-      return inf.conflict.length > 0 ? 1 : (inf.bits ?? 1);
+      // Use the WIDEST declared width on the net (UI_OVERHAUL §15): a width
+      // edit then shows up immediately, and a net whose endpoints disagree
+      // still draws as the bus you wired (the engine reports the mismatch).
+      if (inf.conflict.length > 0) return Math.max(1, inf.conflict[inf.conflict.length - 1]);
+      return Math.max(1, inf.bits ?? 1);
     });
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
@@ -374,6 +398,32 @@ export class DocScene {
 
   // ---- drawing ----
 
+  /**
+   * Canvas grid (opt-in setting, UI_OVERHAUL §15). Lines are drawn in GROUPS:
+   * the step doubles (1, 2, 4, 8 … grid cells) until adjacent lines are at
+   * least `GRID_MIN_PX` apart on screen, so the grid stays readable at every
+   * zoom instead of collapsing into a wash.
+   */
+  private drawGrid(renderer: Renderer, theme: Theme, camera: Camera, view: ViewSize): void {
+    const step = gridStepFor(camera.scale);
+    const rect = camera.visibleWorldRect(view);
+    const left = Math.floor(rect.x / step) * step;
+    const right = rect.x + rect.w;
+    const top = Math.floor(rect.y / step) * step;
+    const bottom = rect.y + rect.h;
+    const cmds: PathCmd[] = [];
+    for (let x = left; x <= right; x += step) {
+      cmds.push({ t: "M", x, y: top }, { t: "L", x, y: bottom });
+    }
+    for (let y = top; y <= bottom; y += step) {
+      cmds.push({ t: "M", x: left, y }, { t: "L", x: right, y });
+    }
+    if (cmds.length === 0) return;
+    // 1 CSS px at any zoom (lineWidth is in world units).
+    renderer.drawPath(cmds, { stroke: theme.grid, lineWidth: 1 / camera.scale });
+    renderer.flush();
+  }
+
   draw(
     renderer: Renderer,
     theme: Theme,
@@ -382,8 +432,12 @@ export class DocScene {
     selection: SelectionModel,
     overlay: SceneOverlay,
     sim?: SimOverlay,
+    grid = false,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
+
+    // Behind everything (the renderer has already filled the background).
+    if (grid) this.drawGrid(renderer, theme, camera, view);
 
     // Net-extent highlight: on PIN hover (the no-tunnels navigability
     // feature, DESIGN.md §7.1) and for the wire info card. Idle wire hover
@@ -413,9 +467,7 @@ export class DocScene {
       const simVal = sim?.valueForWire(i);
       const contested = simVal !== undefined && wireValueState(simVal) === "x";
       let stroke: string;
-      if (selected) {
-        stroke = theme.accent;
-      } else if (custom !== null && !contested) {
+      if (custom !== null && !contested) {
         // A user-chosen color (UI_OVERHAUL §12) wins over state/bus hues —
         // except contention, which stays red because it is an error signal.
         stroke = custom;
@@ -428,13 +480,17 @@ export class DocScene {
       } else {
         stroke = isBus ? theme.bus[hue % theme.bus.length] : theme.wire.disconnected;
       }
-      // Thickness ∝ width (UI_OVERHAUL §12): buses start heavier than
-      // single-bit wires and grow with the bit count, so 32-bit reads
-      // clearly wider than 16-bit.
-      const lineWidth = isBus ? WIRE_BUS + Math.min(30, bits - 2) * WIRE_W * 0.06 : WIRE_W;
+      // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
+      // bit buses read as clearly different weights beside a 1-bit wire.
+      const width = wireWidthForBits(bits);
+      // Selection is an accent HALO under the core rather than a repaint, so
+      // a wire color you just picked shows immediately (UI_OVERHAUL §15).
+      if (selected) {
+        renderer.drawPath(this.wirePaths[i], { stroke: theme.accent, lineWidth: width * 2 });
+      }
       renderer.drawPath(this.wirePaths[i], {
         stroke,
-        lineWidth: selected ? lineWidth * 1.6 : lineWidth,
+        lineWidth: selected ? width * 1.25 : width,
       });
     }
     renderer.flush();

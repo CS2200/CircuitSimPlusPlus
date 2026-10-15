@@ -76,3 +76,25 @@ test("top bar: the light/dark toggle flips themes and restores the dark family",
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled");
 });
+
+test("Settings: the canvas grid overlay toggles and persists", async ({ page }) => {
+  await page.goto("/");
+  // Off by default (the pref is written on load, so it lands as "0").
+  expect(await page.evaluate(() => localStorage.getItem("csx.grid"))).toBe("0");
+
+  const gridToggle = () =>
+    page
+      .getByRole("dialog", { name: "Settings" })
+      .locator(".settings-toggle", { hasText: "Show grid" })
+      .locator("input");
+
+  await openSettings(page);
+  await expect(gridToggle()).not.toBeChecked();
+  await gridToggle().check();
+  expect(await page.evaluate(() => localStorage.getItem("csx.grid"))).toBe("1");
+
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await openSettings(page);
+  await expect(gridToggle()).toBeChecked();
+});

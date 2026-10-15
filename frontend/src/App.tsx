@@ -21,7 +21,7 @@ import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
-import { loadBoolPref, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
+import { loadBoolPref, PREF_GRID, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
 import {
   DEFAULT_ACCENT,
   DEFAULT_THEME,
@@ -66,6 +66,7 @@ export default function App() {
   // animation, startup update check — per machine, all persisted.
   const [accent, setAccent] = useState<AccentId>(loadAccentPref);
   const [pulsesOn, setPulsesOn] = useState(() => loadBoolPref(PREF_PULSES, true));
+  const [gridOn, setGridOn] = useState(() => loadBoolPref(PREF_GRID, false));
   const [updateCheckOn, setUpdateCheckOn] = useState(() => loadBoolPref(PREF_UPDATE_CHECK, true));
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
@@ -115,8 +116,7 @@ export default function App() {
   // Current sheet (circuit) index — subcircuits live on their own sheets.
   const [sheet, setSheet] = useState(0);
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
-  const [hzExp, setHzExp] = useState(10); // hz = 10^(exp/10)
-  const hz = Math.round(10 ** (hzExp / 10));
+  const [hzExp, setHzExp] = useState(10); // clock speed exponent: hz = 10^(exp/10)
   const [nameDialog, setNameDialog] = useState<{
     title: string;
     initial: string;
@@ -147,6 +147,9 @@ export default function App() {
     saveBoolPref(PREF_PULSES, pulsesOn);
   }, [pulsesOn]);
   useEffect(() => {
+    saveBoolPref(PREF_GRID, gridOn);
+  }, [gridOn]);
+  useEffect(() => {
     saveBoolPref(PREF_UPDATE_CHECK, updateCheckOn);
   }, [updateCheckOn]);
 
@@ -166,6 +169,7 @@ export default function App() {
     setTheme(DEFAULT_THEME);
     setAccent(DEFAULT_ACCENT);
     setPulsesOn(true);
+    setGridOn(false);
     setUpdateCheckOn(true);
   }, []);
 
@@ -411,46 +415,9 @@ export default function App() {
     [doc, toast],
   );
 
-  // ---- simulation menu commands ----
-
-  /** Menu mirror of SimBar's load-then-command guard; errors toast. */
-  const simCmd = useCallback(
-    async (cmd: () => Promise<void>) => {
-      try {
-        if (!sim.store.loaded) {
-          const ok = await sim.load(doc);
-          if (!ok) return; // load errors already surface in the sim banner
-        }
-        await cmd();
-      } catch (err) {
-        toast(String(err));
-      }
-    },
-    [sim, doc, toast],
-  );
-
-  const onRunTo = useCallback(() => {
-    setNameDialog({
-      title: "Run to cycle",
-      initial: String(Math.max(sim.store.cycle + 100, 100)),
-      submitLabel: "Run",
-      onSubmit: (value) => {
-        setNameDialog(null);
-        const cycle = Number(value);
-        if (!Number.isInteger(cycle) || cycle < 0) {
-          toast(`Run to: "${value}" is not a non-negative integer cycle`);
-          return;
-        }
-        void simCmd(() => sim.runUntil(cycle));
-      },
-    });
-  }, [sim, simCmd, toast]);
-
   // ---- menus ----
 
   const menus: MenuDef[] = useMemo(() => {
-    const mode = sim.store.status?.mode ?? "delay";
-    const speedPresets = [1, 10, 100, 1_000];
     return [
       {
         label: "File",
@@ -508,49 +475,10 @@ export default function App() {
           },
         ],
       },
-      {
-        label: "Simulation",
-        items: [
-          {
-            label: "Step tick",
-            shortcut: "Ctrl+J",
-            onSelect: () => void simCmd(() => sim.stepTick()),
-          },
-          { label: "Run to cycle…", onSelect: onRunTo },
-          {
-            label: "Reset (autoload re-applies)",
-            shortcut: "Ctrl+R",
-            onSelect: () => void onReset(),
-          },
-          { kind: "sep" },
-          ...speedPresets.map((p) => ({
-            label: p >= 1000 ? `${p / 1000} kHz` : `${p} Hz`,
-            radio: true,
-            checked: hz === p,
-            onSelect: () => setHzExp(Math.round(10 * Math.log10(p))),
-          })),
-          { kind: "sep" },
-          {
-            label: "Delay-aware mode (teaching/grading)",
-            radio: true,
-            checked: mode === "delay",
-            onSelect: () => void simCmd(() => sim.setMode("delay")),
-          },
-          {
-            label: "Zero-delay mode (fast/debug)",
-            radio: true,
-            checked: mode === "zero",
-            onSelect: () => void simCmd(() => sim.setMode("zero")),
-          },
-          { kind: "sep" },
-          {
-            label: "Highlight critical path",
-            checked: pathOn,
-            disabled: sim.store.timing === null,
-            onSelect: () => setPathOn((v) => !v),
-          },
-        ],
-      },
+      // The Simulation menu is retired for now (UI_OVERHAUL §15): the sim
+      // transport bar owns step/reset/run-to, the speed slider owns the clock
+      // (the Hz preset list was redundant), the T_obs chip toggles the
+      // critical-path highlight, and the status chip switches delay/zero mode.
       {
         label: "Subcircuits",
         items: [
@@ -570,7 +498,6 @@ export default function App() {
   }, [
     doc,
     sheet,
-    hz,
     pathOn,
     status,
     onNew,
@@ -579,13 +506,10 @@ export default function App() {
     onSaveAs,
     onNewSheet,
     onRenameSheet,
-    onRunTo,
     onReset,
     sim,
-    simCmd,
     simVersion,
   ]);
-
   // DEV hook: e2e reads the document JSON through this.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -717,17 +641,6 @@ export default function App() {
           onHzExp={setHzExp}
         />
       )}
-      {!stress && (
-        <SheetTabs
-          sheets={doc.circuits.map((c) => c.name)}
-          active={sheet}
-          onSwitch={setSheet}
-          onNew={onNewSheet}
-          onRename={onRenameSheet}
-          onDelete={onDeleteSheet}
-          inset={panelWidths.palette}
-        />
-      )}
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -820,36 +733,50 @@ export default function App() {
                 </div>
               </div>
             </aside>
-            <div className="editor-wrap">
-              <EditorCanvas
-                ref={editorRef}
-                doc={doc}
-                themeName={`${theme}|${accent}`}
-                sheetIdx={sheet}
-                onStatus={onStatus}
-                onOpenSubcircuit={onOpenSubcircuit}
-                sim={sim}
-                pathIds={pathIds}
-                violations={violationMarkers}
-                pulsesOn={pulsesOn}
+            {/* Circuit tabs live above the CANVAS column (UI_OVERHAUL §15), so
+             * the side panels run the full height — no dead strip above the
+             * palette (that empty band was the "gap"). */}
+            <div className="editor-col">
+              <SheetTabs
+                sheets={doc.circuits.map((c) => c.name)}
+                active={sheet}
+                onSwitch={setSheet}
+                onNew={onNewSheet}
+                onRename={onRenameSheet}
+                onDelete={onDeleteSheet}
               />
-              {/* Panel separators: edge overlays (no layout footprint). */}
-              <ResizeHandle
-                panel="palette"
-                side="left"
-                width={panelWidths.palette}
-                defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
-                onResize={(w) => resizePanel("palette", w)}
-                onCommit={(w) => commitPanel("palette", w)}
-              />
-              <ResizeHandle
-                panel="dock"
-                side="right"
-                width={panelWidths.dock}
-                defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
-                onResize={(w) => resizePanel("dock", w)}
-                onCommit={(w) => commitPanel("dock", w)}
-              />
+              <div className="editor-wrap">
+                <EditorCanvas
+                  ref={editorRef}
+                  doc={doc}
+                  themeName={`${theme}|${accent}`}
+                  sheetIdx={sheet}
+                  onStatus={onStatus}
+                  onOpenSubcircuit={onOpenSubcircuit}
+                  sim={sim}
+                  pathIds={pathIds}
+                  violations={violationMarkers}
+                  pulsesOn={pulsesOn}
+                  gridOn={gridOn}
+                />
+                {/* Panel separators: edge overlays (no layout footprint). */}
+                <ResizeHandle
+                  panel="palette"
+                  side="left"
+                  width={panelWidths.palette}
+                  defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
+                  onResize={(w) => resizePanel("palette", w)}
+                  onCommit={(w) => commitPanel("palette", w)}
+                />
+                <ResizeHandle
+                  panel="dock"
+                  side="right"
+                  width={panelWidths.dock}
+                  defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
+                  onResize={(w) => resizePanel("dock", w)}
+                  onCommit={(w) => commitPanel("dock", w)}
+                />
+              </div>
             </div>
             <aside className="right-dock" aria-label="Details" style={{ width: panelWidths.dock }}>
               <InspectorPanel
@@ -906,10 +833,12 @@ export default function App() {
           theme={theme}
           accent={accent}
           pulsesOn={pulsesOn}
+          gridOn={gridOn}
           updateCheckOn={updateCheckOn}
           onTheme={setTheme}
           onAccent={setAccent}
           onPulses={setPulsesOn}
+          onGrid={setGridOn}
           onUpdateCheck={setUpdateCheckOn}
           onReset={resetAppearance}
           onClose={() => setSettingsOpen(false)}

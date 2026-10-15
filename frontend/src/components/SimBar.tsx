@@ -4,6 +4,14 @@ import type { CircuitDocument } from "../model/document";
 import type { SimMode } from "../ipc/types";
 
 /**
+ * Slider notches at the "nice" clock values (slider exponents, where
+ * hz = 10^(exp/10)): 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000 Hz. Decades get
+ * a taller mark (UI_OVERHAUL §15).
+ */
+const SPEED_NOTCHES = [0, 3, 7, 10, 13, 17, 20, 23, 27, 30];
+const DECADE_EXPS = new Set([0, 10, 20, 30]);
+
+/**
  * Simulation transport bar (FRONTEND.md U5): play/pause, step tick/cycle,
  * run-to-cycle-N, speed slider (log scale), zero/delay mode toggle, plus
  * cycle/eff-Hz telemetry. Load errors and halts surface as banners.
@@ -118,18 +126,32 @@ export default function SimBar({
           </button>
         </span>
         <label className="sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
-          <input
-            type="range"
-            min={0}
-            max={30}
-            value={hzExp}
-            onChange={(e) => {
-              const exp = Number(e.target.value);
-              onHzExp(exp);
-              if (running) void guard(ctl.play(Math.round(10 ** (exp / 10))));
-            }}
-          />
-          <span>{hz.toLocaleString()} Hz</span>
+          <span className="sim-speed-slider">
+            <input
+              type="range"
+              min={0}
+              max={30}
+              step={1}
+              value={hzExp}
+              aria-label="Clock speed"
+              onChange={(e) => {
+                const exp = Number(e.target.value);
+                onHzExp(exp);
+                if (running) void guard(ctl.play(Math.round(10 ** (exp / 10))));
+              }}
+            />
+            <span className="sim-notches">
+              {SPEED_NOTCHES.map((exp) => (
+                <span
+                  key={exp}
+                  className={`sim-notch${DECADE_EXPS.has(exp) ? " major" : ""}`}
+                  style={{ left: `${(exp / 30) * 100}%` }}
+                  title={`${Math.round(10 ** (exp / 10)).toLocaleString()} Hz`}
+                />
+              ))}
+            </span>
+          </span>
+          <span className="sim-speed-value">{hz.toLocaleString()} Hz</span>
         </label>
         <button
           className="secondary"
@@ -141,7 +163,18 @@ export default function SimBar({
         <span className="sim-status">
           {s.loaded ? (
             <>
-              cycle {s.cycle} · {mode}
+              cycle {s.cycle} ·{" "}
+              <button
+                className="sim-mode"
+                title={`Simulation mode: ${mode} — click for ${
+                  mode === "delay" ? "zero-delay" : "delay-aware"
+                }`}
+                onClick={() =>
+                  void withLoadedDoc(() => ctl.setMode(mode === "delay" ? "zero" : "delay"))
+                }
+              >
+                {mode}
+              </button>
               {running && s.status !== null && ` · ${s.status.eff_hz.toLocaleString()} Hz eff.`}
             </>
           ) : (

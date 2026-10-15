@@ -2,11 +2,8 @@
  * Circuit tab strip: one tab per circuit in the file (the top-level sheet
  * first, subcircuits after), horizontally scrollable when they don't fit.
  * Double-click renames; each deletable tab carries an "×" (UI_OVERHAUL §10);
- * the "+" button creates a new subcircuit.
- *
- * `inset` left-pads the strip so the tabs line up with the canvas grid
- * (i.e. clear of the component palette) instead of starting at the window
- * edge, and tracks the palette's live width.
+ * the "+" button creates a new subcircuit. The strip sits above the CANVAS
+ * column only (§15), so the side panels run the full height.
  */
 export default function SheetTabs({
   sheets,
@@ -15,7 +12,6 @@ export default function SheetTabs({
   onNew,
   onRename,
   onDelete,
-  inset = 0,
 }: {
   sheets: readonly string[];
   active: number;
@@ -24,16 +20,9 @@ export default function SheetTabs({
   onRename: (i: number) => void;
   /** Delete a circuit sheet (guarded in the document). */
   onDelete?: (i: number) => void;
-  /** Left inset in CSS px (the palette's width) to align with the grid. */
-  inset?: number;
 }) {
   return (
-    <div
-      className="sheet-tabs"
-      role="tablist"
-      aria-label="Circuits"
-      style={inset > 0 ? { paddingLeft: inset + 8 } : undefined}
-    >
+    <div className="sheet-tabs" role="tablist" aria-label="Circuits">
       {sheets.map((name, i) => (
         <div key={`${i}:${name}`} className={`sheet-tab-wrap${i === active ? " active" : ""}`}>
           <button

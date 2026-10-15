@@ -80,6 +80,8 @@ export default forwardRef<
     violations?: readonly ViolationMarker[] | null;
     /** Signal-pulse animation (Settings → Canvas); default on. */
     pulsesOn?: boolean;
+    /** Coarse canvas grid (Settings → Canvas, UI_OVERHAUL §15); default off. */
+    gridOn?: boolean;
   }
 >(function EditorCanvas(
   {
@@ -93,6 +95,7 @@ export default forwardRef<
     pathIds,
     violations,
     pulsesOn = true,
+    gridOn = false,
   },
   ref,
 ) {
@@ -194,10 +197,23 @@ export default forwardRef<
           ),
         };
       }
-      scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay);
+      scene.draw(renderer, theme, camera, view, sel, tool.overlay(), simOverlay, gridOn);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
-    [doc, scene, sel, tool, sim, simVersion, pathIds, violations, pulses, pulsesLive, pulsesOn],
+    [
+      doc,
+      scene,
+      sel,
+      tool,
+      sim,
+      simVersion,
+      pathIds,
+      violations,
+      pulses,
+      pulsesLive,
+      pulsesOn,
+      gridOn,
+    ],
   );
 
   const report = useCallback(() => {

@@ -7,6 +7,8 @@
 
 export const PREF_PULSES = "csx.pulses";
 export const PREF_UPDATE_CHECK = "csx.updateCheck";
+/** Canvas grid overlay (UI_OVERHAUL §15) — off by default. */
+export const PREF_GRID = "csx.grid";
 
 export function loadBoolPref(key: string, fallback: boolean): boolean {
   try {

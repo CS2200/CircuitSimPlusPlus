@@ -348,8 +348,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 8px 0;
+  /* Roomier spacing between the group icons (UI_OVERHAUL §15). */
+  gap: 10px;
+  padding: 10px 0;
   overflow-y: auto;
   border-right: 1px solid var(--panel-border);
 }
@@ -684,7 +685,13 @@ body {
   background: transparent;
   border: none;
   border-radius: 0;
-  padding: 0.3rem 0.35rem 0.3rem 0.9rem;
+  /* Symmetric padding + centered label: the block name sits in the middle of
+   * its tab and the ✕ keeps its own slot (UI_OVERHAUL §15). */
+  padding: 0.3rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .sheet-tab-close {
@@ -786,7 +793,21 @@ body {
   color: var(--text-dim);
 }
 
-/* ---- right dock: Inspector + Watch (UI overhaul §3) ---- */
+/* Canvas column: circuit tabs sit above the canvas ONLY, so the side panels
+ * run the full height (UI_OVERHAUL §15). */
+.editor-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-col .editor-wrap {
+  min-height: 0;
+}
+
+/* ---- right dock: Inspector (UI overhaul §3) ---- */
 
 .right-dock {
   width: 16rem; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
@@ -794,6 +815,9 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Breathing room for the Inspector content (UI_OVERHAUL §15). */
+  padding: 0.7rem 0.8rem 0.9rem;
+  overflow-y: auto;
   background: var(--panel);
 }
 
@@ -1409,6 +1433,45 @@ body {
 .sim-speed input[type="range"] {
   width: 9rem;
   accent-color: var(--accent);
+}
+
+/* Log-scale notches under the slider track (UI_OVERHAUL §15): the exponent is
+ * 0…30 (hz = 10^(exp/10)), so a notch at exp/30 maps straight to a position. */
+.sim-speed-slider {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sim-notches {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 7px;
+  pointer-events: none;
+}
+
+.sim-notch {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 3px;
+  background: var(--panel-border);
+  transform: translateX(-0.5px);
+}
+
+.sim-notch.major {
+  height: 6px;
+  background: var(--text-dim);
+}
+
+/* Delay/zero mode chip (retired Simulation menu, UI_OVERHAUL §15). */
+.simbar .sim-mode {
+  padding: 0 0.4rem;
+  font-size: 0.78rem;
+  border-radius: 999px;
+  color: var(--text-dim);
 }
 
 .sim-speed span {

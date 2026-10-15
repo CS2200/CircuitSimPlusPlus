@@ -283,30 +283,30 @@ test("Subcircuits: right-click an instance jumps to its definition tab", async (
   await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
 });
 
-test("Simulation menu: mode radio + speed preset + run-to dialog", async ({ page }) => {
+test("sim transport bar: mode chip, log slider with notches, run-to", async ({ page }) => {
   await page.goto("/?simdemo=1");
 
-  await openMenu(page, "Simulation");
-  await expect(page.getByRole("menuitem", { name: "Step tick" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Run to cycle…" })).toBeVisible();
+  // The retired Simulation menu's controls live in the transport bar now.
+  await page.getByRole("button", { name: "tick" }).click();
+  const status = page.locator(".sim-status");
+  await expect(status).toContainText("cycle");
 
-  // mode radios reflect and drive the sim store (loads the demo on demand)
-  await page.getByRole("menuitem", { name: "Zero-delay mode" }).click();
-  await expect(page.locator(".sim-status")).toContainText("zero");
-  await openMenu(page, "Simulation");
-  await page.getByRole("menuitem", { name: "Delay-aware mode" }).click();
-  await expect(page.locator(".sim-status")).toContainText("delay");
+  // Delay/zero mode chip (was the menu's radio pair).
+  const mode = page.locator(".sim-mode");
+  await expect(mode).toHaveText("delay");
+  await mode.click();
+  await expect(mode).toHaveText("zero");
+  await mode.click();
+  await expect(mode).toHaveText("delay");
 
-  // speed preset mirrors into the transport slider readout
-  await openMenu(page, "Simulation");
-  await page.getByRole("menuitem", { name: "100 Hz" }).click();
-  await expect(page.locator(".sim-speed")).toContainText("100 Hz");
+  // Log scale: slider exponent 20 → 10^2 = 100 Hz, with marked notches.
+  await expect(page.locator(".sim-notch")).toHaveCount(10);
+  await expect(page.locator(".sim-notch.major")).toHaveCount(4);
+  await page.locator(".sim-speed input[type=range]").fill("20");
+  await expect(page.locator(".sim-speed-value")).toHaveText("100 Hz");
 
-  // run-to via the menu dialog
-  await openMenu(page, "Simulation");
-  await page.getByRole("menuitem", { name: "Run to cycle…" }).click();
-  const dialog = page.locator(".name-dialog");
-  await dialog.getByRole("textbox").fill("5");
-  await dialog.getByRole("button", { name: "Run" }).click();
-  await expect(page.locator(".sim-status")).toContainText("cycle 5");
+  // Run to cycle N from the transport bar.
+  await page.locator(".sim-runto input").fill("5");
+  await page.getByRole("button", { name: "run to" }).click();
+  await expect(status).toContainText("cycle 5");
 });

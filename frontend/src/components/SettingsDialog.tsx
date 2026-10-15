@@ -12,10 +12,12 @@ export default function SettingsDialog({
   theme,
   accent,
   pulsesOn,
+  gridOn,
   updateCheckOn,
   onTheme,
   onAccent,
   onPulses,
+  onGrid,
   onUpdateCheck,
   onReset,
   onClose,
@@ -23,10 +25,13 @@ export default function SettingsDialog({
   theme: ThemeId;
   accent: AccentId;
   pulsesOn: boolean;
+  /** Coarse canvas grid overlay (default off). */
+  gridOn: boolean;
   updateCheckOn: boolean;
   onTheme: (id: ThemeId) => void;
   onAccent: (id: AccentId) => void;
   onPulses: (v: boolean) => void;
+  onGrid: (v: boolean) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
   onReset: () => void;
@@ -127,6 +132,15 @@ export default function SettingsDialog({
               checked={pulsesOn}
               onChange={(e) => onPulses(e.target.checked)}
             />
+          </label>
+          <label className="settings-toggle">
+            <span>
+              Show grid
+              <span className="settings-hint">
+                Coarse groups of cells that stay evenly spaced as you zoom.
+              </span>
+            </span>
+            <input type="checkbox" checked={gridOn} onChange={(e) => onGrid(e.target.checked)} />
           </label>
         </section>
 
