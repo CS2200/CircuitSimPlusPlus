@@ -558,7 +558,7 @@ body {
 }
 
 .app-main {
-  position: relative; /* anchors the version drawer + preview overlay (§33) */
+  position: relative; /* anchors the version drawer + preview overlay (§34) */
   flex: 1;
   min-height: 0; /* allow the flex child to shrink to its container */
   display: flex;
@@ -1933,7 +1933,7 @@ body {
   border-color: var(--accent);
 }
 
-/* Version history (UI_OVERHAUL §33): a Docs-style drawer over the right dock,
+/* Version history (UI_OVERHAUL §34): a Docs-style drawer over the right dock,
  * plus a read-only canvas preview of the selected version. */
 
 .history-drawer {
@@ -2181,7 +2181,7 @@ body {
   color: var(--text-dim);
 }
 
-/* Sim transport (U5; restyled §33): one quiet row inside the header — a single
+/* Sim transport (U5; restyled §34): one quiet row inside the header — a single
  * filled play button, flat text buttons, hairline dividers between the
  * clusters, and the telemetry trailing. */
 

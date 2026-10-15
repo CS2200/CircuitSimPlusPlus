@@ -93,7 +93,7 @@ function realPathOf(path: string | null): string | null {
 const VERSION_COALESCE_MS = 60_000;
 
 /**
- * Width of the version-history drawer (UI_OVERHAUL §33). The canvas preview
+ * Width of the version-history drawer (UI_OVERHAUL §34). The canvas preview
  * stops where the drawer starts, so the two never overlap.
  */
 const HISTORY_DRAWER_W = 320;

@@ -170,6 +170,22 @@ function labelAnchor(
   }
 }
 
+/**
+ * Friendly preview names for pins whose registry name is cryptic
+ * (UI_OVERHAUL §33): the comparator's outputs read as words instead of
+ * `lt`/`eq`/`gt` in the hover card.
+ */
+const PIN_DISPLAY: Readonly<Record<string, string>> = {
+  lt: "less than",
+  eq: "equal to",
+  gt: "greater than",
+};
+
+/** Display name for a pin in the hover preview (falls back to the raw name). */
+function pinDisplayName(name: string): string {
+  return PIN_DISPLAY[name] ?? name;
+}
+
 /** Point at arc-length fraction t ∈ [0,1] along a polyline. */
 function pointAlong(points: [number, number][], t: number): Vec2 {
   const first = points[0];
@@ -1005,12 +1021,15 @@ export class DocScene {
     // Hover feedback (pins only — idle wire hover does nothing):
     const hit = overlay.hoverHit;
     if (hit?.kind === "pin") {
-      // Accent ring + one concise line: the pin name, plus its width only
-      // when it is wider than a single bit (§29).
+      // Accent ring + one concise line: the pin's friendly name (the
+      // comparator's lt/eq/gt read as words, §33), plus its width only when it
+      // is wider than a single bit (§29).
       renderer.drawDots([hit.pos], PIN_R * 1.5, theme.accent);
       const spec = this.layouts.get(hit.compId)?.pins.find((p) => p.name === hit.pin);
       const bits = spec !== undefined && spec.bitsize > 1 ? ` · ${spec.bitsize}b` : "";
-      drawCard(renderer, theme, { x: hit.pos.x + 0.6, y: hit.pos.y - 1.0 }, [`${hit.pin}${bits}`]);
+      drawCard(renderer, theme, { x: hit.pos.x + 0.6, y: hit.pos.y - 1.0 }, [
+        `${pinDisplayName(hit.pin)}${bits}`,
+      ]);
     } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
       // junction-on-drop preview (only while routing a wire)
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);

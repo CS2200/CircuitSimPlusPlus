@@ -985,7 +985,18 @@ baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
 
 **Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
 
-## 33. Follow-up batch X (2026-10-16): version drawer, quieter transport
+## 33. Follow-up batch X (2026-10-16): friendly comparator pin preview
+
+- **Hover preview reads as words.** The pin hover card (the preview that follows
+  the cursor over a pin) showed the raw registry name, so the comparator's
+  outputs read `lt` / `eq` / `gt`. `pinDisplayName()` maps those three to
+  **less than** / **equal to** / **greater than**; every other pin keeps its
+  name. This matches the `<` / `=` / `>` symbols now drawn on the body (§31) —
+  the glyph on the part, the words on hover.
+
+**Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
+
+## 34. Follow-up batch Y (2026-10-16): version drawer, quieter transport
 
 Three requests: make version history a Google-Docs-style drawer, drop the Tools
 menu, and tidy the simulation bar.

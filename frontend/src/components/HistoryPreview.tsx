@@ -5,7 +5,7 @@ import { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 
 /**
- * Read-only render of one stored version (version history, UI_OVERHAUL §33).
+ * Read-only render of one stored version (version history, UI_OVERHAUL §34).
  *
  * The version's canonical `.csx` is parsed into a throwaway document and drawn
  * on its OWN `DocScene`/`CanvasHost`. Nothing here touches the editor's
