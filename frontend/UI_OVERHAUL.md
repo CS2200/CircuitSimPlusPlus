@@ -923,7 +923,8 @@ instead of owning a row of its own.
   `File Edit View Tools Help` … `play tick reset run-to speed T_obs`.
 - **New menus** — `View` (grid, live values, pulses, performance overlay,
   highlight critical path — previously Settings-only) and `Tools` (recover
-  unsaved work, clear this file's history, settings, reset appearance).
+  unsaved work, clear this file's history, settings, reset appearance — the
+  Tools menu was dropped again in §32).
   `Simulate` was deliberately **not** re-added: §15 retired it because the
   transport owns run/step/reset/speed, and the transport is still on screen.
   `Edit` is unchanged; `File` keeps Version history….
@@ -944,3 +945,35 @@ both the canvas region and the label anchors changed: the five screenshot
 baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
 `demo-dark`, `demo-light`). Their Linux copies need the same one-shot
 `--update-snapshots` run on CI.
+
+## 31. Follow-up batch V (2026-10-16): version drawer, quieter transport
+
+Three requests: make version history a Google-Docs-style drawer, drop the Tools
+menu, and tidy the simulation bar.
+
+- **Version history is a drawer, not a dialog** (`HistoryDrawer.tsx`). It sits
+  over the right dock: newest first, each row showing the relative time, the
+  label, and the absolute time + size, with a badge on named versions. Selecting
+  a row previews that version's circuit on the canvas behind it.
+- **The preview is its own renderer** (`HistoryPreview.tsx`): the version's
+  canonical `.csx` is parsed into a throwaway document and drawn on a private
+  `DocScene`/`CanvasHost`. The live document, selection, undo stack, sim session
+  and autosave are never touched, so previewing cannot disturb the open circuit
+  (and closing the drawer is instant). A Docs-style banner sits above it —
+  "Viewing an older version — 5 min ago · Added the ALU" with **Restore this
+  version** / **Back to current**. Restore is the only action that changes the
+  document, and the restored state comes back dirty so autosave/Save protect it.
+  Save a copy…, Name… and Delete live in the drawer footer.
+- **The Tools menu is gone.** All four items already lived where they belong:
+  recover unsaved work (the recovery dialog), clear this file's history and reset
+  appearance (Settings), settings (File ▸ Settings…). Menus are now File / Edit /
+  View / Help.
+- **Transport restyle** (`SimBar` + `.simbar` CSS). The nested pill borders are
+  gone: one filled play button, flat text buttons that highlight on hover,
+  hairline dividers between the clusters, a single 26px control height, a thinner
+  slider with fainter preset ticks, and tabular-figure telemetry. The "speed"
+  word is gone (the slider plus the Hz readout already say it), and the T_obs
+  chip is a quiet outlined chip rather than a panel-coloured block.
+
+**Acceptance:** 292 unit / 45 e2e green. The transport is 2px taller, so the
+committed screenshot baselines need the usual `--update-snapshots` pass on CI.

@@ -14,7 +14,8 @@ import {
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
-import HistoryDialog from "./components/HistoryDialog";
+import HistoryDrawer from "./components/HistoryDrawer";
+import HistoryPreview from "./components/HistoryPreview";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -43,6 +44,7 @@ import {
   saveTextFile,
   statFile,
 } from "./files";
+import { relativeAge } from "./lib/time";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import {
   loadBoolPref,
@@ -93,6 +95,12 @@ function realPathOf(path: string | null): string | null {
  * editing becomes one history entry; an explicit Save always makes a new one.
  */
 const VERSION_COALESCE_MS = 60_000;
+
+/**
+ * Width of the version-history drawer (UI_OVERHAUL §31). The canvas preview
+ * stops where the drawer starts, so the two never overlap.
+ */
+const HISTORY_DRAWER_W = 320;
 
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
@@ -757,6 +765,25 @@ export default function App() {
     await refreshHistory();
   }, [refreshHistory]);
 
+  /** Close the drawer and drop the preview (the canvas returns to the live doc). */
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    setHistorySelectedId(null);
+  }, []);
+
+  /** The version the drawer has selected. */
+  const selectedVersion = useMemo(
+    () => versions.find((v) => v.id === historySelectedId) ?? null,
+    [versions, historySelectedId],
+  );
+
+  /** "5 min ago · Added the ALU" for the preview banner. */
+  const previewLabel = useMemo(() => {
+    if (selectedVersion === null) return "an older version";
+    const when = relativeAge(selectedVersion.at_ms);
+    return selectedVersion.label !== "" ? `${when} · ${selectedVersion.label}` : when;
+  }, [selectedVersion]);
+
   // The preview follows the selection (read on demand — versions can be large).
   useEffect(() => {
     if (!historyOpen || historySelectedId === null) {
@@ -824,6 +851,7 @@ export default function App() {
       adoptDoc(restored, realPathOf(filePathRef.current));
       void sim.load(restored);
       setHistoryOpen(false);
+      setHistorySelectedId(null);
       toast(`Restored ${label}`);
     },
     [historyTarget, versions, adoptDoc, sim, toast, refreshHistory],
@@ -1120,20 +1148,6 @@ export default function App() {
         ],
       },
       {
-        label: "Tools",
-        items: [
-          {
-            label: "Recover unsaved work…",
-            disabled: recoveries.length === 0,
-            onSelect: () => setRecoveryOpen(true),
-          },
-          { label: "Clear this file's history", onSelect: () => void clearHistory() },
-          { kind: "sep" },
-          { label: "Settings…", onSelect: () => setSettingsOpen(true) },
-          { label: "Reset appearance", onSelect: resetAppearance },
-        ],
-      },
-      {
         label: "Help",
         items: [
           { label: "Keyboard shortcuts", shortcut: "?", onSelect: () => setShowHelp(true) },
@@ -1161,9 +1175,6 @@ export default function App() {
     pulsesOn,
     showPerf,
     pathOn,
-    recoveries,
-    clearHistory,
-    resetAppearance,
     sim,
     simVersion,
   ]);
@@ -1481,6 +1492,44 @@ export default function App() {
             </aside>
           </>
         )}
+        {historyOpen && (
+          <HistoryDrawer
+            versions={versions}
+            selectedId={historySelectedId}
+            usage={historyUsage}
+            onSelect={setHistorySelectedId}
+            onSaveCopy={(id) => void saveVersionCopy(id)}
+            onName={nameVersion}
+            onDelete={(id) => void deleteVersion(id)}
+            onClose={closeHistory}
+          />
+        )}
+        {historyOpen && historySelectedId !== null && historyPreview !== null && (
+          <div
+            className="history-preview"
+            style={{ left: panelWidths.palette, right: HISTORY_DRAWER_W }}
+          >
+            <div className="history-preview-bar">
+              <span className="history-preview-text">
+                Viewing an older version — {previewLabel}
+              </span>
+              <button onClick={() => void restoreVersion(historySelectedId)}>
+                Restore this version
+              </button>
+              <button className="secondary" onClick={() => setHistorySelectedId(null)}>
+                Back to current
+              </button>
+            </div>
+            <HistoryPreview
+              key={historySelectedId}
+              text={historyPreview}
+              themeName={`${theme}|${accent}`}
+              gridOn={gridOn}
+              showValues={showValues}
+              labelPos={labelPos}
+            />
+          </div>
+        )}
       </main>
       <footer className="app-statusbar">
         {status?.placing && (
@@ -1494,20 +1543,6 @@ export default function App() {
         )}
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
-      {historyOpen && (
-        <HistoryDialog
-          versions={versions}
-          selectedId={historySelectedId}
-          preview={historyPreview}
-          usage={historyUsage}
-          onSelect={setHistorySelectedId}
-          onRestore={(id) => void restoreVersion(id)}
-          onSaveCopy={(id) => void saveVersionCopy(id)}
-          onName={nameVersion}
-          onDelete={(id) => void deleteVersion(id)}
-          onClose={() => setHistoryOpen(false)}
-        />
-      )}
       {nameDialog !== null && (
         <NameDialog
           title={nameDialog.title}

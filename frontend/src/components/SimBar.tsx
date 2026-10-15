@@ -132,7 +132,6 @@ export default function SimBar({
           </button>
         </div>
         <label className="sim-group sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
-          <span className="sim-speed-label">speed</span>
           <span className="sim-speed-slider">
             <input
               type="range"
