@@ -371,7 +371,7 @@ green.
 ## 10. Follow-up batch A (2026-10-16): placement, rotation, interaction
 
 - **Rotation alignment:** for N/S rotations the body rect swaps axes (h×w),
-  but the gate silhouette was still anchored at the *unrotated* origin, so it
+  but the gate silhouette was still anchored at the _unrotated_ origin, so it
   rotated about the wrong point and drew offset from its pins (and from the
   selection box / floating rotate button). The EAST-frame shape is now built
   centered on the body rect.
