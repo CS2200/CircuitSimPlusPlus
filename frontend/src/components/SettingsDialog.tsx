@@ -3,7 +3,6 @@ import { bytesLabel } from "../lib/time";
 import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
 import type { HistoryUsage } from "../model/versionStore";
 import Select from "./Select";
-import type { LabelPos } from "../editor/docScene";
 
 /**
  * Settings panel (UI_OVERHAUL §25): a sectioned settings dialog — a nav
@@ -48,7 +47,6 @@ export default function SettingsDialog({
   defaultBits,
   defaultInputs,
   defaultHz,
-  labelPos,
   updateCheckOn,
   historyUsage,
   onClearHistory,
@@ -63,7 +61,6 @@ export default function SettingsDialog({
   onDefaultBits,
   onDefaultInputs,
   onDefaultHz,
-  onLabelPos,
   onUpdateCheck,
   onReset,
   onClose,
@@ -84,8 +81,6 @@ export default function SettingsDialog({
   defaultInputs: number;
   /** Default clock-speed exponent (hz = 10^(exp/10)). */
   defaultHz: number;
-  /** Which side of a part its name label is drawn on. */
-  labelPos: LabelPos;
   updateCheckOn: boolean;
   /** Version-history footprint, or null while it is loading. */
   historyUsage: HistoryUsage | null;
@@ -101,7 +96,6 @@ export default function SettingsDialog({
   onDefaultBits: (v: number) => void;
   onDefaultInputs: (v: number) => void;
   onDefaultHz: (v: number) => void;
-  onLabelPos: (v: LabelPos) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
   onReset: () => void;
@@ -154,30 +148,6 @@ export default function SettingsDialog({
         <span className="settings-hint">{hint}</span>
       </span>
       <Select label={label} value={value} options={choices} onChange={onPick} />
-    </div>
-  );
-
-  // All parts follow this side unless one overrides it from the Inspector,
-  // which stores the per-part `namePos` field (UI_OVERHAUL §28).
-  const choosePos = (): JSX.Element => (
-    <div className="settings-row">
-      <span className="settings-row-label">
-        Default name position
-        <span className="settings-hint">
-          Which side a part's name is drawn on. Each part can override this in the Inspector.
-        </span>
-      </span>
-      <Select
-        label="Default name position"
-        value={labelPos}
-        options={[
-          { value: "N", label: "Above" },
-          { value: "S", label: "Below" },
-          { value: "W", label: "Left" },
-          { value: "E", label: "Right" },
-        ]}
-        onChange={onLabelPos}
-      />
     </div>
   );
 
@@ -305,7 +275,6 @@ export default function SettingsDialog({
                   showPerf,
                   onShowPerf,
                 )}
-                {choosePos()}
               </section>
             )}
 

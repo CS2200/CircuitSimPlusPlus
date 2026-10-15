@@ -310,7 +310,7 @@ describe("updateComponent", () => {
       circuits: { components: Record<string, unknown>[] }[];
     };
     expect(parsed.circuits[0].components[0].namePos).toBe("S");
-    // "Default" (null) removes the override so the part follows the app default.
+    // "Above" (the default) removes the override so the part writes nothing.
     doc.updateComponent(0, a, { namePos: null });
     expect(doc.circuit(0).components[0]).not.toHaveProperty("namePos");
     expect(doc.toJson()).not.toContain("namePos");

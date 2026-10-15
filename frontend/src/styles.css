@@ -380,6 +380,15 @@ button,
 input,
 select {
   font: inherit;
+  /* Native checkbox / radio / range highlights follow the chosen accent, never
+   * the browser's default blue (UI_OVERHAUL §31). */
+  accent-color: var(--accent);
+}
+
+/* Text selection too, so dragging over a field is the selected colour. */
+::selection {
+  background: var(--accent);
+  color: #fff;
 }
 
 button {
@@ -1339,9 +1348,11 @@ body {
 
 .select-item:hover {
   background: var(--grid);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .select-item.active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent);
 }
 

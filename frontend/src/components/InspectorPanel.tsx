@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CircuitDocument } from "../model/document";
-import type { CsxCircuit, CsxComponent } from "../model/csx";
+import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
 import { editableAttrs, compPins, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
@@ -220,10 +220,11 @@ export default function InspectorPanel({
   const commitRot = (rot: CsxComponent["rot"]) => {
     if (rot !== (comp.rot ?? "E")) commit({ rot }, "rot");
   };
-  /** Per-part name-label side; empty selection clears the override (§28). */
-  const commitNamePos = (side: CsxComponent["namePos"] | null) => {
-    if (side === (comp.namePos ?? null)) return;
-    commit({ namePos: side }, "namePos");
+  /** Per-part name-label side (§28/§31): Above (N) is the default and is
+   * stored as "absent" so a default part writes nothing. */
+  const commitNamePos = (side: Rotation) => {
+    if (side === (comp.namePos ?? "N")) return;
+    commit({ namePos: side === "N" ? null : side }, "namePos");
   };
   const commitType = (type: string) => {
     if (type !== comp.type) commit({ type }, "type");
@@ -338,15 +339,14 @@ export default function InspectorPanel({
         <span>Label side</span>
         <Select
           label="Label side"
-          value={comp.namePos ?? ""}
+          value={comp.namePos ?? "N"}
           options={[
-            { value: "", label: "Default" },
             { value: "N", label: "Above" },
             { value: "S", label: "Below" },
             { value: "W", label: "Left" },
             { value: "E", label: "Right" },
           ]}
-          onChange={(side) => commitNamePos(side === "" ? null : (side as CsxComponent["namePos"]))}
+          onChange={(side) => commitNamePos(side as Rotation)}
         />
       </div>
 

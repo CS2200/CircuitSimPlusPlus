@@ -549,7 +549,6 @@ export class DocScene {
     sim?: SimOverlay,
     grid = false,
     showValues = true,
-    labelPos: LabelPos = "N",
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
@@ -682,7 +681,7 @@ export class DocScene {
         }
         // shaped bodies have no caption — a named part shows its name beside it
         if (comp.name !== undefined && comp.name !== "") {
-          const na = labelAnchor(layout.rect, comp.namePos ?? labelPos);
+          const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,
@@ -737,7 +736,7 @@ export class DocScene {
         }
         if (valueText !== null) caption = valueText;
         if (comp.name !== undefined && comp.name !== "") {
-          const na = labelAnchor(layout.rect, comp.namePos ?? labelPos);
+          const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,
@@ -757,18 +756,34 @@ export class DocScene {
             });
           }
         }
-        renderer.drawText(
-          cx,
-          cy,
-          caption,
-          // Values (and symbols, §18) are sized to fit the body, so a 32-bit
-          // readout on a small part stays inside it.
-          {
-            color: valueText !== null ? theme.text : theme.textDim,
-            size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
-            align: "center",
-          },
-        );
+        // The comparator's three outputs each get their own relation symbol
+        // next to the pin (<, =, >) instead of one centered mark
+        // (UI_OVERHAUL §31).
+        if (comp.type === "arith.comparator") {
+          const REL: Record<string, string> = { lt: "<", eq: "=", gt: ">" };
+          for (const p of layout.pins) {
+            const sym = REL[p.name];
+            if (sym === undefined) continue;
+            renderer.drawText(layout.rect.x + layout.rect.w - 0.5, p.y + 0.55, sym, {
+              color: theme.textDim,
+              size: 1.1,
+              align: "right",
+            });
+          }
+        } else {
+          renderer.drawText(
+            cx,
+            cy,
+            caption,
+            // Values (and symbols, §18) are sized to fit the body, so a 32-bit
+            // readout on a small part stays inside it.
+            {
+              color: valueText !== null ? theme.text : theme.textDim,
+              size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
+              align: "center",
+            },
+          );
+        }
         // Subcircuit instances: label each interface pin just inside the
         // box (inputs at the left edge, outputs at the right).
         if (comp.type === "subcircuit") {

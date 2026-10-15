@@ -850,19 +850,18 @@ Four requests on top of §25/§26, all in the Inspector and Settings panels.
   when unset** (`Option` + `skip_serializing_if`, exactly like a wire's `color`),
   so files written before it stay byte-identical and old `.csx` files stay valid.
   The engine ignores it beyond round-tripping it. The Inspector's **Label side**
-  select sets it (Above / Below / Left / Right, plus **Default** to clear the
-  override); Settings ▸ Canvas ▸ **Default name position** is the fallback for
-  parts with no override. `docScene`'s `labelAnchor()` reads
-  `comp.namePos ?? labelPos` and maps the side to an anchor + text alignment for
-  both box and shaped bodies. The per-pin value readout beside a pin is
-  unaffected.
+  select sets it (Above / Below / Left / Right), **Above (`N`) is the default**
+  and is stored as "absent", so a default part writes nothing — there is no
+  global setting and no "Default" entry (superseded by §31). `docScene`'s
+  `labelAnchor()` reads `comp.namePos ?? "N"` and maps the side to an anchor +
+  text alignment for both box and shaped bodies. The per-pin value readout beside
+  a pin is unaffected.
 - **App dropdowns instead of native `<select>`.** A new `Select` component
   (`components/Select.tsx`) renders a button (`aria-haspopup="listbox"`,
   `aria-label`) plus an option list styled like the menu-bar popups, and is now
   used for every select in the **Inspector** (Rotation, gate Type, and the
   `select`-kind attrs: radix / shift / extend mode / subcircuit) and in the
-  **Settings** panel (default bit width / gate inputs / clock speed / default
-  name position). The list renders **inline** (not absolutely positioned): the dock
+  **Settings** panel (default bit width / gate inputs / clock speed). The list renders **inline** (not absolutely positioned): the dock
   and the settings pane both scroll. (Superseded by §29: the list is now a
   portaled overlay rather than inline.) Escape and outside-click close it.
 - **Prettier `endOfLine: "auto"`** in `frontend/.prettierrc.json`. The Windows
@@ -910,7 +909,7 @@ Three polish fixes.
 ## 30. Follow-up batch U (2026-10-16): Docs-style header
 
 The top bar became a two-row header modelled on Google Docs/Sheets. Chrome
-height is unchanged: the sim transport moved *into* the header's second row
+height is unchanged: the sim transport moved _into_ the header's second row
 instead of owning a row of its own.
 
 - **Row 1** — `[app mark] <file name> (save chip) …… undo redo | history | theme`.
@@ -929,7 +928,7 @@ instead of owning a row of its own.
   `Edit` is unchanged; `File` keeps Version history….
 - **Layout guarantee** — the menu row never shrinks (`flex: 0 0 auto`); the
   transport gives way instead: its telemetry ellipsizes, the status text drops
-  below 1150 px and the run-to group below 1000 px. Letting the *menus* shrink
+  below 1150 px and the run-to group below 1000 px. Letting the _menus_ shrink
   instead made the Help button spill over `.sim-play` and swallow clicks (caught
   by `sim.spec`'s play/pause loop). The sim banner is now an overlay dropping
   out from under the header (`.sim-banner`, absolute) so a halt never becomes a
@@ -944,3 +943,26 @@ both the canvas region and the label anchors changed: the five screenshot
 baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
 `demo-dark`, `demo-light`). Their Linux copies need the same one-shot
 `--update-snapshots` run on CI.
+
+## 31. Follow-up batch V (2026-10-16): label-side default, accent highlights, comparator symbols
+
+- **Label side: no "Default", Above is the default.** The Inspector's **Label
+  side** select dropped its "Default" entry and now offers only Above / Below /
+  Left / Right, with **Above (`N`) selected when unset**. Choosing Above stores
+  nothing (the field is removed again), so a default part writes no `namePos`.
+  The global **Default name position** setting from §28 is gone — with Above as
+  the built-in default it had nothing left to do — along with the `csx.labelPos`
+  pref and the `labelPos` parameter threading through `EditorCanvas`/`draw`.
+- **Highlights follow the accent, not the browser blue.** The base
+  `button, input, select` rule sets `accent-color: var(--accent)`, so the
+  Settings toggles, any radio/range control and the like highlight in the chosen
+  accent; a global `::selection` paints text selection in the accent; and the
+  dropdown's hovered/active option uses an accent-tinted background
+  (`color-mix`) instead of plain grey.
+- **Comparator shows its three relations.** `arith.comparator` no longer draws
+  one centered `=`. Each output pin gets its own symbol just inside the right
+  edge — `<` by `lt`, `=` by `eq`, `>` by `gt` — so the part reads as a
+  comparator at a glance. The catalog's family mark stays `=` (it still drives
+  the palette tile and the `catalog.test` marks list).
+
+**Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
