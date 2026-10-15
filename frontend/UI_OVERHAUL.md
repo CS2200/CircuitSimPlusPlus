@@ -1294,3 +1294,18 @@ month-old one to one a day).
 
 **Acceptance:** frontend lint / 303 unit / build green; 51-of-51 e2e green; Rust
 171 core + 12 CLI + 8 golden, clippy/fmt clean.
+
+## 45. Follow-up batch AJ (2026-10-16): a `?` panel that fits
+
+- **Redesigned the shortcuts overlay.** It was one long `<table>` inside
+  `.help-card` (max-width 480, no height cap), so it ran off the bottom of the
+  screen. It is now `.help-card.help-shortcuts`: a **two-column, scrollable**
+  card (`width: min(94vw, 820px)`, `max-height: min(88vh, 780px)`, the section
+  list itself scrolls) with a header + close button, the rows grouped into
+  **Wiring / Selecting & editing / Keyboard / Files / Simulation / Pan & zoom**,
+  and a `Ctrl+X` (cut) + `?` row added. The shared `.help-card` base is
+  untouched, so the About/memory dialogs keep their look.
+- `help.spec` opens it with `?` and asserts the card's box is inside the
+  viewport, that all six sections render, and that Escape dismisses.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-52 e2e green.

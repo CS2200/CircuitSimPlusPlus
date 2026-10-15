@@ -123,6 +123,71 @@ function initDoc(d: CircuitDocument): CircuitDocument {
  * at ?stress=1, the U4 visual showcase at ?demo=1, and the U5 mock-core
  * demo circuit at ?simdemo=1.
  */
+/** Sections of the `?` shortcuts panel (UI_OVERHAUL §45). */
+const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][] }[] = [
+  {
+    title: "Wiring",
+    rows: [
+      ["Click a pin", "start a wire (each click plants a bend)"],
+      ["X (while wiring)", "flip the corner direction"],
+      ["Drag a wire bend", "move that corner point"],
+      ["Drop on a wire", "finish with a junction (dot)"],
+      ["Drag from a wire", "start a wire from a junction"],
+      ["Shift+click wire", "show the value on that wire"],
+    ],
+  },
+  {
+    title: "Selecting & editing",
+    rows: [
+      ["Click component / wire", "select (Shift toggles)"],
+      ["Drag component", "move the selection (wires follow)"],
+      ["↻ above a selection", "rotate it (same as R)"],
+      ["Drag empty space", "box select (Ctrl/Shift adds)"],
+      ["Inspector (right dock)", "edit the selection — applies live"],
+      ["Right-click a subcircuit", "jump to its definition tab"],
+      ["Del / Backspace", "delete the selection"],
+    ],
+  },
+  {
+    title: "Keyboard",
+    rows: [
+      ["R", "rotate selection / ghost (clockwise)"],
+      ["← ↑ → ↓", "point the selection / ghost (W / N / E / S)"],
+      ["Ctrl+C / Ctrl+X / Ctrl+V", "copy / cut / paste"],
+      ["Ctrl+A", "select all"],
+      ["Shift+click palette", "place many (Esc to stop)"],
+      ["Esc / right-click", "cancel wiring / placement"],
+      ["?", "this panel"],
+    ],
+  },
+  {
+    title: "Files",
+    rows: [
+      ["Ctrl+O", "open a .csx circuit"],
+      ["Ctrl+S / Ctrl+Shift+S", "save / save as"],
+      ["Ctrl+Z / Ctrl+Y", "undo / redo"],
+      ["Ctrl+Alt+H", "version history"],
+    ],
+  },
+  {
+    title: "Simulation",
+    rows: [
+      ["Ctrl+J", "step one tick"],
+      ["Ctrl+K", "run (until halt) / pause"],
+      ["Ctrl+R", "reset (autoload re-applies)"],
+    ],
+  },
+  {
+    title: "Pan & zoom",
+    rows: [
+      ["Wheel", "zoom at cursor"],
+      ["Right-drag / Shift+drag", "pan (a click still cancels / selects)"],
+      ["Middle-drag / Space+drag", "pan"],
+      ["Panel edges", "drag to resize the palette / dock"],
+    ],
+  },
+];
+
 export default function App() {
   // Theme is a persisted per-machine preference (UI_OVERHAUL §2); OLED is
   // the default for fresh installs.
@@ -1643,130 +1708,33 @@ export default function App() {
       )}
       <UpdateNudge enabled={updateCheckOn} />
       {showHelp && (
-        <div className="help-overlay" onClick={() => setShowHelp(false)}>
-          <div className="help-card" onClick={(e) => e.stopPropagation()}>
-            <h2>Keyboard &amp; mouse</h2>
-            <table>
-              <tbody>
-                <tr>
-                  <td>Click a pin</td>
-                  <td>start a wire (each click plants a bend)</td>
-                </tr>
-                <tr>
-                  <td>X (while wiring)</td>
-                  <td>flip the corner direction</td>
-                </tr>
-                <tr>
-                  <td>Drag a wire bend</td>
-                  <td>move that corner point</td>
-                </tr>
-                <tr>
-                  <td>Drop on a wire</td>
-                  <td>finish wire with a junction (dot)</td>
-                </tr>
-                <tr>
-                  <td>Drag from a wire</td>
-                  <td>start a wire from a junction</td>
-                </tr>
-                <tr>
-                  <td>Click component / wire</td>
-                  <td>select (Shift toggles)</td>
-                </tr>
-                <tr>
-                  <td>Inspector (right dock)</td>
-                  <td>edits the selected component — applies live</td>
-                </tr>
-                <tr>
-                  <td>Drag component</td>
-                  <td>move selection (wires follow)</td>
-                </tr>
-                <tr>
-                  <td>↻ above a selection</td>
-                  <td>rotate it (same as R)</td>
-                </tr>
-                <tr>
-                  <td>Drag empty space</td>
-                  <td>box select (Ctrl/Shift adds)</td>
-                </tr>
-                <tr>
-                  <td>R</td>
-                  <td>rotate selection / placement ghost (clockwise)</td>
-                </tr>
-                <tr>
-                  <td>← ↑ → ↓</td>
-                  <td>point the selection / placement ghost that way (W / N / E / S)</td>
-                </tr>
-                <tr>
-                  <td>Del / Backspace</td>
-                  <td>delete selection</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+C / Ctrl+V</td>
-                  <td>copy / paste</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+A</td>
-                  <td>select all</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+O</td>
-                  <td>open a .csx circuit</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+S / Ctrl+Shift+S</td>
-                  <td>save / save as</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+Z / Ctrl+Y</td>
-                  <td>undo / redo</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+J</td>
-                  <td>sim: step one tick</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+K</td>
-                  <td>sim: run (until halt) / pause</td>
-                </tr>
-                <tr>
-                  <td>Ctrl+R</td>
-                  <td>sim: reset (autoload re-applies)</td>
-                </tr>
-                <tr>
-                  <td>Shift+click wire</td>
-                  <td>show the value on that wire</td>
-                </tr>
-                <tr>
-                  <td>Shift+click palette</td>
-                  <td>place many (Esc to stop)</td>
-                </tr>
-                <tr>
-                  <td>Esc / right-click</td>
-                  <td>cancel wiring / placement / gesture</td>
-                </tr>
-                <tr>
-                  <td>Right-click a subcircuit</td>
-                  <td>jump to its definition tab</td>
-                </tr>
-                <tr>
-                  <td>Wheel</td>
-                  <td>zoom at cursor</td>
-                </tr>
-                <tr>
-                  <td>Right-drag / Shift+drag</td>
-                  <td>pan (a click without moving still cancels / selects)</td>
-                </tr>
-                <tr>
-                  <td>Middle-drag / Space+drag</td>
-                  <td>pan</td>
-                </tr>
-                <tr>
-                  <td>Panel edges</td>
-                  <td>drag to resize the palette / dock (double-click resets)</td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="help-dismiss">click anywhere or press Esc to dismiss</p>
+        <div
+          className="help-overlay"
+          role="dialog"
+          aria-label="Keyboard & mouse"
+          onClick={() => setShowHelp(false)}
+        >
+          <div className="help-card help-shortcuts" onClick={(e) => e.stopPropagation()}>
+            <div className="help-head">
+              <h2>Keyboard &amp; mouse</h2>
+              <button className="help-close" aria-label="Close" onClick={() => setShowHelp(false)}>
+                ×
+              </button>
+            </div>
+            <div className="help-sections">
+              {HELP_SECTIONS.map((s) => (
+                <section className="help-section" key={s.title}>
+                  <h3>{s.title}</h3>
+                  {s.rows.map(([k, v]) => (
+                    <div className="help-row" key={k}>
+                      <span className="help-key">{k}</span>
+                      <span className="help-desc">{v}</span>
+                    </div>
+                  ))}
+                </section>
+              ))}
+            </div>
+            <p className="help-dismiss">Esc or click outside to dismiss</p>
           </div>
         </div>
       )}

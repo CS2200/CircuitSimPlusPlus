@@ -1121,6 +1121,83 @@ body {
   color: var(--text-dim);
 }
 
+/* `?` shortcuts panel (UI_OVERHAUL §45): a two-column, scrollable card that
+ * always fits the viewport instead of growing off-screen. */
+.help-shortcuts {
+  display: flex;
+  flex-direction: column;
+  width: min(94vw, 820px);
+  max-width: none;
+  max-height: min(88vh, 780px);
+  padding: 0.9rem 1.1rem 0.7rem;
+}
+
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.help-head h2 {
+  margin: 0;
+}
+
+.help-close {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.help-close:hover {
+  color: var(--text);
+  background: var(--grid);
+}
+
+.help-sections {
+  margin-top: 0.6rem;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  align-content: start;
+  gap: 0.1rem 1.6rem;
+  padding-right: 0.2rem;
+}
+
+.help-section h3 {
+  margin: 0.55rem 0 0.25rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
+  gap: 0.7rem;
+  padding: 2px 0;
+  font-size: 0.82rem;
+}
+
+.help-key {
+  font-family: ui-monospace, monospace;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.help-desc {
+  min-width: 0;
+}
+
 /* Canvas column: circuit tabs sit above the canvas ONLY, so the side panels
  * run the full height (UI_OVERHAUL §15). */
 .editor-col {
