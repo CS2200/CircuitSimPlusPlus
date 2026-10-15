@@ -764,7 +764,9 @@ export class DocScene {
           for (const p of layout.pins) {
             const sym = REL[p.name];
             if (sym === undefined) continue;
-            renderer.drawText(layout.rect.x + layout.rect.w - 0.5, p.y + 0.55, sym, {
+            // drawText centres on y (textBaseline: middle), so the symbol sits
+            // exactly on the pin's row.
+            renderer.drawText(layout.rect.x + layout.rect.w - 0.5, p.y, sym, {
               color: theme.textDim,
               size: 1.1,
               align: "right",

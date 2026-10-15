@@ -958,11 +958,16 @@ baselines were re-blessed locally (`sim-lit`, `timing-path`, `timing-violation`,
   Settings toggles, any radio/range control and the like highlight in the chosen
   accent; a global `::selection` paints text selection in the accent; and the
   dropdown's hovered/active option uses an accent-tinted background
-  (`color-mix`) instead of plain grey.
+  (`color-mix`) instead of plain grey. The option list is portaled **inside
+  `.app`** (which carries `data-accent`), not `document.body` — a body-level
+  portal sits outside the accent override and silently falls back to the theme's
+  default accent. `editor.spec` guards this (`.app .select-pop`).
 - **Comparator shows its three relations.** `arith.comparator` no longer draws
   one centered `=`. Each output pin gets its own symbol just inside the right
-  edge — `<` by `lt`, `=` by `eq`, `>` by `gt` — so the part reads as a
-  comparator at a glance. The catalog's family mark stays `=` (it still drives
-  the palette tile and the `catalog.test` marks list).
+  edge, **vertically centred on the pin's row** (`drawText` uses
+  `textBaseline: middle`, so the symbol is drawn at `p.y`) — `<` by `lt`, `=` by
+  `eq`, `>` by `gt` — so the part reads as a comparator at a glance. The
+  catalog's family mark stays `=` (it still drives the palette tile and the
+  `catalog.test` marks list).
 
 **Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.
