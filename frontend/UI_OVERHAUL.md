@@ -567,3 +567,40 @@ double-click on the tab box; the palette rail test asserts DECODER).
 sim demo baselines were regenerated (the mismatch halos and the new body
 marks/value layout are intentional); the committed Linux baselines still need
 one `--update-snapshots` run on Linux.
+
+## 18. Follow-up batch I (2026-10-16): marks, complete properties, bit picker
+
+- **Arithmetic marks**: the body mark is drawn larger (`CompSpec.markSize`,
+  1.7 for the symbol family) so `+ − × ÷ = ~ «` read clearly, while the
+  **palette tiles keep the human name** (`CompSpec.label`: ADD, SUB, MUL, DIV,
+  CMP, NEG, SHIFT, EXT) with the symbol still inside the icon.
+- **Bit width is a picker, not a text box**: `BitsizePicker` shows all 32 legal
+  widths in an 8×4 grid (one click, and it can't hold an invalid value); used
+  for every width field (`bitsize`, `inBits`, `outBits`) and for the wire
+  width control. Fields show the format's effective default when the attr is
+  absent (1, or 4 for a hex display, 8/16 for the extender).
+- **Every component now exposes every attr format-v2 §4 defines**, under
+  Width / Options / Timing section headings, with hints. Names were corrected
+  to the engine's (`crates/core/src/components.rs`), which also fixes attrs the
+  frontend was writing that the engine would reject:
+  | was                                                                       | now                                                                    |
+  | ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+  | mux/demux `selBits`                                                       | `selectBits` (1..8)                                                    |
+  | decoder `selBits`                                                         | `inputBits` (default 2)                                                |
+  | probe `display`                                                           | `radix`                                                                |
+  | extender `bitsize`                                                        | `inBits` (8) + `outBits` (16) + `mode` (zero/sign)                     |
+  | splitter: none                                                            | `splits` (required) — default mapping seeded on placement,             |
+  | edited as `pin: bit,bit` lines; the bus width now follows the mapping     |
+  | constant `value` (number)                                                 | hex string (default `"0"`)                                             |
+  | —                                                                         | gates gained `negateInputs` + `inputs` up to 64; every type gained the |
+  | optional per-instance `delay` override                                    |
+  | The `io.hexdisplay` default width is 4. Unit tests assert the field sets, |
+  | the groups, and the seeded splitter mapping.                              |
+- **Known gap (next)**: _pin names_ still diverge from the engine on several
+  types — adder `c_in`/`c_out` vs `cin`/`cout`, subtractor missing
+  `bin`/`bout`, divider `out` vs `quot`/`rem`, register missing `rst`,
+  RAM `d`/`q` vs `din`/`dout`, ROM `clk`/`q` vs `out`, decoder `sel` vs `in`.
+  Those are geometry/format changes (they touch wires, demos and tests), so
+  they are deliberately left for their own pass.
+
+**Acceptance:** frontend lint / 262 unit / build / 35-of-35 e2e green.

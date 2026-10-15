@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
 import { editableAttrs, compPins, GATE_TYPE_OPTIONS, type AttrField } from "../editor/catalog";
@@ -6,6 +6,7 @@ import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
+import BitsizePicker from "./BitsizePicker";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -146,22 +147,19 @@ export default function InspectorPanel({
           <span className="inspector-id">wire {wire.idx}</span>
           <span className="inspector-type">{wire.info.bitsize}-bit bus</span>
         </div>
-        <label className="inspector-row">
-          <span>Width (bits)</span>
-          <input
-            type="number"
-            min={1}
-            max={32}
+        <div className="inspector-field">
+          <span className="inspector-field-label">Width (bits)</span>
+          <BitsizePicker
             value={wire.info.bitsize}
-            disabled={driver === null}
-            title={
-              driver === null
-                ? "No driving pin found on this net"
-                : `Sets ${driver.compId}.${driver.pin} (the net's source)`
-            }
-            onChange={(e) => setWidth(Number(e.target.value))}
+            label="Width (bits)"
+            onPick={(bits) => setWidth(bits)}
           />
-        </label>
+          {driver === null && (
+            <p className="settings-hint">
+              No driving pin on this net — width comes from the source.
+            </p>
+          )}
+        </div>
         {driver !== null && (
           <p className="settings-hint">
             width comes from {driver.compId}.{driver.pin}
@@ -340,16 +338,21 @@ export default function InspectorPanel({
         </label>
       )}
 
-      {fields.map((f) => (
-        <FieldRow
-          key={f.key}
-          field={f}
-          comp={comp}
-          draft={draft}
-          onDraft={setDraft}
-          onCommitAttr={commitAttr}
-          onCommitOutput={commitAsOutput}
-        />
+      {fields.map((f, i) => (
+        <Fragment key={f.key}>
+          {f.group !== undefined && f.group !== fields[i - 1]?.group && (
+            <div className="inspector-group">{f.group}</div>
+          )}
+          <FieldRow
+            field={f}
+            comp={comp}
+            draft={draft}
+            onDraft={setDraft}
+            onCommitAttr={commitAttr}
+            onCommitOutput={commitAsOutput}
+          />
+          {f.hint !== undefined && <p className="settings-hint inspector-hint">{f.hint}</p>}
+        </Fragment>
       ))}
 
       {isMemory && (
@@ -427,6 +430,31 @@ export default function InspectorPanel({
   );
 }
 
+/** `splits` object → `pin: bit,bit` lines (UI_OVERHAUL §18). */
+function splitsToText(value: unknown): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>)
+    .map(([name, bits]) => `${name}: ${Array.isArray(bits) ? bits.join(",") : ""}`)
+    .join("\n");
+}
+
+/** `pin: bit,bit` lines → a `splits` object (null when nothing parses). */
+function textToSplits(text: string): Record<string, number[]> | null {
+  const out: Record<string, number[]> = {};
+  for (const line of text.split("\n")) {
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    const name = line.slice(0, colon).trim();
+    const bits = line
+      .slice(colon + 1)
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 0);
+    if (name !== "") out[name] = bits;
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
 function FieldRow({
   field,
   comp,
@@ -481,6 +509,72 @@ function FieldRow({
     );
   }
 
+  if (field.kind === "bitsize") {
+    const n = typeof value === "number" ? value : (field.dflt ?? 1);
+    return (
+      <div className="inspector-field">
+        <span className="inspector-field-label">{field.label}</span>
+        <BitsizePicker
+          value={n}
+          label={field.label}
+          onPick={(bits) => onCommitAttr(field.key, bits)}
+        />
+      </div>
+    );
+  }
+
+  if (field.kind === "list") {
+    const list = Array.isArray(value)
+      ? value.filter((v): v is string => typeof v === "string")
+      : [];
+    const text = draft?.key === key ? draft.text : list.join(", ");
+    return (
+      <label className="inspector-row">
+        <span>{field.label}</span>
+        <input
+          value={text}
+          placeholder={field.placeholder}
+          onChange={(e) => onDraft({ key, text: e.target.value })}
+          onBlur={() => {
+            if (draft?.key !== key) return;
+            const items = draft.text
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => s !== "");
+            onCommitAttr(field.key, items);
+            onDraft(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </label>
+    );
+  }
+
+  if (field.kind === "splits") {
+    const text = draft?.key === key ? draft.text : splitsToText(value);
+    return (
+      <label className="inspector-field">
+        <span className="inspector-field-label">{field.label}</span>
+        <textarea
+          className="inspector-textarea"
+          value={text}
+          rows={4}
+          spellCheck={false}
+          placeholder={field.placeholder}
+          onChange={(e) => onDraft({ key, text: e.target.value })}
+          onBlur={() => {
+            if (draft?.key !== key) return;
+            const parsed = textToSplits(draft.text);
+            if (parsed !== null) onCommitAttr(field.key, parsed);
+            onDraft(null);
+          }}
+        />
+      </label>
+    );
+  }
+
   if (field.kind === "select") {
     return (
       <label className="inspector-row">
@@ -506,7 +600,12 @@ function FieldRow({
         <input
           type="checkbox"
           checked={value === true}
-          onChange={(e) => onCommitOutput(e.target.checked)}
+          // wiring.pin direction also mirrors the pin's facing (E ↔ W).
+          onChange={(e) =>
+            field.key === "isOutput"
+              ? onCommitOutput(e.target.checked)
+              : onCommitAttr(field.key, e.target.checked)
+          }
         />
       </label>
     );

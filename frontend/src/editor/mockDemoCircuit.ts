@@ -82,12 +82,12 @@ export function buildMockDemoDoc(): CircuitDocument {
   const constEn = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [4, 4],
-    attrs: { value: 1, bitsize: 1 },
+    attrs: { value: "1", bitsize: 1 },
   });
   const constOne = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [17, 6],
-    attrs: { value: 1, bitsize: 32 },
+    attrs: { value: "1", bitsize: 32 },
   });
 
   if (doc.circuit(c).components.length !== MOCK_DEMO_COMPS.ledBase + MOCK_DEMO_GATE_COUNT + 3) {

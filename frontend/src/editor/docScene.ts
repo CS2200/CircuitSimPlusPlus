@@ -66,7 +66,7 @@ function maskNonzero(hex: string): boolean {
   return hex !== "" && BigInt(`0x${hex}`) !== 0n;
 }
 
-/** Probe `display` attr → watch value mode (default hex). */
+/** Probe `radix` attr (format-v2 §4) → value display mode (default hex). */
 function probeDisplayMode(attr: unknown): ValueMode {
   return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
 }
@@ -618,7 +618,7 @@ export class DocScene {
           const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
           const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
           if (val !== undefined) {
-            valueText = formatValue(val, probeDisplayMode(comp.attrs?.display));
+            valueText = formatValue(val, probeDisplayMode(comp.attrs?.radix));
           }
         }
         if (valueText !== null) caption = valueText;
@@ -643,7 +643,9 @@ export class DocScene {
           layout.rect.x + layout.rect.w / 2,
           layout.rect.y + layout.rect.h / 2,
           caption,
-          { color: theme.textDim, size: 1.0, align: "center" },
+          // Mark scale: symbols (+ − × ÷ …) read better a little larger
+          // (UI_OVERHAUL §18).
+          { color: theme.textDim, size: spec.markSize ?? 1.0, align: "center" },
         );
         // Subcircuit instances: label each interface pin just inside the
         // box (inputs at the left edge, outputs at the right).

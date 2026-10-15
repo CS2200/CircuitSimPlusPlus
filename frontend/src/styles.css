@@ -979,6 +979,78 @@ body {
   color: var(--violation);
 }
 
+/* ---- inspector sections + bit-width picker (UI_OVERHAUL §18) ---- */
+
+.inspector-group {
+  margin: 0.85rem 0 0.2rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-dim);
+}
+
+.inspector-hint {
+  margin: -3px 0 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 7px 0;
+  font-size: 0.85rem;
+}
+
+.inspector-field-label {
+  color: var(--text-dim);
+}
+
+.bitsize-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 3px;
+}
+
+.bitsize-cell {
+  padding: 3px 0;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.bitsize-cell:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.bitsize-cell.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.inspector-textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+
+.inspector-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ---- inspector: memory image + wire styling (UI_OVERHAUL §11/§12) ---- */
 
 .inspector-sep {

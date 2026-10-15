@@ -25,14 +25,18 @@ describe("catalog", () => {
     expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(5);
   });
 
-  it("plexer pin sets scale with selBits (2^selBits data lines)", () => {
+  it("plexer pin sets scale with the select width (format-v2 §4 attrs)", () => {
     expect(compPins({ type: "plexers.mux" }).filter((p) => p.name.startsWith("in"))).toHaveLength(
       2,
     );
-    const mux4 = compPins({ type: "plexers.mux", attrs: { selBits: 2 } });
+    const mux4 = compPins({ type: "plexers.mux", attrs: { selectBits: 2 } });
     expect(mux4.filter((p) => p.name.startsWith("in"))).toHaveLength(4);
-    const dec3 = compPins({ type: "plexers.decoder", attrs: { selBits: 3 } });
-    expect(dec3.filter((p) => p.name.startsWith("out"))).toHaveLength(8);
+    // The decoder's default is 2 input bits (4 outputs), like the engine.
+    expect(
+      compPins({ type: "plexers.decoder" }).filter((p) => p.name.startsWith("out")),
+    ).toHaveLength(4);
+    const dec8 = compPins({ type: "plexers.decoder", attrs: { inputBits: 3 } });
+    expect(dec8.filter((p) => p.name.startsWith("out"))).toHaveLength(8);
   });
 });
 
