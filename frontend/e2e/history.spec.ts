@@ -52,6 +52,12 @@ async function openHistory(page: Page) {
   return dialog;
 }
 
+test("version history: the top-bar button opens the dialog", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Version history" }).click();
+  await expect(page.getByRole("dialog", { name: HISTORY_DIALOG })).toBeVisible();
+});
+
 test("version history: two saves, then restore the earlier one", async ({ page }) => {
   await page.goto("/");
 

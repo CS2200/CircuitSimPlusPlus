@@ -809,7 +809,8 @@ filesystem stores in the Tauri shell.
   (`crates/app/src/history.rs`: content-addressed canonical snapshots plus a
   small per-document index, same document key as recovery). Automatic versions
   coalesce inside 60 s, so one editing burst is one entry. **File ▸ Version
-  history…** (Ctrl+Alt+H) lists them newest-first, previews the selected one and
+  history…**, the top-bar clock button, or **Ctrl+Alt+H** lists them
+  newest-first, previews the selected one and
   offers Restore (becomes the new head — history is never rewritten), Save a
   copy…, Name… (exempt from retention) and Delete. Retention: named versions are
   kept forever; automatic ones are capped at 50 per document and 25 MB.

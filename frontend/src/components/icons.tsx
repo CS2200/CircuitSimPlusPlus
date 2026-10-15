@@ -61,6 +61,17 @@ export function MoonIcon() {
   );
 }
 
+/** Clock with a counter-clockwise tail: "version history / restore". */
+export function HistoryIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 10a7.5 7.5 0 1 0 7.5-7.5 8.1 8.1 0 0 0-5.6 2.3L2.5 6.7" />
+      <path d="M2.5 2.5v4.2h4.2" />
+      <path d="M10 5.8v4.2l3.3 1.7" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon() {
   return (
     <Svg>

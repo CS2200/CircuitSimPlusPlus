@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
-import { MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
+import { HistoryIcon, MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
@@ -1202,6 +1202,14 @@ export default function App() {
                 onClick={() => editorRef.current?.redo()}
               >
                 <RedoIcon />
+              </button>
+              <button
+                className="icon-btn"
+                aria-label="Version history"
+                title="Version history (Ctrl+Alt+H)"
+                onClick={() => void openHistory()}
+              >
+                <HistoryIcon />
               </button>
             </>
           )}
