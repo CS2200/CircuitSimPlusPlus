@@ -291,8 +291,8 @@ export default function InspectorPanel({
         <span className="inspector-type">{comp.type}</span>
       </div>
 
-      {/* A text annotation has no name/position label — its body IS the text
-       * (UI_OVERHAUL §40). */}
+      {/* A text annotation is just its text: no Name / Rotation / Label-side
+       * rows — only the Text / Color / Font fields (UI_OVERHAUL §40/§42). */}
       {comp.type !== "misc.text" && (
         <label className="inspector-row">
           <span>Name</span>
@@ -313,20 +313,22 @@ export default function InspectorPanel({
         </label>
       )}
 
-      <div className="inspector-row">
-        <span>Rotation</span>
-        <Select
-          label="Rotation"
-          value={comp.rot ?? "E"}
-          options={[
-            { value: "E", label: "East" },
-            { value: "S", label: "South" },
-            { value: "W", label: "West" },
-            { value: "N", label: "North" },
-          ]}
-          onChange={(rot) => commitRot(rot as CsxComponent["rot"])}
-        />
-      </div>
+      {comp.type !== "misc.text" && (
+        <div className="inspector-row">
+          <span>Rotation</span>
+          <Select
+            label="Rotation"
+            value={comp.rot ?? "E"}
+            options={[
+              { value: "E", label: "East" },
+              { value: "S", label: "South" },
+              { value: "W", label: "West" },
+              { value: "N", label: "North" },
+            ]}
+            onChange={(rot) => commitRot(rot as CsxComponent["rot"])}
+          />
+        </div>
+      )}
 
       {comp.type !== "misc.text" && (
         <div className="inspector-row">

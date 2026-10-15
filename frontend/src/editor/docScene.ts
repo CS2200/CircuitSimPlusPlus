@@ -685,18 +685,18 @@ export class DocScene {
       // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
       // bit buses read as clearly different weights beside a 1-bit wire.
       const width = wireWidthForBits(bits);
-      // Halos nest: mismatch (widest) → selection → core. The mismatch ring is
-      // amber so it reads over any wire color or bus hue (UI_OVERHAUL §17) and
-      // it PULSES while the canvas is animating (§19), so a width mismatch is
-      // impossible to miss; selection is an accent halo under the core so a
-      // color you just picked shows immediately (§15).
+      // Halos nest: mismatch (widest) → selection → core. A width mismatch
+      // BLINKS in the wire's OWN color (UI_OVERHAUL §42) — a pulsing glow rather
+      // than a fixed amber ring — while the canvas is animating (§19); selection
+      // is an accent halo under the core so a color you just picked shows
+      // immediately (§15).
       if (this.wireMismatch[i]) {
         const t = overlay.now;
         const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
         renderer.drawPath(this.wirePaths[i], {
-          stroke: theme.violation,
+          stroke,
           lineWidth: width * (2.1 + 1.0 * phase),
-          alpha: 0.35 + 0.65 * phase,
+          alpha: 0.3 + 0.7 * phase,
         });
       }
       if (selected) {

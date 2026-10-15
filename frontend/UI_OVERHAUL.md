@@ -553,10 +553,11 @@ double-click on the tab box; the palette rail test asserts DECODER).
   input/select/button group lines up down the panel instead of drifting with
   its label.
 - **Bitsize mismatch, clearly visible**: a net whose pins disagree (format-v2
-  width rules) gets an **amber halo under the wire core** and a **⚠ width
-  badge** once per net — color-independent, so it reads over bus hues and
-  custom wire colors (the old "turn it yellow" recolor was lost once wires got
-  colors). Selecting such a wire also shows the exact widths in the Inspector
+  width rules) gets a halo under the wire core once per net — color-independent,
+  so it reads over bus hues and custom wire colors (the old "turn it yellow"
+  recolor was lost once wires got colors). (Superseded by §42: the halo is no
+  longer amber — it blinks in the wire's own color.) Selecting such a wire also
+  shows the exact widths in the Inspector
   ("this net mixes 1 / 32-bit pins — the engine reports it at load").
 - **Default wire color**: wires with **no signal yet** (nothing simulated, or a
   wire added after the current sim load) were drawn in the near-black
@@ -611,8 +612,9 @@ one `--update-snapshots` run on Linux.
 
 ## 19. Follow-up batch J (2026-10-16): pulse, slider, sim bar, HUD, flat panel
 
-- **Width mismatches pulse.** The amber mismatch halo now animates (opacity and
-  ring weight oscillate) so it is impossible to miss even among colored wires;
+- **Width mismatches pulse.** The mismatch halo now animates (opacity and
+  ring weight oscillate) so it is impossible to miss even among colored wires
+  (superseded by §42: the blink is now the wire's own color, not amber);
   the canvas keeps repainting while any net disagrees, gated by the same
   _Animate signal pulses_ preference. `StrokeStyle` gained an `alpha` channel
   (batched, like the other style keys), `SceneOverlay` gained `now`, and
@@ -655,8 +657,9 @@ freeze animations).
   `.csx` and looked like a successful save); and `doSave` refuses a blank path.
   Cancel now writes nothing, marks nothing clean and toasts nothing.
 - **Width mismatch: the pulse is the whole signal.** The "⚠ width" text badge
-  is gone; the pulsing amber ring (which reads over any wire color) is it. The
-  Inspector still spells out the mixed widths when such a wire is selected.
+  is gone; the pulsing ring is it (superseded by §42: it blinks in the wire's own
+  color). The Inspector still spells out the mixed widths when such a wire is
+  selected.
 - **Arrow-key rotation.** ← / → rotate the selection and the placement ghost
   counter-clockwise / clockwise (R stays clockwise; the reverse cycle is a new
   `prevRotation`, and a CCW rotate is still one undoable op). The canvas key
@@ -1202,3 +1205,24 @@ app (the new `history::rename` test included).
 171 core + 12 CLI + 8 golden, clippy/fmt clean. The camera nudge shifts the
 canvas a few px, so the sim/timing screenshot baselines were re-blessed locally
 (`--update-snapshots`); their committed Linux copies need the same pass on CI.
+
+## 42. Follow-up batch AG (2026-10-16): mismatch blink, no text rotation, grid toggle repaint
+
+- **Settings/View toggles repaint an idle canvas.** Changing a render-affecting
+  preference (e.g. **Show grid**) produced a new `draw` closure but never marked
+  the canvas dirty, so an idle canvas kept its old frame — the grid toggle
+  appeared to do nothing. `CanvasHost` now marks dirty when `draw` changes
+  (UI_OVERHAUL §42); `settings.spec` checks the pixels actually change.
+- **The text annotation drops Rotation too.** `misc.text` now hides Name,
+  Rotation and Label side — a free text label is placed and typed, not aimed — so
+  its Inspector is only Text / Color / Font (UI_OVERHAUL §40).
+- **The mismatch halo is the wire's own color, not amber.** A net whose pin
+  widths disagree no longer draws a fixed `theme.violation` ring; the halo under
+  the core uses the wire's computed color (`stroke` — custom color, bus hue, or
+  state color) and **blinks** it (opacity 0.3→1 and ring weight 2.1→3.1× at
+  ~170 ms), so the part you drew pulses in its own color. `theme.violation`
+  stays for the setup/hold violation markers (§U7), which are a different signal.
+
+**Acceptance:** frontend lint / 302 unit / build green; 50-of-50 e2e green. The
+sim/timing screenshot baselines were re-blessed locally for the new halo color;
+their committed Linux copies need the same `--update-snapshots` pass on CI.

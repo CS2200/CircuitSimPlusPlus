@@ -355,8 +355,10 @@ test("Misc: a text annotation stores and edits its text", async ({ page }) => {
 
   // Born with visible text (UI_OVERHAUL §37), then edited in the Inspector.
   await expect(page.locator(".inspector-id")).toBeVisible();
-  // A text annotation has no Name / Label-side rows (§40), but does offer Font.
+  // A text annotation is just its text: no Name / Rotation / Label-side rows
+  // (§40/§42), but it does offer Font.
   await expect(page.getByLabel("Name")).toHaveCount(0);
+  await expect(page.getByLabel("Rotation")).toHaveCount(0);
   await expect(page.getByLabel("Label side")).toHaveCount(0);
   await page.getByLabel("Text").fill("hello");
   await page.getByLabel("Text").press("Enter");

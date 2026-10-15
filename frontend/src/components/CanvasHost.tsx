@@ -190,6 +190,13 @@ export default function CanvasHost({
     dirtyRef.current = true;
   }, [revision]);
 
+  // A new `draw` closure means the render inputs changed (a View/Settings toggle
+  // such as "Show grid", "Show live values", …): repaint even while the canvas is
+  // otherwise idle (UI_OVERHAUL §42).
+  useEffect(() => {
+    dirtyRef.current = true;
+  }, [draw]);
+
   // Size tracking.
   useEffect(() => {
     const el = containerRef.current;

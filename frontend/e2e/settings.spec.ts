@@ -110,6 +110,31 @@ test("Settings: the canvas grid overlay toggles and persists", async ({ page }) 
   await openSettings(page);
   await openSection(page, "Canvas");
   await expect(gridToggle()).toBeChecked();
+
+  // The toggle must actually REPAINT the canvas (a new draw closure alone did
+  // not mark it dirty — the grid never appeared; UI_OVERHAUL §42). An empty
+  // sheet shows only the background with the grid off, and background + grid
+  // lines with it on.
+  await page.keyboard.press("Escape");
+  const distinctColors = () =>
+    page.evaluate(() => {
+      const c = document.querySelector("canvas.circuit-canvas") as HTMLCanvasElement;
+      const ctx = c.getContext("2d")!;
+      const colors = new Set<string>();
+      for (let i = 0; i < 400; i++) {
+        const x = Math.floor((((i * 53) % 200) * (c.width - 1)) / 200);
+        const y = Math.floor((((i * 97) % 200) * (c.height - 1)) / 200);
+        colors.add(Array.from(ctx.getImageData(x, y, 1, 1).data).join(","));
+      }
+      return colors.size;
+    });
+  await expect.poll(distinctColors).toBeGreaterThan(1); // grid on → lines visible
+
+  await openSettings(page);
+  await openSection(page, "Canvas");
+  await gridToggle().uncheck();
+  await page.keyboard.press("Escape");
+  await expect.poll(distinctColors).toBe(1); // grid off → background only
 });
 
 test("Settings: the panel keeps its size when switching sections", async ({ page }) => {

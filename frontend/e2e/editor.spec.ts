@@ -18,6 +18,7 @@ interface CsxDoc {
       pos: [number, number];
       rot?: string;
       namePos?: string;
+      attrs?: Record<string, unknown>;
     }[];
     wires: {
       a: unknown;
