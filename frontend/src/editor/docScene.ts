@@ -28,10 +28,12 @@ import { BUBBLE_R, circlePath, gateShape, rotatePath } from "./shapes";
  * indexes, net derivation) only when (doc revision, circuit index)
  * changes — editing-scale circuits make rebuilds sub-millisecond.
  *
- * Wire coloring: pre-load everything is "disconnected" (neutral); when a
- * sim session is loaded (U5) the `sim` draw argument supplies per-wire
- * values and wires render in state colors (buses keep rainbow hues unless
- * X/Z). Selection/hover/net-extent highlights layer on top.
+ * Wire coloring: before data flows, every wire shows a DULL version of its
+ * identity color (its custom color, else its net's bus hue) — never flat grey.
+ * Once a sim session is loaded (U5) the `sim` draw argument supplies per-wire
+ * values and the TRUE color comes in (state colors; buses keep rainbow hues
+ * unless X/Z). Selection/hover/net-extent highlights layer on top.
+ * (UI_OVERHAUL §35.)
  */
 
 /** A setup/hold violation marker on one component of the open sheet (U7). */
@@ -101,6 +103,15 @@ function tintColor(theme: Theme, role: TintRole): string {
     case "io":
       return theme.accent;
   }
+}
+
+/**
+ * A DULL version of a wire's identity color (UI_OVERHAUL §35): mixed halfway
+ * toward the background, so an idle wire reads as a subdued tint that the true
+ * color brightens out of when data flows.
+ */
+function dullColor(theme: Theme, color: string): string {
+  return mixHex(theme.bg, color, 0.5);
 }
 
 /** Mix `base` toward `other` by `t` (0..1); unchanged if either is not a hex. */
@@ -586,9 +597,10 @@ export class DocScene {
     }
 
     // Wires layer: single-bit wires in state colors; buses rainbow-hued
-    // per net + thicker (DLS look, DESIGN.md §7.1 / D8). With a sim
-    // loaded, state colors come from the streamed values (buses keep hues
-    // unless X/Z — hue is identity, state color is value).
+    // per net + thicker (DLS look, DESIGN.md §7.1 / D8). With a sim loaded,
+    // state colors come from the streamed values (buses keep hues unless
+    // X/Z — hue is identity, state color is value). Idle wires are a DULL
+    // tint of that identity color, not grey (UI_OVERHAUL §35).
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
@@ -598,19 +610,25 @@ export class DocScene {
       const hue = this.wireNetId[i] ?? i;
       const simVal = sim?.valueForWire(i);
       const contested = simVal !== undefined && wireValueState(simVal) === "x";
+      // The wire's identity: a user-chosen color (UI_OVERHAUL §12), else the
+      // net's bus hue. This is the "true color" the wire brightens into.
+      const identity = custom ?? theme.bus[hue % theme.bus.length];
       let stroke: string;
-      if (custom !== null && !contested) {
-        // A user-chosen color (UI_OVERHAUL §12) wins over state/bus hues —
-        // except contention, which stays red because it is an error signal.
+      if (simVal === undefined) {
+        // No data yet: a dull version of the identity color, so a drawn wire is
+        // tinted rather than flat grey, and the true color can "light up" when
+        // data flows (UI_OVERHAUL §35).
+        stroke = dullColor(theme, identity);
+      } else if (custom !== null && !contested) {
+        // A user-chosen color wins over state/bus hues — except contention,
+        // which stays red because it is an error signal.
         stroke = custom;
-      } else if (simVal !== undefined) {
+      } else {
         const state = wireValueState(simVal);
         stroke =
           isBus && state !== "x" && state !== "z"
             ? theme.bus[hue % theme.bus.length]
             : theme.wire[state];
-      } else {
-        stroke = isBus ? theme.bus[hue % theme.bus.length] : theme.wire.disconnected;
       }
       // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
       // bit buses read as clearly different weights beside a 1-bit wire.

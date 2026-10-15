@@ -564,6 +564,8 @@ double-click on the tab box; the palette rail test asserts DECODER).
   now each theme's visible **default wire** color (a slate in dark/OLED/
   midnight/contrast, mid-grey in the light/paper themes), so drawing a wire
   looks like a wire until a simulation replaces it with per-state colors.
+  (Superseded by §34: idle wires now show a dull tint of their own color, and
+  `--wire-disconnected` is only the junction-dot neutral.)
 
 **Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green. The three
 sim demo baselines were regenerated (the mismatch halos and the new body
@@ -1027,3 +1029,20 @@ menu, and tidy the simulation bar.
 
 **Acceptance:** 292 unit / 45 e2e green. The transport is 2px taller, so the
 committed screenshot baselines need the usual `--update-snapshots` pass on CI.
+
+## 35. Follow-up batch Z (2026-10-16): dull idle wires, true color when data flows
+
+- **Idle wires are tinted, never grey.** Before a sim value reaches a wire it now
+  draws in `dullColor()` — its **identity color mixed halfway toward the
+  background** — instead of the flat `--wire-disconnected` slate. The identity is
+  the wire's user-chosen `color` if it has one (UI_OVERHAUL §12), otherwise its
+  **net's bus hue** (`theme.bus[netId % 5]`), the same hue a bus already used, now
+  extended to single-bit wires so every wire carries a tint (and wires on one net
+  share it). `--wire-disconnected` now only neutralises junction dots.
+- **The true color comes in when data flows.** Once `sim.valueForWire(i)` is
+  defined the wire brightens to its real color: a chosen color, the bus hue for a
+  live bus, or the per-state logic color (`low`/`high`/`x`/`z`) for a single-bit
+  wire. So a wire reads "dull = not driven yet, vivid = live".
+
+**Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green (the
+demo/theme screenshot specs stay within their 2% `maxDiffPixelRatio`).
