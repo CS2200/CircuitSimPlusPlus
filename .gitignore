@@ -5,3 +5,8 @@ frontend/playwright-report
 frontend/test-results
 *.log
 __pycache__/
+
+# Local Playwright screenshot baselines: only the Linux ones are committed
+# (CI renders on Linux), so a Windows/macOS run must not re-add its own.
+frontend/e2e/**/*-win32.png
+frontend/e2e/**/*-darwin.png
