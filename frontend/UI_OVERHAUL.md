@@ -660,3 +660,30 @@ freeze animations).
   handles, so rail/resize keyboard use isn't hijacked.
 
 **Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.
+
+## 21. Follow-up batch L (2026-10-16): live values, pin shapes, family colour
+
+- **Live values on the body.** Clocks, pin parts, probes, registers, RAM/ROM,
+  LEDs and hex displays now show the value on their read pin (`VALUE_PIN`) in
+  place of their type mark, plus the part's name above — the same live-readout
+  treatment probes/registers already had. A single-bit readout reads `0`/`1`
+  (no `0x` prefix); wider ones honour the part's `radix`. The value repeats next
+  to the source pin only for the big readouts (probe/register/memory): a pin
+  part's body _is_ that pin, and small I/O parts would just get noisy.
+- **Text fits the body.** Both the mark and the value are auto-sized to the
+  body (`fitTextSize`), so a 32-bit readout on a 2×1 pin stays inside it, and
+  values are drawn in the brighter text colour to stand apart from type marks.
+- **Pin shapes.** Every input pin marker is a **square**, every output pin
+  marker is a **circle** (inout stays square, junction/corner dots unchanged) —
+  so a part's direction is readable from any component. The `wiring.pin`
+  _component_ follows the same rule: an input pin is a square body, an output
+  pin a rounded (stadium) body.
+- **Family colour.** Components that belong to a family get a subtle tint —
+  a 10 % body fill and a 50 % outline — from the theme's existing palette:
+  input pins cyan, output pins amber, memory purple, arithmetic lime, plexers
+  pink, I/O the accent colour. Gates keep the classic look and wiring parts
+  stay neutral. Pin markers are the same colours, muted, so they read as
+  colour-coded without shouting.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (baselines
+regenerated locally; Linux still wants one `--update-snapshots` run).
