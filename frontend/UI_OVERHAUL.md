@@ -697,7 +697,32 @@ regenerated locally; Linux still wants one `--update-snapshots` run).
   whatever it faced before. `R` still steps the E→S→W→N cycle (one undoable op
   per change, and the wired-pin repair still runs, since `applyRotation` is now
   shared by the cycle and the absolute setter).
-- The canvas key handler already ignores events from inputs/buttons/resize
-  handles, so the rail's own arrow navigation is untouched.
+- The canvas key handler ignores real text fields (and open dialogs); widgets
+  that own arrow keys (palette rail, resize handles) stop the event instead
+  (§23).
 
 **Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.
+
+## 23. Follow-up batch N (2026-10-16): values from the start, arrow focus
+
+- **Values are live from the start.** Adopting a document (mount, File → New,
+  File → Open) now loads it into the engine, so clocks, pins, probes,
+  registers, RAM/ROM and I/O show their value immediately instead of their type
+  mark — opening a circuit (or the `?simdemo=1` demo) no longer needs a
+  transport command first. `store.onLoaded` already preserved the load-time
+  full-state batch; the missing piece was triggering a load on identity change,
+  and that effect must depend on the document identity only — depending on the
+  store version re-entered while `loaded` was still false and looped. Edits
+  afterwards keep the last known values until the next command (U6).
+- **A placed component is selected.** Placing now leaves the new part selected,
+  so the natural follow-up — arrows/R to orient it, Del to remove it, the
+  Inspector to edit it — acts on it immediately instead of on nothing.
+- **Arrow focus trap fixed.** After picking a palette item the button keeps
+  focus, and the canvas key handler used to bail on any BUTTON target, so
+  R/arrows appeared dead. It now ignores only real text fields (and open
+  dialogs), and the widgets that own arrow keys stop propagation. So: place a
+  part with the palette, press ↑, and it faces up — no clicking back into the
+  canvas first.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (canvas
+baselines regenerated: they now include live readouts).
