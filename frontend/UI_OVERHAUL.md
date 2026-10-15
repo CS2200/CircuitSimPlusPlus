@@ -726,3 +726,45 @@ regenerated locally; Linux still wants one `--update-snapshots` run).
 
 **Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (canvas
 baselines regenerated: they now include live readouts).
+
+## 24. Follow-up batch O (2026-10-16): negateInputs out, 32 inputs, pins bottom
+
+- **`negateInputs` is gone** (human decision) — from the engine
+  (`CompKind::Gate` lost its `negate_inputs`, the string-list attr helper went
+  with it, and the De Morgan test became a truth-table test for the NAND/NOR/
+  XNOR _types_), from the frontend (the Inspector field, the `list` field kind
+  and the bubble pass), and from the docs so they match the code:
+  `docs/format-v2.md` §4 (the gate row) + §4's deviations note, and the
+  DESIGN.md §5.2 sample document. A file carrying `negateInputs` now fails
+  validation as an unknown attr (asserted in `components.rs`).
+- **Gate inputs cap at 32** (`MAX_GATE_INPUTS`, the Inspector's max) and
+  `docs/format-v2.md` says 2..=32 accordingly.
+- **Clock/reset inputs moved to the bottom edge** of the memory parts, data-sheet
+  style: `mem.register` gained the `rst` pin the format defines (d/en left,
+  clk/rst bottom, q right), `mem.ram` puts `we`/`clk` on the bottom and uses the
+  format's `din`/`dout` names, and `mem.rom` is `addr`/`out` only. `VALUE_PIN`
+  follows the renamed read pins (ram → dout, rom → out).
+
+**Acceptance:** `cargo fmt`/`clippy -D warnings`/`test` green (12 cli + 167 core
+
+- 8 golden); frontend lint / 263 unit / build / 36-of-36 e2e green.
+
+## 25. Follow-up batch P (2026-10-16): modern settings panel
+
+- **Sectioned panel**: the Settings dialog is now a two-pane settings panel —
+  a nav column (Appearance / Canvas / Editing / Simulation / Startup) and the
+  section's controls beside it, in rows (label + hint left, control right) that
+  mirror the Inspector. Same live-apply, no-Apply-button model, same footer.
+- **More themes** (11): OLED, Dark, Midnight, **Nord**, **Dracula**,
+  **Gruvbox**, **Solarized**, High contrast, Light, Paper, **Solarized Light** —
+  each one CSS block plus a catalog entry (themes stay data).
+- **More accents** (14): theme default plus blue, indigo, violet, fuchsia, rose,
+  red, orange, amber, lime, green, teal, cyan, slate.
+- **More settings**: _Canvas_ — show grid, **show live values**, animate signal
+  pulses, **show the performance overlay**; _Editing_ — **default bit width**
+  and **default gate inputs**, seeded onto newly placed parts; _Simulation_ —
+  **default clock speed** (where the transport slider starts). All persist per
+  machine (`csx.*`), all are reset by "Reset to defaults", and the e2e covers
+  the nav, a new theme/accent and the placement seeds.
+
+**Acceptance:** frontend lint / 263 unit / build / 36-of-36 e2e green.

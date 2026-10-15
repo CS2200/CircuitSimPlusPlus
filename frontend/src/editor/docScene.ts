@@ -135,8 +135,8 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "wiring.pin": "pin",
   "wiring.probe": "in",
   "mem.register": "q",
-  "mem.ram": "q",
-  "mem.rom": "q",
+  "mem.ram": "dout",
+  "mem.rom": "out",
   "io.led": "in",
   "io.hexdisplay": "in",
 };
@@ -527,6 +527,7 @@ export class DocScene {
     overlay: SceneOverlay,
     sim?: SimOverlay,
     grid = false,
+    showValues = true,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
@@ -653,13 +654,6 @@ export class DocScene {
           const p = rotPt(b.x, b.y, cx, cy, rot);
           bubbles.push(p);
         }
-        const negate = comp.attrs?.negateInputs;
-        if (Array.isArray(negate)) {
-          for (const pinName of negate) {
-            const pin = layout.pins.find((p) => p.name === pinName);
-            if (pin !== undefined) bubbles.push({ x: pin.x, y: pin.y });
-          }
-        }
         for (const b of bubbles) {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), strokeStyle);
@@ -703,7 +697,7 @@ export class DocScene {
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
           valueText = String(comp.attrs.value);
-        } else if (sim !== undefined) {
+        } else if (sim !== undefined && showValues) {
           const pinName = VALUE_PIN[comp.type];
           if (pinName !== undefined) {
             const docNet = this.nets.pinToNet.get(`${comp.id}:${pinName}`);

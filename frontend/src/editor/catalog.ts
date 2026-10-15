@@ -486,14 +486,17 @@ const REGISTRY: Record<string, CompSpec> = {
     markSize: 1.5,
   },
 
-  // Memory
+  // Memory. Clock/reset/write-enable inputs sit on the BOTTOM edge, the way
+  // they're drawn on a data sheet (UI_OVERHAUL §24); pin names follow
+  // format-v2 §4 exactly (d/clk/en/rst/q, addr/din/dout/we/clk, addr/out).
   "mem.register": boxSpec(
     6,
     4,
     [
       { name: "d", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
-      { name: "clk", dx: 0, dy: 2, kind: "in" },
       { name: "en", dx: 0, dy: 3, kind: "in" },
+      { name: "clk", dx: 2, dy: 4, kind: "in" },
+      { name: "rst", dx: 4, dy: 4, kind: "in" },
       { name: "q", dx: 6, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "REG",
@@ -503,10 +506,10 @@ const REGISTRY: Record<string, CompSpec> = {
     6,
     [
       { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
-      { name: "d", dx: 0, dy: 2, kind: "in", bitsize: BUS_WIDTH },
-      { name: "clk", dx: 0, dy: 3, kind: "in" },
-      { name: "we", dx: 0, dy: 4, kind: "in" },
-      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
+      { name: "din", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
+      { name: "we", dx: 3, dy: 6, kind: "in" },
+      { name: "clk", dx: 7, dy: 6, kind: "in" },
     ],
     "RAM",
   ),
@@ -514,9 +517,8 @@ const REGISTRY: Record<string, CompSpec> = {
     10,
     6,
     [
-      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
-      { name: "clk", dx: 0, dy: 2, kind: "in" },
-      { name: "q", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
+      { name: "addr", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "out", dx: 10, dy: 3, kind: "out", bitsize: BUS_WIDTH },
     ],
     "ROM",
   ),
@@ -630,15 +632,6 @@ export type AttrField =
       group?: string;
       hint?: string;
     }
-  /** Comma-separated string list (e.g. negateInputs). */
-  | {
-      key: string;
-      label: string;
-      kind: "list";
-      placeholder?: string;
-      group?: string;
-      hint?: string;
-    }
   /** `pin: bit,bit` line map (wiring.splitter `splits`). */
   | {
       key: string;
@@ -666,6 +659,18 @@ const HEX_BITSIZE_FIELD: AttrField = {
   hint: "A hex display decodes four bits per digit.",
 };
 
+/** Per-instance timing override, offered last on every part (format-v2 §6). */
+const DELAY_FIELD: AttrField = {
+  key: "delay",
+  label: "Delay override",
+  kind: "number",
+  min: 0,
+  max: 1_000_000,
+  placeholder: "auto",
+  group: "Timing",
+  hint: "Raw timing units; blank uses the delay table.",
+};
+
 const RADIX_OPTIONS = [
   { value: "unsigned", label: "Unsigned" },
   { value: "signed", label: "Signed" },
@@ -675,32 +680,31 @@ const RADIX_OPTIONS = [
 /**
  * Every attribute format-v2 §4 defines for a type, grouped for the Inspector
  * (§18): Width / Options. Names and defaults mirror the engine's
- * `components.rs` so what the panel writes is exactly what loads. There is no
- * per-instance delay field — timing is unit-wide, from the delay table (§6).
+ * `components.rs` so what the panel writes is exactly what loads. The shared
+ * per-instance `delay` override (format-v2 §4/§6) is appended for every type
+ * that accepts it.
  */
 export function editableAttrs(type: string): AttrField[] {
+  const fields = baseFields(type);
+  if (fields.length === 0 || type === "subcircuit") return fields;
+  return [...fields, DELAY_FIELD];
+}
+
+/** A type's own fields, without the shared `delay` override. */
+function baseFields(type: string): AttrField[] {
   if (type.startsWith("gate.")) {
     const fields: AttrField[] = [BITSIZE_FIELD];
     if (type !== "gate.not" && type !== "gate.buffer") {
-      fields.push(
-        {
-          key: "inputs",
-          label: "Inputs",
-          kind: "number",
-          min: 2,
-          max: 64,
-          placeholder: "2",
-          group: "Width",
-        },
-        {
-          key: "negateInputs",
-          label: "Negated inputs",
-          kind: "list",
-          placeholder: "in0, in2",
-          group: "Options",
-          hint: "Input pins drawn with an inverting bubble.",
-        },
-      );
+      fields.push({
+        key: "inputs",
+        label: "Inputs",
+        kind: "number",
+        min: 2,
+        max: 32,
+        placeholder: "2",
+        group: "Width",
+      });
+      // (Gate inputs are plain — `negateInputs` was removed, §24.)
     }
     return fields;
   }

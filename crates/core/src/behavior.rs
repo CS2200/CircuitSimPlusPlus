@@ -135,8 +135,6 @@ enum BehaviorKind {
     Gate {
         op: GateOp,
         bitsize: u32,
-        /// Per-input negation bubbles, indexed like the `in{i}` pins.
-        negate: Vec<bool>,
     },
     ControlledBuffer {
         bitsize: u32,
@@ -244,29 +242,10 @@ impl Behavior {
         let kind = match &cfg.kind {
             CompKind::Not { .. } => BehaviorKind::Not,
             CompKind::Buffer { .. } => BehaviorKind::Buffer,
-            CompKind::Gate {
-                op,
-                bitsize,
-                inputs,
-                negate_inputs,
-            } => {
-                let mut negate = vec![false; *inputs as usize];
-                for name in negate_inputs {
-                    if let Some(i) = name
-                        .strip_prefix("in")
-                        .and_then(|s| s.parse::<usize>().ok())
-                    {
-                        if i < negate.len() {
-                            negate[i] = true;
-                        }
-                    }
-                }
-                BehaviorKind::Gate {
-                    op: *op,
-                    bitsize: *bitsize,
-                    negate,
-                }
-            }
+            CompKind::Gate { op, bitsize, .. } => BehaviorKind::Gate {
+                op: *op,
+                bitsize: *bitsize,
+            },
             CompKind::ControlledBuffer { bitsize } => {
                 BehaviorKind::ControlledBuffer { bitsize: *bitsize }
             }
@@ -371,11 +350,7 @@ impl Behavior {
                 consume(ins[0], "in")?;
                 Ok(vec![ins[0].clone()])
             }
-            BehaviorKind::Gate {
-                op,
-                bitsize,
-                negate,
-            } => {
+            BehaviorKind::Gate { op, bitsize } => {
                 for (i, v) in ins.iter().enumerate() {
                     consume(v, format!("in{i}"))?;
                 }
@@ -384,12 +359,11 @@ impl Behavior {
                     GateOp::And => Value::all_ones(*bitsize),
                     _ => Value::zero(*bitsize),
                 };
-                for (i, v) in ins.iter().enumerate() {
-                    let v = if negate[i] { v.not() } else { (*v).clone() };
+                for v in ins.iter() {
                     acc = match base {
-                        GateOp::And => acc.and(&v),
-                        GateOp::Or => acc.or(&v),
-                        _ => acc.xor(&v),
+                        GateOp::And => acc.and(v),
+                        GateOp::Or => acc.or(v),
+                        _ => acc.xor(v),
                     };
                 }
                 if invert {
@@ -1049,42 +1023,39 @@ mod tests {
     }
 
     #[test]
-    fn bubbled_gates_de_morgan() {
-        // NAND(a, b) ≡ OR(¬a, ¬b)
+    fn gate_truth_tables() {
+        // NAND/NOR/XNOR are their own types (negateInputs was removed,
+        // UI_OVERHAUL §24): each must equal the composition of the primitives.
+        let and = mk("gate.and", json!({}));
+        let or = mk("gate.or", json!({}));
+        let xor = mk("gate.xor", json!({}));
+        let not = mk("gate.not", json!({}));
         let nand = mk("gate.nand", json!({}));
-        let or_neg = mk("gate.or", json!({"negateInputs": ["in0", "in1"]}));
-        // NOR(a, b) ≡ AND(¬a, ¬b)
         let nor = mk("gate.nor", json!({}));
-        let and_neg = mk("gate.and", json!({"negateInputs": ["in0", "in1"]}));
-        // XNOR(a, b) ≡ XOR(¬a, b) (single bubble flips parity)
         let xnor = mk("gate.xnor", json!({}));
-        let xor_neg = mk("gate.xor", json!({"negateInputs": ["in0"]}));
         for a in KNOWN {
             for b in KNOWN {
                 let ins = [Value::from_bits(&[a]), Value::from_bits(&[b])];
+                let and_out = and.eval(&refs(&ins)).unwrap();
+                let or_out = or.eval(&refs(&ins)).unwrap();
+                let xor_out = xor.eval(&refs(&ins)).unwrap();
                 assert_eq!(
                     nand.eval(&refs(&ins)).unwrap(),
-                    or_neg.eval(&refs(&ins)).unwrap(),
-                    "De Morgan NAND at {a},{b}"
+                    not.eval(&refs(&and_out)).unwrap(),
+                    "NAND at {a},{b}"
                 );
                 assert_eq!(
                     nor.eval(&refs(&ins)).unwrap(),
-                    and_neg.eval(&refs(&ins)).unwrap(),
-                    "De Morgan NOR at {a},{b}"
+                    not.eval(&refs(&or_out)).unwrap(),
+                    "NOR at {a},{b}"
                 );
                 assert_eq!(
                     xnor.eval(&refs(&ins)).unwrap(),
-                    xor_neg.eval(&refs(&ins)).unwrap(),
-                    "XNOR ≡ XOR(¬a,b) at {a},{b}"
+                    not.eval(&refs(&xor_out)).unwrap(),
+                    "XNOR at {a},{b}"
                 );
             }
         }
-        // Single bubble on AND: AND(a, ¬b).
-        let and_b = mk("gate.and", json!({"negateInputs": ["in1"]}));
-        let ins = [k(1, 1), k(1, 0)];
-        assert_eq!(and_b.eval(&refs(&ins)).unwrap(), vec![k(1, 1)]);
-        let ins = [k(1, 1), k(1, 1)];
-        assert_eq!(and_b.eval(&refs(&ins)).unwrap(), vec![k(1, 0)]);
     }
 
     #[test]

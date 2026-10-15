@@ -43,6 +43,8 @@ export interface CanvasHostProps {
   ) => void;
   /** Redraw every frame (animations); otherwise redraw on dirty only. */
   animate?: boolean;
+  /** Show the frame-rate overlay in the corner (Settings → Canvas). */
+  showPerf?: boolean;
   /** External dirty signal — bump when the underlying model changed. */
   revision?: number;
   themeName?: string;
@@ -106,6 +108,7 @@ interface PendingPan {
 export default function CanvasHost({
   draw,
   animate = false,
+  showPerf = false,
   revision = 0,
   themeName = "dark",
   sceneBounds,
@@ -426,10 +429,12 @@ export default function CanvasHost({
           onDoubleClick?.(worldOf(e), infoOf(e));
         }}
       />
-      <div className="canvas-overlay">
-        {fpsText}
-        {overlayExtra}
-      </div>
+      {showPerf && (
+        <div className="canvas-overlay">
+          {fpsText}
+          {overlayExtra}
+        </div>
+      )}
     </div>
   );
 }

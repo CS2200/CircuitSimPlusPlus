@@ -125,7 +125,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | Type | Pins | Attrs (defaults) |
 |---|---|---|
 | `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1) |
-| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs−1}`, `out` | `bitsize` (1), `inputs` (2; 2..=64), `negateInputs` ([]) — input pin names to bubble |
+| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32), `delay` |
 | `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
 | `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex") |
 | `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize` |
@@ -154,8 +154,7 @@ and §4.1's tri-state semantics but is absent from the pinned registry list in
 `docs/tasks/README.md` §4 — flagged to the human; the name is this document's assignment.
 
 **Deviations from the DESIGN.md §5.2 sketch** (sketch is illustrative, this table is
-normative): gate inputs are named `in0`, `in1`, … (not `a`, `b`); `negateInputs` takes those
-names.
+normative): gate inputs are named `in0`, `in1`, … (not `a`, `b`).
 
 ## 5. Load-time validation
 
@@ -216,7 +215,7 @@ and address memories by hierarchical name (see §9 "Named access" and docs/autog
 ## 8. Implementation limits (§11)
 
 `bitsize` ≤ 32 (the course word size; derived pin widths may exceed it — a 32-bit
-multiplier's `out` is 64 bits); gate `inputs` ≤ 64; `selectBits`/`inputBits` ≤ 8;
+multiplier's `out` is 64 bits); gate `inputs` ≤ 32; `selectBits`/`inputBits` ≤ 8;
 memory `depth` ≤ 2²⁰;
 split pins ≤ 64; splitter bus bits < 32; hierarchy depth ≤ 64; post-flatten instance cap
 ~1M (enforced in B3). These bound corrupt files, not students — no real course circuit comes

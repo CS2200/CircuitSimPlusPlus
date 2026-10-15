@@ -175,9 +175,177 @@
   --accent: #b25a2a;
 }
 
+/* Nord: cool arctic blues on slate. */
+[data-theme="nord"] {
+  color-scheme: dark;
+
+  --bg: #2e3440;
+  --grid: #3b4252;
+  --panel: #353b49;
+  --panel-border: #4c566a;
+  --text: #eceff4;
+  --text-dim: #a7b1c2;
+
+  --wire-low: #5e81ac;
+  --wire-high: #a3be8c;
+  --wire-x: #bf616a;
+  --wire-z: #8f9bab;
+  --wire-disconnected: #6f7b8f;
+
+  --bus-a: #ebcb8b;
+  --bus-b: #b48ead;
+  --bus-c: #88c0d0;
+  --bus-d: #d08770;
+  --bus-e: #a3be8c;
+
+  --violation: #d08770;
+
+  --accent: #88c0d0;
+}
+
+/* Dracula: purple-tinted night palette. */
+[data-theme="dracula"] {
+  color-scheme: dark;
+
+  --bg: #282a36;
+  --grid: #323544;
+  --panel: #2f3241;
+  --panel-border: #44475a;
+  --text: #f8f8f2;
+  --text-dim: #9ba0b8;
+
+  --wire-low: #6272a4;
+  --wire-high: #50fa7b;
+  --wire-x: #ff5555;
+  --wire-z: #8b8fa8;
+  --wire-disconnected: #6d7192;
+
+  --bus-a: #f1fa8c;
+  --bus-b: #bd93f9;
+  --bus-c: #8be9fd;
+  --bus-d: #ff79c6;
+  --bus-e: #50fa7b;
+
+  --violation: #ffb86c;
+
+  --accent: #bd93f9;
+}
+
+/* Gruvbox: warm retro earth tones. */
+[data-theme="gruvbox"] {
+  color-scheme: dark;
+
+  --bg: #282828;
+  --grid: #3c3836;
+  --panel: #32302f;
+  --panel-border: #504945;
+  --text: #ebdbb2;
+  --text-dim: #a89984;
+
+  --wire-low: #83a598;
+  --wire-high: #b8bb26;
+  --wire-x: #fb4934;
+  --wire-z: #928374;
+  --wire-disconnected: #7c6f64;
+
+  --bus-a: #fabd2f;
+  --bus-b: #d3869b;
+  --bus-c: #8ec07c;
+  --bus-d: #fe8019;
+  --bus-e: #b8bb26;
+
+  --violation: #fe8019;
+
+  --accent: #d79921;
+}
+
+/* Solarized (dark): balanced teal, easy on the eyes. */
+[data-theme="solarized"] {
+  color-scheme: dark;
+
+  --bg: #002b36;
+  --grid: #073642;
+  --panel: #04303c;
+  --panel-border: #0d4a58;
+  --text: #eee8d5;
+  --text-dim: #93a1a1;
+
+  --wire-low: #268bd2;
+  --wire-high: #859900;
+  --wire-x: #dc322f;
+  --wire-z: #839496;
+  --wire-disconnected: #557780;
+
+  --bus-a: #b58900;
+  --bus-b: #6c71c4;
+  --bus-c: #2aa198;
+  --bus-d: #d33682;
+  --bus-e: #859900;
+
+  --violation: #cb4b16;
+
+  --accent: #268bd2;
+}
+
+/* Solarized Light: cream background, calm accents. */
+[data-theme="solarized-light"] {
+  color-scheme: light;
+
+  --bg: #fdf6e3;
+  --grid: #eee8d5;
+  --panel: #fffbf0;
+  --panel-border: #ded8c4;
+  --text: #073642;
+  --text-dim: #657b83;
+
+  --wire-low: #6aa6d8;
+  --wire-high: #7a9a00;
+  --wire-x: #d3302f;
+  --wire-z: #93a1a1;
+  --wire-disconnected: #b0a58c;
+
+  --bus-a: #a07d00;
+  --bus-b: #6c71c4;
+  --bus-c: #1f8f86;
+  --bus-d: #c23573;
+  --bus-e: #7a9a00;
+
+  --violation: #cb4b16;
+
+  --accent: #268bd2;
+}
+
 /* Accent color overrides (Settings → Accent color). Declared after all
  * theme blocks so the single `data-accent` attribute selector wins; "auto"
  * sets no block and keeps the theme's own accent. */
+[data-accent="indigo"] {
+  --accent: #6366f1;
+}
+
+[data-accent="fuchsia"] {
+  --accent: #d946ef;
+}
+
+[data-accent="red"] {
+  --accent: #ef4444;
+}
+
+[data-accent="orange"] {
+  --accent: #f97316;
+}
+
+[data-accent="lime"] {
+  --accent: #84cc16;
+}
+
+[data-accent="cyan"] {
+  --accent: #06b6d4;
+}
+
+[data-accent="slate"] {
+  --accent: #94a3b8;
+}
+
 [data-accent="blue"] {
   --accent: #5b8def;
 }
@@ -1228,6 +1396,106 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.5rem;
+}
+
+/* Sectioned settings panel (UI_OVERHAUL §25): nav column + section pane. */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(56rem, calc(100vw - 2rem));
+  max-height: min(88vh, 44rem);
+  overflow: hidden;
+  padding: 1rem 0 1.1rem;
+}
+
+.settings-panel .settings-head {
+  padding: 0 1.2rem;
+}
+
+.settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0.9rem;
+  padding: 0.2rem 0 0.4rem;
+}
+
+.settings-nav {
+  flex: none;
+  width: 10.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 0.6rem 0 1.2rem;
+  border-right: 1px solid var(--panel-border);
+  overflow-y: auto;
+}
+
+.settings-nav-btn {
+  text-align: left;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.settings-nav-btn:hover {
+  color: var(--text);
+  background: var(--grid);
+}
+
+.settings-nav-btn.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 1.2rem 0 0.3rem;
+}
+
+/* Rows read like the Inspector: label+hint left, the control on the right. */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, 9rem);
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0.55rem 0;
+  font-size: 0.85rem;
+}
+
+.settings-row-label,
+.settings-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-row-label > .settings-hint,
+.settings-toggle-label > .settings-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.settings-row select {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  padding: 4px 8px;
+  font-size: 0.85rem;
+}
+
+.settings-row select:hover {
+  border-color: var(--accent);
 }
 
 .settings-head h2 {

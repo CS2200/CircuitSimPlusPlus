@@ -82,6 +82,10 @@ export default forwardRef<
     pulsesOn?: boolean;
     /** Coarse canvas grid (Settings → Canvas, UI_OVERHAUL §15); default off. */
     gridOn?: boolean;
+    /** Live value readouts on parts (Settings → Canvas, §25); default on. */
+    showValues?: boolean;
+    /** Frame-rate overlay in the canvas corner (Settings → Canvas); default off. */
+    showPerf?: boolean;
   }
 >(function EditorCanvas(
   {
@@ -96,6 +100,8 @@ export default forwardRef<
     violations,
     pulsesOn = true,
     gridOn = false,
+    showValues = true,
+    showPerf = false,
   },
   ref,
 ) {
@@ -213,6 +219,7 @@ export default forwardRef<
         { ...tool.overlay(), now: pulsesOn ? tMs : undefined },
         simOverlay,
         gridOn,
+        showValues,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
@@ -229,6 +236,7 @@ export default forwardRef<
       pulsesLive,
       pulsesOn,
       gridOn,
+      showValues,
     ],
   );
 
@@ -364,6 +372,7 @@ export default forwardRef<
       draw={draw}
       revision={tick + simVersion}
       animate={pulsesLive || (pulsesOn && mismatchLive)}
+      showPerf={showPerf}
       themeName={themeName}
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}

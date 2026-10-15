@@ -11,7 +11,18 @@
  * written into the `.csx` document.
  */
 
-export type ThemeId = "oled" | "dark" | "midnight" | "contrast" | "light" | "paper";
+export type ThemeId =
+  | "oled"
+  | "dark"
+  | "midnight"
+  | "nord"
+  | "dracula"
+  | "gruvbox"
+  | "solarized"
+  | "contrast"
+  | "light"
+  | "paper"
+  | "solarized-light";
 
 export interface ThemeMeta {
   readonly id: ThemeId;
@@ -45,6 +56,30 @@ export const THEMES: readonly ThemeMeta[] = [
     swatches: ["#0a0f1e", "#131b2e", "#6d9eff", "#34d399"],
   },
   {
+    id: "nord",
+    name: "Nord",
+    blurb: "Cool arctic blues on slate",
+    swatches: ["#2e3440", "#3b4252", "#88c0d0", "#a3be8c"],
+  },
+  {
+    id: "dracula",
+    name: "Dracula",
+    blurb: "Purple-tinted night palette",
+    swatches: ["#282a36", "#44475a", "#bd93f9", "#50fa7b"],
+  },
+  {
+    id: "gruvbox",
+    name: "Gruvbox",
+    blurb: "Warm retro earth tones",
+    swatches: ["#282828", "#3c3836", "#d79921", "#b8bb26"],
+  },
+  {
+    id: "solarized",
+    name: "Solarized",
+    blurb: "Balanced dark teal, easy on the eyes",
+    swatches: ["#002b36", "#073642", "#268bd2", "#859900"],
+  },
+  {
     id: "contrast",
     name: "High contrast",
     blurb: "Stark black & yellow — maximum separation",
@@ -64,6 +99,13 @@ export const THEMES: readonly ThemeMeta[] = [
     swatches: ["#f7f4ec", "#fffdf8", "#b25a2a", "#2f9e44"],
     light: true,
   },
+  {
+    id: "solarized-light",
+    name: "Solarized Light",
+    blurb: "Cream background, calm accents",
+    swatches: ["#fdf6e3", "#eee8d5", "#268bd2", "#859900"],
+    light: true,
+  },
 ];
 
 export const DEFAULT_THEME: ThemeId = "oled";
@@ -81,7 +123,21 @@ export function isLightTheme(id: ThemeId): boolean {
  * accent. Applies to focus rings, selection, buttons and the on-canvas
  * selection highlight alike (everything reads `--accent`).
  */
-export type AccentId = "auto" | "blue" | "violet" | "teal" | "green" | "amber" | "rose";
+export type AccentId =
+  | "auto"
+  | "blue"
+  | "indigo"
+  | "violet"
+  | "fuchsia"
+  | "rose"
+  | "red"
+  | "orange"
+  | "amber"
+  | "lime"
+  | "green"
+  | "teal"
+  | "cyan"
+  | "slate";
 
 export interface AccentMeta {
   readonly id: AccentId;
@@ -93,11 +149,18 @@ export interface AccentMeta {
 export const ACCENTS: readonly AccentMeta[] = [
   { id: "auto", name: "Theme default", hex: null },
   { id: "blue", name: "Blue", hex: "#5b8def" },
+  { id: "indigo", name: "Indigo", hex: "#6366f1" },
   { id: "violet", name: "Violet", hex: "#8b5cf6" },
-  { id: "teal", name: "Teal", hex: "#14b8a6" },
-  { id: "green", name: "Green", hex: "#22c55e" },
-  { id: "amber", name: "Amber", hex: "#f59e0b" },
+  { id: "fuchsia", name: "Fuchsia", hex: "#d946ef" },
   { id: "rose", name: "Rose", hex: "#f43f5e" },
+  { id: "red", name: "Red", hex: "#ef4444" },
+  { id: "orange", name: "Orange", hex: "#f97316" },
+  { id: "amber", name: "Amber", hex: "#f59e0b" },
+  { id: "lime", name: "Lime", hex: "#84cc16" },
+  { id: "green", name: "Green", hex: "#22c55e" },
+  { id: "teal", name: "Teal", hex: "#14b8a6" },
+  { id: "cyan", name: "Cyan", hex: "#06b6d4" },
+  { id: "slate", name: "Slate", hex: "#94a3b8" },
 ];
 
 export const DEFAULT_ACCENT: AccentId = "auto";

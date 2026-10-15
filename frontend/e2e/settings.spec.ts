@@ -14,6 +14,14 @@ async function openSettings(page: Page): Promise<void> {
   await page.getByRole("menuitem", { name: "Settings…" }).click();
 }
 
+/** Switch to a section of the sectioned settings panel (UI_OVERHAUL §25). */
+async function openSection(page: Page, name: string): Promise<void> {
+  await page
+    .getByRole("dialog", { name: "Settings" })
+    .getByRole("tab", { name, exact: true })
+    .click();
+}
+
 test("Settings: theme picker applies, persists, and survives reload", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // fresh default
@@ -42,7 +50,9 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
   await expect(page.locator(".app")).toHaveAttribute("data-accent", "violet");
   expect(await page.evaluate(() => localStorage.getItem("csx.accent"))).toBe("violet");
 
-  // Behavior toggles persist too (pulses off).
+  // Behavior toggles persist too (pulses off) — they live in the Canvas
+  // section of the sectioned panel (UI_OVERHAUL §25).
+  await openSection(page, "Canvas");
   await page.getByLabel("Animate signal pulses").uncheck();
   expect(await page.evaluate(() => localStorage.getItem("csx.pulses"))).toBe("0");
 
@@ -54,6 +64,7 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
     "aria-checked",
     "true",
   );
+  await openSection(page, "Canvas");
   await expect(page.getByLabel("Animate signal pulses")).not.toBeChecked();
 
   // Reset to defaults restores the shipped appearance.
@@ -89,6 +100,7 @@ test("Settings: the canvas grid overlay toggles and persists", async ({ page }) 
       .locator("input");
 
   await openSettings(page);
+  await openSection(page, "Canvas");
   await expect(gridToggle()).not.toBeChecked();
   await gridToggle().check();
   expect(await page.evaluate(() => localStorage.getItem("csx.grid"))).toBe("1");
@@ -96,5 +108,40 @@ test("Settings: the canvas grid overlay toggles and persists", async ({ page }) 
   await page.keyboard.press("Escape");
   await page.reload();
   await openSettings(page);
+  await openSection(page, "Canvas");
   await expect(gridToggle()).toBeChecked();
+});
+
+test("Settings: sectioned panel — new themes, accents and editing prefs persist", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await openSettings(page);
+
+  // A new theme from the catalogue applies and persists (UI_OVERHAUL §25).
+  await page.locator('[data-theme-option="nord"]').click();
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "nord");
+  expect(await page.evaluate(() => localStorage.getItem("csx.theme"))).toBe("nord");
+  await page.locator('[data-theme-option="dracula"]').click();
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "dracula");
+
+  // A new accent likewise.
+  await page.locator('[data-accent-option="cyan"]').click();
+  await expect(page.locator(".app")).toHaveAttribute("data-accent", "cyan");
+
+  // Editing prefs seed new parts: 8-bit AND with 4 inputs.
+  await openSection(page, "Editing");
+  await page.getByLabel("Default bit width").selectOption("8");
+  await page.getByLabel("Default gate inputs").selectOption("4");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const d = (await page.evaluate(() =>
+    JSON.parse((window as unknown as { __circuitDoc: () => string }).__circuitDoc()),
+  )) as { circuits: { components: { type: string; attrs?: Record<string, unknown> }[] }[] };
+  const and = d.circuits[0].components.find((c) => c.type === "gate.and");
+  expect(and?.attrs).toMatchObject({ bitsize: 8, inputs: 4 });
+  expect(await page.evaluate(() => localStorage.getItem("csx.defaultBits"))).toBe("8");
 });

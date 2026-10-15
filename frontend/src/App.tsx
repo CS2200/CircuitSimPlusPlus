@@ -13,7 +13,7 @@ import SimBar from "./components/SimBar";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
-import { PALETTE, compPins, compSpec, defaultAttrs } from "./editor/catalog";
+import { PALETTE, compPins, compSpec, defaultAttrs, editableAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
@@ -21,7 +21,20 @@ import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, isTauri, openCircuitFile, pickSavePath, saveTextFile } from "./files";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
-import { loadBoolPref, PREF_GRID, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
+import {
+  loadBoolPref,
+  loadNumPref,
+  PREF_DEFAULT_BITS,
+  PREF_DEFAULT_HZ,
+  PREF_DEFAULT_INPUTS,
+  PREF_GRID,
+  PREF_PULSES,
+  PREF_SHOW_PERF,
+  PREF_SHOW_VALUES,
+  PREF_UPDATE_CHECK,
+  saveBoolPref,
+  saveNumPref,
+} from "./prefs";
 import {
   DEFAULT_ACCENT,
   DEFAULT_THEME,
@@ -67,6 +80,12 @@ export default function App() {
   const [accent, setAccent] = useState<AccentId>(loadAccentPref);
   const [pulsesOn, setPulsesOn] = useState(() => loadBoolPref(PREF_PULSES, true));
   const [gridOn, setGridOn] = useState(() => loadBoolPref(PREF_GRID, false));
+  // Canvas readouts / overlays (Settings → Canvas).
+  const [showValues, setShowValues] = useState(() => loadBoolPref(PREF_SHOW_VALUES, true));
+  const [showPerf, setShowPerf] = useState(() => loadBoolPref(PREF_SHOW_PERF, false));
+  // Placement seeds (Settings → Editing) and the transport's start speed.
+  const [defaultBits, setDefaultBits] = useState(() => loadNumPref(PREF_DEFAULT_BITS, 1));
+  const [defaultInputs, setDefaultInputs] = useState(() => loadNumPref(PREF_DEFAULT_INPUTS, 2));
   const [updateCheckOn, setUpdateCheckOn] = useState(() => loadBoolPref(PREF_UPDATE_CHECK, true));
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
@@ -116,7 +135,7 @@ export default function App() {
   // Current sheet (circuit) index — subcircuits live on their own sheets.
   const [sheet, setSheet] = useState(0);
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
-  const [hzExp, setHzExp] = useState(10); // clock speed exponent: hz = 10^(exp/10)
+  const [hzExp, setHzExp] = useState(() => loadNumPref(PREF_DEFAULT_HZ, 10)); // hz = 10^(exp/10)
   const [nameDialog, setNameDialog] = useState<{
     title: string;
     initial: string;
@@ -150,6 +169,21 @@ export default function App() {
     saveBoolPref(PREF_GRID, gridOn);
   }, [gridOn]);
   useEffect(() => {
+    saveBoolPref(PREF_SHOW_VALUES, showValues);
+  }, [showValues]);
+  useEffect(() => {
+    saveBoolPref(PREF_SHOW_PERF, showPerf);
+  }, [showPerf]);
+  useEffect(() => {
+    saveNumPref(PREF_DEFAULT_BITS, defaultBits);
+  }, [defaultBits]);
+  useEffect(() => {
+    saveNumPref(PREF_DEFAULT_INPUTS, defaultInputs);
+  }, [defaultInputs]);
+  useEffect(() => {
+    saveNumPref(PREF_DEFAULT_HZ, hzExp);
+  }, [hzExp]);
+  useEffect(() => {
     saveBoolPref(PREF_UPDATE_CHECK, updateCheckOn);
   }, [updateCheckOn]);
 
@@ -170,6 +204,11 @@ export default function App() {
     setAccent(DEFAULT_ACCENT);
     setPulsesOn(true);
     setGridOn(false);
+    setShowValues(true);
+    setShowPerf(false);
+    setDefaultBits(1);
+    setDefaultInputs(2);
+    setHzExp(10);
     setUpdateCheckOn(true);
   }, []);
 
@@ -427,6 +466,27 @@ export default function App() {
       editorRef.current?.refresh();
     },
     [doc, toast],
+  );
+
+  /** Attrs seeded when a part is placed: REQUIRED attrs plus the Editing prefs
+   *  (default bit width / gate inputs) — UI_OVERHAUL §25. */
+  const placementAttrs = useCallback(
+    (type: string): Record<string, unknown> | undefined => {
+      const seed: Record<string, unknown> = { ...(defaultAttrs(type) ?? {}) };
+      if (defaultBits > 1 && editableAttrs(type).some((f) => f.key === "bitsize")) {
+        seed.bitsize = defaultBits;
+      }
+      if (
+        type.startsWith("gate.") &&
+        type !== "gate.not" &&
+        type !== "gate.buffer" &&
+        defaultInputs > 2
+      ) {
+        seed.inputs = defaultInputs;
+      }
+      return Object.keys(seed).length === 0 ? undefined : seed;
+    },
+    [defaultBits, defaultInputs],
   );
 
   // ---- menus ----
@@ -719,7 +779,7 @@ export default function App() {
                             className={`palette-item${status?.placing === t ? " active" : ""}`}
                             draggable
                             onClick={(e) =>
-                              editorRef.current?.startPlacing(t, e.shiftKey, defaultAttrs(t))
+                              editorRef.current?.startPlacing(t, e.shiftKey, placementAttrs(t))
                             }
                             onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
                             title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
@@ -759,6 +819,8 @@ export default function App() {
                   violations={violationMarkers}
                   pulsesOn={pulsesOn}
                   gridOn={gridOn}
+                  showValues={showValues}
+                  showPerf={showPerf}
                 />
                 {/* Panel separators: edge overlays (no layout footprint). */}
                 <ResizeHandle
@@ -835,11 +897,21 @@ export default function App() {
           accent={accent}
           pulsesOn={pulsesOn}
           gridOn={gridOn}
+          showValues={showValues}
+          showPerf={showPerf}
+          defaultBits={defaultBits}
+          defaultInputs={defaultInputs}
+          defaultHz={hzExp}
           updateCheckOn={updateCheckOn}
           onTheme={setTheme}
           onAccent={setAccent}
           onPulses={setPulsesOn}
           onGrid={setGridOn}
+          onShowValues={setShowValues}
+          onShowPerf={setShowPerf}
+          onDefaultBits={setDefaultBits}
+          onDefaultInputs={setDefaultInputs}
+          onDefaultHz={setHzExp}
           onUpdateCheck={setUpdateCheckOn}
           onReset={resetAppearance}
           onClose={() => setSettingsOpen(false)}
