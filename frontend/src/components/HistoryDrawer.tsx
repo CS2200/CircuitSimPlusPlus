@@ -3,7 +3,7 @@ import { bytesLabel, clockTime, relativeAge } from "../lib/time";
 import type { HistoryUsage, VersionMeta } from "../model/versionStore";
 
 /**
- * Version-history drawer (UI_OVERHAUL §31): a Google-Docs-style panel that
+ * Version-history drawer (UI_OVERHAUL §33): a Google-Docs-style panel that
  * overlays the right dock. Clicking a version previews that circuit on the
  * canvas behind it; nothing is applied until **Restore this version**.
  *
