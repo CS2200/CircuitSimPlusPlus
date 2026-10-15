@@ -28,7 +28,7 @@ export function buildDemoDoc(): CircuitDocument {
   doc.addComponent(c, {
     type: "plexers.mux",
     pos: [4, 24],
-    attrs: { selBits: 2, bitsize: 32 },
+    attrs: { selectBits: 2, bitsize: 32 },
   });
   const reg = doc.addComponent(c, {
     type: "mem.register",
@@ -46,7 +46,7 @@ export function buildDemoDoc(): CircuitDocument {
   const konst = doc.addComponent(c, {
     type: "wiring.constant",
     pos: [28, 32],
-    attrs: { value: 1, bitsize: 32 },
+    attrs: { value: "1", bitsize: 32 },
   });
   // 32-bit bus: acc.q → add.a (with a bend), add.out → probe.in, const → add.b
   doc.addWire(c, {

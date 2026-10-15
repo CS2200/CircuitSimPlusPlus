@@ -103,7 +103,7 @@ test("wire section: color swatch and width (driver bitsize)", async ({ page }) =
   await page.getByRole("button", { name: "Wire color #4dd0e1" }).click();
 
   // Width: the control edits the driving component's bitsize (the AND).
-  await page.getByLabel("Width (bits)").fill("8");
+  await page.locator('.bitsize-grid[aria-label="Width (bits)"] [data-bitsize="8"]').click();
   const d = await doc(page);
   expect(d.circuits[0].components.find((c) => c.type === "gate.and")?.attrs?.bitsize).toBe(8);
   await expect(page.locator(".inspector-type")).toContainText("8-bit");

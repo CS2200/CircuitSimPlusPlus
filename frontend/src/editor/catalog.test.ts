@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { circuitInterface, compPins, compSize, compSpec } from "./catalog";
+import {
+  circuitInterface,
+  compPins,
+  compSize,
+  compSpec,
+  defaultAttrs,
+  editableAttrs,
+} from "./catalog";
 import type { CsxCircuit } from "../model/csx";
 
 /**
@@ -8,6 +15,71 @@ import type { CsxCircuit } from "../model/csx";
  * mirror the netlist (B3): the target's named pin components in document
  * order, subcircuit inputs on the left edge, outputs on the right.
  */
+
+describe("body marks (UI_OVERHAUL §17)", () => {
+  it("arithmetic parts use the symbol, not an abbreviation", () => {
+    const marks = [
+      "arith.adder",
+      "arith.subtractor",
+      "arith.multiplier",
+      "arith.divider",
+      "arith.comparator",
+      "arith.negator",
+      "arith.shifter",
+    ].map((t) => compSpec(t).caption({}));
+    expect(marks).toEqual(["+", "\u2212", "\u00d7", "\u00f7", "=", "~", "\u00ab"]);
+    // …and the palette keeps the human name (§18).
+    expect(compSpec("arith.adder").label).toBe("ADD");
+    expect(compSpec("arith.shifter").markSize).toBeGreaterThan(1);
+  });
+
+  it("non-symbol families keep a short abbreviation", () => {
+    expect(compSpec("mem.register").caption({})).toBe("REG");
+    expect(compSpec("mem.ram").caption({})).toBe("RAM");
+    expect(compSpec("plexers.mux").caption({})).toBe("MUX");
+    expect(compSpec("plexers.decoder").caption({})).toBe("DECODER");
+  });
+});
+
+describe("properties coverage (UI_OVERHAUL §18)", () => {
+  const keys = (type: string): string[] => editableAttrs(type).map((f) => f.key);
+
+  it("exposes every attr the engine accepts, with format-v2 names", () => {
+    expect(keys("arith.shifter")).toEqual(["bitsize", "shift", "delay"]);
+    expect(keys("arith.bit-extender")).toEqual(["inBits", "outBits", "mode", "delay"]);
+    expect(keys("plexers.mux")).toEqual(["bitsize", "selectBits", "delay"]);
+    expect(keys("plexers.decoder")).toEqual(["inputBits", "delay"]);
+    expect(keys("wiring.probe")).toEqual(["bitsize", "radix", "delay"]);
+    expect(keys("wiring.splitter")).toEqual(["splits", "delay"]);
+    expect(keys("gate.and")).toEqual(["bitsize", "inputs", "negateInputs", "delay"]);
+    expect(keys("gate.not")).toEqual(["bitsize", "delay"]);
+    expect(keys("mem.ram")).toEqual(["bitsize", "depth", "delay"]);
+    expect(keys("io.button")).toEqual(["bitsize", "delay"]);
+    expect(keys("subcircuit")).toEqual(["circuit"]);
+  });
+
+  it("groups fields for the Inspector", () => {
+    const groups = editableAttrs("arith.bit-extender").map((f) => f.group);
+    expect(groups).toEqual(["Width", "Width", "Options", "Timing"]);
+  });
+
+  it("seeds the REQUIRED splitter mapping on placement", () => {
+    expect(defaultAttrs("wiring.splitter")).toEqual({
+      splits: { b0: [0], b1: [1], b2: [2], b3: [3] },
+    });
+    expect(defaultAttrs("gate.and")).toBeUndefined();
+    // A placed-with-defaults splitter is valid geometry (bus width 4).
+    const pins = compPins({ type: "wiring.splitter", attrs: defaultAttrs("wiring.splitter") });
+    expect(pins.find((p) => p.name === "bus")?.bitsize).toBe(4);
+    expect(pins.map((p) => p.name)).toEqual(["bus", "b0", "b1", "b2", "b3"]);
+  });
+
+  it("the bit extender reads inBits/outBits, not bitsize", () => {
+    const pins = compPins({ type: "arith.bit-extender" });
+    expect(pins.find((p) => p.name === "in")?.bitsize).toBe(8);
+    expect(pins.find((p) => p.name === "out")?.bitsize).toBe(16);
+  });
+});
 
 function pin(name: string, attrs?: Record<string, unknown>, id?: string) {
   return { id: id ?? name, type: "wiring.pin", pos: [0, 0] as [number, number], name, attrs };

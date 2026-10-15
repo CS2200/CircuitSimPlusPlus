@@ -13,7 +13,7 @@ import SimBar from "./components/SimBar";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { CircuitDocument } from "./model/document";
-import { PALETTE, compPins, compSpec } from "./editor/catalog";
+import { PALETTE, compPins, compSpec, defaultAttrs } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
@@ -703,12 +703,16 @@ export default function App() {
                             key={t}
                             className={`palette-item${status?.placing === t ? " active" : ""}`}
                             draggable
-                            onClick={(e) => editorRef.current?.startPlacing(t, e.shiftKey)}
+                            onClick={(e) =>
+                              editorRef.current?.startPlacing(t, e.shiftKey, defaultAttrs(t))
+                            }
                             onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
                             title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
                           >
                             <CompIcon type={t} />
-                            <span className="palette-item-label">{compSpec(t).caption({})}</span>
+                            <span className="palette-item-label">
+                              {compSpec(t).label ?? compSpec(t).caption({})}
+                            </span>
                           </button>
                         ),
                       )}

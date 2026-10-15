@@ -35,7 +35,9 @@ export const FALLBACK_THEME: Theme = {
     high: "#40dc82",
     x: "#e5534b",
     z: "#8a8a8a",
-    disconnected: "#2c2c3a",
+    // The DEFAULT wire color: a wire with no signal yet (nothing simulated).
+    // Kept clearly visible — it is what you see while drawing (UI_OVERHAUL §17).
+    disconnected: "#6b6b80",
   },
   bus: ["#f0b43c", "#b478e6", "#4dd0e1", "#f368a0", "#b8e34d"],
   violation: "#ff9e3d",

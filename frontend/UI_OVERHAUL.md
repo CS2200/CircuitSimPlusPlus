@@ -532,3 +532,75 @@ run on Linux.
 **Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green (the
 subcircuit e2e now drives creation through the "+" tab and rename through a
 double-click on the tab box; the palette rail test asserts DECODER).
+
+## 17. Follow-up batch H (2026-10-16): labels, alignment, mismatch, wire color
+
+- **One labeling rule** (the "consistent method" ask). A component body ALWAYS
+  shows its **type mark**:
+  1. the **symbol** where the family has one — the arithmetic family is now
+     `+ − × ÷ = ~ «` (matching the palette icons) instead of `ADD/SUB/MUL/…`;
+  2. the **shape itself** for shaped parts (gates, plexers);
+  3. otherwise a **short abbreviation** (`REG`, `RAM`, `ROM`, `MUX`, `DEMUX`,
+     `DECODER`, `PIN`, `CLK`, `BTN`, `LED`, `EXT`, …).
+     A user-assigned **name is drawn above the part** and never replaces the
+     mark (previously a named box swapped its mark for the name); value parts
+     (constant / probe / register) still show the live value in place of the
+     mark with the name above. So `imem` now reads "RAM" with "imem" above it.
+- **Inspector alignment**: `.inspector-row` is a two-column grid (flexible
+  label track + fixed control track, controls `width: 100%`), so every
+  input/select/button group lines up down the panel instead of drifting with
+  its label.
+- **Bitsize mismatch, clearly visible**: a net whose pins disagree (format-v2
+  width rules) gets an **amber halo under the wire core** and a **⚠ width
+  badge** once per net — color-independent, so it reads over bus hues and
+  custom wire colors (the old "turn it yellow" recolor was lost once wires got
+  colors). Selecting such a wire also shows the exact widths in the Inspector
+  ("this net mixes 1 / 32-bit pins — the engine reports it at load").
+- **Default wire color**: wires with **no signal yet** (nothing simulated, or a
+  wire added after the current sim load) were drawn in the near-black
+  `--wire-disconnected`, so a freshly drawn wire looked dead. That variable is
+  now each theme's visible **default wire** color (a slate in dark/OLED/
+  midnight/contrast, mid-grey in the light/paper themes), so drawing a wire
+  looks like a wire until a simulation replaces it with per-state colors.
+
+**Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green. The three
+sim demo baselines were regenerated (the mismatch halos and the new body
+marks/value layout are intentional); the committed Linux baselines still need
+one `--update-snapshots` run on Linux.
+
+## 18. Follow-up batch I (2026-10-16): marks, complete properties, bit picker
+
+- **Arithmetic marks**: the body mark is drawn larger (`CompSpec.markSize`,
+  1.7 for the symbol family) so `+ − × ÷ = ~ «` read clearly, while the
+  **palette tiles keep the human name** (`CompSpec.label`: ADD, SUB, MUL, DIV,
+  CMP, NEG, SHIFT, EXT) with the symbol still inside the icon.
+- **Bit width is a picker, not a text box**: `BitsizePicker` shows all 32 legal
+  widths in an 8×4 grid (one click, and it can't hold an invalid value); used
+  for every width field (`bitsize`, `inBits`, `outBits`) and for the wire
+  width control. Fields show the format's effective default when the attr is
+  absent (1, or 4 for a hex display, 8/16 for the extender).
+- **Every component now exposes every attr format-v2 §4 defines**, under
+  Width / Options / Timing section headings, with hints. Names were corrected
+  to the engine's (`crates/core/src/components.rs`), which also fixes attrs the
+  frontend was writing that the engine would reject:
+  | was                                                                       | now                                                                    |
+  | ------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+  | mux/demux `selBits`                                                       | `selectBits` (1..8)                                                    |
+  | decoder `selBits`                                                         | `inputBits` (default 2)                                                |
+  | probe `display`                                                           | `radix`                                                                |
+  | extender `bitsize`                                                        | `inBits` (8) + `outBits` (16) + `mode` (zero/sign)                     |
+  | splitter: none                                                            | `splits` (required) — default mapping seeded on placement,             |
+  | edited as `pin: bit,bit` lines; the bus width now follows the mapping     |
+  | constant `value` (number)                                                 | hex string (default `"0"`)                                             |
+  | —                                                                         | gates gained `negateInputs` + `inputs` up to 64; every type gained the |
+  | optional per-instance `delay` override                                    |
+  | The `io.hexdisplay` default width is 4. Unit tests assert the field sets, |
+  | the groups, and the seeded splitter mapping.                              |
+- **Known gap (next)**: _pin names_ still diverge from the engine on several
+  types — adder `c_in`/`c_out` vs `cin`/`cout`, subtractor missing
+  `bin`/`bout`, divider `out` vs `quot`/`rem`, register missing `rst`,
+  RAM `d`/`q` vs `din`/`dout`, ROM `clk`/`q` vs `out`, decoder `sel` vs `in`.
+  Those are geometry/format changes (they touch wires, demos and tests), so
+  they are deliberately left for their own pass.
+
+**Acceptance:** frontend lint / 262 unit / build / 35-of-35 e2e green.
