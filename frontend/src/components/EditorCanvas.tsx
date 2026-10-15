@@ -257,16 +257,18 @@ export default forwardRef<
   // keyboard map
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ignore keys aimed at a text field or while a dialog is open. Buttons
+      // are NOT excluded: after picking a palette item the button keeps focus,
+      // and R/Delete/arrows must still drive the canvas (widgets that own an
+      // arrow key stop it from propagating instead — §22).
       const target = e.target as HTMLElement | null;
       if (
         target !== null &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "BUTTON" ||
-          target.closest(".resize-handle") !== null)
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
       ) {
         return;
       }
+      if (document.querySelector(".help-overlay") !== null) return;
       const mod = e.ctrlKey || e.metaKey;
       let handled = true;
       if (mod && !e.shiftKey && e.key.toLowerCase() === "z") doc.undo();

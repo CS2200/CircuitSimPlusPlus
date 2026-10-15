@@ -214,12 +214,15 @@ export class ToolMachine {
     if (this.placing !== null) {
       const p = this.placing;
       const body = placementBodyPos(p, this.doc.circuits);
-      this.doc.addComponent(this.circuitIdx(), {
+      const placed = this.doc.addComponent(this.circuitIdx(), {
         type: p.type,
         pos: [body.x, body.y],
         rot: p.rot,
         ...(p.attrs !== undefined && { attrs: p.attrs }),
       });
+      // Select what was just placed: the natural follow-up is to rotate, edit
+      // or wire it, and R/arrows/Delete act on the selection (UI_OVERHAUL §23).
+      this.selection.set([placed], []);
       // One placement per palette pick; shift-picked (sticky) keeps placing
       // until Esc/right-click (UX decision).
       if (!p.sticky) this.placing = null;

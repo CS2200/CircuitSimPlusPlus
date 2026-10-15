@@ -345,6 +345,16 @@ export default function App() {
 
   // ---- sheet (subcircuit) operations (Subcircuits menu) ----
 
+  // Live readouts from the start (UI_OVERHAUL §23): load the document into the
+  // engine whenever it changes identity (mount, New, Open) so clocks, pins,
+  // registers, memory and I/O show values immediately instead of type marks.
+  // Edits afterwards keep the last known values until the next command.
+  // NOTE: depends on the document IDENTITY only — depending on the store
+  // version would re-enter while `loaded` is still false and loop.
+  useEffect(() => {
+    if (!sim.store.loaded) void sim.load(doc);
+  }, [doc, sim]);
+
   /** Right-click a subcircuit instance → jump to its definition tab. */
   const onOpenSubcircuit = useCallback(
     (circuit: string) => {
@@ -658,6 +668,7 @@ export default function App() {
                       const dir = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
                       if (dir === 0) return;
                       e.preventDefault();
+                      e.stopPropagation(); // the canvas must not also act on it
                       const next =
                         paletteGroups[(i + dir + paletteGroups.length) % paletteGroups.length];
                       setPaletteGroup(next);
