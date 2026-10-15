@@ -333,19 +333,78 @@ body {
 }
 
 .palette {
-  width: 244px;
-  overflow-y: auto;
+  width: 190px; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
+  flex: none;
+  display: flex;
   background: var(--panel);
+}
+
+/* Activity rail (UI_OVERHAUL §8): one icon per component group. Hovering,
+ * focusing, or clicking a group switches the body beside it. */
+.palette-rail {
+  flex: none;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  overflow-y: auto;
   border-right: 1px solid var(--panel-border);
-  padding: 10px;
+}
+
+.palette-rail-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.palette-rail-btn:hover {
+  color: var(--text);
+  background: var(--grid);
+}
+
+.palette-rail-btn.active {
+  color: var(--accent);
+}
+
+.palette-rail-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.palette-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 8px;
 }
 
 .palette-group {
-  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 4px;
+  margin-bottom: 10px;
 }
 
 .palette-group-title {
-  font-size: 0.8rem;
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--text-dim);
@@ -353,20 +412,75 @@ body {
 }
 
 .palette-item {
-  display: inline-block;
-  margin: 3px;
-  padding: 0.55rem 0.6rem;
-  min-width: 102px;
-  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
   border-radius: 8px;
   cursor: grab;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-align: center;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.palette-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comp-icon {
+  flex: none;
+}
+
+/* ---- resizable side panels (UI_OVERHAUL §7) ---- */
+
+/* Overlays on the work area's edges: no layout footprint, so the canvas
+ * geometry (and the visual-regression baselines) do not depend on the
+ * handles. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none; /* double-clicks must not start a text-selection drag */
+  background: transparent;
+}
+
+.resize-handle.left {
+  left: 0;
+}
+
+.resize-handle.right {
+  right: 0;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--panel-border);
+}
+
+.resize-handle:hover::after,
+.resize-handle.dragging::after {
+  background: var(--accent);
+  width: 2px;
+  left: 1.5px;
+}
+
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .palette-item:hover {
@@ -617,13 +731,12 @@ body {
 /* ---- right dock: Inspector + Watch (UI overhaul §3) ---- */
 
 .right-dock {
-  width: 16rem;
+  width: 16rem; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
   flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--panel);
-  border-left: 1px solid var(--panel-border);
 }
 
 .dock-tabs {

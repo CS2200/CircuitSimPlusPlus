@@ -17,16 +17,23 @@ const TABS: readonly { id: DockTab; label: string }[] = [
 export default function RightDock({
   tab,
   onTab,
+  width,
   inspector,
   watch,
 }: {
   tab: DockTab;
   onTab: (tab: DockTab) => void;
+  /** Panel width in CSS px (UI_OVERHAUL §7: user-resizable). */
+  width?: number;
   inspector: ReactNode;
   watch: ReactNode;
 }) {
   return (
-    <aside className="right-dock" aria-label="Details">
+    <aside
+      className="right-dock"
+      aria-label="Details"
+      style={width === undefined ? undefined : { width }}
+    >
       <div className="dock-tabs" role="tablist" aria-label="Right dock">
         {TABS.map((t) => (
           <button

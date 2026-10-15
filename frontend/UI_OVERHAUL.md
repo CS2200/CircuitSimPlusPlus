@@ -259,3 +259,67 @@ terminal's world position via the camera).
 - Inspector: per-field scrub-to-edit; multi-select batch edits.
 - Separating the statusbar cursor readout from hover-rate re-renders
   (pre-existing; unaffected by this pass).
+
+## 7. Second pass (2026-10-15): resizable panels + palette glyphs
+
+Team direction after the first pass. Per the human, the **Watch tab stays**
+("keep the watch tab for now") — no changes to §3's dock contract.
+
+**Resizable side panels.** The palette and the right dock are resizable by
+dragging the separator strip between the panel and the canvas:
+
+- Bounds/defaults: palette 150–320 px (default 190), dock 220–420 px
+  (default 256). `src/panels.ts` owns clamp/load/save; `App` holds the live
+  widths and persists on release (`csx.panel.palette`, `csx.panel.dock`).
+- Interaction: pointer drag with capture (live re-layout, one localStorage
+  write on release); double-click resets the default; the handle is a
+  focusable `role="separator"` with Arrow-key stepping (±8 px).
+- The handles are edge **overlays** on the work area (absolute, no layout
+  footprint): the canvas geometry is identical whether or not the panels
+  are resizable, which also keeps the visual-regression baselines stable.
+  The panels' former static borders are gone.
+
+**Palette component glyphs.** Every palette entry renders a small SVG
+miniature of the component next to its name (`components/CompIcon.tsx`):
+
+- gate bodies come from the real `gateShape` geometry and pin stubs/dots
+  from the catalog's pin specs — the sidebar is a faithful miniature of
+  what gets placed, same curves as the canvas;
+- box families carry a short glyph (+ − × ÷ = ~ «, REG/RAM/ROM, DEC, 1, 8);
+  clock/probe/LED get bespoke silhouettes; subcircuit modules get an inset
+  border. Icons draw in `currentColor`, so every theme (incl. OLED) styles
+  them automatically;
+- the palette is a responsive grid (`auto-fill, minmax(80px, 1fr)`) — a
+  wider panel simply shows more columns (see §8 for the group rail).
+
+**Acceptance:** `e2e/panels.spec.ts` (drag / persist / reset / clamp /
+keyboard + icon coverage) and `src/panels.test.ts` (clamp / load / save)
+pass; lint / unit / build / e2e green.
+
+## 8. Third pass (2026-10-15): palette activity rail (VS Code-style)
+
+Team direction: one rail icon per component group; hovering a group icon
+opens that group's components.
+
+- **Layout:** the palette is a fixed 44px **activity rail** plus the
+  resizable body. The rail carries one glyph per registry group (Gates,
+  Wiring, Plexers, Arithmetic, Memory, I/O — plus Subcircuits while the
+  document has more than one circuit); the body shows the active group's
+  item grid with the group name as its header. The rail is fixed-width;
+  the persisted `csx.panel.palette` width keeps covering the whole panel
+  (default stays 190px — rail 44 + a single-column body, VS Code-like;
+  widen the panel for more columns).
+- **Interaction:** hovering, focusing, or clicking a rail icon switches
+  the body (VS Code's click model, extended with hover as requested).
+  Markup is `role="tablist"`/`role="tab"`/`role="tabpanel"` with roving
+  focus; ArrowUp/ArrowDown move between groups; each icon has a `title`
+  tooltip and the active one gets the accent left-bar treatment. If the
+  active group disappears (Subcircuits after New), the body falls back to
+  the first group.
+- **Group glyphs** (`PaletteGroupIcon`, same `CompIcon` language,
+  `currentColor`, theme-agnostic): NAND for Gates, a bent wire with a
+  junction dot for Wiring, mux/adder/RAM/LED/module for the rest.
+
+**Acceptance:** `e2e/panels.spec.ts` covers rail hover/click switching,
+per-group icon coverage, and the resize numbers; the other suites
+(canvas geometry unchanged → baselines unchanged) stay green.

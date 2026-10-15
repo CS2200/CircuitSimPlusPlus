@@ -53,8 +53,14 @@ async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y
   };
 }
 
+/** Switch the palette's activity rail to `group` (UI_OVERHAUL §8). */
+async function openPaletteGroup(page: Page, group: string): Promise<void> {
+  await page.locator(`[data-group="${group}"]`).click();
+}
+
 /** Place one AND gate at the canvas center (dirty-ifies the document). */
 async function placeAndGate(page: Page): Promise<void> {
+  await openPaletteGroup(page, "Gates");
   await page.getByRole("button", { name: "AND", exact: true }).click();
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
@@ -162,6 +168,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   // Placement anchors the body top-left to the cursor; the 2×1 pin body
   // center is +16,+8 CSS px at the default zoom — click there to select it
   // (the Inspector opens on the right).
+  await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(center.x - 60, center.y);
   await page.keyboard.press("Escape");
@@ -171,11 +178,12 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.getByPlaceholder("(unnamed)").press("Enter");
 
   // second pin, made an OUTPUT via the Inspector (rot mirrors to W)
+  await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(center.x + 60, center.y);
   await page.keyboard.press("Escape");
   await page.mouse.click(center.x + 60 + 16, center.y + 8);
-  await expect(page.locator(".inspector-id")).toHaveText("c2");
+  await expect(page.locator(".inspector-id")).toHaveText("c2"); // panel switched before typing
   await page.getByPlaceholder("(unnamed)").fill("y");
   await page.getByPlaceholder("(unnamed)").press("Enter");
   await page.getByRole("checkbox").check();
@@ -190,7 +198,8 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
 
   // ---- back on main: the palette offers "alu" as a placeable instance ----
   await page.getByRole("tab", { name: "main" }).click();
-  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await openPaletteGroup(page, "Subcircuits");
+  await page.locator(".palette-group .palette-item").first().click();
   await page.mouse.click(center.x, center.y - 80);
   await page.keyboard.press("Escape");
 
@@ -199,7 +208,8 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   expect(inst?.attrs?.circuit).toBe("alu");
 
   // ---- placing a second copy works too (multiple instances) ----
-  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await openPaletteGroup(page, "Subcircuits");
+  await page.locator(".palette-group .palette-item").first().click();
   await page.mouse.click(center.x, center.y + 80);
   await page.keyboard.press("Escape");
   d = await doc(page);
@@ -215,10 +225,12 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
   const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
   // PIN body lands at [-6,0] once placement snaps → terminal at (-4,0.5).
+  await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(c.x - 100, c.y - 8);
   await page.keyboard.press("Escape");
   // AND body lands at [1,-1] → in0 at (1,0).
+  await openPaletteGroup(page, "Gates");
   await page.getByRole("button", { name: "AND", exact: true }).click();
   await page.mouse.click(c.x + 20, c.y - 24);
   await page.keyboard.press("Escape");
@@ -258,7 +270,8 @@ test("Subcircuits: right-click an instance jumps to its definition tab", async (
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
   const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await page.locator(".palette-group", { hasText: "Subcircuits" }).getByRole("button").click();
+  await openPaletteGroup(page, "Subcircuits");
+  await page.locator(".palette-group .palette-item").first().click();
   await page.mouse.click(c.x - 64, c.y - 32); // body top-left; center at c
   await page.keyboard.press("Escape");
   await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
+import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import {
   HelpIcon,
@@ -13,6 +14,7 @@ import {
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
+import ResizeHandle from "./components/ResizeHandle";
 import RightDock, { type DockTab } from "./components/RightDock";
 import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
@@ -28,6 +30,7 @@ import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
+import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import { loadBoolPref, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
 import {
   DEFAULT_ACCENT,
@@ -89,11 +92,30 @@ export default function App() {
   // VITE_MOCK_CORE=1 (dev default), else the Tauri adapter.
   const [sim] = useState(() => new SimController(getCore()));
   const editorRef = useRef<EditorHandle>(null);
+  const railRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dockTab, setDockTab] = useState<DockTab>("watch");
+  // Palette activity rail (UI_OVERHAUL §8): which component group the body shows.
+  const [paletteGroup, setPaletteGroup] = useState<string>(PALETTE[0].group);
+  // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
+  // release; defaults match the pre-resize layout.
+  const [panelWidths, setPanelWidths] = useState<Record<PanelId, number>>(() => ({
+    palette: loadPanelWidth("palette"),
+    dock: loadPanelWidth("dock"),
+  }));
+  const resizePanel = useCallback((id: PanelId, width: number) => {
+    setPanelWidths((prev) => (prev[id] === width ? prev : { ...prev, [id]: width }));
+  }, []);
+  const commitPanel = useCallback(
+    (id: PanelId, width: number) => {
+      resizePanel(id, width);
+      savePanelWidth(id, width);
+    },
+    [resizePanel],
+  );
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [pathOn, setPathOn] = useState(false);
@@ -115,6 +137,14 @@ export default function App() {
 
   // Current sheet name (safe while a doc/sheet swap is mid-render).
   const sheetName = doc.circuits[sheet]?.name;
+
+  // Palette rail groups (UI_OVERHAUL §8): Subcircuits only exists while the
+  // document has more than one circuit; if the active group disappears the
+  // body falls back to the first group. Computed inline — the document is
+  // mutated in place, so there is no identity to memoize on.
+  const paletteGroups = PALETTE.map((g) => g.group);
+  if (doc.circuits.length > 1) paletteGroups.push("Subcircuits");
+  const activePaletteGroup = paletteGroups.includes(paletteGroup) ? paletteGroup : PALETTE[0].group;
 
   // Preference persistence (best-effort; non-fatal without storage).
   useEffect(() => {
@@ -707,54 +737,89 @@ export default function App() {
           </div>
         ) : (
           <>
-            <aside className="palette">
-              {PALETTE.map((g) => (
-                <div className="palette-group" key={g.group}>
-                  <div className="palette-group-title">{g.group}</div>
-                  {g.types.map((t) => (
-                    <button
-                      key={t}
-                      className={`palette-item${status?.placing === t ? " active" : ""}`}
-                      draggable
-                      onClick={(e) => editorRef.current?.startPlacing(t, e.shiftKey)}
-                      onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
-                      title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
-                    >
-                      {compSpec(t).caption({})}
-                    </button>
-                  ))}
+            <aside className="palette" style={{ width: panelWidths.palette }}>
+              <div
+                className="palette-rail"
+                role="tablist"
+                aria-orientation="vertical"
+                aria-label="Component groups"
+                ref={railRef}
+              >
+                {paletteGroups.map((g, i) => (
+                  <button
+                    key={g}
+                    role="tab"
+                    data-group={g}
+                    className={`palette-rail-btn${activePaletteGroup === g ? " active" : ""}`}
+                    aria-selected={activePaletteGroup === g}
+                    tabIndex={activePaletteGroup === g ? 0 : -1}
+                    title={g}
+                    onMouseEnter={() => setPaletteGroup(g)}
+                    onFocus={() => setPaletteGroup(g)}
+                    onClick={() => setPaletteGroup(g)}
+                    onKeyDown={(e) => {
+                      const dir = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+                      if (dir === 0) return;
+                      e.preventDefault();
+                      const next =
+                        paletteGroups[(i + dir + paletteGroups.length) % paletteGroups.length];
+                      setPaletteGroup(next);
+                      railRef.current
+                        ?.querySelector<HTMLButtonElement>(`[data-group="${next}"]`)
+                        ?.focus();
+                    }}
+                  >
+                    <PaletteGroupIcon group={g} />
+                  </button>
+                ))}
+              </div>
+              <div className="palette-body">
+                <div className="palette-group-title">{activePaletteGroup}</div>
+                <div className="palette-group" role="tabpanel" aria-label={activePaletteGroup}>
+                  {activePaletteGroup === "Subcircuits"
+                    ? doc.circuits.map(
+                        (c, i) =>
+                          i !== sheet && (
+                            <button
+                              key={c.name}
+                              className={`palette-item${status?.placing === "subcircuit" ? " active" : ""}`}
+                              draggable
+                              onClick={(e) =>
+                                editorRef.current?.startPlacing("subcircuit", e.shiftKey, {
+                                  circuit: c.name,
+                                })
+                              }
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/x-csx-type", "subcircuit");
+                                e.dataTransfer.setData(
+                                  "text/x-csx-attrs",
+                                  JSON.stringify({ circuit: c.name }),
+                                );
+                              }}
+                              title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
+                            >
+                              <CompIcon type="subcircuit" />
+                              <span className="palette-item-label">{c.name}</span>
+                            </button>
+                          ),
+                      )
+                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.types ?? []).map(
+                        (t) => (
+                          <button
+                            key={t}
+                            className={`palette-item${status?.placing === t ? " active" : ""}`}
+                            draggable
+                            onClick={(e) => editorRef.current?.startPlacing(t, e.shiftKey)}
+                            onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
+                            title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
+                          >
+                            <CompIcon type={t} />
+                            <span className="palette-item-label">{compSpec(t).caption({})}</span>
+                          </button>
+                        ),
+                      )}
                 </div>
-              ))}
-              {doc.circuits.length > 1 && (
-                <div className="palette-group">
-                  <div className="palette-group-title">Subcircuits</div>
-                  {doc.circuits.map(
-                    (c, i) =>
-                      i !== sheet && (
-                        <button
-                          key={c.name}
-                          className={`palette-item${status?.placing === "subcircuit" ? " active" : ""}`}
-                          draggable
-                          onClick={(e) =>
-                            editorRef.current?.startPlacing("subcircuit", e.shiftKey, {
-                              circuit: c.name,
-                            })
-                          }
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/x-csx-type", "subcircuit");
-                            e.dataTransfer.setData(
-                              "text/x-csx-attrs",
-                              JSON.stringify({ circuit: c.name }),
-                            );
-                          }}
-                          title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
-                        >
-                          {c.name}
-                        </button>
-                      ),
-                  )}
-                </div>
-              )}
+              </div>
             </aside>
             <div className="editor-wrap">
               <EditorCanvas
@@ -770,10 +835,28 @@ export default function App() {
                 violations={violationMarkers}
                 pulsesOn={pulsesOn}
               />
+              {/* Panel separators: edge overlays (no layout footprint). */}
+              <ResizeHandle
+                panel="palette"
+                side="left"
+                width={panelWidths.palette}
+                defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
+                onResize={(w) => resizePanel("palette", w)}
+                onCommit={(w) => commitPanel("palette", w)}
+              />
+              <ResizeHandle
+                panel="dock"
+                side="right"
+                width={panelWidths.dock}
+                defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
+                onResize={(w) => resizePanel("dock", w)}
+                onCommit={(w) => commitPanel("dock", w)}
+              />
             </div>
             <RightDock
               tab={dockTab}
               onTab={setDockTab}
+              width={panelWidths.dock}
               inspector={
                 <InspectorPanel
                   doc={doc}
@@ -950,6 +1033,10 @@ export default function App() {
                 <tr>
                   <td>Middle-drag / Space+drag</td>
                   <td>pan</td>
+                </tr>
+                <tr>
+                  <td>Panel edges</td>
+                  <td>drag to resize the palette / dock (double-click resets)</td>
                 </tr>
               </tbody>
             </table>
