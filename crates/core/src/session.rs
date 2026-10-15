@@ -3,8 +3,7 @@
 //! v1.1).
 //!
 //! One [`Session`] owns one open circuit: the stored [`Document`], the
-//! flattened [`Netlist`], and the live engine (delay-aware by default;
-//! `settings.delayModel` is the interactive default). All engine access
+//! flattened [`Netlist`], and the live delay-aware engine. All engine access
 //! is serialized through one `Mutex`; `play` runs on a dedicated thread
 //! that steps through the same mutex and stops on an atomic flag — no
 //! lock is held across frames and every sink callback happens under the
@@ -15,15 +14,14 @@
 //! - Exactly one **full** [`NetDiffs`] batch (`full: true`, all nets) is
 //!   emitted after each successful `load_circuit_*`, `resume`, and
 //!   `reset`; every later batch is diff-only.
-//! - A **tick** is one clock half-period in delay mode (advance to the
-//!   next clock edge), one full cycle in zero mode.
+//! - A **tick** is one clock half-period (advance to the next clock edge).
 //! - `CompId`s on the wire are document-order indices within the
 //!   referenced circuit; the engine's post-flatten ids are mapped back
 //!   here.
-//! - `set_mode` and `reset` **rebuild the engine from the stored
-//!   document — all simulation state resets** (power-on). `reset`
-//!   additionally re-applies every memory's `autoload` image (the G6
-//!   feature: reset reloads the program).
+//! - `reset` **rebuilds the engine from the stored document — all
+//!   simulation state resets** (power-on) — and additionally re-applies
+//!   every memory's `autoload` image (the G6 feature: reset reloads the
+//!   program).
 //! - Autoload paths resolve relative to the circuit file's directory and
 //!   stay inside its tree (§11 sandbox). A session loaded from **bytes**
 //!   has no base path: autoloads resolve against the current working
@@ -41,14 +39,13 @@ use std::time::{Duration, Instant};
 
 use crate::api::{
     CompId, EventSink, LoadError, LoadErrorKind, LoadResult, NetChange, NetDiffs, NetId,
-    SaveResult, Sim, SimHalted, SimMode, SimStatus, TimingUpdate, WireValue,
+    SaveResult, Sim, SimHalted, SimStatus, TimingUpdate, WireValue,
 };
-use crate::delay::{DelayEngine, RunReport};
+use crate::delay::{DelayEngine, Halt, RunReport};
 use crate::format::{self, Document};
 use crate::netlist::{self, Netlist};
 use crate::timing_table::TimingTable;
 use crate::value::Value;
-use crate::zero::{Halt, ZeroEngine};
 
 /// Default clock half-period for the delay engine (ns); the same default
 /// the autograder uses (docs/delay-table.md).
@@ -79,7 +76,6 @@ struct Inner {
 }
 
 struct SimState {
-    mode: SimMode,
     engine: Engine,
     netlist: Netlist,
     half: u64,
@@ -94,114 +90,70 @@ struct SimState {
     eff_hz: u64,
 }
 
-enum Engine {
-    Zero(Box<ZeroEngine>),
-    Delay(Box<DelayEngine>),
-}
+/// The one simulation engine: delay-aware (DESIGN.md §4.3). The wrapper
+/// keeps the session plumbing engine-shaped; there is no second mode.
+struct Engine(DelayEngine);
 
 impl Engine {
     fn cycle(&self) -> u64 {
-        match self {
-            Engine::Zero(e) => e.cycle(),
-            Engine::Delay(e) => e.cycle(),
-        }
+        self.0.cycle()
     }
 
     fn net_count(&self) -> usize {
-        match self {
-            Engine::Zero(e) => e.netlist().nets.len(),
-            Engine::Delay(e) => e.netlist().nets.len(),
-        }
+        self.0.netlist().nets.len()
     }
 
     fn net_value(&self, net: usize) -> Value {
-        match self {
-            Engine::Zero(e) => e.net_value(NetId(net as u32)),
-            Engine::Delay(e) => e.net_value(NetId(net as u32)),
-        }
+        self.0.net_value(NetId(net as u32))
     }
 
-    /// Current simulation time in ns (delay mode only; `None` in zero).
+    /// Current simulation time in ns.
     fn now(&self) -> Option<u64> {
-        match self {
-            Engine::Zero(_) => None,
-            Engine::Delay(e) => Some(e.now()),
-        }
+        Some(self.0.now())
     }
 
     /// Run `n` full cycles; `Err` on halt (sticky in the engine).
     fn run(&mut self, n: u64) -> Result<Option<RunReport>, Halt> {
-        match self {
-            Engine::Zero(e) => e.run(n).map(|()| None),
-            Engine::Delay(e) => e.run(n).map(Some),
-        }
+        self.0.run(n).map(Some)
     }
 
-    /// One contract tick: half-period in delay mode, one cycle in zero.
+    /// One contract tick: one clock half-period (advance to the next edge).
     fn tick(&mut self) -> Result<Option<RunReport>, Halt> {
-        match self {
-            Engine::Zero(e) => e.step_cycle().map(|()| None),
-            Engine::Delay(e) => e.step_tick().map(|()| None),
-        }
+        self.0.step_tick().map(|()| None)
     }
 
-    /// Settle once without clocking (initial paint after load).
+    /// Settle once without clocking (initial paint after load). The delay
+    /// engine's construction-time boot settle already quiesced the circuit.
     fn settle_initial(&mut self) -> Result<(), Halt> {
-        match self {
-            Engine::Zero(e) => e.settle(),
-            // The delay engine's construction-time boot settle already
-            // quiesced the circuit.
-            Engine::Delay(_) => Ok(()),
-        }
+        Ok(())
     }
 
     fn snapshot(&self) -> String {
-        match self {
-            Engine::Zero(e) => e.snapshot(),
-            Engine::Delay(e) => e.snapshot(),
-        }
+        self.0.snapshot()
     }
 
     fn restore(&mut self, json: &str) -> Result<(), String> {
-        match self {
-            Engine::Zero(e) => e.restore(json),
-            Engine::Delay(e) => e.restore(json),
-        }
+        self.0.restore(json)
     }
 
     fn poke_pin(&mut self, name: &str, v: Value) -> Result<bool, Halt> {
-        match self {
-            Engine::Zero(e) => e.poke_input_pin(name, v),
-            Engine::Delay(e) => Ok(e.poke_input_pin(name, v)),
-        }
+        Ok(self.0.poke_input_pin(name, v))
     }
 
     fn poke_button(&mut self, name: &str, pressed: bool) -> Result<bool, Halt> {
-        match self {
-            Engine::Zero(e) => e.poke_button(name, pressed),
-            Engine::Delay(e) => Ok(e.poke_button(name, pressed)),
-        }
+        Ok(self.0.poke_button(name, pressed))
     }
 
     fn memory_word(&self, name: &str, addr: u64) -> Option<Value> {
-        match self {
-            Engine::Zero(e) => e.memory_word(name, addr),
-            Engine::Delay(e) => e.memory_word(name, addr),
-        }
+        self.0.memory_word(name, addr)
     }
 
     fn set_memory_word(&mut self, name: &str, addr: u64, v: Value) -> bool {
-        match self {
-            Engine::Zero(e) => e.set_memory_word(name, addr, v),
-            Engine::Delay(e) => e.set_memory_word(name, addr, v),
-        }
+        self.0.set_memory_word(name, addr, v)
     }
 
     fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
-        match self {
-            Engine::Zero(e) => e.load_memory_image(name, image),
-            Engine::Delay(e) => e.load_memory_image(name, image),
-        }
+        self.0.load_memory_image(name, image)
     }
 }
 
@@ -261,7 +213,6 @@ impl SimState {
         sink.status(&SimStatus {
             running: self.running,
             cycle: self.engine.cycle(),
-            mode: self.mode,
             eff_hz: self.eff_hz,
         });
     }
@@ -282,41 +233,31 @@ impl SimState {
         });
     }
 
-    /// DTA results for `timing_update` (zero mode: zeros/empty, per the
-    /// contract — DTA exists only on the delay-aware engine).
+    /// DTA results for `timing_update` (DESIGN.md §4.4).
     fn emit_timing(&self, sink: &mut dyn EventSink) {
-        let update = match &self.engine {
-            Engine::Delay(e) => {
-                let cycles = e.cycle();
-                let t_obs = e.t_obs();
-                TimingUpdate {
-                    t_obs,
-                    est_time: cycles.saturating_mul(t_obs),
-                    violations: e
-                        .violations()
+        let e = &self.engine.0;
+        let cycles = e.cycle();
+        let t_obs = e.t_obs();
+        let update = TimingUpdate {
+            t_obs,
+            est_time: cycles.saturating_mul(t_obs),
+            violations: e
+                .violations()
+                .iter()
+                .map(|v| crate::autograde::api_violation(&self.netlist, v))
+                .collect(),
+            top_paths: self
+                .last_report
+                .as_ref()
+                .map(|r| {
+                    r.top_paths
                         .iter()
-                        .map(|v| crate::autograde::api_violation(&self.netlist, v))
-                        .collect(),
-                    top_paths: self
-                        .last_report
-                        .as_ref()
-                        .map(|r| {
-                            r.top_paths
-                                .iter()
-                                .flat_map(|(settle, path)| {
-                                    crate::autograde::api_path(&self.netlist, *settle, path)
-                                })
-                                .collect()
+                        .flat_map(|(settle, path)| {
+                            crate::autograde::api_path(&self.netlist, *settle, path)
                         })
-                        .unwrap_or_default(),
-                }
-            }
-            Engine::Zero(_) => TimingUpdate {
-                t_obs: 0,
-                est_time: 0,
-                violations: Vec::new(),
-                top_paths: Vec::new(),
-            },
+                        .collect()
+                })
+                .unwrap_or_default(),
         };
         sink.timing(&update);
     }
@@ -344,7 +285,6 @@ impl SimState {
 /// Build a fresh engine + netlist from a validated document.
 fn build_engine(
     doc: &Document,
-    mode: SimMode,
     half: u64,
 ) -> Result<(Engine, Netlist, TimingTable), Vec<LoadError>> {
     let nl = netlist::build(doc)?;
@@ -357,12 +297,7 @@ fn build_engine(
             wire_idx: None,
         }]
     })?;
-    let engine = match mode {
-        SimMode::Zero => Engine::Zero(Box::new(ZeroEngine::new(nl.clone())?)),
-        SimMode::Delay => {
-            Engine::Delay(Box::new(DelayEngine::new(nl.clone(), half.max(1), &table)?))
-        }
-    };
+    let engine = Engine(DelayEngine::new(nl.clone(), half.max(1), &table)?);
     Ok((engine, nl, table))
 }
 
@@ -416,8 +351,7 @@ impl Session {
                 return fail(errors);
             }
         };
-        let mode = doc.settings.delay_model;
-        match build_engine(&doc, mode, DEFAULT_HALF_PERIOD) {
+        match build_engine(&doc, DEFAULT_HALF_PERIOD) {
             Err(errors) => {
                 inner.doc = None;
                 inner.state = None;
@@ -428,7 +362,6 @@ impl Session {
                 let net_map = nl.net_map.clone();
                 let named = nl.named.clone();
                 let st = SimState {
-                    mode,
                     engine,
                     netlist: nl,
                     half: DEFAULT_HALF_PERIOD,
@@ -445,18 +378,18 @@ impl Session {
                 // G6/§5.2: autoload images apply at startup (and on every
                 // reset — see `reset`).
                 Self::apply_autoloads(&mut inner);
-                // Initial paint: settle once (zero mode; the delay engine
-                // already boot-settled at construction). A power-on halt
-                // (e.g. a floating input) is reported, not hidden.
+                // Initial paint: the delay engine already boot-settled at
+                // construction; a power-on halt (e.g. a floating input) is
+                // reported, not hidden.
                 let Inner { state, sink, .. } = &mut *inner;
                 let st = state.as_mut().expect("just stored");
                 let initial_halt = st.engine.settle_initial().err();
                 st.emit_full_batch(&mut **sink);
                 if let Some(h) = initial_halt {
                     st.emit_halted(&mut **sink, &h);
-                } else if let Engine::Delay(e) = &st.engine {
+                } else {
                     // A boot-settle halt is sticky in the engine; surface it.
-                    if let Some(h) = e.halted() {
+                    if let Some(h) = st.engine.0.halted() {
                         let h = h.clone();
                         st.emit_halted(&mut **sink, &h);
                     }
@@ -472,10 +405,10 @@ impl Session {
         }
     }
 
-    /// Rebuild the engine from the stored document (set_mode / reset
-    /// shared core): all simulation state resets to power-on; the fresh
-    /// full batch is emitted by the caller.
-    fn rebuild(inner: &mut Inner, mode: SimMode) -> Result<(), Vec<LoadError>> {
+    /// Rebuild the engine from the stored document (the reset core): all
+    /// simulation state resets to power-on; the fresh full batch is
+    /// emitted by the caller.
+    fn rebuild(inner: &mut Inner) -> Result<(), Vec<LoadError>> {
         let Some(doc) = inner.doc.clone() else {
             return Err(vec![LoadError {
                 kind: LoadErrorKind::Other,
@@ -486,10 +419,9 @@ impl Session {
             }]);
         };
         let half = inner.state.as_ref().map_or(DEFAULT_HALF_PERIOD, |s| s.half);
-        let (engine, nl, _table) = build_engine(&doc, mode, half)?;
+        let (engine, nl, _table) = build_engine(&doc, half)?;
         let root_flat = root_flat_map(&doc, &nl);
         inner.state = Some(SimState {
-            mode,
             engine,
             netlist: nl,
             half,
@@ -715,34 +647,6 @@ impl Sim for Session {
         st.emit_timing(&mut **sink);
     }
 
-    fn set_mode(&mut self, mode: SimMode) {
-        self.stop_play();
-        let mut g = self.inner.lock().expect("session mutex poisoned");
-        if g.doc.is_none() {
-            return;
-        }
-        if let Err(errors) = Self::rebuild(&mut g, mode) {
-            let msg = errors
-                .iter()
-                .map(|e| e.message.as_str())
-                .collect::<Vec<_>>()
-                .join("; ");
-            let Inner { state, sink, .. } = &mut *g;
-            if let Some(st) = state.as_mut() {
-                st.emit_error(&mut **sink, format!("set_mode rebuild failed: {msg}"));
-            }
-            return;
-        }
-        let Inner { state, sink, .. } = &mut *g;
-        let st = state.as_mut().expect("rebuilt");
-        let halt = st.engine.settle_initial().err();
-        st.emit_full_batch(&mut **sink);
-        if let Some(h) = halt {
-            st.emit_halted(&mut **sink, &h);
-        }
-        st.emit_status(&mut **sink);
-    }
-
     fn poke(&mut self, comp_id: CompId, pin: &str, value: WireValue) {
         let mut g = self.inner.lock().expect("session mutex poisoned");
         let Inner { state, sink, .. } = &mut *g;
@@ -856,8 +760,7 @@ impl Sim for Session {
         if g.doc.is_none() {
             return;
         }
-        let mode = g.state.as_ref().map(|s| s.mode).unwrap_or(SimMode::Delay);
-        if let Err(errors) = Self::rebuild(&mut g, mode) {
+        if let Err(errors) = Self::rebuild(&mut g) {
             let msg = errors
                 .iter()
                 .map(|e| e.message.as_str())
@@ -927,8 +830,8 @@ mod tests {
             .unwrap_or_default();
         format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings": {{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings": {{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1012,26 +915,6 @@ mod tests {
     }
 
     #[test]
-    fn zero_mode_tick_is_one_cycle_and_at_is_absent() {
-        let rec = RecSink::default();
-        let mut s = Session::new(Box::new(rec.clone()));
-        let doc = counter_doc(None).replace(r#""delayModel":"delay""#, r#""delayModel":"zero""#);
-        assert!(s.load_circuit_bytes(doc.as_bytes()).ok);
-        // Zero mode: initial batch has no `at`.
-        assert!(rec.0.lock().unwrap().diffs[0]
-            .changes
-            .iter()
-            .all(|c| c.at.is_none()));
-        s.step_tick();
-        assert_eq!(last_cycle(&rec.0), 1);
-        s.set_mode(SimMode::Delay);
-        // set_mode resets state (documented): cycle back to 0, fresh full batch.
-        assert_eq!(last_cycle(&rec.0), 0);
-        let r = rec.0.lock().unwrap();
-        assert!(r.diffs.last().unwrap().full);
-    }
-
-    #[test]
     fn reset_reapplies_autoload_image() {
         let dir = std::env::temp_dir().join(format!("csim-session-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1086,8 +969,8 @@ mod tests {
     fn poke_and_halt_details_prefix() {
         // Floating input on a gate → halt with the contract prefix.
         let json = r##"{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings": {"delayModel":"zero","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"c","type":"wiring.constant","pos":[0,0]},
                 {"id":"g","type":"gate.and","pos":[0,0]}

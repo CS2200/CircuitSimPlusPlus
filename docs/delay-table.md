@@ -116,9 +116,8 @@ For a component instance of type `T` with bitsize `b`:
 effective_prop(T, b) = components[T].prop + components[T].perBit × (b − 1)
 ```
 
-An instance attribute `attrs.delay` **overrides `effective_prop`**
-(highest precedence, DESIGN.md §4.3); it never touches `setup`/`hold`/
-`access` or the wire constant. Component types absent from `components`
+An instance's timing comes **only** from its type's table entry; there is no
+per-instance override (DESIGN.md §4.3). Component types absent from `components`
 (wiring pins/constants/clocks/probes/splitters, `arith.bit-extender`,
 inert `io.*`) are ideal: zero delay.
 

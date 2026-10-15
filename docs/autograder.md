@@ -10,18 +10,17 @@ addressing, and memory preloading + sandboxing.
 
 ```bash
 csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rss-cap-mb M]
-    [--mode zero|delay] [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
+    [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
     [--expect-halt] [--clock-half-period-ns N] [--sta] [--paths K]
     [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--sta] [--json out.json]
-csim snapshot file.csx --out state.json [--cycles N] [--mode zero|delay] [--clock-half-period-ns N]
+csim snapshot file.csx --out state.json [--cycles N] [--clock-half-period-ns N]
 csim resume state.json [--cycles N] [--json out.json]
 ```
 
 - `run` — the grading flow: load → preload memories → run under limits → assertions →
-  JSON report + exit code. The delay-aware engine (DTA) is the default; `--mode zero` is for
-  functional-only checks (timing fields are 0/omitted, §6).
+  JSON report + exit code. The delay-aware engine (DTA) is the only engine.
 - `validate` — full load check: parse, document validation, **and netlist build** (a
   bitsize-mismatch net fails validation too, F8). Prints `{ "ok": bool, "errors": [LoadError] }`;
   exit 0 or 6.
@@ -58,8 +57,8 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `cycles` | rising edges executed |
 | `halt_reason` | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"` |
 | `halt_details` | `comp <id> pin "<pin>": <message>` when attributable (root-sheet document-order id; see `docs/ipc.md` §3's `sim_halted`), else a plain message |
-| `t_obs` | max observed per-cycle settle time, ns (delay mode; 0 in zero mode) |
-| `est_time` | `cycles × t_obs`, saturating (0 in zero mode) |
+| `t_obs` | max observed per-cycle settle time, ns |
+| `est_time` | `cycles × t_obs`, saturating |
 | `speedup_vs_baseline` | `baseline_est_time / est_time`; `null` without a baseline or when `est_time == 0` |
 | `timing_violations` | **count** of setup/hold warnings (the §8.2 field name) |
 | `violation_details` | the warnings: `[{ circuit, comp_id, kind: "setup"\|"hold", detail }]` with document-order `comp_id` within `circuit` |
@@ -67,7 +66,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `top_paths` | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
 | `t_sta`, `sta_note` | informational structural bound (only with `--sta` / `include_sta`); STA totals include the destination register's setup time (docs/delay-table.md) |
 | `delay_table` | table provenance, e.g. `"cs2200-74ls-v1 (DRAFT)"` |
-| `trace_hash` | FNV-1a over the applied event stream (the §4.6 determinism tripwire); delay mode only |
+| `trace_hash` | FNV-1a over the applied event stream (the §4.6 determinism tripwire) |
 | `rubric_full_credit` | `est_time < rubric_full_credit_below` when a threshold was given, else `null` |
 | `errors` | the load/validation `[LoadError]` list when `halt_reason` is `"malformed-file"`; empty otherwise (F10: one malformed-file JSON shape everywhere) |
 | `peak_rss_bytes`, `wall_time_ms` | telemetry |
@@ -96,7 +95,6 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
 
 ```jsonc
 {
-  "mode": "delay",                    // "zero" | "delay"
   "cycles": 500000,                   // → run limit
   "timeout_ms": 60000,
   "rss_cap_bytes": 268435456,
@@ -119,12 +117,11 @@ Self-contained JSON — the circuit travels with the state:
 ```jsonc
 {
   "format": "csim-snapshot",
-  "version": 1,
-  "mode": "delay",                  // engine the state belongs to
+  "version": 2,
   "clock_half_period_ns": 1000,
   "cycles_run": 500,
   "circuit": { /* the full .csx document */ },
-  "state": { /* engine state; delay-engine snapshot format version 2 */ }
+  "state": { /* delay-engine snapshot format version 2 */ }
 }
 ```
 

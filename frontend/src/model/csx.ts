@@ -16,12 +16,9 @@
  */
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
-export const CSX_VERSION = 2;
-
-export type DelayModel = "zero" | "delay";
+export const CSX_VERSION = 3;
 
 export interface CsxSettings {
-  delayModel: DelayModel;
   clockHz: number;
   /** Published delay table id, e.g. "cs2200-74ls-v1" (DESIGN.md §4.4). */
   delayTable: string;

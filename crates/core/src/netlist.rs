@@ -1004,8 +1004,8 @@ mod tests {
         // One 200-unit wire (polyline) + one 30-unit wire (endpoint
         // distance, no drawn points) on the same net → 230.
         let json = r##"{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"m","type":"wiring.pin","pos":[10,0],"name":"b","attrs":{"isOutput":true}},
@@ -1021,8 +1021,8 @@ mod tests {
         assert_eq!(nl.nets[0].wire_len, 200 + 30);
         // No drawn points and no resolvable geometry → 0.
         let json = r##"{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"p","type":"wiring.probe","pos":[0,0]}
@@ -1039,8 +1039,8 @@ mod tests {
         // Half-grid points: [0,0]→[5,0] = 5 exactly; [5,0]→[5,1.5] = 1.5
         // quantized to 2 (transport delay is integer-ns approximate).
         let json = r##"{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"p","type":"wiring.probe","pos":[10,0]}
@@ -1062,8 +1062,8 @@ mod tests {
 
     fn header(circuits: &str) -> String {
         format!(
-            r#"{{"format":"circuitsim-plus-plus","version":2,"name":"t",
-                "settings":{{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+            r#"{{"format":"circuitsim-plus-plus","version":3,"name":"t",
+                "settings":{{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
                 "circuits":[{circuits}]}}"#
         )
     }

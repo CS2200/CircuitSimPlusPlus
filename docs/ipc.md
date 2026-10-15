@@ -4,7 +4,7 @@
 `docs/tasks/README.md` §3; implemented in Rust by `crates/core/src/api.rs` and in TypeScript by
 `frontend/src/ipc/types.ts`. Changes require human sign-off and a DESIGN.md note.
 
-**Changelog v1.0 → v1.1:** `NetChange.at?` (delay-mode event timestamps); `NetDiffs.full`
+**Changelog v1.0 → v1.1:** `NetChange.at?` (engine event timestamps); `NetDiffs.full`
 (initial full-state batch exception); structured `TimingViolation[]`/`TimingPath[]` in
 `timing_update` (replaces the bare count + bare id lists); `NamedComponent.circuit`;
 CompId redefined as document-order within the referenced circuit (net_map stays
@@ -31,10 +31,9 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` |
 | `sim_play` | `{ hz: number }` | — |
 | `sim_pause` | `{}` | — |
-| `sim_step_tick` | `{}` | — one **tick**: in `delay` mode a clock half-period (posedge/negedge); in `zero` mode one full cycle (its only granularity) |
+| `sim_step_tick` | `{}` | — one **tick**: a clock half-period (posedge/negedge) |
 | `sim_step_cycles` | `{ n: number }` | — |
 | `sim_run_until` | `{ cycle: number }` | — |
-| `sim_set_mode` | `{ mode: "zero" \| "delay" }` | — |
 | `sim_reset` | `{}` | — fresh power-on state; every memory's autoload image re-applies (DESIGN.md §5.2 / G6); answered with a `full: true` `net_diffs` batch |
 | `poke` | `{ comp_id: CompId, pin: string, value: WireValue }` | — |
 | `mem_read` | `{ name: string, addr: number, len: number }` | `WireValue[]` |
@@ -50,8 +49,8 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 
 | Event | Payload | Semantics |
 |---|---|---|
-| `net_diffs` | `{ cycle, full, changes: [{ net, val, at? }] }` | Only changed nets, never full state (DESIGN.md §7.2) — **one exception (v1.1):** the single initial batch after load/resume has `full: true` and contains ALL nets (the UI's initial paint); every later batch is changed-nets-only with `full: false`. `at` = ns since run start; present in `delay` mode, absent in `zero` mode. The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. |
-| `sim_status` | `{ running, cycle, mode, eff_hz }` | On play/pause and ~1 Hz while running. |
+| `net_diffs` | `{ cycle, full, changes: [{ net, val, at? }] }` | Only changed nets, never full state (DESIGN.md §7.2) — **one exception (v1.1):** the single initial batch after load/resume has `full: true` and contains ALL nets (the UI's initial paint); every later batch is changed-nets-only with `full: false`. `at` = ns since run start. The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. |
+| `sim_status` | `{ running, cycle, eff_hz }` | On play/pause and ~1 Hz while running. |
 | `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting (shape pinned in §5). |
 | `timing_update` | `{ t_obs, est_time, violations, top_paths }` | DTA results (DESIGN.md §4.4), after `sim_run_until` / pause. `violations: TimingViolation[]` = `{ circuit, comp_id, kind: "setup" \| "hold", detail }` (the count is `violations.length`). `top_paths: TimingPath[]` = `{ circuit, comps: [comp_id], delay_ns }`. |
 

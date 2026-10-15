@@ -1,9 +1,8 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 2,
+  "version": 3,
   "name": "fsm",
   "settings": {
-    "delayModel": "delay",
     "clockHz": 1,
     "delayTable": "cs2200-74ls-v1"
   },

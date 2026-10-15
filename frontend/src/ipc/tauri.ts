@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { CoreApi } from "./types";
 import type { CoreEvents, CoreEventHandler, CoreEventName, Unlisten } from "./events";
-import type { CompId, LoadResult, SaveResult, SimMode, WireValue } from "./types";
+import type { CompId, LoadResult, SaveResult, WireValue } from "./types";
 
 class TauriEvents implements CoreEvents {
   on<E extends CoreEventName>(event: E, handler: CoreEventHandler<E>): Unlisten {
@@ -66,10 +66,6 @@ class TauriCore implements CoreApi {
 
   runUntil(cycle: number): Promise<void> {
     return invoke("sim_run_until", { cycle });
-  }
-
-  setMode(mode: SimMode): Promise<void> {
-    return invoke("sim_set_mode", { mode });
   }
 
   reset(): Promise<void> {

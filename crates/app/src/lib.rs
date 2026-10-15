@@ -13,8 +13,8 @@
 use std::sync::Mutex;
 
 use csim_core::api::{
-    CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimMode, SimStatus,
-    TimingUpdate, WireValue,
+    CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimStatus, TimingUpdate,
+    WireValue,
 };
 use csim_core::session::Session;
 use tauri::{AppHandle, Emitter, State};
@@ -140,13 +140,6 @@ fn sim_run_until(state: State<SimState>, cycle: u64) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn sim_set_mode(state: State<SimState>, mode: SimMode) -> Result<(), String> {
-    let mut guard = lock(&state)?;
-    session(&mut guard)?.set_mode(mode);
-    Ok(())
-}
-
 /// Fresh power-on state; every memory's autoload image re-applies
 /// (DESIGN.md §5.2 / G6).
 #[tauri::command]
@@ -218,7 +211,6 @@ pub fn run() {
             sim_step_tick,
             sim_step_cycles,
             sim_run_until,
-            sim_set_mode,
             sim_reset,
             poke,
             mem_read,

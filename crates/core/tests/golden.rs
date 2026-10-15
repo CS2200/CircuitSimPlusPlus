@@ -72,40 +72,31 @@ const SCENARIOS: &[Scenario] = &[
     },
 ];
 
-/// Both CPU fixtures run the same program to the same architectural
-/// state, in both engines (the course's CPI lesson is in the timing
-/// numbers, not the values).
+/// The CPU fixtures run the same program to the same architectural state
+/// (the course's CPI lesson is in the timing numbers, not the values).
 #[test]
 fn cpu_fixtures_compute_the_program() {
     for fixture in ["multicycle.csx", "pipeline5.csx"] {
-        for mode in [
-            csim_core::api::SimMode::Zero,
-            csim_core::api::SimMode::Delay,
-        ] {
-            let doc = load(fixture);
-            let mut cfg = autograde::GradeConfig {
-                mode,
-                ..autograde::GradeConfig::default()
-            };
-            cfg.limits.max_cycles = 100;
-            cfg.assertions = [
-                "probe('sum') == 10",
-                "probe('r4') == 10",
-                "probe('r5') == 20",
-                "mem('dmem')[0] == 10",
-                "violations == 0",
-            ]
-            .iter()
-            .map(|a| autograde::parse_assertion(a).unwrap())
-            .collect();
-            let out = autograde::grade(&doc, &cfg).unwrap();
-            assert_eq!(
-                out.outcome,
-                autograde::GradeOutcome::Passed,
-                "{fixture} {mode:?}: {:?}",
-                out.report.assertions
-            );
-        }
+        let doc = load(fixture);
+        let mut cfg = autograde::GradeConfig::default();
+        cfg.limits.max_cycles = 100;
+        cfg.assertions = [
+            "probe('sum') == 10",
+            "probe('r4') == 10",
+            "probe('r5') == 20",
+            "mem('dmem')[0] == 10",
+            "violations == 0",
+        ]
+        .iter()
+        .map(|a| autograde::parse_assertion(a).unwrap())
+        .collect();
+        let out = autograde::grade(&doc, &cfg).unwrap();
+        assert_eq!(
+            out.outcome,
+            autograde::GradeOutcome::Passed,
+            "{fixture}: {:?}",
+            out.report.assertions
+        );
     }
 }
 
@@ -117,8 +108,8 @@ fn cpu_fixtures_compute_the_program() {
 #[test]
 fn delay_power_on_static_splitter_cone() {
     let json = r##"{
-        "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-        "settings": {"delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+        "settings": {"clockHz": 1, "delayTable": "cs2200-74ls-v1"},
         "circuits": [{ "name": "main", "components": [
             {"id": "clk", "type": "wiring.clock", "pos": [0, 0]},
             {"id": "z", "type": "wiring.constant", "pos": [0, 0]},
@@ -161,8 +152,8 @@ fn delay_power_on_static_splitter_cone() {
 #[test]
 fn chained_splitters_carry_values() {
     let json = r##"{
-        "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-        "settings": {"delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+        "settings": {"clockHz": 1, "delayTable": "cs2200-74ls-v1"},
         "circuits": [{ "name": "main", "components": [
             {"id": "src", "type": "wiring.constant", "pos": [0, 0], "attrs": {"value": "d", "bitsize": 4}},
             {"id": "s1", "type": "wiring.splitter", "pos": [0, 0],
@@ -180,28 +171,20 @@ fn chained_splitters_carry_values() {
             {"a": {"comp": "s1", "pin": "hi"}, "b": {"comp": "ph", "pin": "in"}}
         ]}]
     }"##;
-    for mode in [
-        csim_core::api::SimMode::Zero,
-        csim_core::api::SimMode::Delay,
-    ] {
-        let doc = load_document(json.as_bytes()).unwrap();
-        let mut cfg = autograde::GradeConfig {
-            mode,
-            ..autograde::GradeConfig::default()
-        };
-        cfg.limits.max_cycles = 1;
-        cfg.assertions = ["probe('p0') == 1", "probe('p1') == 0", "probe('ph') == 3"]
-            .iter()
-            .map(|a| autograde::parse_assertion(a).unwrap())
-            .collect();
-        let out = autograde::grade(&doc, &cfg).unwrap();
-        assert_eq!(
-            out.outcome,
-            autograde::GradeOutcome::Passed,
-            "{mode:?}: {:?}",
-            out.report.assertions
-        );
-    }
+    let doc = load_document(json.as_bytes()).unwrap();
+    let mut cfg = autograde::GradeConfig::default();
+    cfg.limits.max_cycles = 1;
+    cfg.assertions = ["probe('p0') == 1", "probe('p1') == 0", "probe('ph') == 3"]
+        .iter()
+        .map(|a| autograde::parse_assertion(a).unwrap())
+        .collect();
+    let out = autograde::grade(&doc, &cfg).unwrap();
+    assert_eq!(
+        out.outcome,
+        autograde::GradeOutcome::Passed,
+        "{:?}",
+        out.report.assertions
+    );
 }
 
 fn load(fixture: &str) -> csim_core::format::Document {
@@ -282,10 +265,7 @@ fn fixture_alu_computes() {
     ];
     for &(a, b, op, y) in checks {
         let doc = load("alu.csx");
-        let mut cfg = autograde::GradeConfig {
-            mode: csim_core::api::SimMode::Zero,
-            ..autograde::GradeConfig::default()
-        };
+        let mut cfg = autograde::GradeConfig::default();
         cfg.limits.max_cycles = 1;
         cfg.pokes = vec![
             autograde::Poke {
@@ -352,21 +332,15 @@ fn negative_fixtures_halt_as_advertised() {
 
     // contention: bus is X; an equality assertion must fail (exit 1).
     let doc = load("neg-contention.csx");
-    let mut cfg = autograde::GradeConfig {
-        mode: csim_core::api::SimMode::Zero,
-        ..autograde::GradeConfig::default()
-    };
+    let mut cfg = autograde::GradeConfig::default();
     cfg.limits.max_cycles = 1;
     cfg.assertions = vec![autograde::parse_assertion("probe('bus') == 0").unwrap()];
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::AssertionFailed);
 
-    // oscillation: exit 4 in zero mode.
+    // oscillation: exit 4.
     let doc = load("neg-oscillation.csx");
-    let mut cfg = autograde::GradeConfig {
-        mode: csim_core::api::SimMode::Zero,
-        ..autograde::GradeConfig::default()
-    };
+    let mut cfg = autograde::GradeConfig::default();
     cfg.limits.max_cycles = 2;
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Oscillation);

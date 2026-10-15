@@ -74,6 +74,10 @@ Execute in order. Do not start a task until its dependencies are accepted. After
 
 ## B5 — Zero-delay engine
 
+> **Removed.** The zero-delay engine was deleted in favour of the delay-aware
+> engine (which is faster on real designs and is what grading/timing already
+> used). DESIGN.md §4.2; `settings.delayModel` is gone (format v3).
+
 **Spec:** DESIGN.md §4.2, §4.5. **Depends on:** B4
 
 - Levelization (Kahn) over the flattened netlist; cycle step = latch-all + single sorted sweep.

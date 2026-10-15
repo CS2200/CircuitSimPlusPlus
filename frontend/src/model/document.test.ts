@@ -38,11 +38,11 @@ function fixture() {
 }
 
 describe("CircuitDocument.create/fromJson", () => {
-  it("creates the v2 envelope with one empty main circuit", () => {
+  it("creates the current-version envelope with one empty main circuit", () => {
     const doc = CircuitDocument.create("demo");
     expect(doc.data.format).toBe(CSX_FORMAT);
     expect(doc.data.version).toBe(CSX_VERSION);
-    expect(doc.data.settings.delayModel).toBe("delay");
+    expect(doc.data.settings).toEqual({ clockHz: 1, delayTable: "cs2200-74ls-v1" });
     expect(doc.circuits).toHaveLength(1);
     expect(doc.circuit(0)).toEqual({ name: "main", components: [], wires: [] });
     expect(doc.dirty).toBe(false);
@@ -60,6 +60,26 @@ describe("CircuitDocument.create/fromJson", () => {
     expect(() => CircuitDocument.fromJson(JSON.stringify(bad))).toThrow("version");
   });
 
+  it("migrates a v2 document by dropping settings.delayModel and attrs.delay", () => {
+    const v2 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 2,
+      name: "old",
+      settings: { delayModel: "zero", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [{ id: "c1", type: "gate.not", pos: [0, 0], attrs: { delay: 3 } }],
+          wires: [],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v2);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    expect("delayModel" in doc.data.settings).toBe(false);
+    expect(doc.circuit(0).components[0].attrs).not.toHaveProperty("delay");
+  });
+
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
     // Early frontend builds called the wiring.pin terminal "port"; files
     // from that window fail engine validation — rename on load.
@@ -67,7 +87,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name: "legacy",
-      settings: { delayModel: "delay", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
       circuits: [
         {
           name: "main",
@@ -571,7 +591,7 @@ describe("validateStructure (soft, editor-side)", () => {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name: "bad",
-      settings: { delayModel: "delay", clockHz: 1, delayTable: "t" },
+      settings: { clockHz: 1, delayTable: "t" },
       circuits: [
         {
           name: "main",

@@ -81,16 +81,12 @@ export interface SaveResult {
   errors: LoadError[];
 }
 
-/** `zero` = interactive fast/debug; `delay` = teaching + grading (DTA). */
-export type SimMode = "zero" | "delay";
-
 export interface NetChange {
   net: NetId;
   val: WireValue;
   /**
-   * Event timestamp (v1.1): ns since run start. Present in `delay` mode,
-   * absent in `zero` mode. Powers the U7 propagation pulses; presentation
-   * only, never the evaluation path.
+   * Event timestamp (v1.1): ns since run start. Powers the U7 propagation
+   * pulses; presentation only, never the evaluation path.
    */
   at?: number;
 }
@@ -111,7 +107,6 @@ export interface NetDiffs {
 export interface SimStatus {
   running: boolean;
   cycle: number;
-  mode: SimMode;
   eff_hz: number;
 }
 
@@ -182,14 +177,12 @@ export interface CoreApi {
   play(hz: number): Promise<void>;
   pause(): Promise<void>;
   /**
-   * Advance one tick (v1.1 semantics): in `delay` mode a tick is one clock
-   * half-period (posedge/negedge); in `zero` mode a tick is one full cycle
-   * (the only granularity that mode has).
+   * Advance one tick (v1.1 semantics): one clock half-period
+   * (posedge/negedge).
    */
   stepTick(): Promise<void>;
   stepCycles(n: number): Promise<void>;
   runUntil(cycle: number): Promise<void>;
-  setMode(mode: SimMode): Promise<void>;
 
   /**
    * Reset to fresh power-on state and re-apply every memory's autoload

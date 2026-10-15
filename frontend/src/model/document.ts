@@ -99,7 +99,7 @@ export class CircuitDocument {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name,
-      settings: { delayModel: "delay", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
       circuits: [{ name: "main", components: [], wires: [] }],
     });
   }
@@ -114,6 +114,7 @@ export class CircuitDocument {
     if (data.format !== CSX_FORMAT) {
       throw new Error(`not a CircuitSim++ file (format=${JSON.stringify(data.format)})`);
     }
+    migrateDelayModel(data);
     if (data.version !== CSX_VERSION) {
       throw new Error(`unsupported .csx version ${JSON.stringify(data.version)}`);
     }
@@ -691,6 +692,26 @@ export class CircuitDocument {
  * saved (browser download) during that window carry "port" endpoints that
  * fail engine validation (unresolved-pin) — rename them on load.
  */
+/**
+ * Backward compatibility: format v2 carried `settings.delayModel`
+ * ("zero" | "delay") and a per-instance `attrs.delay` override; v3 dropped
+ * both — the zero-delay engine was removed (every file is delay-aware) and
+ * timing is unit-wide. Strip them and bump the version. Mirrors the
+ * backend's `format::migrate`.
+ */
+function migrateDelayModel(data: CsxDocument): void {
+  const version = data.version as number;
+  if (version !== 2) return;
+  const settings = data.settings as unknown as Record<string, unknown> | undefined;
+  if (settings !== undefined) delete settings.delayModel;
+  for (const c of data.circuits ?? []) {
+    for (const comp of c.components ?? []) {
+      if (comp.attrs !== undefined) delete comp.attrs.delay;
+    }
+  }
+  data.version = CSX_VERSION;
+}
+
 function migratePinTerminals(data: CsxDocument): void {
   for (const c of data.circuits) {
     const pinComps = new Set(c.components.filter((x) => x.type === "wiring.pin").map((x) => x.id));

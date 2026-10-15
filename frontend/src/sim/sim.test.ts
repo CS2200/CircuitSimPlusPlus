@@ -129,7 +129,7 @@ describe("SimStore", () => {
   it("reset() returns to the pre-load state", () => {
     const store = new SimStore();
     store.onLoaded(new Map(), []);
-    store.onStatus({ running: true, cycle: 10, mode: "delay", eff_hz: 1000 });
+    store.onStatus({ running: true, cycle: 10, eff_hz: 1000 });
     store.onHalted({ cycle: 10, reason: "oscillation", details: "comp 2" });
     store.reset();
     expect(store.loaded).toBe(false);

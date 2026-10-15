@@ -87,8 +87,8 @@ impl FloatingRead {
 /// - `access`: RAM/ROM read settling time.
 ///
 /// Values come from the published delay table named by
-/// `settings.delayTable` (task B7, [`crate::timing_table`]); an
-/// instance's `attrs.delay` overrides `prop`.
+/// `settings.delayTable` (task B7, [`crate::timing_table`]) — timing is
+/// unit-wide, never a per-instance override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Timing {
     /// Combinational propagation delay; clk→Q for state elements.
@@ -121,12 +121,11 @@ fn ctl(v: &Value) -> Bit {
     v.bit(0)
 }
 
-/// Component behavior: kind (config + state) plus the per-instance delay
-/// override. Construct via [`Behavior::new`]; evaluate via [`Behavior::eval`].
+/// Component behavior: kind (config + state). Construct via
+/// [`Behavior::from_type_attrs`]; evaluate via [`Behavior::eval`].
 #[derive(Debug, Clone)]
 pub struct Behavior {
     kind: BehaviorKind,
-    delay: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -340,10 +339,7 @@ impl Behavior {
             CompKind::HexDisplay { .. } => BehaviorKind::HexDisplay,
             CompKind::Subcircuit { .. } => return None,
         };
-        Some(Behavior {
-            kind,
-            delay: cfg.delay,
-        })
+        Some(Behavior { kind })
     }
 
     /// True for components with clocked state (register, RAM) — the
@@ -708,7 +704,7 @@ impl Behavior {
     }
 
     /// Timing parameters (see [`Timing`]) from the delay table in force
-    /// (task B7); the instance's `attrs.delay` overrides `prop`.
+    /// (task B7).
     pub fn timing(&self, table: &crate::timing_table::TimingTable) -> Timing {
         use crate::components::GateOp as G;
         let (type_, bitsize) = match &self.kind {
@@ -749,7 +745,7 @@ impl Behavior {
             BehaviorKind::Led => ("io.led", 1),
             BehaviorKind::HexDisplay => ("io.hexdisplay", 1),
         };
-        table.timing(type_, bitsize, self.delay)
+        table.timing(type_, bitsize)
     }
 
     // -- Engine/poke/autograder accessors ---------------------------------
@@ -1665,9 +1661,6 @@ mod tests {
         assert_eq!(add1.timing(&table).prop, 15);
         let add32 = mk("arith.adder", json!({"bitsize": 32}));
         assert_eq!(add32.timing(&table).prop, 15 + 31 * 4);
-        // Per-instance override replaces prop (§4.3).
-        let gate = mk("gate.and", json!({"delay": 42}));
-        assert_eq!(gate.timing(&table).prop, 42);
         // Ideal parts have zero delay.
         let sp = mk("wiring.splitter", json!({"splits": {"a": [0]}}));
         assert_eq!(sp.timing(&table).prop, 0);

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 
-use csim_core::api::{LoadError, LoadErrorKind, SimMode};
+use csim_core::api::{LoadError, LoadErrorKind};
 use csim_core::autograde::{self, GradeConfig, LoadSource, RunLimits, TestSpec};
 use csim_core::format::{self, Document};
 use csim_core::timing_table::TimingTable;
@@ -63,10 +63,7 @@ enum Cmd {
         /// Run this many cycles before snapshotting.
         #[arg(long, default_value_t = 0)]
         cycles: u64,
-        /// Simulation mode (default delay).
-        #[arg(long, value_parser = ["delay", "zero"])]
-        mode: Option<String>,
-        /// Clock half-period in ns (delay mode).
+        /// Clock half-period in ns.
         #[arg(long)]
         clock_half_period_ns: Option<u64>,
     },
@@ -101,9 +98,6 @@ struct RunArgs {
     /// RSS guard, MiB (§11).
     #[arg(long)]
     rss_cap_mb: Option<u64>,
-    /// Simulation mode: delay (default, grading) or zero (DESIGN.md §4.2–4.4).
-    #[arg(long, value_parser = ["delay", "zero"])]
-    mode: Option<String>,
     /// Assertion, e.g. --assert "probe('result') == 0x2A" (repeatable; §8.2).
     #[arg(long = "assert")]
     asserts: Vec<String>,
@@ -264,12 +258,6 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
         }
         None => GradeConfig::default(),
     };
-    if let Some(m) = &args.mode {
-        cfg.mode = match m.as_str() {
-            "zero" => SimMode::Zero,
-            _ => SimMode::Delay,
-        };
-    }
     if let Some(c) = args.cycles {
         cfg.limits.max_cycles = c;
     }
@@ -466,14 +454,8 @@ fn timing(
     print_or_write(&json, json_out)
 }
 
-/// Self-contained snapshot file: circuit + mode + engine state.
-fn snapshot(
-    file: &Path,
-    out: &Path,
-    cycles: u64,
-    mode: Option<&str>,
-    half: Option<u64>,
-) -> ExitCode {
+/// Self-contained snapshot file: circuit + engine state.
+fn snapshot(file: &Path, out: &Path, cycles: u64, half: Option<u64>) -> ExitCode {
     let bytes = match std::fs::read(file) {
         Ok(b) => b,
         Err(e) => {
@@ -491,7 +473,7 @@ fn snapshot(
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    let zero = matches!(mode, Some("zero"));
+    let doc_json = serde_json::to_value(&doc).expect("document serializes");
     let nl = match csim_core::netlist::build(&doc) {
         Ok(nl) => nl,
         Err(errors) => {
@@ -502,48 +484,29 @@ fn snapshot(
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    let doc_json = serde_json::to_value(&doc).expect("document serializes");
-    let (state_json, run_cycles) = if zero {
-        let mut eng = match csim_core::zero::ZeroEngine::new(nl) {
-            Ok(e) => e,
-            Err(errors) => {
-                eprintln!(
-                    "csim: {}",
-                    serde_json::to_string(&errors).expect("serializes")
-                );
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        if let Err(h) = eng.run(cycles) {
+    let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
+    let half = half.unwrap_or(1000).max(1);
+    let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
+        Ok(e) => e,
+        Err(errors) => {
+            eprintln!(
+                "csim: {}",
+                serde_json::to_string(&errors).expect("serializes")
+            );
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    };
+    let run_cycles = match eng.run(cycles) {
+        Ok(rep) => rep.cycles,
+        Err(h) => {
             eprintln!("csim: halted: {h}");
             return ExitCode::from(autograde::EXIT_ASSERTION_FAILED as u8);
         }
-        (eng.snapshot(), eng.cycle())
-    } else {
-        let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
-        let half = half.unwrap_or(1000).max(1);
-        let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
-            Ok(e) => e,
-            Err(errors) => {
-                eprintln!(
-                    "csim: {}",
-                    serde_json::to_string(&errors).expect("serializes")
-                );
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        match eng.run(cycles) {
-            Ok(rep) => (eng.snapshot(), rep.cycles),
-            Err(h) => {
-                eprintln!("csim: halted: {h}");
-                return ExitCode::from(autograde::EXIT_ASSERTION_FAILED as u8);
-            }
-        }
     };
+    let state_json = eng.snapshot();
     let file_json = serde_json::json!({
         "format": "csim-snapshot",
-        "version": 1,
-        "mode": if zero { "zero" } else { "delay" },
+        "version": 2,
         "clock_half_period_ns": half,
         "cycles_run": run_cycles,
         "circuit": doc_json,
@@ -580,8 +543,8 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    if file["format"] != "csim-snapshot" || file["version"] != 1 {
-        eprintln!("csim: not a csim-snapshot v1 file");
+    if file["format"] != "csim-snapshot" || file["version"] != 2 {
+        eprintln!("csim: not a csim-snapshot v2 file");
         return ExitCode::from(exit::MALFORMED_FILE);
     }
     let doc: Document = match serde_json::from_value(file["circuit"].clone()) {
@@ -604,7 +567,6 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
         }
     }
     let state = serde_json::to_string(&file["state"]).expect("state serializes");
-    let zero = file["mode"] == "zero";
     let nl = match csim_core::netlist::build(&doc) {
         Ok(nl) => nl,
         Err(errors) => {
@@ -623,46 +585,25 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
                 .map(|n| (n.name.clone(), get(&n.name).map(|v| v.to_wire_value())))
                 .collect::<Vec<_>>()
         };
-    let out = if zero {
-        let mut eng = match csim_core::zero::ZeroEngine::new(nl) {
-            Ok(e) => e,
-            Err(errors) => {
-                eprintln!(
-                    "csim: {}",
-                    serde_json::to_string(&errors).expect("serializes")
-                );
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        if let Err(e) = eng.restore(&state) {
+    let table = match TimingTable::builtin(&doc.settings.delay_table) {
+        Ok(t) => t,
+        Err(e) => {
             eprintln!("csim: {e}");
             return ExitCode::from(exit::MALFORMED_FILE);
         }
-        if let Err(h) = eng.run(cycles) {
-            eprintln!("csim: halted: {h}");
-            return ExitCode::from(autograde::EXIT_ASSERTION_FAILED as u8);
+    };
+    let half = file["clock_half_period_ns"].as_u64().unwrap_or(1000).max(1);
+    let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
+        Ok(e) => e,
+        Err(errors) => {
+            eprintln!(
+                "csim: {}",
+                serde_json::to_string(&errors).expect("serializes")
+            );
+            return ExitCode::from(exit::MALFORMED_FILE);
         }
-        let vals = named_values(eng.netlist(), &|n| eng.named_value(n));
-        serde_json::json!({ "cycle": eng.cycle(), "halted": false, "named": vals })
-    } else {
-        let table = match TimingTable::builtin(&doc.settings.delay_table) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("csim: {e}");
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        let half = file["clock_half_period_ns"].as_u64().unwrap_or(1000).max(1);
-        let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
-            Ok(e) => e,
-            Err(errors) => {
-                eprintln!(
-                    "csim: {}",
-                    serde_json::to_string(&errors).expect("serializes")
-                );
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
+    };
+    let out = {
         if let Err(e) = eng.restore(&state) {
             eprintln!("csim: {e}");
             return ExitCode::from(exit::MALFORMED_FILE);
@@ -711,9 +652,8 @@ fn main() -> ExitCode {
             file,
             out,
             cycles,
-            mode,
             clock_half_period_ns,
-        } => snapshot(file, out, *cycles, mode.as_deref(), *clock_half_period_ns),
+        } => snapshot(file, out, *cycles, *clock_half_period_ns),
         Cmd::Resume {
             snapshot,
             cycles,
@@ -734,8 +674,7 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    const SETTINGS: &str =
-        r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     /// The B9 counter fixture as a file, plus a program image.
     /// `tag` makes the dir unique per test (they run in parallel).
@@ -746,7 +685,7 @@ mod tests {
             dir.join("counter.csx"),
             format!(
                 r##"{{
-                "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+                "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
                 "circuits": [{{ "name": "main", "components": [
                     {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                     {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -850,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn run_mode_zero_and_spec_file() {
+    fn run_with_spec_file() {
         let dir = counter_dir("spec");
         std::fs::write(
             dir.join("spec.json"),
@@ -859,12 +798,7 @@ mod tests {
         .unwrap();
         let args = run_args(
             &dir.join("counter.csx"),
-            &[
-                "--mode",
-                "zero",
-                "--spec",
-                dir.join("spec.json").to_str().unwrap(),
-            ],
+            &["--spec", dir.join("spec.json").to_str().unwrap()],
         );
         assert_eq!(run(&args), ExitCode::SUCCESS);
         std::fs::remove_dir_all(&dir).ok();
@@ -877,7 +811,7 @@ mod tests {
             dir.join("evil.csx"),
             format!(
                 r##"{{
-                "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+                "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
                 "circuits": [{{ "name": "main", "components": [
                     {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":2}}}},
                     {{"id":"m","type":"mem.rom","pos":[0,0],"name":"m",
@@ -941,8 +875,8 @@ mod tests {
         std::fs::write(
             &f,
             r##"{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t",
-            "settings": {"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"a","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"b","type":"wiring.pin","pos":[0,0],"name":"b","attrs":{"bitsize":32}}
@@ -986,7 +920,7 @@ mod tests {
         let dir = counter_dir("resume-evil");
         let snap = dir.join("state.json");
         assert_eq!(
-            snapshot(&dir.join("counter.csx"), &snap, 1, Some("delay"), None),
+            snapshot(&dir.join("counter.csx"), &snap, 1, None),
             ExitCode::SUCCESS
         );
         // Corrupt the embedded circuit's delayTable.
@@ -999,28 +933,26 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_resume_roundtrip_delay_and_zero() {
+    fn snapshot_resume_roundtrip() {
         let dir = counter_dir("snap");
-        for mode in ["delay", "zero"] {
-            let snap = dir.join(format!("state-{mode}.json"));
-            assert_eq!(
-                snapshot(&dir.join("counter.csx"), &snap, 3, Some(mode), None),
-                ExitCode::SUCCESS
-            );
-            let out = dir.join(format!("resumed-{mode}.json"));
-            assert_eq!(resume(&snap, 3, Some(&out)), ExitCode::SUCCESS);
-            let v: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-            assert_eq!(v["cycle"], 6);
-            // r1 after 6 toggles = 0 (0→1→0→1→0→1→0).
-            let r1 = &v["named"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|nv| nv[0] == "r1")
-                .unwrap()[1];
-            assert_eq!(r1["v"], "", "{mode}"); // empty hex mask = 0 (ipc.md)
-        }
+        let snap = dir.join("state.json");
+        assert_eq!(
+            snapshot(&dir.join("counter.csx"), &snap, 3, None),
+            ExitCode::SUCCESS
+        );
+        let out = dir.join("resumed.json");
+        assert_eq!(resume(&snap, 3, Some(&out)), ExitCode::SUCCESS);
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(v["cycle"], 6);
+        // r1 after 6 toggles = 0 (0→1→0→1→0→1→0).
+        let r1 = &v["named"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|nv| nv[0] == "r1")
+            .unwrap()[1];
+        assert_eq!(r1["v"], ""); // empty hex mask = 0 (ipc.md)
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1035,8 +967,8 @@ mod tests {
 
         std::fs::write(
             &valid,
-            r#"{"format":"circuitsim-plus-plus","version":2,"name":"t",
-                "settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            r#"{"format":"circuitsim-plus-plus","version":3,"name":"t",
+                "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
                 "circuits":[{"name":"main","components":[
                     {"id":"c0","type":"wiring.clock","pos":[0,0]}
                 ]}]}"#,
@@ -1081,7 +1013,6 @@ mod tests {
                 assert_eq!(args.load.len(), 2);
                 assert_eq!(args.cycles, Some(500000));
                 assert_eq!(args.asserts.len(), 1);
-                assert_eq!(args.mode, None); // defaults to delay downstream
             }
             _ => panic!("expected run subcommand"),
         }

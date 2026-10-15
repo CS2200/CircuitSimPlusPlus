@@ -44,14 +44,13 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::api::{self, CompId, HaltReason, LoadError, NamedKind, SimMode};
-use crate::delay::{DelayEngine, RunReport};
+use crate::api::{self, CompId, HaltReason, LoadError, NamedKind};
+use crate::delay::{DelayEngine, Halt, RunReport};
 use crate::format::Document;
 use crate::netlist::{self, Netlist};
 use crate::sta;
 use crate::timing_table::TimingTable;
 use crate::value::Value;
-use crate::zero::{Halt, ZeroEngine};
 
 // ---------------------------------------------------------------------------
 // Exit codes
@@ -373,15 +372,13 @@ pub struct Poke {
     pub target: String,
     /// Value to drive.
     pub value: u64,
-    /// Time (ns) to drive at — delay mode; ignored by zero mode.
+    /// Time (ns) to drive at.
     pub at: u64,
 }
 
 /// Everything a grading run needs that isn't the circuit file.
 #[derive(Debug, Clone)]
 pub struct GradeConfig {
-    /// Engine mode; grading pins `Delay` (DTA, §4.4).
-    pub mode: SimMode,
     /// Run caps (§11).
     pub limits: RunLimits,
     /// Assertions to evaluate after the run (grammar in module docs).
@@ -410,7 +407,6 @@ pub struct GradeConfig {
 impl Default for GradeConfig {
     fn default() -> Self {
         GradeConfig {
-            mode: SimMode::Delay,
             limits: RunLimits::default(),
             assertions: Vec::new(),
             loads: Vec::new(),
@@ -430,8 +426,6 @@ impl Default for GradeConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct TestSpec {
-    /// Sim mode override.
-    pub mode: Option<SimMode>,
     /// Cycle budget → `RunLimits::max_cycles`.
     pub cycles: Option<u64>,
     /// Wall-clock timeout, in milliseconds.
@@ -476,7 +470,7 @@ pub struct SpecPoke {
     pub target: String,
     /// Literal value (`0x…`/`0b…`/decimal, same syntax as assertions).
     pub value: String,
-    /// Drive at this time (ns; delay mode). Zero mode ignores `at`.
+    /// Drive at this time (ns).
     #[serde(default)]
     pub at: u64,
 }
@@ -490,10 +484,7 @@ impl TestSpec {
     /// Resolve into a [`GradeConfig`]; spec file's directory roots the
     /// relative load paths (§11 sandboxing is the CLI's enforcement, B10).
     pub fn into_config(self, spec_dir: &std::path::Path) -> Result<GradeConfig, String> {
-        let mut cfg = GradeConfig {
-            mode: self.mode.unwrap_or(SimMode::Delay),
-            ..GradeConfig::default()
-        };
+        let mut cfg = GradeConfig::default();
         if let Some(c) = self.cycles {
             cfg.limits.max_cycles = c;
         }
@@ -808,24 +799,13 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
         }
     }
 
-    // -- Engine ----------------------------------------------------------
-    match cfg.mode {
-        SimMode::Delay => {
-            let half = cfg.clock_half_period.max(1);
-            let mut eng = match DelayEngine::new(nl, half, &table) {
-                Ok(e) => e,
-                Err(e) => return Ok(malformed(e, &table_name, started)),
-            };
-            grade_delay(&mut eng, cfg, &table, started)
-        }
-        SimMode::Zero => {
-            let mut eng = match ZeroEngine::new(nl) {
-                Ok(e) => e,
-                Err(e) => return Ok(malformed(e, &table_name, started)),
-            };
-            grade_zero(&mut eng, cfg, &table, started)
-        }
-    }
+    // -- Engine (delay-aware only) ---------------------------------------
+    let half = cfg.clock_half_period.max(1);
+    let mut eng = match DelayEngine::new(nl, half, &table) {
+        Ok(e) => e,
+        Err(e) => return Ok(malformed(e, &table_name, started)),
+    };
+    grade_delay(&mut eng, cfg, &table, started)
 }
 
 /// Apply preloads; returns a ConfigError on unknown names / bad images.
@@ -926,12 +906,6 @@ trait MemAccess {
 impl MemAccess for DelayEngine {
     fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
         DelayEngine::load_memory_image(self, name, image)
-    }
-}
-
-impl MemAccess for ZeroEngine {
-    fn load_memory_image(&mut self, name: &str, image: &[u64]) -> Result<bool, String> {
-        ZeroEngine::load_memory_image(self, name, image)
     }
 }
 
@@ -1084,134 +1058,17 @@ fn grade_delay(
     Ok(GradeOutput { report, outcome })
 }
 
-fn grade_zero(
-    eng: &mut ZeroEngine,
-    cfg: &GradeConfig,
-    table: &TimingTable,
-    started: Instant,
-) -> Result<GradeOutput, ConfigError> {
-    let nl = eng.netlist().clone();
-    apply_loads(eng, &nl, cfg)?;
-    for p in &cfg.pokes {
-        let width = input_pin_width(&nl, &p.target).ok_or_else(|| {
-            ConfigError(format!(
-                "poke target '{}' is not a named input pin",
-                p.target
-            ))
-        })?;
-        let v = poke_value(width, p)?;
-        match eng.poke_input_pin(&p.target, v) {
-            Ok(true) => {}
-            Ok(false) => {
-                return Err(ConfigError(format!(
-                    "poke target '{}' is not a named input pin",
-                    p.target
-                )));
-            }
-            // A poke that immediately halts = broken testbench (zero mode
-            // settles combinationally on poke).
-            Err(h) => return Err(ConfigError(format!("poke '{}': {h}", p.target))),
-        }
-    }
-    let deadline = cfg.limits.timeout.map(|t| started + t);
-
-    let mut remaining = cfg.limits.max_cycles;
-    let mut halt: Option<(GradeOutcome, &'static str, String)> = None;
-    while remaining > 0 && halt.is_none() {
-        let chunk = remaining.min(RUN_CHUNK);
-        if let Err(h) = eng.run(chunk) {
-            let (oc, reason) = halt_outcome(&h);
-            halt = Some((oc, reason, h.details));
-        }
-        remaining = remaining.saturating_sub(chunk);
-        if halt.is_none() {
-            if let Some((oc, reason)) = limits_tripped(cfg, deadline) {
-                halt = Some((oc, reason, String::new()));
-            }
-        }
-    }
-
-    let cycles = eng.cycle();
-    let results: Vec<AssertionResult> = cfg
-        .assertions
-        .iter()
-        .map(|a| eval_assertion(a, &ZeroProbe(eng), 0))
-        .collect();
-    let all_passed = results.iter().all(|r| r.passed);
-    let (outcome, halt_reason, halt_details) = match halt {
-        Some((oc, reason, details)) => (oc, reason.to_string(), details),
-        None if cfg.expect_halt => (
-            GradeOutcome::CycleLimit,
-            "cycle-limit".to_string(),
-            format!(
-                "{} cycles without a halt (expect_halt set)",
-                cfg.limits.max_cycles
-            ),
-        ),
-        None if all_passed => (GradeOutcome::Passed, "completed".to_string(), String::new()),
-        None => (
-            GradeOutcome::AssertionFailed,
-            "completed".to_string(),
-            String::new(),
-        ),
-    };
-
-    let (t_sta, sta_note) = if cfg.include_sta {
-        match sta::analyze(&nl, table, cfg.top_k) {
-            Ok(r) => (
-                Some(r.t_sta),
-                Some("structural bound — may include paths your design never uses".to_string()),
-            ),
-            Err(e) => (None, Some(e.to_string())),
-        }
-    } else {
-        (None, None)
-    };
-
-    let report = Report {
-        cycles,
-        halt_reason,
-        halt_details,
-        t_obs: 0,
-        est_time: 0,
-        speedup_vs_baseline: None,
-        timing_violations: 0,
-        violation_details: Vec::new(),
-        assertions: results,
-        top_paths: Vec::new(),
-        t_sta,
-        sta_note,
-        delay_table: format!("{} ({})", table.name(), table.status()),
-        trace_hash: None,
-        rubric_full_credit: None,
-        errors: Vec::new(),
-        peak_rss_bytes: peak_rss_bytes(),
-        wall_time_ms: started.elapsed().as_millis() as u64,
-    };
-    Ok(GradeOutput { report, outcome })
-}
-
 // -- Assertion evaluation -------------------------------------------------
 
-/// Named-value view of an engine (delay or zero).
+/// Named-value view of the delay-aware engine.
 trait ProbeView {
     fn probe_value(&self, name: &str) -> Option<Value>;
     fn mem_word(&self, name: &str, addr: u64) -> Option<Value>;
 }
 
 struct DelayProbe<'a>(&'a DelayEngine);
-struct ZeroProbe<'a>(&'a ZeroEngine);
 
 impl ProbeView for DelayProbe<'_> {
-    fn probe_value(&self, name: &str) -> Option<Value> {
-        self.0.named_value(name)
-    }
-    fn mem_word(&self, name: &str, addr: u64) -> Option<Value> {
-        self.0.memory_word(name, addr)
-    }
-}
-
-impl ProbeView for ZeroProbe<'_> {
     fn probe_value(&self, name: &str) -> Option<Value> {
         self.0.named_value(name)
     }
@@ -1281,8 +1138,7 @@ mod tests {
     use super::*;
     use crate::format::load_document;
 
-    const SETTINGS: &str =
-        r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     /// Toggling counter + named RAM: r1 flips each cycle, r2 follows one
     /// behind; probe `out` = and(n1.out, 1). T_obs = clk→Q 20 + not 9 +
@@ -1290,7 +1146,7 @@ mod tests {
     fn counter_json() -> String {
         format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1493,7 +1349,7 @@ mod tests {
         // net → contention X on the probe (§4.1: X is not a number).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
                 {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
@@ -1511,7 +1367,6 @@ mod tests {
         }}"##
         );
         let mut cfg = cfg3();
-        cfg.mode = SimMode::Zero;
         cfg.assertions = vec![parse_assertion("probe('bus') == 0").unwrap()];
         let out = grade(&doc(&json), &cfg).unwrap();
         assert_eq!(out.outcome, GradeOutcome::AssertionFailed);
@@ -1531,7 +1386,7 @@ mod tests {
         // engine semantics).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1612,10 +1467,10 @@ mod tests {
     }
 
     #[test]
-    fn oscillation_exit_4_zero_mode() {
+    fn oscillation_exit_4() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
                 {{"id":"g","type":"gate.nand","pos":[0,0]}},
@@ -1627,8 +1482,7 @@ mod tests {
             ]}}]
         }}"##
         );
-        let mut cfg = cfg3();
-        cfg.mode = SimMode::Zero;
+        let cfg = cfg3();
         let out = grade(&doc(&json), &cfg).unwrap();
         assert_eq!(out.outcome, GradeOutcome::Oscillation);
         assert_eq!(out.outcome.exit_code(), EXIT_OSCILLATION);
@@ -1641,7 +1495,7 @@ mod tests {
         // driven (no load error) but floats at the edge (§4.1).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1673,7 +1527,7 @@ mod tests {
         // Parses + validates, but netlist build fails (bitsize mismatch).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"a","type":"wiring.pin","pos":[0,0],"name":"a"}},
                 {{"id":"b","type":"wiring.pin","pos":[0,0],"name":"b","attrs":{{"bitsize":32}}}}
@@ -1687,26 +1541,6 @@ mod tests {
         assert_eq!(out.outcome.exit_code(), EXIT_MALFORMED_FILE);
         assert_eq!(out.report.halt_reason, "malformed-file");
         assert!(!out.report.errors.is_empty());
-    }
-
-    // ---- Zero mode + STA note ----------------------------------------------
-
-    #[test]
-    fn zero_mode_functional_check() {
-        let mut cfg = cfg3();
-        cfg.mode = SimMode::Zero;
-        cfg.assertions = vec![
-            parse_assertion("probe('r1') == 1").unwrap(),
-            parse_assertion("probe('r2') == 1").unwrap(),
-            parse_assertion("violations == 0").unwrap(),
-        ];
-        cfg.include_sta = true;
-        let out = grade(&doc(&counter_json()), &cfg).unwrap();
-        assert_eq!(out.outcome, GradeOutcome::Passed);
-        assert_eq!(out.report.t_obs, 0);
-        assert_eq!(out.report.est_time, 0);
-        assert_eq!(out.report.trace_hash, None);
-        assert_eq!(out.report.t_sta, Some(34));
     }
 
     // ---- Preload from file -------------------------------------------------
@@ -1785,7 +1619,7 @@ mod tests {
         // (components.rs); preloading it must not error.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8}}}},
@@ -1799,7 +1633,6 @@ mod tests {
         }}"##
         );
         let mut cfg = cfg3();
-        cfg.mode = SimMode::Zero;
         cfg.loads = vec![("m".into(), LoadSource::Words(vec![0x2A; 300]))]; // > 256: extra ignored
         cfg.assertions = vec![parse_assertion("mem('m')[0] == 0x2A").unwrap()];
         let out = grade(&doc(&json), &cfg).unwrap();
@@ -1811,7 +1644,7 @@ mod tests {
         // A 1-bit pin and a 9-bit poke value.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
                 {{"id":"p","type":"wiring.probe","pos":[5,0],"name":"out"}}
@@ -1840,7 +1673,6 @@ mod tests {
         std::fs::write(dir.join("data.hex"), "0 0 2a\n").unwrap();
         let spec = TestSpec::from_json(
             br#"{
-                "mode": "delay",
                 "cycles": 3,
                 "timeout_ms": 60000,
                 "baseline_est_time": 234,
@@ -1857,7 +1689,6 @@ mod tests {
         )
         .unwrap();
         let cfg = spec.into_config(&dir).unwrap();
-        assert_eq!(cfg.mode, SimMode::Delay);
         assert_eq!(cfg.limits.max_cycles, 3);
         assert_eq!(cfg.limits.timeout, Some(Duration::from_millis(60000)));
         assert_eq!(cfg.baseline_est_time, Some(234));

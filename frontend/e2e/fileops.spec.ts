@@ -283,21 +283,13 @@ test("Subcircuits: right-click an instance jumps to its definition tab", async (
   await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
 });
 
-test("sim transport bar: mode chip, log slider with notches, run-to", async ({ page }) => {
+test("sim transport bar: log slider with notches, run-to", async ({ page }) => {
   await page.goto("/?simdemo=1");
 
   // The retired Simulation menu's controls live in the transport bar now.
   await page.getByRole("button", { name: "tick" }).click();
   const status = page.locator(".sim-status");
   await expect(status).toContainText("cycle");
-
-  // Delay/zero mode chip (was the menu's radio pair).
-  const mode = page.locator(".sim-mode");
-  await expect(mode).toHaveText("delay");
-  await mode.click();
-  await expect(mode).toHaveText("zero");
-  await mode.click();
-  await expect(mode).toHaveText("delay");
 
   // Log scale: slider exponent 20 → 10^2 = 100 Hz, with marked notches.
   await expect(page.locator(".sim-notch")).toHaveCount(10);

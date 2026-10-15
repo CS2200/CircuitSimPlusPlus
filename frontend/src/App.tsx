@@ -464,8 +464,8 @@ export default function App() {
       },
       // The Simulation menu is retired for now (UI_OVERHAUL §15): the sim
       // transport bar owns step/reset/run-to, the speed slider owns the clock
-      // (the Hz preset list was redundant), the T_obs chip toggles the
-      // critical-path highlight, and the status chip switches delay/zero mode.
+      // (the Hz preset list was redundant), and the T_obs chip toggles the
+      // critical-path highlight.
       // The Subcircuits menu is retired too (UI_OVERHAUL §16): a new subcircuit
       // is the tab strip's "+" and renaming is a double-click on its tab.
       {

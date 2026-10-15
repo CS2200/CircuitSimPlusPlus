@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as Json};
 
-use crate::api::{LoadError, LoadErrorKind, SimMode};
+use crate::api::{LoadError, LoadErrorKind};
 
 pub mod rle;
 pub mod validate;
@@ -21,7 +21,7 @@ pub mod validate;
 /// Value of the `format` field (§5.1 versioning).
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value.
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 /// A whole `.csx` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,14 +39,10 @@ pub struct Document {
     pub circuits: Vec<Circuit>,
 }
 
-/// Document-wide settings (§5.2). `delay_model` is the interactive default;
-/// the autograder pins `Delay` regardless (§4.4).
+/// Document-wide settings (§5.2).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
-    /// Interactive delay model (`delayModel`); the autograder pins `Delay`
-    /// regardless (§4.4).
-    pub delay_model: SimMode,
     /// Interactive clock rate in Hz (`clockHz`).
     pub clock_hz: u64,
     /// Delay table id (`delayTable`), e.g. `cs2200-74ls-v1` (task B7).
@@ -246,24 +242,64 @@ pub struct JoinRef {
 /// Parse and validate a `.csx` document. On success returns the document;
 /// on failure the **complete** error list (§5.2 — never panics, never
 /// partially loads).
+///
+/// Documents written before the current [`FORMAT_VERSION`] are migrated
+/// first (§5.1 versioning): v2 → v3 drops the removed `settings.delayModel`
+/// field (there is only one engine now, the delay-aware one). Files that
+/// already match the current version parse directly.
 pub fn load_document(bytes: &[u8]) -> Result<Document, Vec<LoadError>> {
-    let doc: Document = match serde_json::from_slice(bytes) {
+    let mut raw: Json = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(e) => return Err(vec![parse_error(format!("invalid .csx JSON: {e}"))]),
+    };
+    migrate(&mut raw);
+    let doc: Document = match serde_json::from_value(raw) {
         Ok(d) => d,
-        Err(e) => {
-            return Err(vec![LoadError {
-                kind: LoadErrorKind::Parse,
-                message: format!("invalid .csx JSON: {e}"),
-                circuit: String::new(),
-                comp_id: None,
-                wire_idx: None,
-            }])
-        }
+        Err(e) => return Err(vec![parse_error(format!("invalid .csx JSON: {e}"))]),
     };
     let errors = validate::validate(&doc);
     if errors.is_empty() {
         Ok(doc)
     } else {
         Err(errors)
+    }
+}
+
+/// A `.csx` JSON parse failure.
+fn parse_error(message: String) -> LoadError {
+    LoadError {
+        kind: LoadErrorKind::Parse,
+        message,
+        circuit: String::new(),
+        comp_id: None,
+        wire_idx: None,
+    }
+}
+
+/// Apply the version-migration chain in place (§5.1). Unknown or newer
+/// versions are left untouched, so `validate` reports them.
+fn migrate(v: &mut Json) {
+    if v.get("version").and_then(Json::as_u64) == Some(2) {
+        // v2 → v3:
+        //  - drops `settings.delayModel` (`"zero" | "delay"`) — the
+        //    zero-delay engine was removed, so every file is delay-aware;
+        //  - drops the per-instance `attrs.delay` override — timing is
+        //    unit-wide now (the delay table alone).
+        if let Some(settings) = v.get_mut("settings").and_then(Json::as_object_mut) {
+            settings.remove("delayModel");
+        }
+        if let Some(circuits) = v.get_mut("circuits").and_then(Json::as_array_mut) {
+            for c in circuits {
+                if let Some(comps) = c.get_mut("components").and_then(Json::as_array_mut) {
+                    for comp in comps {
+                        if let Some(attrs) = comp.get_mut("attrs").and_then(Json::as_object_mut) {
+                            attrs.remove("delay");
+                        }
+                    }
+                }
+            }
+        }
+        v["version"] = Json::from(FORMAT_VERSION);
     }
 }
 
@@ -306,9 +342,9 @@ mod tests {
     fn sample_doc() -> Document {
         let json = r#"{
             "format": "circuitsim-plus-plus",
-            "version": 2,
+            "version": 3,
             "name": "round-trip",
-            "settings": { "delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
             "circuits": [
                 {
                     "name": "and2",
@@ -345,6 +381,40 @@ mod tests {
         let text = to_canonical_json(&doc);
         let doc2: Document = serde_json::from_str(&text).unwrap();
         assert_eq!(doc, doc2);
+    }
+
+    /// v2 → v3 migration: a v2 file's `settings.delayModel` and any
+    /// per-instance `attrs.delay` override are dropped and the document
+    /// loads as the current version (always delay-aware; timing unit-wide).
+    #[test]
+    fn v2_document_migrates_dropping_delay_model() {
+        let v2 = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 2,
+            "name": "old",
+            "settings": { "delayModel": "zero", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "circuits": [{ "name": "main", "components": [
+                { "id": "c0", "type": "gate.not", "pos": [0, 0], "attrs": { "delay": 3 } }
+            ], "wires": [] }]
+        }"#;
+        let doc = load_document(v2.as_bytes()).expect("a v2 file must migrate");
+        assert_eq!(doc.version, FORMAT_VERSION);
+        let out = to_canonical_json(&doc);
+        assert!(!out.contains("delayModel"), "{out}");
+        assert!(!out.contains("\"delay\""), "{out}");
+        // Canonical output is already current-version and re-loads cleanly.
+        assert_eq!(load_document(out.as_bytes()).unwrap(), doc);
+    }
+
+    /// v1 predates the migration chain and is rejected.
+    #[test]
+    fn v1_document_is_rejected() {
+        let v1 = r#"{
+            "format": "circuitsim-plus-plus", "version": 1, "name": "x",
+            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "circuits": []
+        }"#;
+        assert!(load_document(v1.as_bytes()).is_err());
     }
 
     /// Wire colors (docs/format-v2.md §2): purely cosmetic, absent when
@@ -428,9 +498,9 @@ mod tests {
         // integers, so pre-fractional files stay byte-identical.
         let json = r#"{
             "format": "circuitsim-plus-plus",
-            "version": 2,
+            "version": 3,
             "name": "frac",
-            "settings": { "delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
             "circuits": [{
                 "name": "main",
                 "components": [
@@ -462,9 +532,9 @@ mod tests {
         // must fail parsing rather than silently saturate.
         let json = r#"{
             "format": "circuitsim-plus-plus",
-            "version": 2,
+            "version": 3,
             "name": "bad",
-            "settings": { "delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
             "circuits": [{
                 "name": "main",
                 "components": [

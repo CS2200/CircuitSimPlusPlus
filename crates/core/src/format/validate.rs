@@ -388,8 +388,8 @@ mod tests {
 
     fn header(circuits: &str) -> String {
         format!(
-            r#"{{"format":"circuitsim-plus-plus","version":2,"name":"t",
-                "settings":{{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+            r#"{{"format":"circuitsim-plus-plus","version":3,"name":"t",
+                "settings":{{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
                 "circuits":[{circuits}]}}"#
         )
     }
@@ -450,10 +450,10 @@ mod tests {
 
     #[test]
     fn wrong_version() {
-        let json = header(AND2).replace(r#""version":2"#, r#""version":3"#);
+        let json = header(AND2).replace(r#""version":3"#, r#""version":4"#);
         let errors = check(&json);
         assert_eq!(kinds(&errors), vec![LoadErrorKind::Other]);
-        assert!(errors[0].message.contains("version 3"));
+        assert!(errors[0].message.contains("version 4"));
     }
 
     #[test]

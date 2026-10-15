@@ -61,9 +61,9 @@ describe("mock core (U9)", () => {
     it("applies an embedded memory image (attrs.contents) on load", async () => {
       const csx = JSON.stringify({
         format: "circuitsim-plus-plus",
-        version: 2,
+        version: 3,
         name: "contents",
-        settings: { delayModel: "delay", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+        settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
         circuits: [
           {
             name: "main",
@@ -129,28 +129,26 @@ describe("mock core (U9)", () => {
     });
 
     it("emits only changed nets", async () => {
-      await mock.api.setMode("zero"); // one merged batch per tick
       diffs.length = 0;
       await mock.api.stepTick(); // posedge: everything may change
+      const between = diffs.length;
       await mock.api.stepTick(); // negedge: pc unchanged → only clk + bus change
-      const negedgeBatch = diffs[diffs.length - 1];
-      expect(negedgeBatch.changes.map((c) => c.net).sort()).toEqual([MOCK_NET.clk, MOCK_NET.bus]);
+      const nets = new Set(diffs.slice(between).flatMap((d) => d.changes.map((c) => c.net)));
+      expect([...nets].sort()).toEqual([MOCK_NET.clk, MOCK_NET.bus]);
     });
   });
 
-  describe("delay vs zero mode", () => {
-    it("delay mode splits each tick into sequential + combinational batches", async () => {
+  describe("timed net batches", () => {
+    it("splits each tick into sequential + combinational batches", async () => {
       diffs.length = 0;
-      await mock.api.setMode("delay");
       await mock.api.stepTick(); // posedge: state and comb both change
       expect(diffs).toHaveLength(2);
       expect(diffs[0].changes.map((c) => c.net)).toEqual([MOCK_NET.clk, MOCK_NET.pcQ]);
       expect(diffs[1].changes.map((c) => c.net)).not.toContain(MOCK_NET.clk);
     });
 
-    it("delay mode stamps every change with `at` (ns since run start, v1.1)", async () => {
+    it("stamps every change with `at` (ns since run start, v1.1)", async () => {
       diffs.length = 0;
-      await mock.api.setMode("delay");
       await mock.api.stepTick(); // tick 1: posedge
       const seq = diffs[0].changes;
       const comb = diffs[1].changes;
@@ -160,17 +158,6 @@ describe("mock core (U9)", () => {
       await mock.api.stepTick(); // tick 2: negedge — timestamps advance with the run
       const later = diffs.at(-1)!.changes;
       expect(later.every((c) => c.at !== undefined && c.at >= 2 * 50)).toBe(true);
-    });
-
-    it("zero mode emits one merged batch per tick, with NO `at` stamps (v1.1)", async () => {
-      diffs.length = 0;
-      await mock.api.setMode("zero");
-      await mock.api.stepTick();
-      expect(diffs).toHaveLength(1);
-      const nets = diffs[0].changes.map((c) => c.net);
-      expect(nets).toContain(MOCK_NET.clk);
-      expect(nets).toContain(MOCK_NET.nextPc);
-      expect(diffs[0].changes.every((c) => c.at === undefined)).toBe(true);
     });
   });
 

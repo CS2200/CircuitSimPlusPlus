@@ -16,12 +16,12 @@
  *
  * Timing model (contract v1.1): a *tick* is one clock half-period; odd
  * ticks are posedges (clk rises, pc latches), even ticks fall.
- * cycle = tick / 2. In "delay" mode each tick emits two `net_diffs`
- * batches (state elements settle, then the combinational cloud — like the
- * real engine's clk→Q propagation) and every change carries an `at`
- * timestamp (ns since run start); "zero" mode emits one merged batch per
- * tick with no `at`. The initial batch after load/resume has `full: true`
- * and contains all nets; every other batch is changed-only.
+ * cycle = tick / 2. Each tick emits two `net_diffs` batches when both
+ * state and combinational nets change (state elements settle, then the
+ * combinational cloud — like the real engine's clk→Q propagation) and
+ * every change carries an `at` timestamp (ns since run start). The initial
+ * batch after load/resume has `full: true` and contains all nets; every
+ * other batch is changed-only.
  *
  * Poke affordances for UI development:
  *  - poke(MOCK_COMP.pc, "q", value)        force the register's state
@@ -43,7 +43,6 @@ import type {
   NamedComponent,
   NamedKind,
   SaveResult,
-  SimMode,
   WireValue,
 } from "./types";
 import { isPinEndpoint, type CsxDocument } from "../model/csx";
@@ -161,7 +160,6 @@ function valueToU32(val: WireValue): number {
 export class MockCore implements CoreApi {
   readonly events = new CoreEventEmitter();
 
-  private mode: SimMode = "delay";
   private tick = 0;
   private pc = 0;
   private clk = false;
@@ -315,11 +313,6 @@ export class MockCore implements CoreApi {
     this.emitTimingUpdate();
   }
 
-  async setMode(mode: SimMode): Promise<void> {
-    this.mode = mode;
-    this.emitStatus();
-  }
-
   // ---- inspection & interaction ----
 
   async poke(compId: CompId, pin: string, value: WireValue): Promise<void> {
@@ -462,11 +455,11 @@ export class MockCore implements CoreApi {
   }
 
   /**
-   * `at` timestamp for a change settling `settleNs` into the current tick.
-   * Contract v1.1: present in delay mode, ABSENT in zero mode.
+   * `at` timestamp for a change settling `settleNs` into the current tick
+   * (contract v1.1).
    */
-  private stamp(settleNs: number): { at?: number } {
-    return this.mode === "delay" ? { at: this.tick * TICK_NS + settleNs } : {};
+  private stamp(settleNs: number): { at: number } {
+    return { at: this.tick * TICK_NS + settleNs };
   }
 
   /** Emit `net_diffs` for every net whose value changed since the last emission. */
@@ -484,7 +477,7 @@ export class MockCore implements CoreApi {
     }
     this.nets = next;
     const cycle = this.cycle;
-    if (this.mode === "delay" && sequential.length > 0 && combinational.length > 0) {
+    if (sequential.length > 0 && combinational.length > 0) {
       this.events.emit(IpcEvents.NetDiffs, { cycle, full: false, changes: sequential });
       this.events.emit(IpcEvents.NetDiffs, { cycle, full: false, changes: combinational });
     } else if (sequential.length + combinational.length > 0) {
@@ -512,7 +505,6 @@ export class MockCore implements CoreApi {
     this.events.emit(IpcEvents.SimStatus, {
       running: this.timer !== null,
       cycle: this.cycle,
-      mode: this.mode,
       eff_hz: this.effHz,
     });
   }

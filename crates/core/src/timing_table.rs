@@ -16,7 +16,8 @@
 //! - `setup` / `hold` — register and RAM write discipline (§4.3).
 //! - `access` — RAM/ROM read settling time.
 //! - `wire` — net transport delay = `wire_len × num / den` grid units.
-//! - An instance's `attrs.delay` overrides the *effective* `prop`.
+//! - Timing is **unit-wide**: the table is the only source of delays; there
+//!   is no per-instance override.
 //!
 //! A table must define every kind in `REQUIRED_KINDS`; zero-timing
 //! kinds (wiring/io) may be listed explicitly for documentation. Unknown
@@ -238,13 +239,14 @@ impl TimingTable {
         u64::from(wire_len) * self.wire_num / self.wire_den
     }
 
-    /// Timing for one component instance: table entry, per-bit scaling,
-    /// then the `attrs.delay` override (highest precedence, §4.3).
-    pub fn timing(&self, type_: &str, bitsize: u32, delay_override: Option<u64>) -> Timing {
+    /// Timing for one component instance: the table entry with per-bit
+    /// scaling applied. Timing is unit-wide — there is no per-instance
+    /// override (§4.3).
+    pub fn timing(&self, type_: &str, bitsize: u32) -> Timing {
         let e = self.entries.get(type_).copied().unwrap_or_default();
         let effective = e.prop + e.per_bit * u64::from(bitsize.saturating_sub(1));
         Timing {
-            prop: delay_override.unwrap_or(effective),
+            prop: effective,
             setup: e.setup,
             hold: e.hold,
             access: e.access,
@@ -266,15 +268,15 @@ mod tests {
         assert_eq!(t.name(), "cs2200-74ls-v1");
         assert_eq!(t.status(), "DRAFT");
         // DRAFT 74LS anchors (DESIGN.md §4.4).
-        assert_eq!(t.timing("gate.not", 1, None).prop, 9);
-        assert_eq!(t.timing("gate.and", 8, None).prop, 10);
-        assert_eq!(t.timing("gate.xor", 1, None).prop, 12);
-        assert_eq!(t.timing("plexers.mux", 1, None).prop, 12);
-        let reg = t.timing("mem.register", 32, None);
+        assert_eq!(t.timing("gate.not", 1).prop, 9);
+        assert_eq!(t.timing("gate.and", 8).prop, 10);
+        assert_eq!(t.timing("gate.xor", 1).prop, 12);
+        assert_eq!(t.timing("plexers.mux", 1).prop, 12);
+        let reg = t.timing("mem.register", 32);
         assert_eq!((reg.prop, reg.setup, reg.hold), (20, 15, 5));
-        let ram = t.timing("mem.ram", 32, None);
+        let ram = t.timing("mem.ram", 32);
         assert_eq!((ram.access, ram.setup, ram.hold), (50, 15, 5));
-        assert_eq!(t.timing("mem.rom", 32, None).access, 50);
+        assert_eq!(t.timing("mem.rom", 32).access, 50);
         // Wire constant: 1 ns per 10 grid units.
         assert_eq!(t.wire_delay(200), 20);
         assert_eq!(t.wire_delay(9), 0);
@@ -292,29 +294,18 @@ mod tests {
             "arith.bit-extender",
             "io.led",
         ] {
-            assert_eq!(t.timing(kind, 1, None), Timing::default(), "{kind}");
+            assert_eq!(t.timing(kind, 1), Timing::default(), "{kind}");
         }
     }
 
     #[test]
     fn adder_scales_per_bit_ripple() {
         let t = table();
-        assert_eq!(t.timing("arith.adder", 1, None).prop, 15);
-        assert_eq!(t.timing("arith.adder", 2, None).prop, 19);
-        assert_eq!(t.timing("arith.adder", 32, None).prop, 15 + 31 * 4);
+        assert_eq!(t.timing("arith.adder", 1).prop, 15);
+        assert_eq!(t.timing("arith.adder", 2).prop, 19);
+        assert_eq!(t.timing("arith.adder", 32).prop, 15 + 31 * 4);
         // Non-scaling kinds ignore bitsize.
-        assert_eq!(t.timing("arith.multiplier", 32, None).prop, 15);
-    }
-
-    #[test]
-    fn instance_delay_override_wins_over_table() {
-        let t = table();
-        assert_eq!(t.timing("gate.not", 1, Some(42)).prop, 42);
-        // Override replaces the *scaled* prop too.
-        assert_eq!(t.timing("arith.adder", 32, Some(7)).prop, 7);
-        // ...but leaves setup/hold/access alone.
-        let reg = t.timing("mem.register", 32, Some(3));
-        assert_eq!((reg.prop, reg.setup, reg.hold), (3, 15, 5));
+        assert_eq!(t.timing("arith.multiplier", 32).prop, 15);
     }
 
     #[test]

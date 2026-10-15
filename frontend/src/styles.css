@@ -1508,14 +1508,6 @@ body {
   background: var(--text-dim);
 }
 
-/* Delay/zero mode chip (retired Simulation menu, UI_OVERHAUL §15). */
-.simbar .sim-mode {
-  padding: 0 0.4rem;
-  font-size: 0.78rem;
-  border-radius: 999px;
-  color: var(--text-dim);
-}
-
 .sim-speed span {
   min-width: 5.5rem;
   font-family: ui-monospace, monospace;

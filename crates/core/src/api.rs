@@ -142,17 +142,6 @@ pub struct SaveResult {
     pub errors: Vec<LoadError>,
 }
 
-/// Simulation mode (DESIGN.md §4.2–4.3). Grading pins `Delay` (DTA, §4.4);
-/// `Zero` is the interactive fast/debug mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SimMode {
-    /// Zero-delay mode — interactive fast/debug (§4.2).
-    Zero,
-    /// Delay-aware mode — teaching + grading engine (§4.3).
-    Delay,
-}
-
 /// One net's new value within a [`NetDiffs`] batch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetChange {
@@ -160,8 +149,7 @@ pub struct NetChange {
     pub net: NetId,
     /// The net's new value.
     pub val: WireValue,
-    /// Simulation time (ns since run start) of the change; present in
-    /// delay mode, absent in zero mode (contract v1.1).
+    /// Simulation time (ns since run start) of the change (contract v1.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<u64>,
 }
@@ -193,8 +181,6 @@ pub struct SimStatus {
     pub running: bool,
     /// Current cycle.
     pub cycle: u64,
-    /// Current simulation mode.
-    pub mode: SimMode,
     /// Rounded effective sim speed (telemetry only, not evaluation).
     pub eff_hz: u64,
 }
@@ -366,10 +352,6 @@ pub trait Sim {
     fn run_until(&mut self, cycle: u64) {
         unimplemented!("csim-core engine — BACKEND.md task B5/B6")
     }
-    /// Switch the simulation mode.
-    fn set_mode(&mut self, mode: SimMode) {
-        unimplemented!("csim-core engine — BACKEND.md task B5/B6")
-    }
 
     /// Drive a component pin (interactive poking / test setup).
     fn poke(&mut self, comp_id: CompId, pin: &str, value: WireValue) {
@@ -466,10 +448,6 @@ mod tests {
         assert_eq!(initial, serde_json::from_str(&json).unwrap());
 
         // Enum wire spellings must match the contract exactly.
-        assert_eq!(
-            serde_json::to_string(&SimMode::Delay).unwrap(),
-            r#""delay""#
-        );
         assert_eq!(
             serde_json::to_string(&HaltReason::FloatingRead).unwrap(),
             r#""floating-read""#

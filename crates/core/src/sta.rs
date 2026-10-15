@@ -103,21 +103,21 @@ enum Role {
     Splitter,
 }
 
-fn role_of(type_: &str, in_width: u32, table: &TimingTable, delay_override: Option<u64>) -> Role {
+fn role_of(type_: &str, in_width: u32, table: &TimingTable) -> Role {
     match type_ {
         "wiring.splitter" => Role::Splitter,
         // Registers are timing breaks: q restarts paths at 0, data inputs
         // are endpoints (collected by the caller).
         "mem.register" => Role::Source,
         "mem.ram" => Role::Ram {
-            access: table.timing(type_, in_width, delay_override).access,
+            access: table.timing(type_, in_width).access,
         },
         "mem.rom" => Role::Rom {
-            access: table.timing(type_, in_width, delay_override).access,
+            access: table.timing(type_, in_width).access,
         },
         "wiring.probe" | "io.led" | "io.hexdisplay" => Role::EndpointOnly,
         _ => {
-            let t = table.timing(type_, in_width, delay_override);
+            let t = table.timing(type_, in_width);
             if t.prop == 0 && t.access == 0 {
                 Role::Source
             } else {
@@ -191,8 +191,7 @@ pub fn analyze(
             .map(|p| p.width)
             .max()
             .unwrap_or(1);
-        let delay_override = fc.attrs.get("delay").and_then(|v| v.as_u64());
-        let role = role_of(&fc.type_, in_width, table, delay_override);
+        let role = role_of(&fc.type_, in_width, table);
         roles.push(role);
         match fc.type_.as_str() {
             "mem.register" => {
@@ -478,8 +477,8 @@ pub fn analyze(
     // settle is measured edge-to-settle instead (docs/delay-table.md).
     let setup_of = |ci: usize| -> u64 {
         match netlist.comps[ci].type_.as_str() {
-            "mem.register" => table.timing("mem.register", 1, None).setup,
-            "mem.ram" => table.timing("mem.ram", 1, None).setup,
+            "mem.register" => table.timing("mem.register", 1).setup,
+            "mem.ram" => table.timing("mem.ram", 1).setup,
             _ => 0,
         }
     };
@@ -524,8 +523,7 @@ mod tests {
     use crate::format::load_document;
     use crate::netlist;
 
-    const SETTINGS: &str =
-        r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     fn sta(json: &str, k: usize) -> Result<(StaResult, netlist::Netlist), StaError> {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
@@ -547,7 +545,7 @@ mod tests {
     fn pipeline_json() -> String {
         format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -586,7 +584,7 @@ mod tests {
         // T_sta = 15 + 31×4 + setup 15 = 154.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -613,7 +611,7 @@ mod tests {
         // rom.addr →(access 50)→ rom.dout → probe. T_sta = 50 path wins.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -654,7 +652,7 @@ mod tests {
         // pin → splitter bus; split bit → and → reg.d: T_sta = 10.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -682,7 +680,7 @@ mod tests {
         // nand(a,a) feeding itself = comb loop; downstream probe included.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
                 {{"id":"g","type":"gate.nand","pos":[0,0]}},

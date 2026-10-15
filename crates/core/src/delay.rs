@@ -88,10 +88,10 @@ use std::collections::BinaryHeap;
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead, Timing};
 use crate::engine_common as ec;
+pub use crate::engine_common::Halt;
 use crate::netlist::Netlist;
 use crate::timing_table::TimingTable;
 use crate::value::{Bit, Value};
-pub use crate::zero::Halt;
 
 /// Default cap on applied events per cycle before declaring an event
 /// storm (§4.5).
@@ -633,7 +633,7 @@ impl DelayEngine {
         // values but never originate them (B11 — a 0 seed phantom-contends
         // with the other side of a splitter chain). The seed must reach
         // every sink's *view* (gates read views, F14).
-        let (_, residue) = crate::zero::levelize(&eng.netlist, &eng.comps);
+        let (_, residue) = crate::engine_common::levelize(&eng.netlist, &eng.comps);
         for c in residue {
             if eng.comps[c as usize].is_splitter() {
                 continue;
@@ -1652,8 +1652,7 @@ mod tests {
         Value::from_u64(width, v)
     }
 
-    pub(super) const SETTINGS: &str =
-        r#""settings":{"delayModel":"delay","clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    pub(super) const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
 
     /// Two-stage pipeline: r1.q → not → and → r2.d; r1 toggles
     /// (r1.d ← not(r1.q)). Table delays: clk→Q 20, not 9, and 10 →
@@ -1661,7 +1660,7 @@ mod tests {
     pub(super) fn pipeline_json() -> String {
         format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1716,7 +1715,7 @@ mod tests {
     fn inertial_gate_swallows_narrow_glitch() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
                 {{"id":"g","type":"gate.not","pos":[0,0]}},
@@ -1745,7 +1744,7 @@ mod tests {
         // pin → 200-grid-unit wire → probe: d_net = 200/10 = 20 ns.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
                 {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"d"}}
@@ -1775,7 +1774,7 @@ mod tests {
         // reference table's 1/10) — the constant is data, not code (B7).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
                 {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"d"}}
@@ -1803,7 +1802,7 @@ mod tests {
     fn setup_and_hold_violations_are_warnings() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1870,7 +1869,7 @@ mod tests {
         // Different circuit (the setup/hold fixture's 5 comps) → shape error.
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}}
             ], "wires": []}}]
@@ -1897,7 +1896,7 @@ mod tests {
     fn rom_read_settles_after_access_time() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"addr","type":"wiring.pin","pos":[0,0],"name":"addr","attrs":{{"bitsize":2}}}},
                 {{"id":"rom","type":"mem.rom","pos":[0,0],"name":"rom",
@@ -1921,13 +1920,13 @@ mod tests {
     #[test]
     fn event_storm_halts_with_oscillation() {
         // nand(a=src, b=self): primed at src=0 (out=1), then src=1 →
-        // zero-delay storm (delay overridden to 0).
+        // event storm (a gate feeding its own input has no stable state).
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
-                {{"id":"g","type":"gate.nand","pos":[0,0],"attrs":{{"delay":0}}}}
+                {{"id":"g","type":"gate.nand","pos":[0,0]}}
             ], "wires": [
                 {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"g","pin":"in0"}}}},
                 {{"a":{{"comp":"g","pin":"out"}},"b":{{"comp":"g","pin":"in1"}}}}
@@ -1945,7 +1944,7 @@ mod tests {
     fn floating_gate_input_halts_at_cycle_close() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"c","type":"wiring.constant","pos":[0,0]}},
                 {{"id":"g","type":"gate.and","pos":[0,0]}}
@@ -1963,7 +1962,7 @@ mod tests {
     fn bus_json() -> String {
         format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"a","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"11"}}}},
                 {{"id":"b","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"22"}}}},
@@ -2009,7 +2008,7 @@ mod tests {
     fn ram_we_setup_violation_is_tracked() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":2}}}},
@@ -2102,7 +2101,7 @@ mod tests {
     fn mux_floating_unselected_input_does_not_halt() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"c","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
                 {{"id":"z","type":"wiring.constant","pos":[0,0]}},
@@ -2128,7 +2127,7 @@ mod tests {
     fn stub_branch_does_not_inflate_sink_arrival() {
         let json = format!(
             r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
                 {{"id":"p","type":"wiring.probe","pos":[20,0],"name":"d"}},
@@ -2153,44 +2152,6 @@ mod tests {
             Some(k(1, 1)),
             "stub must not inflate the sink's arrival"
         );
-    }
-
-    #[test]
-    fn zero_and_delay_engines_agree_on_a_counter() {
-        // Same circuit functionally: the zero engine counts 1/cycle; the
-        // delay engine must latch the same sequence.
-        let json = format!(
-            r##"{{
-            "format": "circuitsim-plus-plus", "version": 2, "name": "t", {SETTINGS},
-            "circuits": [{{ "name": "main", "components": [
-                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
-                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"1"}}}},
-                {{"id":"one1","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
-                {{"id":"zero1","type":"wiring.constant","pos":[0,0]}},
-                {{"id":"reg","type":"mem.register","pos":[0,0],"name":"r","attrs":{{"bitsize":8}}}},
-                {{"id":"add","type":"arith.adder","pos":[0,0],"attrs":{{"bitsize":8}}}}
-            ], "wires": [
-                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"reg","pin":"clk"}}}},
-                {{"a":{{"comp":"one1","pin":"out"}},"b":{{"comp":"reg","pin":"en"}}}},
-                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"reg","pin":"rst"}}}},
-                {{"a":{{"comp":"add","pin":"out"}},"b":{{"comp":"reg","pin":"d"}}}},
-                {{"a":{{"comp":"reg","pin":"q"}},"b":{{"comp":"add","pin":"a"}}}},
-                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"add","pin":"b"}}}},
-                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"add","pin":"cin"}}}}
-            ]}}]
-        }}"##
-        );
-        let mut z = {
-            let doc = load_document(json.as_bytes()).unwrap();
-            let nl = netlist::build(&doc).unwrap();
-            crate::zero::ZeroEngine::new(nl).unwrap()
-        };
-        let mut d = engine(&json, 500);
-        z.run(5).unwrap();
-        d.run(5).unwrap();
-        assert_eq!(z.named_value("r"), d.named_value("r"));
-        assert_eq!(d.cycle(), 5);
-        assert_eq!(d.named_value("r"), Some(k(8, 5)));
     }
 }
 

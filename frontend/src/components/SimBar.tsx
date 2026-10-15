@@ -1,7 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { SimController } from "../sim/controller";
 import type { CircuitDocument } from "../model/document";
-import type { SimMode } from "../ipc/types";
 
 /**
  * Slider notches at the "nice" clock values (slider exponents, where
@@ -13,8 +12,8 @@ const DECADE_EXPS = new Set([0, 10, 20, 30]);
 
 /**
  * Simulation transport bar (FRONTEND.md U5): play/pause, step tick/cycle,
- * run-to-cycle-N, speed slider (log scale), zero/delay mode toggle, plus
- * cycle/eff-Hz telemetry. Load errors and halts surface as banners.
+ * run-to-cycle-N, speed slider (log scale), plus cycle/eff-Hz telemetry.
+ * Load errors and halts surface as banners.
  *
  * First command auto-loads the current document into the core; editing
  * afterwards makes the loaded sim stale until the next command reloads
@@ -84,8 +83,6 @@ export default function SimBar({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, doc, hz, onReset]);
-
-  const mode: SimMode = s.status?.mode ?? "delay";
 
   return (
     <>
@@ -163,18 +160,7 @@ export default function SimBar({
         <span className="sim-status">
           {s.loaded ? (
             <>
-              cycle {s.cycle} ·{" "}
-              <button
-                className="sim-mode"
-                title={`Simulation mode: ${mode} — click for ${
-                  mode === "delay" ? "zero-delay" : "delay-aware"
-                }`}
-                onClick={() =>
-                  void withLoadedDoc(() => ctl.setMode(mode === "delay" ? "zero" : "delay"))
-                }
-              >
-                {mode}
-              </button>
+              cycle {s.cycle}
               {running && s.status !== null && ` · ${s.status.eff_hz.toLocaleString()} Hz eff.`}
             </>
           ) : (

@@ -18,7 +18,7 @@ import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
 import { PulseTracker } from "../sim/pulses";
 
-/** Pulses animate in delay mode up to this effective speed (U7). */
+/** Pulses animate up to this effective speed (U7). */
 const PULSE_MAX_EFF_HZ = 120;
 
 /**
@@ -163,14 +163,12 @@ export default forwardRef<
       if (sim !== undefined && sim.store.loaded && sheetRef.current === 0) {
         const store = sim.store;
         const highlight = sim.haltHighlight();
-        // Pulse spawn: once per flushed frame, in delay mode at low speed
-        // (manual steps always qualify — that's the teaching view); gated
-        // by the Settings → Canvas toggle.
+        // Pulse spawn: once per flushed frame at low speed (manual steps
+        // always qualify — that's the teaching view); gated by the
+        // Settings → Canvas toggle.
         const st = store.status;
         const pulseOk =
-          pulsesOn &&
-          st?.mode !== "zero" &&
-          (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
+          pulsesOn && (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
         if (pulseOk && store.lastChanged !== lastPulseChanges.current) {
           lastPulseChanges.current = store.lastChanged;
           if (store.lastChanged.length > 0) {

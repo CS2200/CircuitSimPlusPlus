@@ -15,7 +15,6 @@ import type {
   NamedComponent,
   NetId,
   SaveResult,
-  SimMode,
   ViolationKind,
   WireIdx,
   WireValue,
@@ -159,10 +158,6 @@ export class SimController {
 
   runUntil(cycle: number): Promise<void> {
     return this.core.api.runUntil(cycle);
-  }
-
-  setMode(mode: SimMode): Promise<void> {
-    return this.core.api.setMode(mode);
   }
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void> {

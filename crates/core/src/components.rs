@@ -318,15 +318,14 @@ pub enum CompKind {
     },
 }
 
-/// Full typed configuration: kind + per-instance delay override
-/// (`attrs.delay`, DESIGN.md §4.3 — `None` = use the delay table, task B7).
+/// Full typed configuration: the typed component kind plus its
+/// attr-derived parameters. Timing is *not* per instance — it comes from
+/// the delay table alone (DESIGN.md §4.3), so no component carries a delay
+/// override.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompConfig {
     /// Typed component kind plus its attr-derived parameters.
     pub kind: CompKind,
-    /// Per-instance delay override in ticks (`delay` attr); `None` = use the
-    /// delay table (task B7).
-    pub delay: Option<u64>,
 }
 
 /// A component pin's interface: name, direction, and width in bits.
@@ -495,17 +494,6 @@ impl<'a> AttrCheck<'a> {
         }
     }
 
-    /// Per-instance delay override: null or non-negative integer.
-    fn delay(&mut self) {
-        match self.attrs.get("delay") {
-            None | Some(Json::Null) => {}
-            Some(Json::Number(n)) if n.as_u64().is_some() => {}
-            Some(other) => self.issues.push(format!(
-                "attr 'delay' must be null or a non-negative integer, got {other}"
-            )),
-        }
-    }
-
     /// Every attribute key must be known — a typo'd attr name is an error,
     /// not silently ignored.
     fn finish(&mut self) {
@@ -518,7 +506,7 @@ impl<'a> AttrCheck<'a> {
     }
 }
 
-const GATE_ATTRS: &[&str] = &["bitsize", "delay"];
+const GATE_ATTRS: &[&str] = &["bitsize"];
 
 /// Analyze a component instance: validate its attrs, compute its pin
 /// signatures, and produce its typed configuration. Returns `None` for an
@@ -530,7 +518,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "gate.not" | "gate.buffer" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             let kind = if type_ == "gate.not" {
                 CompKind::Not { bitsize: b }
@@ -540,11 +527,10 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (vec![PinSig::i("in", b), PinSig::o("out", b)], c, kind)
         }
         "gate.and" | "gate.or" | "gate.xor" | "gate.nand" | "gate.nor" | "gate.xnor" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs", "negateInputs", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs", "negateInputs"]);
             let b = c.bitsize(1);
             let inputs = c.uint("inputs", 2, 2, MAX_GATE_INPUTS);
             let negate = c.string_list("negateInputs");
-            c.delay();
             c.finish();
             let mut pins: Vec<PinSig> = (0..inputs)
                 .map(|i| PinSig::i(format!("in{i}"), b))
@@ -578,7 +564,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "wiring.controlled-buffer" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![PinSig::i("in", b), PinSig::i("en", 1), PinSig::o("out", b)],
@@ -590,7 +575,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         // contains it: an input pin (isOutput=false) drives its net; an
         // output pin consumes.
         "wiring.pin" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "isOutput", "radix", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "isOutput", "radix"]);
             let b = c.bitsize(1);
             let is_output = c.boolean("isOutput", false);
             c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
@@ -610,10 +595,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "wiring.constant" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "value", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "value"]);
             let b = c.bitsize(1);
             let value = c.string("value", "0");
-            c.delay();
             c.finish();
             let parsed = match Value::from_hex_masks(b, &value, "", "") {
                 Ok(v) => v,
@@ -632,7 +616,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "wiring.clock" => {
-            let mut c = AttrCheck::new(attrs, &["delay"]);
+            let mut c = AttrCheck::new(attrs, &[]);
             c.finish();
             (vec![PinSig::o("out", 1)], c, CompKind::Clock)
         }
@@ -640,8 +624,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         // resolved dynamically (DESIGN.md §6 "arbitrary bit mapping — the
         // bus plumbing").
         "wiring.splitter" => {
-            let mut c = AttrCheck::new(attrs, &["splits", "delay"]);
-            c.delay();
+            let mut c = AttrCheck::new(attrs, &["splits"]);
             let splits = match attrs.get("splits") {
                 None => {
                     c_issue(&mut c, "splitter requires attr 'splits'".to_string());
@@ -721,17 +704,16 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "wiring.probe" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "radix", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
             let b = c.bitsize(1);
             c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Probe { bitsize: b })
         }
         "plexers.mux" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits"]);
             let b = c.bitsize(1);
             let sel = c.uint("selectBits", 1, 1, MAX_SELECT_BITS);
-            c.delay();
             c.finish();
             let mut pins: Vec<PinSig> = (0..(1u32 << sel))
                 .map(|i| PinSig::i(format!("in{i}"), b))
@@ -748,10 +730,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "plexers.demux" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits"]);
             let b = c.bitsize(1);
             let sel = c.uint("selectBits", 1, 1, MAX_SELECT_BITS);
-            c.delay();
             c.finish();
             let mut pins = vec![PinSig::i("in", b), PinSig::i("sel", sel)];
             pins.extend((0..(1u32 << sel)).map(|i| PinSig::o(format!("out{i}"), b)));
@@ -765,9 +746,8 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "plexers.decoder" => {
-            let mut c = AttrCheck::new(attrs, &["inputBits", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["inputBits"]);
             let bits = c.uint("inputBits", 2, 1, MAX_SELECT_BITS);
-            c.delay();
             c.finish();
             let mut pins = vec![PinSig::i("in", bits)];
             pins.extend((0..(1u32 << bits)).map(|i| PinSig::o(format!("out{i}"), 1)));
@@ -776,7 +756,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.adder" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -793,7 +772,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.subtractor" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -810,7 +788,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.multiplier" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -825,7 +802,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.divider" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -841,7 +817,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.comparator" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -858,7 +833,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "arith.negator" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![PinSig::i("in", b), PinSig::o("out", b)],
@@ -867,10 +841,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "arith.shifter" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "shift", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "shift"]);
             let b = c.bitsize(1);
             let shift = c.enumeration("shift", &["ll", "lr", "ar", "rl", "rr"], "ll");
-            c.delay();
             c.finish();
             let mode = match shift.as_str() {
                 "lr" => ShiftMode::LogicalRight,
@@ -890,11 +863,10 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "arith.bit-extender" => {
-            let mut c = AttrCheck::new(attrs, &["inBits", "outBits", "mode", "delay"]);
+            let mut c = AttrCheck::new(attrs, &["inBits", "outBits", "mode"]);
             let in_bits = c.uint("inBits", 8, 1, MAX_BITSIZE);
             let out_bits = c.uint("outBits", 16, 1, MAX_BITSIZE);
             let mode = c.enumeration("mode", &["zero", "sign"], "zero");
-            c.delay();
             c.finish();
             if out_bits <= in_bits {
                 c_issue(
@@ -919,7 +891,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "mem.register" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
             let b = c.bitsize(1);
-            c.delay();
             c.finish();
             (
                 vec![
@@ -934,15 +905,11 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.ram" => {
-            let mut c = AttrCheck::new(
-                attrs,
-                &["bitsize", "depth", "autoload", "contents", "delay"],
-            );
+            let mut c = AttrCheck::new(attrs, &["bitsize", "depth", "autoload", "contents"]);
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
             let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
-            c.delay();
             c.finish();
             if !depth.is_power_of_two() {
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
@@ -984,15 +951,11 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.rom" => {
-            let mut c = AttrCheck::new(
-                attrs,
-                &["bitsize", "depth", "autoload", "contents", "delay"],
-            );
+            let mut c = AttrCheck::new(attrs, &["bitsize", "depth", "autoload", "contents"]);
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
             let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
-            c.delay();
             c.finish();
             if !depth.is_power_of_two() {
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
@@ -1048,7 +1011,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (Vec::new(), c, CompKind::Subcircuit { circuit })
         }
         "io.button" => {
-            let mut c = AttrCheck::new(attrs, &["delay"]);
+            let mut c = AttrCheck::new(attrs, &[]);
             c.finish();
             (vec![PinSig::o("out", 1)], c, CompKind::Button)
         }
@@ -1087,11 +1050,7 @@ pub fn pin_sigs(type_: &str, attrs: &Map<String, Json>) -> Option<Vec<PinSig>> {
 /// Typed configuration for behavior construction (task B4), from the same
 /// single parse as [`pin_sigs`]. `None` = unknown type string.
 pub fn config(type_: &str, attrs: &Map<String, Json>) -> Option<CompConfig> {
-    let delay = match attrs.get("delay") {
-        Some(Json::Number(n)) => n.as_u64(),
-        _ => None,
-    };
-    analyze(type_, attrs).map(|(_, _, kind)| CompConfig { kind, delay })
+    analyze(type_, attrs).map(|(_, _, kind)| CompConfig { kind })
 }
 
 /// Validate a component's attrs and return its pin signatures. Returns
@@ -1174,9 +1133,11 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("unknown attr"));
 
-        let (_, e) = pins("mem.register", json!({"delay": "fast"}));
+        // Timing is unit-wide (from the delay table), never a per-instance
+        // attr — `delay` is now an unknown attr.
+        let (_, e) = pins("mem.register", json!({"delay": 5}));
         assert_eq!(e.len(), 1);
-        assert!(e[0].message.contains("delay"));
+        assert!(e[0].message.contains("unknown attr 'delay'"), "{:?}", e[0]);
     }
 
     #[test]

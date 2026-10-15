@@ -1,4 +1,7 @@
-# `.csx` — CircuitSim++ File Format v2 (normative)
+# `.csx` — CircuitSim++ File Format v3 (normative)
+
+> The file name is historical (`format-v2.md`); this document specifies the
+> **current** format, version 3.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -8,8 +11,8 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `2`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands only version 2.
+- Top-level `version` must be `3`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 3 and migrates version 2 (see below).
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
 ## 2. Document structure
@@ -17,10 +20,9 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 2,
+  "version": 3,
   "name": "LC-5200 Datapath",
   "settings": {
-    "delayModel": "delay",            // "zero" | "delay" — interactive default; the autograder pins "delay" (§4.4)
     "clockHz": 1,                     // UI clock speed at load time
     "delayTable": "cs2200-74ls-v1"    // published, versioned delay table (§4.4, docs/delay-table.md); unknown name = load error
   },
@@ -29,6 +31,17 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
 ```
 
 Circuit names are unique within a document. One circuit is conventionally `"main"`.
+
+### Migrations
+
+- **v2 → v3** drops `settings.delayModel` (`"zero" | "delay"`) and the
+  per-instance `attrs.delay` override. The zero-delay engine was removed
+  (DESIGN.md §4.2) — every document is delay-aware — and timing is unit-wide
+  (the delay table alone, §4.3) — so neither field carries meaning. Migration
+  is automatic on load: a v2 file loads and is re-saved as v3 with both
+  removed, regardless of their old values.
+- Version 1 predates the migration chain and is rejected with an
+  `unsupported format version` error.
 
 ### Circuit
 
@@ -106,31 +119,31 @@ present, else the first circuit in `circuits`.
 
 ## 4. Component registry (type strings, pins, attrs)
 
-Type strings are pinned by `docs/tasks/README.md` §4. Common optional attr on all types:
-`delay` (`null` or non-negative integer — per-instance delay override, §6).
+Type strings are pinned by `docs/tasks/README.md` §4. There is **no per-instance
+delay attribute**: timing is unit-wide, from the published delay table (§6).
 
 | Type | Pins | Attrs (defaults) |
 |---|---|---|
-| `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1), `delay` |
-| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs−1}`, `out` | `bitsize` (1), `inputs` (2; 2..=64), `negateInputs` ([]) — input pin names to bubble, `delay` |
-| `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1), `delay` |
+| `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1) |
+| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs−1}`, `out` | `bitsize` (1), `inputs` (2; 2..=64), `negateInputs` ([]) — input pin names to bubble |
+| `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
 | `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex") |
 | `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize` |
 | `wiring.clock` | `out` | — |
 | `wiring.splitter` | `bus` + one per `splits` key | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1 |
 | `wiring.probe` | `in` | `bitsize` (1), `radix` |
-| `plexers.mux` | `in0`..`in{2^sel−1}`, `sel`, `out` | `bitsize` (1), `selectBits` (1; 1..=8), `delay` |
-| `plexers.demux` | `in`, `sel`, `out0`..`out{2^sel−1}` | `bitsize` (1), `selectBits` (1), `delay` |
-| `plexers.decoder` | `in`, `out0`..`out{2^in−1}` | `inputBits` (2; 1..=8), `delay` |
-| `arith.adder` | `a`, `b`, `cin`, `out`, `cout` | `bitsize` (1), `delay` |
-| `arith.subtractor` | `a`, `b`, `bin`, `out`, `bout` | `bitsize` (1), `delay` |
-| `arith.multiplier` | `a`, `b`, `out` (out = 2×bitsize) | `bitsize` (1), `delay` |
-| `arith.divider` | `a`, `b`, `quot`, `rem` | `bitsize` (1), `delay` |
-| `arith.comparator` | `a`, `b`, `lt`, `eq`, `gt` | `bitsize` (1), `delay` |
-| `arith.negator` | `in`, `out` | `bitsize` (1), `delay` |
-| `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr"), `delay` |
+| `plexers.mux` | `in0`..`in{2^sel−1}`, `sel`, `out` | `bitsize` (1), `selectBits` (1; 1..=8) |
+| `plexers.demux` | `in`, `sel`, `out0`..`out{2^sel−1}` | `bitsize` (1), `selectBits` (1) |
+| `plexers.decoder` | `in`, `out0`..`out{2^in−1}` | `inputBits` (2; 1..=8) |
+| `arith.adder` | `a`, `b`, `cin`, `out`, `cout` | `bitsize` (1) |
+| `arith.subtractor` | `a`, `b`, `bin`, `out`, `bout` | `bitsize` (1) |
+| `arith.multiplier` | `a`, `b`, `out` (out = 2×bitsize) | `bitsize` (1) |
+| `arith.divider` | `a`, `b`, `quot`, `rem` | `bitsize` (1) |
+| `arith.comparator` | `a`, `b`, `lt`, `eq`, `gt` | `bitsize` (1) |
+| `arith.negator` | `in`, `out` | `bitsize` (1) |
+| `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr") |
 | `arith.bit-extender` | `in`, `out` | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign") |
-| `mem.register` | `d`, `clk`, `en`, `rst`, `q` | `bitsize` (1), `delay` |
+| `mem.register` | `d`, `clk`, `en`, `rst`, `q` | `bitsize` (1) |
 | `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
 | `mem.rom` | `addr`, `out` | same as `mem.ram` |
 | `subcircuit` | from target circuit's named pins | `circuit` (required) |
@@ -212,17 +225,17 @@ close.
 ## 9. Simulation semantics (ratified engine decisions)
 
 The file format is semantics-neutral; this section records the normative simulation
-semantics the engines implement for circuits written in it (references: DESIGN.md §4;
-details in `crates/core/src/{behavior,zero,delay}.rs` module docs and docs/autograder.md).
+semantics the engine implements for circuits written in it (references: DESIGN.md §4;
+details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder.md).
 
 **Values and state initialization.**
 
 - Four-state logic per DESIGN.md §4.1. Registers and RAM **power on at 0** (not `X`;
   contents/autoload aside) — matches legacy CircuitSim and keeps grading deterministic.
 - Register reset is **synchronous**, sampled at the rising edge, and **wins over enable**.
-- Combinational feedback (the zero-delay engine's fixed-point residue and the delay
-  engine's loop nets) is **seeded to 0 at power-on** — deterministic (§4.5: nothing is ever
-  resolved randomly). Splitters are excepted: they carry values but never originate them.
+- Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
+  deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
+  carry values but never originate them.
 - RAM `depth` must be a power of two (validation), so the `addr` pin's width exactly covers
   `0..depth`. The defensive past-end path (reads `X`, writes drop) remains for the
   `depth = 1` corner and the lenient post-validation path. A write with `X` in the address
@@ -248,10 +261,10 @@ simulation-halting error naming the component and pin. What counts as *consuming
 
 When a control input is `X` (mux select, buffer enable, register enable/reset, RAM
 write-enable), behaviors consume *conservatively* — any input that could affect the output.
-The zero-delay engine enforces the table at settle; the delay engine enforces register/RAM
-edge rules immediately and combinational rules via a per-consumer cycle-close sweep (a pin
-that consumes still seeing a never-driven `Z` view halts; driven-then-idle tri-state buses
-and in-flight arrivals in overclocked designs never halt — F6).
+The engine enforces register/RAM edge rules immediately and combinational rules via a
+per-consumer cycle-close sweep (a pin that consumes still seeing a never-driven `Z` view
+halts; driven-then-idle tri-state buses and in-flight arrivals in overclocked designs never
+halt — F6).
 
 **Delay-model semantics** (details: docs/delay-table.md).
 
@@ -268,8 +281,8 @@ and in-flight arrivals in overclocked designs never halt — F6).
   Violations are warnings; the latch still happens, deterministically. RAM tracks `din`,
   `addr`, and `we`.
 - Engine caps (§11 backstops): event storms halt at 1M events/cycle (`Oscillation`,
-  also the boot-settle quiescence cap); the zero-delay fixed point iterates at most
-  `residue + 2` passes. These bound corrupt/pathological inputs, not students.
+  also the boot-settle quiescence cap). These bound corrupt/pathological inputs, not
+  students.
 
 **Named access.** Autograder/watch-visible components (`mem.ram/rom`, `mem.register`,
 `wiring.probe` with a `name`) are addressed by hierarchical name: the plain name at root,
@@ -278,7 +291,6 @@ document-order indices within the defining circuit (contract v1.1).
 
 **Reporting pointers.** Exit-code taxonomy, assertion grammar, JSON test-spec, snapshot
 schema, and the `est_time`/`timing_violations`/`errors` report fields: docs/autograder.md.
-Zero-mode reports omit timing fields (`t_obs`, `est_time`, `trace_hash` are 0/null).
 
 ## 10. JSON Schema
 
@@ -288,21 +300,20 @@ the schema constrains common shapes only.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://circuitsim-plus-plus/schema/csx-v2.json",
-  "title": "CircuitSim++ .csx v2",
+  "$id": "https://circuitsim-plus-plus/schema/csx-v3.json",
+  "title": "CircuitSim++ .csx v3",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "name", "settings", "circuits"],
   "properties": {
     "format": { "const": "circuitsim-plus-plus" },
-    "version": { "const": 2 },
+    "version": { "const": 3 },
     "name": { "type": "string" },
     "settings": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["delayModel", "clockHz", "delayTable"],
+      "required": ["clockHz", "delayTable"],
       "properties": {
-        "delayModel": { "enum": ["zero", "delay"] },
         "clockHz": { "type": "integer", "minimum": 0 },
         "delayTable": { "type": "string" }
       }

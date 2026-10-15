@@ -6,15 +6,15 @@
 
 *IPC contract (now normative in docs/ipc.md v1.1):*
 - `timing_update.violations` is a structured list `{circuit, comp_id, kind, detail}[]` (was count-only; count = length). Report keeps a `timing_violations` count field per §8.2.
-- `net_diffs.changes[]` gains optional `at` (ns since run start; delay mode only) — true propagation animation.
+- `net_diffs.changes[]` gains optional `at` (ns since run start) - true propagation animation.
 - `NetDiffs.full`: the one initial full-state batch after load/resume/reset — the documented exception to "diffs only."
 - `sim_reset` command added: fresh power-on + autoload re-apply (G6 delivered end-to-end).
 - CompId on the wire = document-order index within the referenced circuit (never post-flatten); hierarchical designs attribute via `circuit` fields; `sim_halted.details` is machine-parseable (`comp <id> pin "<name>": …`).
-- Tick = one clock half-period (delay mode) / one cycle (zero mode). `top_paths` entries carry `{circuit, comps, delay_ns}`; `NamedComponent` gains `circuit`; hierarchical memory addressing is `instance/…/name`.
+- Tick = one clock half-period. `top_paths` entries carry `{circuit, comps, delay_ns}`; `NamedComponent` gains `circuit`; hierarchical memory addressing is `instance/…/name`.
 
 *Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/delay-table.md, docs/autograder.md):*
 - Resource caps: bitsize ≤ 32; gate inputs ≤ 64; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
-- Power-on state = 0 for registers/RAM (deterministic, not X); zero-delay feedback nets seed 0, splitters seed Z (they carry, never originate).
+- Power-on state = 0 for registers/RAM (deterministic, not X); combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
 - Register reset is synchronous and wins over enable; divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
 - The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters never).
 - `clock_half_period_ns` engine parameter (CLI default 1000 ns).
@@ -120,7 +120,6 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 │                    │  • netlist builder (union-find  │      │
 │                    │    over wires, flatten,         │      │
 │                    │    levelize, cycle detection)   │      │
-│                    │  • zero-delay engine            │      │
 │                    │  • delay-aware event engine     │      │
 │                    │    (grading + DTA measurement)  │      │
 │                    │  • optional static timing       │      │
@@ -158,26 +157,23 @@ Each bit on a net: `0`, `1`, `X` (unknown/error), `Z` (undriven/floating).
 - **Floating** (no enabled driver) → `Z`, rendered distinctly (a bus idling between transactions is normal and displays as `Z`). But **consuming** a floating value is an electrical bug, so it is a *simulation-halting error*: if a `Z` reaches any gate input, or a register's D input at a clock edge while enabled, or a RAM/ROM port during an access, the simulation stops, the error names the component and pin, and the UI highlights it. Autograder: distinct exit code. (Resolved D3. Watch-item: if idle-bus false positives prove annoying in practice, a later pull-up/pull-down component is the escape hatch — see §13.)
 - Tri-state exists because `ControlledBuffer` buses are central to this course; `Z` must mean something.
 
-### 4.2 Zero-delay mode (interactive fast/debug mode) — explained
+### 4.2 One engine: delay-aware only
 
-At load time we:
+Earlier drafts shipped a second, **zero-delay** engine — a levelized "evaluate
+every component each cycle" fast path, selected by `settings.delayModel`. It
+was **removed**. In practice the event-driven delay-aware engine (§4.3) is
+*faster* on real designs, because it only does work where a value actually
+changes, while the zero-delay engine re-evaluated the entire circuit every
+cycle whether or not anything was static. The delay-aware engine is also what
+grading and the timing instrument already use, so one engine means one set of
+semantics and one determinism story instead of two.
 
-1. **Flatten** the hierarchy into one netlist (subcircuits inlined; registers and memory stay primitive).
-2. **Cut at state elements:** every register/RAM output is a source, every register/RAM input is a sink. What remains between them is a pure combinational DAG.
-3. **Levelize:** topologically sort the combinational components once (Kahn's algorithm).
-
-Then each simulated clock cycle is exactly:
-
-1. All registers/memories simultaneously latch the values present at their inputs (computed at the end of the previous cycle) — the clock edge.
-2. Walk the sorted component list **once**, evaluating each gate from its inputs. Because the list is topologically ordered, a gate's inputs are always final before the gate runs, so the entire combinational cloud settles in a single pass.
-
-No event queue, no iteration-to-converge, no intra-cycle races. The evaluation order was fixed at load time, so identical inputs always produce identical outputs — that's what "deterministic" means here, and it costs nothing: the mode is deterministic *because it's simple*, and it's the fastest possible software simulation (one O(gates) sweep per cycle, cache-friendly).
-
-**Role:** interactive fast-forward/debugging on huge circuits. Functional grading could use it, but doesn't need to — the delay-aware engine (§4.3) is fast enough at course scale and doubles as the timing instrument, so grading runs one engine and gets correctness *and* timing from the same pass.
+The format's `settings.delayModel` field went with it: v2 documents migrate to
+v3 by dropping the field (docs/format-v2.md §2).
 
 ### 4.3 Delay-aware mode (teaching + grading engine)
 
-Event-driven: components and wires have delays from the published delay table (§4.4, overridable per instance). Events are processed from a timestamp-ordered queue; ties broken by a monotonic sequence number assigned in component-index order — so runs are bit-for-bit reproducible (deterministic, exactly like zero-delay; the modes differ in *semantics*, not reproducibility).
+Event-driven: components and wires have delays from the published delay table (§4.4). Events are processed from a timestamp-ordered queue; ties broken by a monotonic sequence number assigned in component-index order - so runs are bit-for-bit reproducible.
 
 **The delay model (resolved D1): the physically-motivated hybrid the curriculum already teaches** — transport on wires, inertial on gates, timed registers:
 
@@ -205,7 +201,7 @@ Event-driven: components and wires have delays from the published delay table (�
 
 ### 4.5 Feedback, loops, and oscillation
 
-- Combinational cycles are detected at compile time (SCC analysis). Bounded fixed-point iteration (zero-delay) / event-storm detection (delay-aware); non-convergence marks all nets in the cycle `X` and raises a visible oscillation error. The simulator never hangs.
+- Combinational cycles are detected at compile time (SCC analysis). Event-storm detection bounds every run; non-convergence marks all nets in the cycle `X` and raises a visible oscillation error. The simulator never hangs.
 - Subcircuit-instantiation cycles in the hierarchy are a load-time error.
 - Unlike DLS, nothing is ever resolved randomly. Ever.
 
@@ -236,10 +232,9 @@ Single global clock domain. A `clock` component places a clock source; multiple 
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 2,
+  "version": 3,
   "name": "LC-5200 Datapath",
   "settings": {
-    "delayModel": "delay",            // "zero" | "delay" (interactive default; autograder pins "delay")
     "clockHz": 1,
     "delayTable": "cs2200-74ls-v1"    // published cost table (§4.4)
   },
@@ -313,7 +308,7 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 
 | Category | Components |
 |---|---|
-| Gates | `and or xor not buffer nand nor xnor` — configurable input count, **per-input negation bubbles** (De Morgan "bubbled" variants are configuration, not separate parts), per-instance delay override |
+| Gates | `and or xor not buffer nand nor xnor` - configurable input count, **per-input negation bubbles** (De Morgan "bubbled" variants are configuration, not separate parts) |
 | Wiring | `pin` (subcircuit I/O; bitsize; value display mode: unsigned/signed/hex), `constant`, `clock` (mirrors the global clock), `splitter` (arbitrary bit mapping — the bus plumbing), `probe` (named value display; autograder-readable) |
 | Plexers | `mux`, `demux`, `decoder` |
 | Arithmetic | `adder`, `subtractor`, `multiplier`, `divider`, `comparator`, `negator`, `shifter`, `bit-extender` |
@@ -460,7 +455,7 @@ Honest scoping: **none of this is proof; all of it is cheap evidence + deterrenc
 
 | Phase | Deliverable | Depends on |
 |---|---|---|
-| **M0** Foundations | Cargo workspace; format v2 JSON Schema; value model; union-find netlist builder; flatten/levelize; cycle detection; zero-delay engine; **delay-aware event engine (inertial gates + transport wires + timed registers)**; STA (informational); **draft 74LS delay table**; unit tests | — |
+| **M0** Foundations | Cargo workspace; format JSON Schema; value model; union-find netlist builder; flatten/levelize; cycle detection; **delay-aware event engine (inertial gates + transport wires + timed registers)**; STA (informational); **draft 74LS delay table**; unit tests | — |
 | **M1** Autograder | `csim-cli`: run/load/assert/**DTA timing**/report; snapshot/resume; musl build; Gradescope Docker image | M0 |
 | **M2** Desktop shell | Tauri app; canvas editor (palette, wire routing w/ bends & junctions, pan/zoom, select, undo); diff-streamed sim controls | M0 |
 | **M3** Library + visuals | All §6 components; gate shapes; DLS-style wire rendering; error highlighting (contention/floating/oscillation); probe watch panel | M2 |
