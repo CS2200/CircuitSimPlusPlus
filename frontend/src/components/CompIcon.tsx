@@ -67,7 +67,14 @@ function fontSize(glyph: string, w: number, h: number): number {
 const BOX_RX = 0.12;
 const RENDER_HEIGHT = 14; // CSS px; width follows the component's aspect
 
-export default function CompIcon({ type }: { type: string }) {
+export default function CompIcon({
+  type,
+  height = RENDER_HEIGHT,
+}: {
+  type: string;
+  /** Rendered height in CSS px (default 14; the rail uses a larger size). */
+  height?: number;
+}) {
   const attrs = {};
   const { w, h } = compSize({ type, attrs }, []);
   const pins = compPins({ type, attrs }, []);
@@ -82,8 +89,8 @@ export default function CompIcon({ type }: { type: string }) {
     <svg
       className="comp-icon"
       viewBox={`${-pad} ${-pad} ${vbW} ${vbH}`}
-      width={(vbW / vbH) * RENDER_HEIGHT}
-      height={RENDER_HEIGHT}
+      width={(vbW / vbH) * height}
+      height={height}
       aria-hidden="true"
       focusable="false"
     >
@@ -200,4 +207,46 @@ export default function CompIcon({ type }: { type: string }) {
       </g>
     </svg>
   );
+}
+
+/** Representative glyph per palette group for the activity rail (UI_OVERHAUL §8). */
+const GROUP_GLYPHS: Readonly<Record<string, string>> = {
+  Gates: "gate.nand",
+  Plexers: "plexers.mux",
+  Arithmetic: "arith.adder",
+  Memory: "mem.ram",
+  "I/O": "io.led",
+  Subcircuits: "subcircuit",
+};
+
+/** A bent wire with a junction dot — the Wiring group's rail glyph. */
+function WireGroupGlyph({ height }: { height: number }) {
+  return (
+    <svg
+      className="comp-icon"
+      viewBox="-0.35 -0.25 3.2 2.6"
+      width={(3.2 / 2.6) * height}
+      height={height}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity={0.85}
+        strokeWidth={0.18}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M0.15 1.95 H1.05 Q1.35 1.95 1.35 1.65 V0.55 Q1.35 0.25 1.65 0.25 H2.6" />
+        <circle cx="1.35" cy="1.95" r="0.2" fill="currentColor" stroke="none" />
+      </g>
+    </svg>
+  );
+}
+
+/** Rail glyph for a palette group (Gates, Wiring, …). */
+export function PaletteGroupIcon({ group, height = 18 }: { group: string; height?: number }) {
+  if (group === "Wiring") return <WireGroupGlyph height={height} />;
+  return <CompIcon type={GROUP_GLYPHS[group] ?? "subcircuit"} height={height} />;
 }

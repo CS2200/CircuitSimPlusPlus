@@ -289,9 +289,37 @@ miniature of the component next to its name (`components/CompIcon.tsx`):
   clock/probe/LED get bespoke silhouettes; subcircuit modules get an inset
   border. Icons draw in `currentColor`, so every theme (incl. OLED) styles
   them automatically;
-- the palette is a responsive grid (`auto-fill, minmax(84px, 1fr)`) — a
-  wider panel simply shows more columns.
+- the palette is a responsive grid (`auto-fill, minmax(80px, 1fr)`) — a
+  wider panel simply shows more columns (see §8 for the group rail).
 
 **Acceptance:** `e2e/panels.spec.ts` (drag / persist / reset / clamp /
 keyboard + icon coverage) and `src/panels.test.ts` (clamp / load / save)
 pass; lint / unit / build / e2e green.
+
+## 8. Third pass (2026-10-15): palette activity rail (VS Code-style)
+
+Team direction: one rail icon per component group; hovering a group icon
+opens that group's components.
+
+- **Layout:** the palette is a fixed 44px **activity rail** plus the
+  resizable body. The rail carries one glyph per registry group (Gates,
+  Wiring, Plexers, Arithmetic, Memory, I/O — plus Subcircuits while the
+  document has more than one circuit); the body shows the active group's
+  item grid with the group name as its header. The rail is fixed-width;
+  the persisted `csx.panel.palette` width keeps covering the whole panel
+  (default stays 190px — rail 44 + a single-column body, VS Code-like;
+  widen the panel for more columns).
+- **Interaction:** hovering, focusing, or clicking a rail icon switches
+  the body (VS Code's click model, extended with hover as requested).
+  Markup is `role="tablist"`/`role="tab"`/`role="tabpanel"` with roving
+  focus; ArrowUp/ArrowDown move between groups; each icon has a `title`
+  tooltip and the active one gets the accent left-bar treatment. If the
+  active group disappears (Subcircuits after New), the body falls back to
+  the first group.
+- **Group glyphs** (`PaletteGroupIcon`, same `CompIcon` language,
+  `currentColor`, theme-agnostic): NAND for Gates, a bent wire with a
+  junction dot for Wiring, mux/adder/RAM/LED/module for the rest.
+
+**Acceptance:** `e2e/panels.spec.ts` covers rail hover/click switching,
+per-group icon coverage, and the resize numbers; the other suites
+(canvas geometry unchanged → baselines unchanged) stay green.

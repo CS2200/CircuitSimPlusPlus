@@ -30,7 +30,7 @@ test("palette resizes by drag, persists across reload, resets on double-click", 
 }) => {
   await page.goto("/");
   const before = await widthOf(page, ".palette");
-  expect(before).toBe(190); // default
+  expect(before).toBe(190); // default (rail + body)
 
   await dragHandle(page, "palette", 60);
   const grown = await widthOf(page, ".palette");
@@ -74,15 +74,32 @@ test("dock resizes by drag (grows leftward) with its own bounds", async ({ page 
   expect(await widthOf(page, ".right-dock")).toBe(220);
 });
 
-test("every palette entry renders an SVG component glyph", async ({ page }) => {
+test("palette rail groups: hover swaps the body; every item keeps its icon", async ({ page }) => {
   await page.goto("/");
-  const items = page.locator(".palette .palette-item");
-  const count = await items.count();
-  expect(count).toBeGreaterThanOrEqual(30); // the full registry
-  expect(await items.locator("svg.comp-icon").count()).toBe(count);
 
-  // Icons are aria-hidden: the accessible button names stay plain text.
+  // One rail tab per registry group (Subcircuits appears only with >1 circuit).
+  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(6);
+
+  // Gates is the default group.
   await expect(page.getByRole("button", { name: "AND", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "NAND", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "RAM", exact: true })).toBeVisible();
+
+  const checkGroup = async (group: string, sample: string) => {
+    await page.locator(`[data-group="${group}"]`).hover();
+    await expect(page.getByRole("button", { name: sample, exact: true })).toBeVisible();
+    const items = page.locator(".palette-group .palette-item");
+    const count = await items.count();
+    expect(count).toBeGreaterThan(0);
+    expect(await items.locator("svg.comp-icon").count()).toBe(count);
+  };
+
+  await checkGroup("Wiring", "PIN");
+  await checkGroup("Plexers", "MUX");
+  await checkGroup("Arithmetic", "ADD");
+  await checkGroup("Memory", "RAM");
+  await checkGroup("I/O", "LED");
+  await checkGroup("Gates", "NAND");
+
+  // Clicking also selects (touch/keyboard paths).
+  await page.locator('[data-group="Memory"]').click();
+  await expect(page.getByRole("button", { name: "ROM", exact: true })).toBeVisible();
 });
