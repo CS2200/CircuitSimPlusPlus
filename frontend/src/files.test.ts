@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { forgetSavedFileHandle, hasSavedFileHandle, saveTextFile } from "./files";
 
 /**
- * Browser save (§36). The reuse rule — Ctrl+S writes the file it already has
+ * Browser save (§37). The reuse rule — Ctrl+S writes the file it already has
  * instead of re-opening the picker — only exists in the browser and is skipped
  * under automation, so it is pinned here against a stubbed picker.
  */

@@ -8,11 +8,11 @@ const and2: CsxComponent = { id: "c1", type: "gate.and", pos: [10, 10] };
 describe("catalog", () => {
   it("every PALETTE type has a spec", () => {
     for (const group of PALETTE) {
-      for (const type of group.types) {
-        expect(isKnownType(type), type).toBe(true);
-        const size = compSize({ type });
-        expect(size.w, type).toBeGreaterThan(0);
-        expect(size.h, type).toBeGreaterThan(0);
+      for (const item of group.items) {
+        expect(isKnownType(item.type), item.type).toBe(true);
+        const size = compSize({ type: item.type });
+        expect(size.w, item.type).toBeGreaterThan(0);
+        expect(size.h, item.type).toBeGreaterThan(0);
       }
     }
   });

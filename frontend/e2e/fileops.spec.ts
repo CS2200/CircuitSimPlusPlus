@@ -165,12 +165,12 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   if (box === null) throw new Error("canvas not visible");
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
-  // input pin placed world-anchored at [-4,0] (default is an INPUT, faces
-  // left); its 2×1 body center at (-3, 0.5) is clicked to select it (the
-  // Inspector opens on the right). World anchoring avoids sub-pixel
-  // snapping surprises when the chrome height changes.
+  // input pin placed world-anchored at [-4,0] (the INPUT tile faces left); its
+  // 2×1 body center at (-3, 0.5) is clicked to select it (the Inspector opens
+  // on the right). World anchoring avoids sub-pixel snapping surprises when the
+  // chrome height changes.
   await openPaletteGroup(page, "Wiring");
-  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.getByRole("button", { name: "INPUT", exact: true }).click();
   const pin1Spot = await world(page, -3, 0.5); // center → body [-4,0]
   await page.mouse.click(pin1Spot.x, pin1Spot.y);
   await page.keyboard.press("Escape");
@@ -180,9 +180,9 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.getByPlaceholder("(unnamed)").fill("a");
   await page.getByPlaceholder("(unnamed)").press("Enter");
 
-  // second pin at [5,0], made an OUTPUT via the Inspector (rot mirrors to W)
+  // second pin at [5,0] from the OUTPUT tile (seeds isOutput + rot W)
   await openPaletteGroup(page, "Wiring");
-  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.getByRole("button", { name: "OUTPUT", exact: true }).click();
   const pin2Spot = await world(page, 6, 0.5); // center → body [5,0]
   await page.mouse.click(pin2Spot.x, pin2Spot.y);
   await page.keyboard.press("Escape");
@@ -191,7 +191,6 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await expect(page.locator(".inspector-id")).toHaveText("c2"); // panel switched before typing
   await page.getByPlaceholder("(unnamed)").fill("y");
   await page.getByPlaceholder("(unnamed)").press("Enter");
-  await page.getByRole("checkbox").check();
 
   let d = await doc(page);
   const alu = d.circuits.find((c) => c.name === "alu")!;
@@ -228,7 +227,7 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
 
   // PIN placed world-anchored at [-6,0] → terminal at (-4,0.5).
   await openPaletteGroup(page, "Wiring");
-  await page.getByRole("button", { name: "PIN", exact: true }).click();
+  await page.getByRole("button", { name: "INPUT", exact: true }).click();
   const pinSpot = await world(page, -6, 0);
   await page.mouse.click(pinSpot.x, pinSpot.y);
   await page.keyboard.press("Escape");

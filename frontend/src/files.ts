@@ -127,7 +127,7 @@ interface BrowserFileHandle {
 /**
  * The handle from the last browser save. Once a file exists, Ctrl+S writes to
  * it again instead of re-opening the picker (the browser has no path to save
- * to, so the handle stands in for one — §36).
+ * to, so the handle stands in for one — §37).
  */
 let savedHandle: BrowserFileHandle | null = null;
 

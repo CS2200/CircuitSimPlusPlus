@@ -446,7 +446,7 @@ export default function App() {
     if (!confirmDiscard()) return;
     sim.unload();
     adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
-    forgetSavedFileHandle(); // a new document must not overwrite the last file (§36)
+    forgetSavedFileHandle(); // a new document must not overwrite the last file (§37)
     toast("New circuit");
   }, [confirmDiscard, adoptDoc, sim, toast]);
 
@@ -468,7 +468,7 @@ export default function App() {
       return;
     }
     adoptDoc(d, opened.path ?? opened.name);
-    forgetSavedFileHandle(); // opened a different file (§36)
+    forgetSavedFileHandle(); // opened a different file (§37)
     // Engine side: path-load in the shell (autoloads resolve next to the
     // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
     // in the sim banner via the store.
@@ -504,7 +504,7 @@ export default function App() {
   );
 
   /**
-   * Browser save (§36): with a file already chosen this writes straight to it,
+   * Browser save (§37): with a file already chosen this writes straight to it,
    * so Ctrl+S behaves like a real save instead of re-asking for a name. Only
    * "Save As" (or the first save) opens the picker.
    */
@@ -551,7 +551,7 @@ export default function App() {
   }, [filePath, doc, doSave, onSaveAs, saveInBrowser, toast]);
 
   /**
-   * Click the title to name the file (§36). Naming writes a file, so this is
+   * Click the title to name the file (§37). Naming writes a file, so this is
    * Save-As semantics: an existing file is left untouched and the title follows
    * whatever name/path is chosen.
    */
@@ -819,7 +819,7 @@ export default function App() {
     return selectedVersion.label !== "" ? `${when} · ${selectedVersion.label}` : when;
   }, [selectedVersion]);
 
-  /** How the previewed version differs from the open document (§36). */
+  /** How the previewed version differs from the open document (§37). */
   const versionDiff = useMemo(() => {
     if (!historyOpen || historyPreview === null) return null;
     try {
@@ -903,7 +903,7 @@ export default function App() {
   );
 
   /** Save a version to a new file (Tauri: dialog + engine write; browser: download). */
-  /** Rename a version in place (the drawer's click-the-name edit, §36). */
+  /** Rename a version in place (the drawer's click-the-name edit, §37). */
   const renameVersion = useCallback(
     (id: string, label: string) => {
       void historyStore()
@@ -1087,6 +1087,12 @@ export default function App() {
             onSelect: () => editorRef.current?.redo(),
           },
           { kind: "sep" },
+          {
+            label: "Cut",
+            shortcut: "Ctrl+X",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => editorRef.current?.cut(),
+          },
           {
             label: "Copy",
             shortcut: "Ctrl+C",
@@ -1401,24 +1407,43 @@ export default function App() {
                             </button>
                           ),
                       )
-                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.types ?? []).map(
-                        (t) => (
-                          <button
-                            key={t}
-                            className={`palette-item${status?.placing === t ? " active" : ""}`}
-                            draggable
-                            onClick={(e) =>
-                              editorRef.current?.startPlacing(t, e.shiftKey, placementAttrs(t))
-                            }
-                            onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
-                            title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
-                          >
-                            <CompIcon type={t} />
-                            <span className="palette-item-label">
-                              {compSpec(t).label ?? compSpec(t).caption({})}
-                            </span>
-                          </button>
-                        ),
+                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.items ?? []).map(
+                        (item) => {
+                          const spec = compSpec(item.type);
+                          const label = item.label ?? spec.label ?? spec.caption({});
+                          const seed = { ...(placementAttrs(item.type) ?? {}), ...item.attrs };
+                          return (
+                            <button
+                              key={`${item.type}:${item.label ?? ""}`}
+                              className={`palette-item${status?.placing === item.type ? " active" : ""}`}
+                              draggable
+                              onClick={(e) =>
+                                editorRef.current?.startPlacing(
+                                  item.type,
+                                  e.shiftKey,
+                                  Object.keys(seed).length === 0 ? undefined : seed,
+                                  item.rot,
+                                )
+                              }
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/x-csx-type", item.type);
+                                if (item.attrs !== undefined) {
+                                  e.dataTransfer.setData(
+                                    "text/x-csx-attrs",
+                                    JSON.stringify(item.attrs),
+                                  );
+                                }
+                                if (item.rot !== undefined) {
+                                  e.dataTransfer.setData("text/x-csx-rot", item.rot);
+                                }
+                              }}
+                              title={`${label} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
+                            >
+                              <CompIcon type={item.type} attrs={item.attrs} />
+                              <span className="palette-item-label">{label}</span>
+                            </button>
+                          );
+                        },
                       )}
                 </div>
               </div>

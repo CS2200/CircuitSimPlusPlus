@@ -229,13 +229,6 @@ export default function InspectorPanel({
     if ((comp.attrs ?? {})[key] === value) return;
     commit({ attrs: { ...(comp.attrs ?? {}), [key]: value } }, `attr:${key}`);
   };
-  /** wiring.pin direction flips mirror the default facing E ↔ W (as the dialog did). */
-  const commitAsOutput = (isOutput: boolean) => {
-    const patch: Patch = { attrs: { ...(comp.attrs ?? {}), isOutput } };
-    const rot = comp.rot ?? "E";
-    if (rot === "E" || rot === "W") patch.rot = rot === "E" ? "W" : "E";
-    commit(patch, "attr:isOutput");
-  };
 
   // Subcircuit instances pick their target from the file's circuits, not
   // free text (a typo would only surface as an engine load error).
@@ -354,7 +347,6 @@ export default function InspectorPanel({
             draft={draft}
             onDraft={setDraft}
             onCommitAttr={commitAttr}
-            onCommitOutput={commitAsOutput}
           />
           {f.hint !== undefined && <p className="settings-hint inspector-hint">{f.hint}</p>}
         </Fragment>
@@ -460,14 +452,12 @@ function FieldRow({
   draft,
   onDraft,
   onCommitAttr,
-  onCommitOutput,
 }: {
   field: AttrField;
   comp: CsxComponent;
   draft: { key: string; text: string } | null;
   onDraft: (d: { key: string; text: string } | null) => void;
   onCommitAttr: (key: string, value: unknown) => void;
-  onCommitOutput: (isOutput: boolean) => void;
 }) {
   const key = `${comp.id}:attr:${field.key}`;
   const value = (comp.attrs ?? {})[field.key];
@@ -568,12 +558,7 @@ function FieldRow({
         <input
           type="checkbox"
           checked={value === true}
-          // wiring.pin direction also mirrors the pin's facing (E ↔ W).
-          onChange={(e) =>
-            field.key === "isOutput"
-              ? onCommitOutput(e.target.checked)
-              : onCommitAttr(field.key, e.target.checked)
-          }
+          onChange={(e) => onCommitAttr(field.key, e.target.checked)}
         />
       </label>
     );

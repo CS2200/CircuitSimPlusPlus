@@ -47,7 +47,12 @@ export interface EditorStatus {
 }
 
 export interface EditorHandle {
-  startPlacing(type: string, sticky?: boolean, attrs?: Record<string, unknown>): void;
+  startPlacing(
+    type: string,
+    sticky?: boolean,
+    attrs?: Record<string, unknown>,
+    rot?: "N" | "E" | "S" | "W",
+  ): void;
   /** Redraw after an out-of-band doc mutation (properties dialog, …). */
   refresh(): void;
   placeAt(type: string, world: Vec2, attrs?: Record<string, unknown>): void;
@@ -57,6 +62,7 @@ export interface EditorHandle {
   rotate(): void;
   deleteSelection(): void;
   copy(): void;
+  cut(): void;
   paste(): void;
   selectAll(): void;
 }
@@ -286,6 +292,7 @@ export default forwardRef<
       )
         doc.redo();
       else if (mod && e.key.toLowerCase() === "c") tool.copy();
+      else if (mod && e.key.toLowerCase() === "x") tool.cut();
       else if (mod && e.key.toLowerCase() === "v") tool.paste();
       else if (mod && e.key.toLowerCase() === "a") tool.selectAll();
       else if (e.key === "Escape") tool.cancel();
@@ -311,8 +318,8 @@ export default forwardRef<
   useImperativeHandle(
     ref,
     (): EditorHandle => ({
-      startPlacing: (type, sticky = false, attrs) => {
-        tool.startPlacing(type, sticky, attrs);
+      startPlacing: (type, sticky = false, attrs, rot) => {
+        tool.startPlacing(type, sticky, attrs, rot);
         bump();
       },
       refresh: () => {
@@ -353,6 +360,10 @@ export default forwardRef<
       },
       copy: () => {
         tool.copy();
+        bump();
+      },
+      cut: () => {
+        tool.cut();
         bump();
       },
       paste: () => {
@@ -397,11 +408,14 @@ export default forwardRef<
             }
           }
           // drop lands with the body CENTERED on the cursor
+          const rotRaw = e.dataTransfer.getData("text/x-csx-rot");
+          const rot =
+            rotRaw === "N" || rotRaw === "E" || rotRaw === "S" || rotRaw === "W" ? rotRaw : "E";
           const { w: bw, h: bh } = compSize({ type, attrs }, doc.circuits);
           doc.addComponent(sheetRef.current, {
             type,
             pos: [Math.round(w.x - bw / 2), Math.round(w.y - bh / 2)],
-            rot: "E",
+            rot,
             ...(attrs !== undefined && { attrs }),
           });
           bump();

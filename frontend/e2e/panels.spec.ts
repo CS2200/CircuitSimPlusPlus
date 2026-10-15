@@ -92,7 +92,7 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
     expect(await items.locator("svg.comp-icon").count()).toBe(count);
   };
 
-  await checkGroup("Wiring", "PIN");
+  await checkGroup("Wiring", "INPUT");
   await checkGroup("Plexers", "MUX");
   await checkGroup("Plexers", "DECODER");
   // Arithmetic tiles keep the human name; the body shows the symbol (§18).

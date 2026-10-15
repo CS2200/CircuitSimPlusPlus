@@ -470,7 +470,7 @@ body {
   white-space: nowrap;
 }
 
-/* Clickable title (§36): looks like the label, invites a click to rename. */
+/* Clickable title (§37): looks like the label, invites a click to rename. */
 .app-title-editable {
   padding: 0.1rem 0.35rem;
   margin-left: -0.35rem;
@@ -590,7 +590,7 @@ body {
  * switches the body beside it. */
 .palette-rail {
   flex: none;
-  width: 68px;
+  width: 74px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -609,7 +609,7 @@ body {
   justify-content: center;
   gap: 2px;
   flex: none;
-  width: 60px;
+  width: 66px;
   min-height: 44px;
   padding: 5px 2px;
   background: transparent;
@@ -625,7 +625,10 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.6rem;
-  line-height: 1.15;
+  /* Tall enough that the descender of a "g"/"y" is not clipped by the
+   * horizontal-overflow ellipsis box (UI_OVERHAUL §36). */
+  line-height: 1.4;
+  padding-bottom: 1px;
   text-align: center;
 }
 
@@ -1995,7 +1998,7 @@ body {
 }
 
 /* A row is a plain container: the click target is an overlay button, so the
- * version's name (and its edit field) can sit above it (§36). */
+ * version's name (and its edit field) can sit above it (§37). */
 .history-row {
   position: relative;
   border-radius: 6px;
@@ -2086,7 +2089,7 @@ body {
   font-size: 0.72rem;
 }
 
-/* "This version vs the open document" (§36). */
+/* "This version vs the open document" (§37). */
 .history-diff {
   padding: 0.5rem 0.7rem;
   border-top: 1px solid var(--panel-border);

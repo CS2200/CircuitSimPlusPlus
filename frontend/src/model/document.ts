@@ -137,7 +137,7 @@ export class CircuitDocument {
   /**
    * Rename the document (the `.csx` `name` field). The FILE's name comes from
    * its path; this keeps the two in step when naming a new document or saving
-   * under a new name (§36). Marks the document dirty — the JSON changed.
+   * under a new name (§37). Marks the document dirty — the JSON changed.
    */
   rename(name: string): void {
     const clean = name.trim();

@@ -1,5 +1,5 @@
 /**
- * Structural diff between two documents (version history, UI_OVERHAUL §36).
+ * Structural diff between two documents (version history, UI_OVERHAUL §37).
  *
  * "What changed between the version I'm looking at and the document I have
  * open?" — answered by identity where identity survives a save: components by
