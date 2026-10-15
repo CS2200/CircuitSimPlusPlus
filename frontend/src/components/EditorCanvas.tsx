@@ -258,7 +258,15 @@ export default forwardRef<
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (
+        target !== null &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "BUTTON" ||
+          target.closest(".resize-handle") !== null)
+      ) {
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       let handled = true;
       if (mod && !e.shiftKey && e.key.toLowerCase() === "z") doc.undo();
@@ -273,6 +281,10 @@ export default forwardRef<
       else if (e.key === "Escape") tool.cancel();
       else if (e.key === "Delete" || e.key === "Backspace") tool.deleteSelection();
       else if (e.key.toLowerCase() === "r" && !mod) tool.rotateSelection();
+      // Arrow keys rotate the selection (← counter-clockwise, → clockwise) and
+      // the placement ghost while placing (UI_OVERHAUL §20).
+      else if (e.key === "ArrowRight" && !mod) tool.rotateSelection();
+      else if (e.key === "ArrowLeft" && !mod) tool.rotateSelection(true);
       else if (e.key.toLowerCase() === "x" && !mod) tool.flipRoute();
       else handled = false;
       if (handled) {

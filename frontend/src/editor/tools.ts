@@ -6,7 +6,7 @@ import { snap, snapPoint } from "../render/camera";
 import { compSize } from "./catalog";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
-import { nextRotation } from "./layout";
+import { nextRotation, prevRotation } from "./layout";
 import type { DocScene, Hit, SceneOverlay } from "./docScene";
 import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } from "./route";
 
@@ -504,14 +504,15 @@ export class ToolMachine {
 
   // ---- commands (keyboard/menu) ----
 
-  rotateSelection(): void {
+  rotateSelection(ccw = false): void {
     if (this.placing !== null) {
-      this.placing = { ...this.placing, rot: nextRotation(this.placing.rot) };
+      const rot = this.placing.rot;
+      this.placing = { ...this.placing, rot: ccw ? prevRotation(rot) : nextRotation(rot) };
       this.changed();
       return;
     }
     if (this.selection.components.size > 0) {
-      this.doc.rotateComponents(this.circuitIdx(), this.selection.components);
+      this.doc.rotateComponents(this.circuitIdx(), this.selection.components, ccw);
       this.changed();
     }
   }
