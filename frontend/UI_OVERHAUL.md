@@ -1177,3 +1177,28 @@ app (the new `history::rename` test included).
 
 **Acceptance:** frontend lint / 302 unit / build green; 48-of-48 e2e green; Rust
 171 core + 12 CLI + 8 golden, clippy/fmt clean.
+
+## 41. Follow-up batch AF (2026-10-16): grid-edge alignment, probe value, splitter editor
+
+- **The grid's edge line meets the chrome.** The camera now snaps so the
+  canvas's **top-left corner lands exactly on a grid line** (`Camera.alignToGrid`,
+  a multiple of the current grid step). Parts stay on the grid — they share the
+  camera transform — but the canvas edge no longer cuts a partial cell, so the
+  grid line under the sheet-tab strip lines up with it. It aligns on the first
+  sizing, on debounced resizes, and (debounced) after a wheel zoom; a **pan**
+  release re-aligns too. The nudge is skipped when it would exceed ~8 px, so a
+  high-zoom gesture never lurches. `editor.spec` checks the invariant;
+  `pan.spec`'s delta assertions now allow the ≤½-cell snap.
+- **A probe's value is only inside the probe.** `wiring.probe` left
+  `VALUE_REPEAT`, so its live value is painted once, on the body — never
+  repeated next to its pin outside the part.
+- **Splitter editor, not a text box.** The `splits` field is now a structured
+  editor (`SplitsField`): one row per split pin with a name and its bus-bit
+  indices, add/remove, and a `N pins · bus M bits` summary. Text edits commit on
+  blur/Enter (a per-keystroke rename would drop the old pin and prune its
+  wires); add/remove commit immediately. `editor.spec` covers it.
+
+**Acceptance:** frontend lint / 302 unit / build green; 50-of-50 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean. The camera nudge shifts the
+canvas a few px, so the sim/timing screenshot baselines were re-blessed locally
+(`--update-snapshots`); their committed Linux copies need the same pass on CI.

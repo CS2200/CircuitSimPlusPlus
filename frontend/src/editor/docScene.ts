@@ -180,13 +180,9 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "io.hexdisplay": "in",
 };
 
-/** Parts that also repeat their value next to the source pin (§21). */
-const VALUE_REPEAT: ReadonlySet<string> = new Set([
-  "wiring.probe",
-  "mem.register",
-  "mem.ram",
-  "mem.rom",
-]);
+/** Parts that also repeat their value next to the source pin (§21). The probe
+ * is NOT here: its value belongs inside its body (UI_OVERHAUL §41). */
+const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register", "mem.ram", "mem.rom"]);
 
 /** CSS font stacks for the text annotation's `font` attr (UI_OVERHAUL §40). */
 const TEXT_FONTS: Readonly<Record<string, string>> = {

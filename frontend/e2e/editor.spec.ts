@@ -159,3 +159,51 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].components).toHaveLength(0);
   expect(d.circuits[0].wires).toHaveLength(0);
 });
+
+test("grid edge lines up with the canvas edge (camera aligned to the grid)", async ({ page }) => {
+  await page.goto("/?demo=1");
+  // The alignment may land a frame later (initial settle), so poll.
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const cam = (
+          window as unknown as { __circuitCamera: () => { x: number; y: number; scale: number } }
+        ).__circuitCamera();
+        const c = document.querySelector("canvas.circuit-canvas") as HTMLCanvasElement;
+        const r = c.getBoundingClientRect();
+        const leftWorld = cam.x - r.width / 2 / cam.scale;
+        const topWorld = cam.y - r.height / 2 / cam.scale;
+        const nearInt = (v: number) => Math.abs(v - Math.round(v)) < 0.01;
+        return nearInt(leftWorld) && nearInt(topWorld);
+      }),
+    )
+    .toBe(true);
+});
+
+test("splitter: the Inspector edits split pins structurally (not a text box)", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "SPLIT", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  // One row per split pin (no textarea).
+  await expect(page.locator(".inspector-textarea")).toHaveCount(0);
+  const rows = await page.locator(".split-row").count();
+  expect(rows).toBeGreaterThan(0);
+
+  // Rename the first pin and set its bits; committed on blur.
+  await page.getByLabel("Split pin 1 name").fill("lo");
+  await page.getByLabel("Split pin 1 bits").fill("0, 1");
+  await page.getByLabel("Split pin 1 bits").press("Enter");
+
+  const d = await doc(page);
+  const split = d.circuits[0].components.find((c) => c.type === "wiring.splitter");
+  expect((split?.attrs?.splits as Record<string, number[]>).lo).toEqual([0, 1]);
+
+  // Add a pin → one more row.
+  await page.getByRole("button", { name: "Add pin" }).click();
+  await expect(page.locator(".split-row")).toHaveCount(rows + 1);
+});

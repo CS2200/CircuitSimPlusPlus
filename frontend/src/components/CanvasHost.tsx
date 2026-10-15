@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Camera } from "../render/camera";
 import { Canvas2DRenderer } from "../render/canvas2d";
 import type { Rect, Vec2 } from "../render/geom";
 import type { Viewport } from "../render/renderer";
 import { FALLBACK_THEME, resolveTheme, type Theme } from "../render/theme";
+import { gridStepFor } from "../editor/docScene";
 
 /**
  * CanvasHost — the shared plumbing for every full-canvas view (editor,
@@ -136,6 +137,36 @@ export default function CanvasHost({
   const benchRef = useRef<BenchState | null>(null);
   const lastRenderMsRef = useRef<number | null>(null);
   const [fpsText, setFpsText] = useState<string>("idle");
+  const alignTimerRef = useRef<number | null>(null);
+  const seenSizeRef = useRef(false);
+
+  /**
+   * Snap the camera so the canvas's top-left corner lies on a grid line
+   * (UI_OVERHAUL §41). Skipped when the nudge would be more than ~8 px, so a
+   * pan/zoom at high magnification never lurches; parts stay on the grid either
+   * way (they share the camera transform).
+   */
+  const alignToGrid = useCallback((): void => {
+    const cam = cameraRef.current;
+    const beforeX = cam.x;
+    const beforeY = cam.y;
+    cam.alignToGrid(viewportRef.current, gridStepFor(cam.scale));
+    if (Math.hypot(cam.x - beforeX, cam.y - beforeY) * cam.scale > 8) {
+      cam.x = beforeX;
+      cam.y = beforeY;
+      return;
+    }
+    dirtyRef.current = true;
+  }, []);
+
+  /** Align once the wheel settles (zooming changes the edge's grid phase). */
+  const scheduleAlign = useCallback((): void => {
+    if (alignTimerRef.current !== null) window.clearTimeout(alignTimerRef.current);
+    alignTimerRef.current = window.setTimeout(() => {
+      alignTimerRef.current = null;
+      alignToGrid();
+    }, 160);
+  }, [alignToGrid]);
 
   // Center the camera on the scene bounds.
   useEffect(() => {
@@ -144,8 +175,9 @@ export default function CanvasHost({
     cam.x = sceneBounds.x + sceneBounds.w / 2;
     cam.y = sceneBounds.y + sceneBounds.h / 2;
     cam.scale = BASE_SCALE;
+    alignToGrid();
     dirtyRef.current = true;
-  }, [sceneBounds]);
+  }, [sceneBounds, alignToGrid]);
 
   // Theme resolution.
   useEffect(() => {
@@ -177,11 +209,20 @@ export default function CanvasHost({
       canvas.width = Math.max(1, Math.round(w * dpr));
       canvas.height = Math.max(1, Math.round(h * dpr));
       viewportRef.current = { width: w, height: h, dpr: canvas.width / w };
+      // Align immediately on the first sizing (so the initial view is flush),
+      // but debounce later resizes — aligning mid-drag would jitter the content
+      // as the dock is resized (UI_OVERHAUL §41).
+      if (!seenSizeRef.current) {
+        seenSizeRef.current = true;
+        alignToGrid();
+      } else {
+        scheduleAlign();
+      }
       dirtyRef.current = true;
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [alignToGrid, scheduleAlign]);
 
   // Render loop.
   useEffect(() => {
@@ -241,11 +282,12 @@ export default function CanvasHost({
         Math.exp(-e.deltaY * 0.0015),
         viewportRef.current,
       );
+      scheduleAlign();
       dirtyRef.current = true;
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [scheduleAlign]);
 
   // Space held = pan mode (with left button).
   useEffect(() => {
@@ -415,6 +457,7 @@ export default function CanvasHost({
           e.currentTarget.releasePointerCapture(e.pointerId);
           if (panRef.current !== null) {
             panRef.current = null;
+            alignToGrid();
             return;
           }
           const pending = pendingRef.current;

@@ -1300,6 +1300,41 @@ body {
   color: var(--text-dim);
 }
 
+/* Splitter editor (UI_OVERHAUL §41): one row per split pin. */
+.split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.split-row input {
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  font-family: ui-monospace, monospace;
+}
+
+.split-row input:hover {
+  border-color: var(--accent);
+}
+
+.split-remove {
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+  line-height: 1.2rem;
+}
+
 .bitsize-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);

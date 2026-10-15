@@ -427,29 +427,129 @@ export default function InspectorPanel({
   );
 }
 
-/** `splits` object → `pin: bit,bit` lines (UI_OVERHAUL §18). */
-function splitsToText(value: unknown): string {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return "";
-  return Object.entries(value as Record<string, unknown>)
-    .map(([name, bits]) => `${name}: ${Array.isArray(bits) ? bits.join(",") : ""}`)
-    .join("\n");
+/** One splitter-pin row in the editor's local state (UI_OVERHAUL §41). */
+interface SplitRow {
+  name: string;
+  /** Comma-separated bit indices, kept as text while editing. */
+  bits: string;
 }
 
-/** `pin: bit,bit` lines → a `splits` object (null when nothing parses). */
-function textToSplits(text: string): Record<string, number[]> | null {
+function splitsToRows(value: unknown): SplitRow[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>).map(([name, bits]) => ({
+    name,
+    bits: Array.isArray(bits) ? bits.join(", ") : "",
+  }));
+}
+
+function rowsToSplits(rows: readonly SplitRow[]): Record<string, number[]> | null {
   const out: Record<string, number[]> = {};
-  for (const line of text.split("\n")) {
-    const colon = line.indexOf(":");
-    if (colon <= 0) continue;
-    const name = line.slice(0, colon).trim();
-    const bits = line
-      .slice(colon + 1)
+  for (const r of rows) {
+    const name = r.name.trim();
+    if (name === "") continue;
+    out[name] = r.bits
       .split(",")
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isInteger(n) && n >= 0);
-    if (name !== "") out[name] = bits;
   }
   return Object.keys(out).length === 0 ? null : out;
+}
+
+/**
+ * Structured splitter editor (UI_OVERHAUL §41): one row per split pin with a
+ * name and its bus-bit indices, plus add/remove — instead of a raw text box.
+ * Text edits commit on blur/Enter (NOT per keystroke: a rename would drop the
+ * old pin and prune its wires); add/remove commit immediately.
+ */
+function SplitsField({
+  value,
+  label,
+  onCommit,
+}: {
+  value: unknown;
+  label: string;
+  onCommit: (v: Record<string, number[]>) => void;
+}) {
+  const [rows, setRows] = useState<SplitRow[]>(() => splitsToRows(value));
+  const serialized = JSON.stringify(value ?? null);
+  useEffect(() => {
+    setRows(splitsToRows(JSON.parse(serialized)));
+  }, [serialized]);
+
+  const commit = (next: SplitRow[]): void => {
+    setRows(next);
+    const parsed = rowsToSplits(next);
+    if (parsed !== null) onCommit(parsed);
+  };
+
+  const bitCount = new Set(
+    rows.flatMap((r) =>
+      r.bits
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== ""),
+    ),
+  ).size;
+
+  return (
+    <div className="inspector-field">
+      <span className="inspector-field-label">{label}</span>
+      <div className="split-rows">
+        {rows.map((r, i) => (
+          <div className="split-row" key={i}>
+            <input
+              className="split-name"
+              value={r.name}
+              placeholder="pin"
+              spellCheck={false}
+              aria-label={`Split pin ${i + 1} name`}
+              onChange={(e) =>
+                setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
+              }
+              onBlur={() => commit(rows)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+            <input
+              className="split-bits"
+              value={r.bits}
+              placeholder="0, 1"
+              spellCheck={false}
+              aria-label={`Split pin ${i + 1} bits`}
+              onChange={(e) =>
+                setRows(rows.map((x, j) => (j === i ? { ...x, bits: e.target.value } : x)))
+              }
+              onBlur={() => commit(rows)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+            <button
+              className="secondary split-remove"
+              aria-label={`Remove split pin ${r.name || i + 1}`}
+              disabled={rows.length <= 1}
+              onClick={() => commit(rows.filter((_, j) => j !== i))}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="inspector-buttons inspector-buttons-full">
+        <button
+          className="secondary"
+          onClick={() => commit([...rows, { name: `b${rows.length}`, bits: "" }])}
+        >
+          Add pin
+        </button>
+      </div>
+      <p className="settings-hint inspector-hint">
+        {rows.length} pin{rows.length === 1 ? "" : "s"} · bus {bitCount} bit
+        {bitCount === 1 ? "" : "s"}
+      </p>
+    </div>
+  );
 }
 
 function FieldRow({
@@ -521,25 +621,8 @@ function FieldRow({
   }
 
   if (field.kind === "splits") {
-    const text = draft?.key === key ? draft.text : splitsToText(value);
     return (
-      <label className="inspector-field">
-        <span className="inspector-field-label">{field.label}</span>
-        <textarea
-          className="inspector-textarea"
-          value={text}
-          rows={4}
-          spellCheck={false}
-          placeholder={field.placeholder}
-          onChange={(e) => onDraft({ key, text: e.target.value })}
-          onBlur={() => {
-            if (draft?.key !== key) return;
-            const parsed = textToSplits(draft.text);
-            if (parsed !== null) onCommitAttr(field.key, parsed);
-            onDraft(null);
-          }}
-        />
-      </label>
+      <SplitsField value={value} label={field.label} onCommit={(v) => onCommitAttr(field.key, v)} />
     );
   }
 
