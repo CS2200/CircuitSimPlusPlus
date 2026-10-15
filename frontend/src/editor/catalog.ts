@@ -61,14 +61,24 @@ function uintAttr(
   return Math.max(1, Math.min(max, v));
 }
 
-/** Standard n-input gate: inputs on the left, out on the right. */
+/**
+ * Standard n-input gate: inputs on the left, out on the right. Extra inputs
+ * extend the INPUT side — the gate grows WIDER, never taller, so its body/shape
+ * keeps its size and proportions (UI_OVERHAUL §43). Two-input gates are
+ * unchanged (5×3); each input past two widens the gate by one cell.
+ */
 function gateSpec(caption: string, minInputs: number): CompSpec {
+  const count = (attrs: Readonly<Record<string, unknown>>): number =>
+    Math.max(minInputs, numAttr(attrs, "inputs", 2));
+  const widthFor = (attrs: Readonly<Record<string, unknown>>): number =>
+    5 + Math.max(0, count(attrs) - 2);
   return {
-    width: () => 5,
-    height: (attrs) => Math.max(3, numAttr(attrs, "inputs", 2) + 1),
+    width: widthFor,
+    height: () => 3,
     pins: (attrs) => {
-      const n = Math.max(minInputs, numAttr(attrs, "inputs", 2));
-      const h = Math.max(3, n + 1);
+      const n = count(attrs);
+      const h = 3;
+      const w = widthFor(attrs);
       const width = bitsOf(attrs); // bitwise multi-bit gates (DLS-style)
       const pins: PinSpec[] = [];
       for (let i = 0; i < n; i++) {
@@ -80,7 +90,7 @@ function gateSpec(caption: string, minInputs: number): CompSpec {
           bitsize: width,
         });
       }
-      pins.push({ name: "out", dx: 5, dy: h / 2, kind: "out", bitsize: width });
+      pins.push({ name: "out", dx: w, dy: h / 2, kind: "out", bitsize: width });
       return pins;
     },
     caption: () => caption,
@@ -355,6 +365,20 @@ const REGISTRY: Record<string, CompSpec> = {
     ],
     "BUF",
   ),
+  // Tri-state buffer (format-v2 §4 `wiring.controlled-buffer`, BACKEND.md B4):
+  // a buffer with an `en` control on the BOTTOM edge (§24). Exposed as the
+  // palette's BUFFER tile (UI_OVERHAUL §43).
+  "wiring.controlled-buffer": boxSpec(
+    3,
+    3,
+    [
+      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH },
+      { name: "en", dx: 1.5, dy: 3, kind: "in" },
+      { name: "out", dx: 3, dy: 1.5, kind: "out", bitsize: BUS_WIDTH },
+    ],
+    "BUF",
+    { label: "BUFFER" },
+  ),
 
   // Wiring
   // The subcircuit interface (format-v2 §5): a pin's `name` is required and
@@ -589,7 +613,9 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
       { type: "gate.or" },
       { type: "gate.xor" },
       { type: "gate.not" },
-      { type: "gate.buffer" },
+      // BUFFER is the tri-state buffer (an `en` pin) — the plain `gate.buffer`
+      // still loads in old files but is no longer offered (UI_OVERHAUL §43).
+      { type: "wiring.controlled-buffer", label: "BUFFER" },
       { type: "gate.nand" },
       { type: "gate.nor" },
       { type: "gate.xnor" },
@@ -817,6 +843,8 @@ function baseFields(type: string): AttrField[] {
       ];
     case "wiring.clock":
       return [];
+    case "wiring.controlled-buffer":
+      return [BITSIZE_FIELD];
     case "misc.text":
       // The annotation body IS this text (UI_OVERHAUL §37/§40).
       return [

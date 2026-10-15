@@ -210,6 +210,20 @@ export function gateShape(
       };
     case "gate.buffer":
       return { body: triPath(x, y, w, h), extra: [], outBubble: null };
+    case "wiring.controlled-buffer":
+      // A buffer triangle with an enable lead on the bottom edge (UI_OVERHAUL
+      // §43): the extra stroke connects the body's lower slanted edge to the
+      // `en` pin at (x + w/2, y + h).
+      return {
+        body: triPath(x, y, w, h),
+        extra: [
+          [
+            { t: "M", x: x + w / 2, y: y + (3 * h) / 4 },
+            { t: "L", x: x + w / 2, y: y + h },
+          ],
+        ],
+        outBubble: null,
+      };
     case "plexers.mux":
       return { body: trapPath(x, y, w, h, true), extra: [], outBubble: null };
     case "plexers.demux":

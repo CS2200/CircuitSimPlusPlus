@@ -159,6 +159,9 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 ⚠️¹ `wiring.controlled-buffer` is required by BACKEND.md B4 ("controlled buffer (tri-state)")
 and §4.1's tri-state semantics but is absent from the pinned registry list in
 `docs/tasks/README.md` §4 — flagged to the human; the name is this document's assignment.
+The editor offers it as the Gates palette's **BUFFER** tile (`en` on the bottom edge);
+the plain `gate.buffer` still loads in existing files but is no longer placeable
+(UI_OVERHAUL §43).
 
 **Deviations from the DESIGN.md §5.2 sketch** (sketch is illustrative, this table is
 normative): gate inputs are named `in0`, `in1`, … (not `a`, `b`).

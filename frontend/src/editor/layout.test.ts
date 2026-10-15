@@ -22,7 +22,10 @@ describe("catalog", () => {
     expect(two.filter((p) => p.kind === "in")).toHaveLength(2);
     const four = compPins({ type: "gate.and", attrs: { inputs: 4 } });
     expect(four.filter((p) => p.kind === "in")).toHaveLength(4);
-    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(5);
+    // Extra inputs widen the gate; the height never changes (UI_OVERHAUL §43).
+    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(3);
+    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).w).toBe(7);
+    expect(compSize({ type: "gate.and" }).w).toBe(5);
   });
 
   it("plexer pin sets scale with the select width (format-v2 §4 attrs)", () => {

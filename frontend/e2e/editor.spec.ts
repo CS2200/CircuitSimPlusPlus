@@ -208,3 +208,17 @@ test("splitter: the Inspector edits split pins structurally (not a text box)", a
   await page.getByRole("button", { name: "Add pin" }).click();
   await expect(page.locator(".split-row")).toHaveCount(rows + 1);
 });
+
+test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ page }) => {
+  await page.goto("/");
+  // Gates is the default group; the tile is the renamed Buf → BUFFER.
+  await page.getByRole("button", { name: "BUFFER", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  const d = await doc(page);
+  const buf = d.circuits[0].components.find((c) => c.type === "wiring.controlled-buffer");
+  expect(buf).toBeTruthy();
+  // It carries the bit-width field (the `in`/`out` bus).
+  await expect(page.locator(".inspector-id")).toBeVisible();
+});

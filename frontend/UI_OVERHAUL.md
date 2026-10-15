@@ -1262,3 +1262,22 @@ Google-Docs-style persistence.
 **Acceptance:** 303 unit / 48 e2e green; Rust 171 core + 12 CLI + 8 golden + 17
 app (two new tier tests: a day-old stretch thins to ~one per 5 minutes, a
 month-old one to one a day).
+
+## 43. Follow-up batch AH (2026-10-16): wider gates, the BUFFER tile
+
+- **A gate grows wider, never taller.** `gateSpec` now fixes the body height at 3
+  and widens the gate by one cell per input past two (`width = 5 + max(0, n-2)`),
+  with the input pins distributed down the (fixed) left edge. Two-input gates are
+  byte-for-byte the same as before (5×3); the AND/OR arc no longer stretches into
+  a tall bulb as inputs climb (UI_OVERHAUL §43). `layout.test` pins the 4-input
+  size at 7×3.
+- **Buf → BUFFER, with an enable.** The Gates palette's `BUF` tile is now
+  **BUFFER**, placing the engine's tri-state `wiring.controlled-buffer`
+  (`in`/`en`/`out`, `en` on the BOTTOM edge per §24) with a buffer triangle plus
+  an enable lead (`shapes.ts`). The frontend registry previously had no spec for
+  this engine type — it was unreachable from the UI. The plain `gate.buffer`
+  still loads (demo circuits use it) but is no longer offered. See
+  `docs/format-v2.md` §4's ⚠️¹ note.
+
+**Acceptance:** frontend lint / 302 unit / build green; 51-of-51 e2e green; Rust
+171 core + 12 CLI + 8 golden, clippy/fmt clean.
