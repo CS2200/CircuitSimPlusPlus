@@ -234,14 +234,27 @@ body {
 
 /* ---- resizable side panels (UI_OVERHAUL §7) ---- */
 
+/* Overlays on the work area's edges: no layout footprint, so the canvas
+ * geometry (and the visual-regression baselines) do not depend on the
+ * handles. */
 .resize-handle {
-  flex: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
   width: 5px;
+  z-index: 5;
   cursor: col-resize;
-  position: relative;
   touch-action: none;
   user-select: none; /* double-clicks must not start a text-selection drag */
   background: transparent;
+}
+
+.resize-handle.left {
+  left: 0;
+}
+
+.resize-handle.right {
+  right: 0;
 }
 
 .resize-handle::after {

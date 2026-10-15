@@ -654,14 +654,6 @@ export default function App() {
                 </div>
               )}
             </aside>
-            <ResizeHandle
-              panel="palette"
-              side="left"
-              width={panelWidths.palette}
-              defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
-              onResize={(w) => resizePanel("palette", w)}
-              onCommit={(w) => commitPanel("palette", w)}
-            />
             <div className="editor-wrap">
               <EditorCanvas
                 ref={editorRef}
@@ -675,15 +667,24 @@ export default function App() {
                 pathIds={pathIds}
                 violations={violationMarkers}
               />
+              {/* Panel separators: edge overlays (no layout footprint). */}
+              <ResizeHandle
+                panel="palette"
+                side="left"
+                width={panelWidths.palette}
+                defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
+                onResize={(w) => resizePanel("palette", w)}
+                onCommit={(w) => commitPanel("palette", w)}
+              />
+              <ResizeHandle
+                panel="dock"
+                side="right"
+                width={panelWidths.dock}
+                defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
+                onResize={(w) => resizePanel("dock", w)}
+                onCommit={(w) => commitPanel("dock", w)}
+              />
             </div>
-            <ResizeHandle
-              panel="dock"
-              side="right"
-              width={panelWidths.dock}
-              defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
-              onResize={(w) => resizePanel("dock", w)}
-              onCommit={(w) => commitPanel("dock", w)}
-            />
             <RightDock
               tab={dockTab}
               onTab={setDockTab}

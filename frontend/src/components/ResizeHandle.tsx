@@ -4,6 +4,10 @@ import { PANEL_LIMITS, clampPanelWidth, type PanelId } from "../panels";
 /**
  * Draggable vertical separator for a side panel (UI_OVERHAUL.md §7).
  *
+ * The handle is an OVERLAY on the work area's edge (absolute, no layout
+ * footprint — the canvas geometry is identical whether or not the panels
+ * are resizable, which also keeps the visual-regression baselines stable).
+ *
  * `side` names where the panel sits relative to the work area: a "left"
  * panel (the palette) grows with rightward drags; a "right" panel (the
  * dock) grows with leftward drags. The handle is keyboard-accessible
@@ -47,7 +51,7 @@ export default function ResizeHandle({
 
   return (
     <div
-      className={`resize-handle${dragging ? " dragging" : ""}`}
+      className={`resize-handle ${side}${dragging ? " dragging" : ""}`}
       data-panel={panel}
       role="separator"
       aria-orientation="vertical"

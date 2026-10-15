@@ -274,8 +274,10 @@ dragging the separator strip between the panel and the canvas:
 - Interaction: pointer drag with capture (live re-layout, one localStorage
   write on release); double-click resets the default; the handle is a
   focusable `role="separator"` with Arrow-key stepping (±8 px).
-- The separator line lives in the handle; the panels' former static
-  borders are gone.
+- The handles are edge **overlays** on the work area (absolute, no layout
+  footprint): the canvas geometry is identical whether or not the panels
+  are resizable, which also keeps the visual-regression baselines stable.
+  The panels' former static borders are gone.
 
 **Palette component glyphs.** Every palette entry renders a small SVG
 miniature of the component next to its name (`components/CompIcon.tsx`):
