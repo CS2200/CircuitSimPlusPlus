@@ -521,6 +521,8 @@ export class CircuitDocument {
       type?: string;
       rot?: CsxComponent["rot"];
       name?: string;
+      /** `null` clears the override (the part follows the app default again). */
+      namePos?: CsxComponent["namePos"] | null;
       attrs?: Record<string, unknown>;
     },
     coalesceKey?: string,
@@ -533,8 +535,10 @@ export class CircuitDocument {
       ...(patch.type !== undefined && { type: patch.type }),
       ...(patch.rot !== undefined && { rot: patch.rot }),
       ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.namePos !== undefined && patch.namePos !== null && { namePos: patch.namePos }),
       ...(patch.attrs !== undefined && { attrs: patch.attrs }),
     };
+    if (patch.namePos === null) delete updated.namePos;
     const components = c.components.map((x) => (x.id === id ? updated : x));
 
     let wires = c.wires;

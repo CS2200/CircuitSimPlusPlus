@@ -682,7 +682,7 @@ export class DocScene {
         }
         // shaped bodies have no caption — a named part shows its name beside it
         if (comp.name !== undefined && comp.name !== "") {
-          const na = labelAnchor(layout.rect, labelPos);
+          const na = labelAnchor(layout.rect, comp.namePos ?? labelPos);
           renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,
@@ -737,7 +737,7 @@ export class DocScene {
         }
         if (valueText !== null) caption = valueText;
         if (comp.name !== undefined && comp.name !== "") {
-          const na = labelAnchor(layout.rect, labelPos);
+          const na = labelAnchor(layout.rect, comp.namePos ?? labelPos);
           renderer.drawText(na.x, na.y, comp.name, {
             color: theme.textDim,
             size: 0.9,

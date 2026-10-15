@@ -157,16 +157,18 @@ export default function SettingsDialog({
     </div>
   );
 
-  // Name labels are drawn around each body (UI_OVERHAUL §28); the choice is a
-  // display preference, so a global setting keeps the `.csx` format untouched.
+  // All parts follow this side unless one overrides it from the Inspector,
+  // which stores the per-part `namePos` field (UI_OVERHAUL §28).
   const choosePos = (): JSX.Element => (
     <div className="settings-row">
       <span className="settings-row-label">
-        Name position
-        <span className="settings-hint">Which side of a part its name is drawn on.</span>
+        Default name position
+        <span className="settings-hint">
+          Which side a part's name is drawn on. Each part can override this in the Inspector.
+        </span>
       </span>
       <Select
-        label="Name position"
+        label="Default name position"
         value={labelPos}
         options={[
           { value: "N", label: "Above" },

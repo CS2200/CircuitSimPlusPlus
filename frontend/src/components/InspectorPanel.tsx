@@ -31,6 +31,7 @@ type Patch = {
   type?: string;
   rot?: CsxComponent["rot"];
   name?: string;
+  namePos?: CsxComponent["namePos"] | null;
   attrs?: Record<string, unknown>;
 };
 
@@ -219,6 +220,11 @@ export default function InspectorPanel({
   const commitRot = (rot: CsxComponent["rot"]) => {
     if (rot !== (comp.rot ?? "E")) commit({ rot }, "rot");
   };
+  /** Per-part name-label side; empty selection clears the override (§28). */
+  const commitNamePos = (side: CsxComponent["namePos"] | null) => {
+    if (side === (comp.namePos ?? null)) return;
+    commit({ namePos: side }, "namePos");
+  };
   const commitType = (type: string) => {
     if (type !== comp.type) commit({ type }, "type");
   };
@@ -325,6 +331,22 @@ export default function InspectorPanel({
             { value: "N", label: "North" },
           ]}
           onChange={(rot) => commitRot(rot as CsxComponent["rot"])}
+        />
+      </div>
+
+      <div className="inspector-row">
+        <span>Label side</span>
+        <Select
+          label="Label side"
+          value={comp.namePos ?? ""}
+          options={[
+            { value: "", label: "Default" },
+            { value: "N", label: "Above" },
+            { value: "S", label: "Below" },
+            { value: "W", label: "Left" },
+            { value: "E", label: "Right" },
+          ]}
+          onChange={(side) => commitNamePos(side === "" ? null : (side as CsxComponent["namePos"]))}
         />
       </div>
 
