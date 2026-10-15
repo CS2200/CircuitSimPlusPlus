@@ -31,6 +31,10 @@ const PULSE_MAX_EFF_HZ = 120;
 export interface EditorStatus {
   cursor: Vec2 | null;
   selection: number;
+  /** Selected component ids at report time (one → the Inspector shows it). */
+  selectedComponents: readonly string[];
+  /** Document revision at report time (invalidates external edits/undo). */
+  revision: number;
   dirty: boolean;
   placing: string | null;
   busy: boolean;
@@ -191,6 +195,8 @@ export default forwardRef<
     onStatus?.({
       cursor: cursorRef.current,
       selection: sel.size,
+      selectedComponents: [...sel.components],
+      revision: doc.revision,
       dirty: doc.dirty,
       placing: tool.placingType,
       busy: tool.isBusy,
@@ -242,7 +248,13 @@ export default forwardRef<
         tool.startPlacing(type, sticky, attrs);
         bump();
       },
-      refresh: () => bump(),
+      refresh: () => {
+        // Repaint AND re-report synchronously: out-of-band doc mutations
+        // (inspector commits) must land in the SAME batch they were made in,
+        // so the Inspector reflects them without a one-frame flicker.
+        bump();
+        report();
+      },
       placeAt: (type, world, attrs) => {
         doc.addComponent(sheetRef.current, {
           type,
@@ -281,7 +293,7 @@ export default forwardRef<
         bump();
       },
     }),
-    [doc, tool, bump],
+    [doc, tool, bump, report],
   );
 
   return (

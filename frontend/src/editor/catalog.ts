@@ -483,7 +483,7 @@ export function isKnownType(type: string): boolean {
 // ---- property editing (double-click dialog, FRONTEND.md U3 UX) ----
 
 export type AttrField =
-  | { key: string; label: string; kind: "number"; min: number; max: number }
+  | { key: string; label: string; kind: "number"; min: number; max: number; placeholder?: string }
   | { key: string; label: string; kind: "text" }
   | { key: string; label: string; kind: "boolean" }
   | { key: string; label: string; kind: "select"; options: { value: string; label: string }[] };
@@ -494,6 +494,7 @@ const BITSIZE_FIELD: AttrField = {
   kind: "number",
   min: 1,
   max: 32,
+  placeholder: "1", // format-v2 default
 };
 
 /** Attr fields the properties dialog shows per type (attrs.* in the .csx schema). */
@@ -501,7 +502,14 @@ export function editableAttrs(type: string): AttrField[] {
   if (type.startsWith("gate.")) {
     const fields = [BITSIZE_FIELD];
     if (type !== "gate.not" && type !== "gate.buffer") {
-      fields.push({ key: "inputs", label: "Inputs", kind: "number", min: 2, max: 8 });
+      fields.push({
+        key: "inputs",
+        label: "Inputs",
+        kind: "number",
+        min: 2,
+        max: 8,
+        placeholder: "2",
+      });
     }
     return fields;
   }
@@ -525,7 +533,7 @@ export function editableAttrs(type: string): AttrField[] {
     case "wiring.constant":
       return [
         BITSIZE_FIELD,
-        { key: "value", label: "Value", kind: "number", min: 0, max: 4294967295 },
+        { key: "value", label: "Value", kind: "number", min: 0, max: 4294967295, placeholder: "0" },
       ];
     case "wiring.probe":
       return [
@@ -548,7 +556,7 @@ export function editableAttrs(type: string): AttrField[] {
     case "plexers.decoder":
       return [
         BITSIZE_FIELD,
-        { key: "selBits", label: "Select bits", kind: "number", min: 1, max: 4 },
+        { key: "selBits", label: "Select bits", kind: "number", min: 1, max: 4, placeholder: "1" },
       ];
     case "mem.register":
       return [BITSIZE_FIELD];
@@ -556,7 +564,14 @@ export function editableAttrs(type: string): AttrField[] {
     case "mem.rom":
       return [
         BITSIZE_FIELD,
-        { key: "depth", label: "Depth (words)", kind: "number", min: 1, max: 65536 },
+        {
+          key: "depth",
+          label: "Depth (words)",
+          kind: "number",
+          min: 1,
+          max: 65536,
+          placeholder: "256",
+        },
         { key: "autoload", label: "Autoload file", kind: "text" },
       ];
     case "subcircuit":

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { expectScreenshot } from "./screenshots";
 
 /**
  * U5 acceptance (mock side): the full sim control loop against the in-page
@@ -25,6 +26,10 @@ function simState(page: Page): Promise<SimState> {
 }
 
 test.beforeEach(async ({ page }) => {
+  // Pin the dark palette: these screenshots validate the classic dark
+  // rendering (UI_OVERHAUL §4 — theme-picker coverage lives in the
+  // visual/settings specs).
+  await page.addInitScript(() => localStorage.setItem("csx.theme", "dark"));
   await page.goto("/?simdemo=1");
 });
 
@@ -102,12 +107,12 @@ test("sim shortcuts: Ctrl+J tick, Ctrl+K run/pause, Ctrl+R reset", async ({ page
   await expect(page.locator(".toast")).toContainText("Reset");
 });
 
-test("U5: wires render in sim state colors (lit-circuit baseline)", async ({ page }) => {
+test("U5: wires render in sim state colors (lit-circuit baseline)", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "tick", exact: true }).click(); // clk high, bus driven
   await expect.poll(() => simState(page)).toMatchObject({ loaded: true, cycle: 0 });
   await page.waitForTimeout(600); // let propagation pulses expire (deterministic baseline)
   await page.addStyleTag({ content: ".canvas-overlay { display: none }" });
-  await expect(page.locator(".editor-wrap")).toHaveScreenshot("sim-lit.png", {
+  await expectScreenshot(page.locator(".editor-wrap"), testInfo, "sim-lit.png", {
     maxDiffPixelRatio: 0.02,
   });
 });

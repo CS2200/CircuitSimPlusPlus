@@ -41,18 +41,20 @@ async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y
 test("U6: autoload → poke-modify → reset restores the image (with toast)", async ({ page }) => {
   await page.goto("/?simdemo=1");
 
-  // Set the autoload image on imem through the properties dialog.
+  // Set the autoload image on imem through the Inspector (right dock).
   const imemCenter = await world(page, 7, 17); // imem body center
-  await page.mouse.dblclick(imemCenter.x, imemCenter.y);
-  const dialog = page.locator(".prop-dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.locator('.prop-row:has-text("Autoload") input').fill("hex:0a 0b 0c");
-  await dialog.getByRole("button", { name: "Apply" }).click();
-  await expect(dialog).not.toBeVisible();
+  await page.mouse.click(imemCenter.x, imemCenter.y);
+  const inspector = page.locator(".inspector");
+  await expect(inspector).toBeVisible();
+  const autoload = inspector.locator('.inspector-row:has-text("Autoload") input');
+  await autoload.fill("hex:0a 0b 0c");
+  await autoload.press("Enter");
 
-  // Load (any command loads) and open the inspector from the watch panel.
+  // Load (any command loads); the selection opened the Inspector tab, so
+  // switch the right dock to Watch and open the memory inspector.
   await page.getByRole("button", { name: "tick", exact: true }).click();
   await expect.poll(() => simState(page)).toMatchObject({ loaded: true });
+  await page.getByRole("tab", { name: "Watch" }).click();
   await page.locator('[data-watch="imem"] .watch-mem').click();
   const grid = page.locator('.memory-inspector[data-mem="imem"] .mem-grid');
   await expect(grid).toBeVisible();

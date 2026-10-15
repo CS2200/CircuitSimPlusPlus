@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { expectScreenshot } from "./screenshots";
 
 /**
  * U7 (UI side): timing_update → T_obs banner → click highlights the
@@ -18,7 +19,13 @@ interface TimingUpdate {
   top_paths: { circuit: string; comps: number[]; delay_ns: number }[];
 }
 
-test("U7: T_obs banner toggles the critical-path highlight", async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  // Pin the dark palette so the committed screenshots keep validating it
+  // (UI_OVERHAUL §4; theme coverage lives in the visual/settings specs).
+  await page.addInitScript(() => localStorage.setItem("csx.theme", "dark"));
+});
+
+test("U7: T_obs banner toggles the critical-path highlight", async ({ page }, testInfo) => {
   await page.goto("/?simdemo=1");
   await page.locator(".sim-runto input").fill("10");
   await page.getByRole("button", { name: "run to" }).click();
@@ -32,7 +39,7 @@ test("U7: T_obs banner toggles the critical-path highlight", async ({ page }) =>
   // Let pulses from the run expire so the baseline is deterministic.
   await page.waitForTimeout(800);
   await page.addStyleTag({ content: ".canvas-overlay { display: none }" });
-  await expect(page.locator(".editor-wrap")).toHaveScreenshot("timing-path.png", {
+  await expectScreenshot(page.locator(".editor-wrap"), testInfo, "timing-path.png", {
     maxDiffPixelRatio: 0.02,
   });
   await tobs.click();
@@ -41,7 +48,7 @@ test("U7: T_obs banner toggles the critical-path highlight", async ({ page }) =>
 
 test("U7 (v1.1): setup violation → count badge + current-sheet register marker", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto("/?simdemo=1");
   await page.locator(".sim-runto input").fill("10");
   await page.getByRole("button", { name: "run to" }).click();
@@ -70,7 +77,7 @@ test("U7 (v1.1): setup violation → count badge + current-sheet register marker
   // The marker renders on the canvas (ring + ⚠setup tag on the register).
   await page.waitForTimeout(800); // pulses expire → deterministic pixels
   await page.addStyleTag({ content: ".canvas-overlay { display: none }" });
-  await expect(page.locator(".editor-wrap")).toHaveScreenshot("timing-violation.png", {
+  await expectScreenshot(page.locator(".editor-wrap"), testInfo, "timing-violation.png", {
     maxDiffPixelRatio: 0.02,
   });
 });

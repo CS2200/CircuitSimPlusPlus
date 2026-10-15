@@ -13,7 +13,18 @@ export default function WatchPanel({ ctl }: { ctl: SimController }) {
   const [inspect, setInspect] = useState<string | null>(null);
   const named = ctl.store.named;
 
-  if (!ctl.store.loaded || named.length === 0) return null;
+  if (!ctl.store.loaded || named.length === 0) {
+    return (
+      <div className="watch-panel">
+        <div className="palette-group-title">Watch</div>
+        <p className="watch-empty">
+          {ctl.store.loaded
+            ? "No named components in this circuit — name its probes, registers, or memories (Inspector) to watch them here."
+            : "Load a circuit (any sim command) to watch its named probes, registers, and memories."}
+        </p>
+      </div>
+    );
+  }
 
   const cycleMode = (name: string) => {
     const order: ValueMode[] = ["unsigned", "signed", "hex"];
@@ -23,7 +34,7 @@ export default function WatchPanel({ ctl }: { ctl: SimController }) {
   };
 
   return (
-    <aside className="watch-panel">
+    <div className="watch-panel">
       <div className="palette-group-title">Watch</div>
       {named.map((n) => {
         const mode = modes.get(n.name) ?? "hex";
@@ -60,6 +71,6 @@ export default function WatchPanel({ ctl }: { ctl: SimController }) {
       {inspect !== null && (
         <MemoryInspector ctl={ctl} name={inspect} onClose={() => setInspect(null)} />
       )}
-    </aside>
+    </div>
   );
 }

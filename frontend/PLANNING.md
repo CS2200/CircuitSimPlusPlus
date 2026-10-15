@@ -93,3 +93,16 @@ Subcircuits menu (new/rename/switch). Still open:
 - Savestate/restore buttons (contract `snapshot`/`resume` exist; mock
   implements in-memory).
 - Colorblind-accessibility theme (D8: palettes are data — drop-in).
+
+## 8. UI overhaul (M5 polish pass — spec: `UI_OVERHAUL.md`)
+
+The human-directed UI pass (right/Shift pan gestures, OLED theme + Settings
+picker, right-dock Inspector replacing the double-click modal) is specified
+in `UI_OVERHAUL.md` next to this file. It re-checked the items above:
+
+- §2 file menu is unaffected; property editing moved from the modal dialog
+  to the dock's **Inspector** tab (selection-driven).
+- §3 contract gaps stay resolved — no IPC changes in the overhaul.
+- §4 mock conventions unchanged.
+- §7 colorblind theme remains a data drop-in (now literally: one CSS block
+  - one catalog entry in `src/theme.ts`).

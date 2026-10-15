@@ -232,14 +232,15 @@ describe("hover + info + double-click", () => {
     expect(tool.overlay().wireInfo).toBeNull();
   });
 
-  it("double-click on a component fires onEditComponent", () => {
-    const { tool } = setup();
+  it("double-click on a component selects it and fires onEditComponent", () => {
+    const { sel, tool } = setup();
     let edited: string | null = null;
     tool.onEditComponent = (id) => {
       edited = id;
     };
     tool.doubleClick({ x: 12, y: 11 }); // AND body
     expect(edited).toBe("c1");
+    expect(sel.components.has("c1")).toBe(true);
     tool.doubleClick({ x: 50, y: 40 }); // empty
     expect(edited).toBe("c1"); // unchanged
   });
@@ -280,6 +281,17 @@ describe("selection + drag", () => {
     expect(sel.components.size).toBe(2);
     // no wires yet — both comps selected but nothing wired
     expect(sel.wires.size).toBe(0);
+  });
+
+  it("Ctrl+box select adds to the existing selection (Shift now pans)", () => {
+    const { sel, tool } = setup();
+    tool.down({ x: 12, y: 11 }, PI()); // select the AND
+    tool.up(PI());
+    expect(sel.components.size).toBe(1);
+    tool.down({ x: 8, y: 9 }, PI({ ctrlKey: true }));
+    tool.move({ x: 25, y: 14 });
+    tool.up(PI({ ctrlKey: true }));
+    expect(sel.components.size).toBe(2); // AND kept + NOT added
   });
 });
 

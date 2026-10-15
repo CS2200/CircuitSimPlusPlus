@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
+import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
-import PropertiesDialog from "./components/PropertiesDialog";
+import RightDock, { type DockTab } from "./components/RightDock";
+import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
 import SimBar from "./components/SimBar";
 import WatchPanel from "./components/WatchPanel";
@@ -16,7 +18,11 @@ import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
+import { loadThemePref, saveThemePref, type ThemeId } from "./theme";
 import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
+
+/** Stable empty selection while no status report has arrived yet. */
+const EMPTY_SELECTION: readonly string[] = [];
 
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
@@ -25,13 +31,15 @@ function initDoc(d: CircuitDocument): CircuitDocument {
 }
 
 /**
- * App shell: header + menu bar + sim transport + palette + canvas + watch
- * panel + statusbar. The circuit editor is the default view; the U1 stress
- * harness stays reachable at ?stress=1, the U4 visual showcase at ?demo=1,
- * and the U5 mock-core demo circuit at ?simdemo=1.
+ * App shell: header + menu bar + sim transport + palette + canvas + right
+ * dock (Inspector / Watch) + statusbar. The circuit editor is the default
+ * view; the U1 stress harness stays reachable at ?stress=1, the U4 visual
+ * showcase at ?demo=1, and the U5 mock-core demo circuit at ?simdemo=1.
  */
 export default function App() {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  // Theme is a persisted per-machine preference (UI_OVERHAUL §2); OLED is
+  // the default for fresh installs.
+  const [theme, setTheme] = useState<ThemeId>(loadThemePref);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
   const [stressScene] = useState(() => (stress ? StressScene.generate() : null));
@@ -51,7 +59,8 @@ export default function App() {
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
-  const [editingComp, setEditingComp] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dockTab, setDockTab] = useState<DockTab>("watch");
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [pathOn, setPathOn] = useState(false);
@@ -73,6 +82,23 @@ export default function App() {
 
   // Current sheet name (safe while a doc/sheet swap is mid-render).
   const sheetName = doc.circuits[sheet]?.name;
+
+  // Theme preference persistence (best-effort; non-fatal without storage).
+  useEffect(() => {
+    saveThemePref(theme);
+  }, [theme]);
+
+  // Right dock (UI_OVERHAUL §3.2): exactly one selected component opens the
+  // Inspector; an emptied selection hands the dock back to Watch.
+  const selectedComps = status?.selectedComponents ?? EMPTY_SELECTION;
+  const inspectorCompId = selectedComps.length === 1 ? selectedComps[0] : null;
+  const prevInspectorRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevInspectorRef.current;
+    prevInspectorRef.current = inspectorCompId;
+    if (inspectorCompId !== null && prev === null) setDockTab("inspector");
+    else if (inspectorCompId === null && prev !== null) setDockTab("watch");
+  }, [inspectorCompId]);
 
   // U7: the observed critical path (top-1) as document component ids —
   // only when its circuit is the current sheet (contract v1.1 filter).
@@ -143,7 +169,6 @@ export default function App() {
     setDoc(d);
     setFilePath(path);
     setSheet(0);
-    setEditingComp(null);
   }, []);
 
   const confirmDiscard = useCallback(() => {
@@ -522,8 +547,12 @@ export default function App() {
           <button className="secondary" onClick={() => setShowAbout(true)}>
             About
           </button>
-          <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-            {theme === "dark" ? "Light" : "Dark"} theme
+          <button
+            className="secondary"
+            onClick={() => setSettingsOpen(true)}
+            title="Settings — theme and appearance"
+          >
+            Settings
           </button>
         </div>
       </header>
@@ -611,14 +640,28 @@ export default function App() {
                 themeName={theme}
                 sheetIdx={sheet}
                 onStatus={onStatus}
-                onEditComponent={setEditingComp}
+                onEditComponent={() => setDockTab("inspector")}
                 onOpenSubcircuit={onOpenSubcircuit}
                 sim={sim}
                 pathIds={pathIds}
                 violations={violationMarkers}
               />
             </div>
-            <WatchPanel ctl={sim} />
+            <RightDock
+              tab={dockTab}
+              onTab={setDockTab}
+              inspector={
+                <InspectorPanel
+                  doc={doc}
+                  compId={inspectorCompId}
+                  selectionCount={selectedComps.length}
+                  circuitIdx={sheet}
+                  circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
+                  onEdit={() => editorRef.current?.refresh()}
+                />
+              }
+              watch={<WatchPanel ctl={sim} />}
+            />
           </>
         )}
       </main>
@@ -638,19 +681,6 @@ export default function App() {
         )}
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
-      {editingComp !== null && (
-        <PropertiesDialog
-          doc={doc}
-          compId={editingComp}
-          circuitIdx={sheet}
-          circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
-          onClose={() => {
-            setEditingComp(null);
-            // The dialog mutates the doc out-of-band; repaint the canvas.
-            editorRef.current?.refresh();
-          }}
-        />
-      )}
       {nameDialog !== null && (
         <NameDialog
           title={nameDialog.title}
@@ -668,6 +698,9 @@ export default function App() {
         ))}
       </div>
       {showAbout && <AboutCard onClose={() => setShowAbout(false)} />}
+      {settingsOpen && (
+        <SettingsDialog theme={theme} onTheme={setTheme} onClose={() => setSettingsOpen(false)} />
+      )}
       <UpdateNudge />
       {showHelp && (
         <div className="help-overlay" onClick={() => setShowHelp(false)}>
@@ -692,12 +725,16 @@ export default function App() {
                   <td>select (Shift toggles)</td>
                 </tr>
                 <tr>
+                  <td>Inspector (right dock)</td>
+                  <td>edits the selected component — applies live</td>
+                </tr>
+                <tr>
                   <td>Drag component</td>
                   <td>move selection (wires follow)</td>
                 </tr>
                 <tr>
                   <td>Drag empty space</td>
-                  <td>box select</td>
+                  <td>box select (Ctrl/Shift adds)</td>
                 </tr>
                 <tr>
                   <td>R</td>
@@ -760,7 +797,11 @@ export default function App() {
                   <td>zoom at cursor</td>
                 </tr>
                 <tr>
-                  <td>Space+drag / middle-drag</td>
+                  <td>Right-drag / Shift+drag</td>
+                  <td>pan (a click without moving still cancels / selects)</td>
+                </tr>
+                <tr>
+                  <td>Middle-drag / Space+drag</td>
                   <td>pan</td>
                 </tr>
               </tbody>

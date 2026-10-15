@@ -1,0 +1,31 @@
+import { expect, test } from "@playwright/test";
+
+/**
+ * UI overhaul §2 acceptance: the Settings theme picker. Selecting a card
+ * applies instantly (data-theme), marks the active card, persists to
+ * localStorage, and survives a reload. OLED is the default for a fresh
+ * profile.
+ */
+test("Settings: theme picker applies, persists, and survives reload", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // fresh default
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+
+  // The active card is marked; pick Light.
+  await expect(page.locator('[data-theme-option="oled"]')).toHaveAttribute("aria-checked", "true");
+  await page.locator('[data-theme-option="light"]').click();
+  await expect(page.locator('[data-theme-option="light"]')).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "light");
+  expect(await page.evaluate(() => localStorage.getItem("csx.theme"))).toBe("light");
+
+  // Escape closes; the choice survives a reload, and the picker reflects it.
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await page.reload();
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "light");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator('[data-theme-option="light"]')).toHaveAttribute("aria-checked", "true");
+});

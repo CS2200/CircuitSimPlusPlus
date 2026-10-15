@@ -15,7 +15,7 @@ import type { DocScene, Hit, SceneOverlay } from "./docScene";
  * (EditorCanvas) subscribes via `onChange` to re-render.
  *
  * Gestures:
- *  - click empty space         box select (Shift adds); click = clear
+ *  - click empty space         box select (Ctrl/Shift adds); click = clear
  *  - click component/wire      select (Shift toggles)
  *  - drag component body       move selection, wires glued (one undo step)
  *  - click a pin               start wiring: every further CLICK plants a
@@ -28,6 +28,10 @@ import type { DocScene, Hit, SceneOverlay } from "./docScene";
  *  - drag from a wire          start wiring with a junction at the press point
  *  - R rotate · Del delete · Ctrl+C/V copy-paste · Ctrl+A select all
  *    (undo/redo and key dispatch live in EditorCanvas/App)
+ *
+ * Pan/zoom live in CanvasHost (UI_OVERHAUL.md §1: middle-drag,
+ * Space+left-drag, right-drag, Shift+left-drag pan) — the machine only ever
+ * sees clicks and plain-left gestures.
  */
 
 type DragState =
@@ -86,7 +90,7 @@ export class ToolMachine {
   private hoverHit: Hit | null = null;
   private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
-  /** Fired when a component is double-clicked (properties dialog). */
+  /** Fired when a component is double-clicked (opens the right-dock Inspector). */
   onEditComponent?: (compId: string) => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
   onOpenSubcircuit?: (circuit: string) => void;
@@ -213,7 +217,12 @@ export class ToolMachine {
       return;
     }
 
-    this.drag = { kind: "boxing", start: world, current: world, additive: info.shiftKey };
+    this.drag = {
+      kind: "boxing",
+      start: world,
+      current: world,
+      additive: info.shiftKey || info.ctrlKey,
+    };
     this.changed();
   }
 
@@ -313,10 +322,18 @@ export class ToolMachine {
     }
   }
 
-  /** Double-click: edit a component's properties. */
+  /**
+   * Double-click: select the component and open the right-dock Inspector
+   * (UI_OVERHAUL §3.2 — kept as a shortcut; single selection alone also
+   * opens the Inspector).
+   */
   doubleClick(world: Vec2): void {
     const comp = this.scene.pickComponent(world);
-    if (comp !== null) this.onEditComponent?.(comp.compId);
+    if (comp !== null) {
+      this.selection.set([comp.compId], []);
+      this.onEditComponent?.(comp.compId);
+      this.changed();
+    }
   }
 
   // ---- commands (keyboard/menu) ----

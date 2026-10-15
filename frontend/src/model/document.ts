@@ -369,6 +369,10 @@ export class CircuitDocument {
    * referencing the vanished pins are removed too (with junction cascade)
    * — requires `pinResolver` to be set (editor layer); without it, wires
    * are left untouched.
+   *
+   * `coalesceKey` (optional): consecutive edits carrying the same key merge
+   * into one undo step — the right-dock Inspector uses per-field keys so a
+   * typing burst or a stepper spree undoes as one edit (UI_OVERHAUL §3.3).
    */
   updateComponent(
     circuitIdx: number,
@@ -379,6 +383,7 @@ export class CircuitDocument {
       name?: string;
       attrs?: Record<string, unknown>;
     },
+    coalesceKey?: string,
   ): void {
     const c = this.circuit(circuitIdx);
     const comp = c.components.find((x) => x.id === id);
@@ -408,7 +413,7 @@ export class CircuitDocument {
     }
     this.exec(
       `edit ${id}`,
-      undefined,
+      coalesceKey,
       this.replaceCircuit(circuitIdx, { ...c, components, wires }),
     );
   }

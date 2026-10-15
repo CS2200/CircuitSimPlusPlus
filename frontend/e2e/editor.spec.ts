@@ -64,13 +64,13 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].components[1]).toMatchObject({ type: "gate.not", pos: [10, 0] });
   const [and, not] = d.circuits[0].components.map((c) => c.id);
 
-  // ---- double-click the AND → properties dialog → rename + bitsize ----
+  // ---- click the AND → Inspector (right dock) → rename + bitsize ----
   const body = await world(page, 2.5, 1.5);
-  await page.mouse.dblclick(body.x, body.y);
-  await expect(page.getByRole("heading", { name: /c1/ })).toBeVisible();
+  await page.mouse.click(body.x, body.y);
+  await expect(page.locator(".inspector-id")).toHaveText("c1");
   await page.getByLabel("Name").fill("my-and");
+  await page.getByLabel("Name").press("Enter");
   await page.getByLabel("Bit size").fill("8");
-  await page.getByRole("button", { name: "Apply" }).click();
   d = await doc(page);
   expect(d.circuits[0].components[0]).toMatchObject({ name: "my-and", attrs: { bitsize: 8 } });
 

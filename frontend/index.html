@@ -1,9 +1,22 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="oled">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CircuitSim++</title>
+    <script>
+      // Apply the persisted theme before first paint (UI_OVERHAUL §2) —
+      // no white/dark flash on startup. App.tsx owns the live preference;
+      // this only mirrors it onto <html> for the initial frame.
+      try {
+        var t = localStorage.getItem("csx.theme");
+        if (t === "oled" || t === "dark" || t === "light") {
+          document.documentElement.dataset.theme = t;
+        }
+      } catch (e) {
+        /* storage unavailable — keep the OLED default */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

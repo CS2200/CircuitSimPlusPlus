@@ -12,8 +12,13 @@ import { FALLBACK_THEME, resolveTheme, type Theme } from "../render/theme";
  * every frame), a 2 Hz perf overlay, and pointer plumbing that translates
  * DOM events into WORLD coordinates for the scene's tool handlers.
  *
- * Pan: middle-drag, or Space + left-drag. Zoom: wheel (anchored at cursor).
- * Left/right clicks and hovers go to the scene handlers.
+ * Pan (UI_OVERHAUL.md §1): middle-drag, Space+left-drag, right-drag, and
+ * Shift+left-drag. The two "click-or-pan" buttons (right, Shift+left) are
+ * disambiguated by a small movement threshold: a press that never moves is
+ * delivered to the scene as a click (synthesized down(+up) for Shift+left,
+ * down for right), a press that moves pans the camera instead — so
+ * right-click cancel/subcircuit-jump and Shift+click keep their meaning.
+ * Zoom: wheel (anchored at cursor).
  *
  * React never re-renders on the 60 FPS path — camera/viewport/sim-adjacent
  * state lives in refs; `revision` is the external "model changed" signal.
@@ -87,6 +92,17 @@ interface CircuitBenchWindow extends Window {
 const BASE_SCALE = 16;
 const FRAME_SAMPLE_CAP = 240;
 
+/** Screen-px movement before a right / Shift+left press becomes a pan. */
+const PAN_THRESHOLD_PX = 4;
+
+/** A press held back until it's known to be a click, not a pan. */
+interface PendingPan {
+  x: number;
+  y: number;
+  /** The mouse button of the press (2 = right, 0 = left). */
+  button: number;
+}
+
 export default function CanvasHost({
   draw,
   animate = false,
@@ -111,6 +127,7 @@ export default function CanvasHost({
   const drawRef = useRef(draw);
   drawRef.current = draw;
   const panRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingRef = useRef<PendingPan | null>(null);
   const spaceRef = useRef(false);
   const framesRef = useRef<FrameSample[]>([]);
   const benchRef = useRef<BenchState | null>(null);
@@ -338,10 +355,19 @@ export default function CanvasHost({
       <canvas
         ref={canvasRef}
         className="circuit-canvas"
+        onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);
           if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
             panRef.current = { x: e.clientX, y: e.clientY };
+            return;
+          }
+          // Right-drag and Shift+left-drag PAN (UI_OVERHAUL §1): hold the
+          // press back until we know it isn't a drag. Released without
+          // movement, the scene gets a synthesized click, so right-click
+          // cancel / subcircuit jump and Shift+click keep working.
+          if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey && !e.metaKey)) {
+            pendingRef.current = { x: e.clientX, y: e.clientY, button: e.button };
             return;
           }
           onPointerDown?.(worldOf(e), infoOf(e));
@@ -355,6 +381,20 @@ export default function CanvasHost({
             dirtyRef.current = true;
             return;
           }
+          const pending = pendingRef.current;
+          if (pending !== null) {
+            const dx = e.clientX - pending.x;
+            const dy = e.clientY - pending.y;
+            if (Math.hypot(dx, dy) >= PAN_THRESHOLD_PX) {
+              // Pan by the full press delta so content tracks the cursor
+              // from the press point (the threshold only gates intent).
+              pendingRef.current = null;
+              cameraRef.current.panByScreen(dx, dy);
+              panRef.current = { x: e.clientX, y: e.clientY };
+              dirtyRef.current = true;
+            }
+            return;
+          }
           const world = worldOf(e);
           if (e.buttons === 0) onHover?.(world);
           else onPointerMove?.(world, infoOf(e));
@@ -365,7 +405,22 @@ export default function CanvasHost({
             panRef.current = null;
             return;
           }
+          const pending = pendingRef.current;
+          if (pending !== null) {
+            // Never moved: this was a click, not a pan. Deliver it whole
+            // (left: down+up; right: down only — up is a no-op for it).
+            pendingRef.current = null;
+            const world = worldOf(e);
+            const info = { ...infoOf(e), button: pending.button };
+            onPointerDown?.(world, info);
+            if (pending.button === 0) onPointerUp?.(world, info);
+            return;
+          }
           onPointerUp?.(worldOf(e), infoOf(e));
+        }}
+        onPointerCancel={() => {
+          pendingRef.current = null;
+          panRef.current = null;
         }}
         onDoubleClick={(e) => {
           onDoubleClick?.(worldOf(e), infoOf(e));

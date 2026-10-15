@@ -37,6 +37,21 @@ async function openMenu(page: Page, name: string): Promise<void> {
   await expect(page.getByRole("menu", { name })).toBeVisible();
 }
 
+/** World→screen via the live camera (same helper as editor.spec). */
+async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y: number }> {
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  const cam = await page.evaluate(() =>
+    (
+      window as unknown as { __circuitCamera: () => { x: number; y: number; scale: number } }
+    ).__circuitCamera(),
+  );
+  return {
+    x: box.x + box.width / 2 + (wx - cam.x) * cam.scale,
+    y: box.y + box.height / 2 + (wy - cam.y) * cam.scale,
+  };
+}
+
 /** Place one AND gate at the canvas center (dirty-ifies the document). */
 async function placeAndGate(page: Page): Promise<void> {
   await page.getByRole("button", { name: "AND", exact: true }).click();
@@ -81,19 +96,19 @@ test("File menu: New / Open / Save-As round-trip", async ({ page }) => {
     await page.getByRole("menuitem", { name: "Open…" }).click();
     const chooser = await chooserPromise;
     await chooser.setFiles(savedPath);
-    const opened = await doc(page);
-    expect(opened.name).toBe("untitled");
-    expect(opened.circuits[0].components).toHaveLength(0);
+    // The browser reads the file asynchronously — wait for the adopted
+    // (empty) document to land; never read the doc the same tick.
     await expect(page.locator(".menubar-path")).toHaveText("saved.csx");
+    await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(0);
+    expect((await doc(page)).name).toBe("untitled");
 
     // ---- New clears the canvas ----
     await placeAndGate(page);
     await openMenu(page, "File");
     page.once("dialog", (d) => void d.accept());
     await page.getByRole("menuitem", { name: "New Circuit" }).click();
-    const fresh = await doc(page);
-    expect(fresh.circuits[0].components).toHaveLength(0);
     await expect(page.locator(".menubar-path")).toHaveText("(unsaved)");
+    await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(0);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -144,22 +159,24 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
 
   // input pin at the center: default placement is an INPUT (faces left).
   // Placement anchors the body top-left to the cursor; the 2×1 pin body
-  // center is +16,+8 CSS px at the default zoom — dblclick there.
+  // center is +16,+8 CSS px at the default zoom — click there to select it
+  // (the Inspector opens on the right).
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(center.x - 60, center.y);
   await page.keyboard.press("Escape");
-  await page.mouse.dblclick(center.x - 60 + 16, center.y + 8);
+  await page.mouse.click(center.x - 60 + 16, center.y + 8);
+  await expect(page.locator(".inspector-id")).toBeVisible();
   await page.getByPlaceholder("(unnamed)").fill("a");
-  await page.getByRole("button", { name: "Apply" }).click();
+  await page.getByPlaceholder("(unnamed)").press("Enter");
 
-  // second pin, made an OUTPUT via the properties dialog (rot mirrors to W)
+  // second pin, made an OUTPUT via the Inspector (rot mirrors to W)
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(center.x + 60, center.y);
   await page.keyboard.press("Escape");
-  await page.mouse.dblclick(center.x + 60 + 16, center.y + 8);
+  await page.mouse.click(center.x + 60 + 16, center.y + 8);
   await page.getByPlaceholder("(unnamed)").fill("y");
+  await page.getByPlaceholder("(unnamed)").press("Enter");
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Apply" }).click();
 
   let d = await doc(page);
   const alu = d.circuits.find((c) => c.name === "alu")!;
@@ -195,18 +212,22 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
   if (box === null) throw new Error("canvas not visible");
   const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 
-  // PIN body top-left at (c.x-100, c.y-8) → terminal dot at (c.x-68, c.y)
+  // PIN body lands at [-6,0] once placement snaps → terminal at (-4,0.5).
   await page.getByRole("button", { name: "PIN", exact: true }).click();
   await page.mouse.click(c.x - 100, c.y - 8);
   await page.keyboard.press("Escape");
-  // AND body top-left at (c.x+20, c.y-24) → in0 dot at (c.x+20, c.y-8)
+  // AND body lands at [1,-1] → in0 at (1,0).
   await page.getByRole("button", { name: "AND", exact: true }).click();
   await page.mouse.click(c.x + 20, c.y - 24);
   await page.keyboard.press("Escape");
 
-  // wire: pin terminal → gate in0 (click-click)
-  await page.mouse.click(c.x - 68, c.y);
-  await page.mouse.click(c.x + 20, c.y - 8);
+  // wire: pin terminal → gate in0 (click-click). Aim at the terminal's
+  // WORLD position: placement snaps to the grid, so raw pixel offsets are
+  // only ~0.01 units inside the pin tolerance.
+  const terminal = await world(page, -4, 0.5);
+  await page.mouse.click(terminal.x, terminal.y);
+  const in0 = await world(page, 1, 0);
+  await page.mouse.click(in0.x, in0.y);
 
   const d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(1);

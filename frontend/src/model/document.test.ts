@@ -247,6 +247,24 @@ describe("updateComponent", () => {
     const doc = CircuitDocument.create();
     expect(() => doc.updateComponent(0, "nope", { name: "x" })).toThrow('no component "nope"');
   });
+
+  it("coalesceKey merges consecutive same-field edits into one undo step", () => {
+    const doc = CircuitDocument.create();
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const depth = doc.historyDepth;
+    // A typing burst on the Inspector's Name field — one key, one step.
+    doc.updateComponent(0, a, { name: "m" }, "edit:0:c1:name");
+    doc.updateComponent(0, a, { name: "my" }, "edit:0:c1:name");
+    doc.updateComponent(0, a, { name: "my-and" }, "edit:0:c1:name");
+    expect(doc.circuit(0).components[0].name).toBe("my-and");
+    expect(doc.historyDepth).toBe(depth + 1);
+    doc.undo();
+    expect(doc.circuit(0).components[0].name ?? "").toBe("");
+    // A different field's key starts a new step.
+    doc.updateComponent(0, a, { name: "a" }, "edit:0:c1:name");
+    doc.updateComponent(0, a, { attrs: { bitsize: 4 } }, "edit:0:c1:attr:bitsize");
+    expect(doc.historyDepth).toBe(depth + 2);
+  });
 });
 
 describe("wire ops", () => {
