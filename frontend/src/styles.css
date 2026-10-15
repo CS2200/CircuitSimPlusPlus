@@ -423,15 +423,42 @@ body {
   background: var(--bg);
 }
 
-/* ---- top bar (VSCode-style: menus left, action icons right) ---- */
+/* ---- app header (UI_OVERHAUL §28): a Docs-style two-row bar ----
+ *
+ *   row 1  [logo] alu.csx  (Saved)                     undo redo | history | theme
+ *   row 2  File Edit View Tools Help    play tick reset run-to speed T_obs
+ *
+ * The sim transport lives in row 2 rather than owning a row of its own, so the
+ * chrome stays two rows tall. */
 
-.topbar {
-  display: flex;
-  align-items: stretch;
-  padding: 2px 6px 0;
+.appheader {
+  position: relative; /* anchors the sim banner that drops below the bar */
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
   user-select: none;
+}
+
+.appheader-top {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.28rem 0.6rem 0;
+}
+
+.app-logo {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+.app-title {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The app title stays in the accessibility tree but is not drawn (the
@@ -448,24 +475,49 @@ body {
   border: 0;
 }
 
-.topbar-actions {
+.appheader-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-left: auto;
-  padding-bottom: 2px;
+}
+
+.appheader-bottom {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.05rem 0.6rem 0.3rem;
+}
+
+/* The transport is the flexible half of row 2: it gives way (telemetry first)
+ * rather than pushing the menus off the bar. */
+.appheader-transport {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  min-width: 0;
+}
+
+/* The save chip reads like a document editor's status pill. */
+.appheader-top .save-state {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  white-space: nowrap;
 }
 
 .icon-btn {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 26px;
+  width: 34px;
+  height: 30px;
   padding: 0;
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
 
@@ -484,6 +536,8 @@ body {
 
 .icon-btn svg {
   display: block;
+  width: 19px;
+  height: 19px;
 }
 
 .topbar-sep {
@@ -687,7 +741,10 @@ body {
   display: flex;
   align-items: stretch;
   gap: 2px;
-  flex: 1;
+  /* Never shrink: the menu buttons must not spill over the transport beside
+   * them (they did, which swallowed clicks on play — §28). The transport
+   * gives way instead. */
+  flex: 0 0 auto;
   min-width: 0;
   padding: 0;
   background: transparent;
@@ -776,20 +833,6 @@ body {
   height: 1px;
   background: var(--panel-border);
   margin: 4px 6px;
-}
-
-.menubar-path {
-  margin-left: auto;
-  margin-right: 8px;
-  align-self: center;
-  text-align: right;
-  padding: 0 1rem;
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl; /* long paths truncate at the FRONT, keeping the file name */
 }
 
 /* ---- circuit tabs (one per circuit in the file) ---- */
@@ -1943,13 +1986,15 @@ body {
 /* Sim transport bar (U5, regrouped §19): transport | run-to | speed, with the
  * telemetry pushed to the right. */
 
+/* The transport shares the header's second row (§28): no row chrome of its
+ * own, just the clusters. */
 .simbar {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.35rem 0.9rem;
-  background: var(--panel);
-  border-bottom: 1px solid var(--panel-border);
+  padding: 0;
+  background: transparent;
+  border-bottom: none;
   font-size: 0.9rem;
 }
 
@@ -1994,7 +2039,7 @@ body {
 }
 
 .sim-runto input {
-  width: 6.5rem;
+  width: 4.5rem;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
@@ -2027,7 +2072,7 @@ body {
 .sim-speed input[type="range"] {
   appearance: none;
   -webkit-appearance: none;
-  width: 9.5rem;
+  width: 6.5rem;
   height: 14px;
   background: transparent;
   cursor: pointer;
@@ -2087,7 +2132,7 @@ body {
 }
 
 .sim-speed-value {
-  min-width: 4.6rem;
+  min-width: 3.6rem;
   text-align: right;
   font-family: ui-monospace, monospace;
   font-size: 0.78rem;
@@ -2095,17 +2140,27 @@ body {
 }
 
 .sim-status {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-dim);
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
 }
 
 /* Halt / load-error banner */
+/* Halt / load-error banner: drops out from under the header as an overlay, so
+ * it never becomes a third row of chrome (§28). */
 .sim-banner {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 40;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
@@ -2301,7 +2356,11 @@ body {
   color: var(--text);
   border: 1px solid var(--panel-border);
   border-radius: 6px;
-  padding: 0.2rem 0.7rem;
+  padding: 0.2rem 0.5rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.8rem;
   font-family: ui-monospace, monospace;
   cursor: pointer;
@@ -2315,6 +2374,21 @@ body {
 
 .sim-violations {
   color: var(--wire-x);
+}
+
+/* Narrow windows: shed the telemetry first, then the run-to group, so the
+ * transport never crowds the menu tabs (UI_OVERHAUL §28). */
+@media (max-width: 1150px) {
+  .appheader-bottom .sim-status {
+    display: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .appheader-bottom .sim-runto,
+  .appheader-bottom .sim-speed-label {
+    display: none;
+  }
 }
 
 /* Update nudge + About (U8) */

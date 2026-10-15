@@ -326,6 +326,8 @@ per-group icon coverage, and the resize numbers; the other suites
 
 ## 9. Fourth pass (2026-10-15): VS Code-style top bar
 
+> Superseded by §28 (Docs-style two-row header).
+
 Team direction: title-bar layout; icons instead of text buttons.
 
 - The old app header (big "CircuitSim++" title + text buttons) is gone —
@@ -827,3 +829,40 @@ filesystem stores in the Tauri shell.
 
 **Acceptance:** frontend lint / 291 unit / build / 43-of-43 e2e green; Rust 168
 core + 12 CLI + 8 golden + 14 app tests, clippy/fmt clean.
+
+## 28. Follow-up batch S (2026-10-16): Docs-style header
+
+The top bar became a two-row header modelled on Google Docs/Sheets. Chrome
+height is unchanged: the sim transport moved *into* the header's second row
+instead of owning a row of its own.
+
+- **Row 1** — `[app mark] <file name> (save chip) …… undo redo | history | theme`.
+  The title is the **file name** (`(unsaved)` before the first save) with the
+  full path on hover; the app name lives on the logo tooltip (plus the sr-only
+  `h1`). Google's ★ (favorite), ↗ (move) and 💬 (comments) have no meaning in a
+  desktop EDA tool, so they were dropped — the ☁ slot became the autosave chip
+  (`SaveIndicator`, moved up out of the status bar).
+- **Row 2** — menu tabs on the left, transport on the right:
+  `File Edit View Tools Help` … `play tick reset run-to speed T_obs`.
+- **New menus** — `View` (grid, live values, pulses, performance overlay,
+  highlight critical path — previously Settings-only) and `Tools` (recover
+  unsaved work, clear this file's history, settings, reset appearance).
+  `Simulate` was deliberately **not** re-added: §15 retired it because the
+  transport owns run/step/reset/speed, and the transport is still on screen.
+  `Edit` is unchanged; `File` keeps Version history….
+- **Layout guarantee** — the menu row never shrinks (`flex: 0 0 auto`); the
+  transport gives way instead: its telemetry ellipsizes, the status text drops
+  below 1150 px and the run-to group below 1000 px. Letting the *menus* shrink
+  instead made the Help button spill over `.sim-play` and swallow clicks (caught
+  by `sim.spec`'s play/pause loop). The sim banner is now an overlay dropping
+  out from under the header (`.sim-banner`, absolute) so a halt never becomes a
+  third row of chrome.
+- **Sizing** — icon buttons are 34×30 with 19 px glyphs; the speed slider and
+  the run-to input were tightened so the row fits a 1280 px window with both the
+  telemetry and the T_obs chip on screen.
+
+**Acceptance:** 291 unit / 45 e2e green. The header is taller than the old strip,
+so the canvas region shrank and the five committed screenshot baselines were
+re-blessed (`sim-lit`, `timing-path`, `timing-violation`, `demo-dark`,
+`demo-light`); the Linux copies need the same one-shot `--update-snapshots` run
+on CI.

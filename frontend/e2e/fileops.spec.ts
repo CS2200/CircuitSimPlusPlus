@@ -107,7 +107,7 @@ test("File menu: New / Open / Save-As round-trip", async ({ page }) => {
     await chooser.setFiles(savedPath);
     // The browser reads the file asynchronously — wait for the adopted
     // (empty) document to land; never read the doc the same tick.
-    await expect(page.locator(".menubar-path")).toHaveText("saved.csx");
+    await expect(page.locator(".app-title")).toHaveText("saved.csx");
     await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(0);
     expect((await doc(page)).name).toBe("untitled");
 
@@ -116,7 +116,7 @@ test("File menu: New / Open / Save-As round-trip", async ({ page }) => {
     await openMenu(page, "File");
     page.once("dialog", (d) => void d.accept());
     await page.getByRole("menuitem", { name: "New Circuit" }).click();
-    await expect(page.locator(".menubar-path")).toHaveText("(unsaved)");
+    await expect(page.locator(".app-title")).toHaveText("(unsaved)");
     await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(0);
   } finally {
     rmSync(scratch, { recursive: true, force: true });

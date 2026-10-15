@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
- * Application top bar (UI_OVERHAUL.md §9): menu buttons (File / Simulation /
- * Subcircuits / Help) on the left, the current file centered, and the window
- * actions (`right`) at the far end — all on one row, VS Code-style. Pure
- * presentation: menus arrive as data from App.
+ * The menu buttons row (UI_OVERHAUL.md §9, re-homed in §28): File / Edit / View
+ * / Tools / Help, rendered inside the header's second row. Pure presentation:
+ * menus arrive as data from App.
  */
 
 export type MenuItem =
@@ -27,17 +26,7 @@ export interface MenuDef {
   items: MenuItem[];
 }
 
-export default function MenuBar({
-  menus,
-  pathLabel,
-  right,
-}: {
-  menus: MenuDef[];
-  /** Current file (centered); null = unsaved. */
-  pathLabel: string | null;
-  /** Right-aligned window actions (undo/redo icons, theme toggle, …). */
-  right?: ReactNode;
-}) {
+export default function MenuBar({ menus }: { menus: MenuDef[] }) {
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -117,10 +106,6 @@ export default function MenuBar({
           )}
         </div>
       ))}
-      <span className="menubar-path" title={pathLabel ?? "unsaved"}>
-        {pathLabel ?? "(unsaved)"}
-      </span>
-      {right !== undefined && <div className="menubar-actions">{right}</div>}
     </div>
   );
 }

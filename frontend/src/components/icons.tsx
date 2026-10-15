@@ -61,6 +61,18 @@ export function MoonIcon() {
   );
 }
 
+/** The app mark: a logic gate seated in a rounded chip. */
+export function AppLogoIcon() {
+  return (
+    <Svg width={22} height={22} strokeWidth={1.5}>
+      <rect x="2.2" y="2.2" width="15.6" height="15.6" rx="3.8" />
+      <path d="M5.4 7h2.4M5.4 13h2.4" />
+      <path d="M7.8 6.2h2.6a3.8 3.8 0 0 1 0 7.6H7.8z" />
+      <path d="M14.2 10h1.6" />
+    </Svg>
+  );
+}
+
 /** Clock with a counter-clockwise tail: "version history / restore". */
 export function HistoryIcon() {
   return (

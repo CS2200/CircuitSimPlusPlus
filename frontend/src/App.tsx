@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import AppHeader from "./components/AppHeader";
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
-import { HistoryIcon, MoonIcon, RedoIcon, SunIcon, UndoIcon } from "./components/icons";
+import {
+  AppLogoIcon,
+  HistoryIcon,
+  MoonIcon,
+  RedoIcon,
+  SunIcon,
+  UndoIcon,
+} from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
@@ -1066,6 +1074,53 @@ export default function App() {
       // The Subcircuits menu is retired too (UI_OVERHAUL §16): a new subcircuit
       // is the tab strip's "+" and renaming is a double-click on its tab.
       {
+        label: "View",
+        items: [
+          {
+            label: "Show grid",
+            checked: gridOn,
+            onSelect: () => setGridOn(!gridOn),
+          },
+          {
+            label: "Show live values",
+            checked: showValues,
+            onSelect: () => setShowValues(!showValues),
+          },
+          {
+            label: "Animate signal pulses",
+            checked: pulsesOn,
+            onSelect: () => setPulsesOn(!pulsesOn),
+          },
+          {
+            label: "Show performance overlay",
+            checked: showPerf,
+            onSelect: () => setShowPerf(!showPerf),
+          },
+          { kind: "sep" },
+          // Duplicates the T_obs chip's click on purpose: the chip is the live
+          // value, the menu item is the discoverable switch (§28).
+          {
+            label: "Highlight critical path",
+            checked: pathOn,
+            onSelect: () => setPathOn((v) => !v),
+          },
+        ],
+      },
+      {
+        label: "Tools",
+        items: [
+          {
+            label: "Recover unsaved work…",
+            disabled: recoveries.length === 0,
+            onSelect: () => setRecoveryOpen(true),
+          },
+          { label: "Clear this file's history", onSelect: () => void clearHistory() },
+          { kind: "sep" },
+          { label: "Settings…", onSelect: () => setSettingsOpen(true) },
+          { label: "Reset appearance", onSelect: resetAppearance },
+        ],
+      },
+      {
         label: "Help",
         items: [
           { label: "Keyboard shortcuts", shortcut: "?", onSelect: () => setShowHelp(true) },
@@ -1088,6 +1143,14 @@ export default function App() {
     onReset,
     openHistory,
     reloadFromDisk,
+    gridOn,
+    showValues,
+    pulsesOn,
+    showPerf,
+    pathOn,
+    recoveries,
+    clearHistory,
+    resetAppearance,
     sim,
     simVersion,
   ]);
@@ -1171,70 +1234,79 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [onOpen, onSave, onSaveAs, openHistory]);
 
+  /** The bar shows the file name; the app name lives on the logo's tooltip. */
+  const docTitle = filePath === null ? "(unsaved)" : baseName(filePath);
+
   return (
     <div className="app" data-theme={theme} data-accent={accent}>
-      <div className="topbar">
-        <h1 className="sr-only">CircuitSim++</h1>
-        {!stress && <MenuBar menus={menus} pathLabel={filePath} />}
-        {stress && <span className="menubar-path">stress harness — ?stress=1</span>}
-        <div className="topbar-actions">
-          {stress && (
-            <button className="secondary" onClick={() => setAnimate(!animate)}>
-              {animate ? "Pause states" : "Animate states"}
+      <AppHeader
+        logo={<AppLogoIcon />}
+        title={stress ? "stress harness — ?stress=1" : docTitle}
+        titleTooltip={stress ? undefined : (filePath ?? undefined)}
+        status={!stress ? <SaveIndicator state={saveState} autosaveOn={autosaveOn} /> : undefined}
+        menus={!stress ? <MenuBar menus={menus} /> : undefined}
+        transport={
+          !stress ? (
+            <SimBar
+              ctl={sim}
+              doc={doc}
+              onReset={onReset}
+              pathOn={pathOn}
+              onTogglePath={() => setPathOn((v) => !v)}
+              hzExp={hzExp}
+              onHzExp={setHzExp}
+            />
+          ) : undefined
+        }
+        actions={
+          <>
+            {stress && (
+              <button className="secondary" onClick={() => setAnimate(!animate)}>
+                {animate ? "Pause states" : "Animate states"}
+              </button>
+            )}
+            {!stress && (
+              <>
+                <button
+                  className="icon-btn"
+                  aria-label="Undo"
+                  title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
+                  disabled={status?.canUndo === false}
+                  onClick={() => editorRef.current?.undo()}
+                >
+                  <UndoIcon />
+                </button>
+                <button
+                  className="icon-btn"
+                  aria-label="Redo"
+                  title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
+                  disabled={status?.canRedo === false}
+                  onClick={() => editorRef.current?.redo()}
+                >
+                  <RedoIcon />
+                </button>
+                <button
+                  className="icon-btn"
+                  aria-label="Version history"
+                  title="Version history (Ctrl+Alt+H)"
+                  onClick={() => void openHistory()}
+                >
+                  <HistoryIcon />
+                </button>
+              </>
+            )}
+            <span className="topbar-sep" aria-hidden="true" />
+            <button
+              className="icon-btn"
+              aria-label={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
+              title={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
+              onClick={toggleLightDark}
+            >
+              {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
             </button>
-          )}
-          {!stress && (
-            <>
-              <button
-                className="icon-btn"
-                aria-label="Undo"
-                title={status?.undoLabel ? `Undo ${status.undoLabel}` : "Undo"}
-                disabled={status?.canUndo === false}
-                onClick={() => editorRef.current?.undo()}
-              >
-                <UndoIcon />
-              </button>
-              <button
-                className="icon-btn"
-                aria-label="Redo"
-                title={status?.redoLabel ? `Redo ${status.redoLabel}` : "Redo"}
-                disabled={status?.canRedo === false}
-                onClick={() => editorRef.current?.redo()}
-              >
-                <RedoIcon />
-              </button>
-              <button
-                className="icon-btn"
-                aria-label="Version history"
-                title="Version history (Ctrl+Alt+H)"
-                onClick={() => void openHistory()}
-              >
-                <HistoryIcon />
-              </button>
-            </>
-          )}
-          <span className="topbar-sep" aria-hidden="true" />
-          <button
-            className="icon-btn"
-            aria-label={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
-            title={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
-            onClick={toggleLightDark}
-          >
-            {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
-          </button>
-        </div>
-      </div>
-      {!stress && (
-        <SimBar
-          ctl={sim}
-          doc={doc}
-          onReset={onReset}
-          pathOn={pathOn}
-          onTogglePath={() => setPathOn((v) => !v)}
-          hzExp={hzExp}
-          onHzExp={setHzExp}
-        />
-      )}
+          </>
+        }
+      />
       <main className="app-main">
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
@@ -1397,11 +1469,6 @@ export default function App() {
         )}
       </main>
       <footer className="app-statusbar">
-        <span>
-          {doc.name}
-          {status?.dirty && !autosaveOn ? " •" : ""}
-        </span>
-        {!stress && <SaveIndicator state={saveState} autosaveOn={autosaveOn} />}
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}
