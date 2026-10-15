@@ -629,6 +629,11 @@ export class ToolMachine {
       }
     }
     this.wiring = null;
+    this.drag = { kind: "idle" };
+    // A finished wire is never left selected: the next click starts a fresh
+    // gesture instead of re-routing the wire just produced (component
+    // selections are preserved).
+    this.selection.set(new Set(this.selection.components), new Set());
     this.changed();
   }
 

@@ -433,12 +433,16 @@ export class DocScene {
         stroke: selected ? theme.accent : theme.panelBorder,
         lineWidth: selected ? 0.22 : 0.12,
       };
-      // Distinctive shape (local EAST frame → rotated about the center), or a box.
+      // Distinctive shape (local EAST frame → rotated about the body's
+      // center), or a box. The EAST-frame shape is built CENTERED on the
+      // (possibly axis-swapped) body rect: for N/S the rect is h×w, so
+      // anchoring the shape at rect.x/y would rotate it about the wrong
+      // point and draw the body offset from its pins.
       const local = compSize(comp, this.circuits);
-      const shape = gateShape(comp.type, layout.rect.x, layout.rect.y, local.w, local.h);
       const rot = comp.rot ?? "E";
       const cx = layout.rect.x + layout.rect.w / 2;
       const cy = layout.rect.y + layout.rect.h / 2;
+      const shape = gateShape(comp.type, cx - local.w / 2, cy - local.h / 2, local.w, local.h);
       if (shape !== null) {
         renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: theme.panel });
         renderer.drawPath(rotatePath(shape.body, cx, cy, rot), strokeStyle);
@@ -687,10 +691,32 @@ export class DocScene {
         ...(overlay.placing.attrs !== undefined && { attrs: overlay.placing.attrs }),
       };
       const layout = compLayout(ghost, this.circuits);
-      renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
-        stroke: theme.accent,
-        lineWidth: 0.15,
-      });
+      // Preview the REAL part: the component's silhouette (gate shape or
+      // box) plus its pins — not just the bounding rectangle (UI_OVERHAUL §10).
+      const local = compSize(ghost, this.circuits);
+      const rot = ghost.rot ?? "E";
+      const gcx = layout.rect.x + layout.rect.w / 2;
+      const gcy = layout.rect.y + layout.rect.h / 2;
+      const shape = gateShape(ghost.type, gcx - local.w / 2, gcy - local.h / 2, local.w, local.h);
+      const stroke = { stroke: theme.accent, lineWidth: 0.16 };
+      if (shape !== null) {
+        renderer.drawPath(rotatePath(shape.body, gcx, gcy, rot), {
+          ...stroke,
+          fill: "rgba(91,141,239,0.10)",
+        });
+        for (const extra of shape.extra) {
+          renderer.drawPath(rotatePath(extra, gcx, gcy, rot), stroke);
+        }
+        if (shape.outBubble !== null) {
+          const b = rotPt(shape.outBubble.x, shape.outBubble.y, gcx, gcy, rot);
+          renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), stroke);
+        }
+      } else {
+        renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+          ...stroke,
+          fill: "rgba(91,141,239,0.10)",
+        });
+      }
       renderer.flush();
       renderer.drawDots(
         layout.pins.map((p) => ({ x: p.x, y: p.y })),
