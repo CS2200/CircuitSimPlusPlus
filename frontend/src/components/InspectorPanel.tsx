@@ -54,9 +54,16 @@ export default function InspectorPanel({
       ? undefined
       : circuit.components.find((x) => x.id === compId);
 
-  // Focused-field draft text; committed on blur/Enter, dropped on selection change.
+  // Focused-field draft text; committed on blur/Enter, dropped on selection
+  // change. The reset keeps drafts that belong to the CURRENT component: the
+  // effect can land a tick after a selection change, and clearing blindly
+  // would clobber text typed immediately after clicking the new component
+  // (the race that broke the e2e pin-rename flow). Stale drafts from other
+  // components are always ignored by the `draft.key` checks anyway.
   const [draft, setDraft] = useState<{ key: string; text: string } | null>(null);
-  useEffect(() => setDraft(null), [compId, circuitIdx]);
+  useEffect(() => {
+    setDraft((d) => (d !== null && !d.key.startsWith(`${compId ?? ""}:`) ? null : d));
+  }, [compId, circuitIdx]);
 
   if (comp === undefined) {
     return (

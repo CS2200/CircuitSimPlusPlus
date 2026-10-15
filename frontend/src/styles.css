@@ -184,18 +184,22 @@ body {
 }
 
 .palette {
-  width: 190px;
+  width: 190px; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
+  flex: none;
   overflow-y: auto;
   background: var(--panel);
-  border-right: 1px solid var(--panel-border);
   padding: 8px;
 }
 
 .palette-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 4px;
   margin-bottom: 10px;
 }
 
 .palette-group-title {
+  grid-column: 1 / -1;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -204,16 +208,62 @@ body {
 }
 
 .palette-item {
-  display: inline-block;
-  margin: 2px;
-  padding: 4px 10px;
-  min-width: 52px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--panel-border);
   border-radius: 6px;
   cursor: grab;
   font-size: 0.8rem;
+  text-align: left;
+}
+
+.palette-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comp-icon {
+  flex: none;
+}
+
+/* ---- resizable side panels (UI_OVERHAUL §7) ---- */
+
+.resize-handle {
+  flex: none;
+  width: 5px;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+  user-select: none; /* double-clicks must not start a text-selection drag */
+  background: transparent;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--panel-border);
+}
+
+.resize-handle:hover::after,
+.resize-handle.dragging::after {
+  background: var(--accent);
+  width: 2px;
+  left: 1.5px;
+}
+
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .palette-item:hover {
@@ -483,13 +533,12 @@ body {
 /* ---- right dock: Inspector + Watch (UI overhaul §3) ---- */
 
 .right-dock {
-  width: 16rem;
+  width: 16rem; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
   flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--panel);
-  border-left: 1px solid var(--panel-border);
 }
 
 .dock-tabs {

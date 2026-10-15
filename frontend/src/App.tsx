@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import StressCanvas from "./components/StressCanvas";
+import CompIcon from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 import NameDialog from "./components/NameDialog";
+import ResizeHandle from "./components/ResizeHandle";
 import RightDock, { type DockTab } from "./components/RightDock";
 import SettingsDialog from "./components/SettingsDialog";
 import SheetTabs from "./components/SheetTabs";
@@ -18,6 +20,7 @@ import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
 import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
+import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import { loadThemePref, saveThemePref, type ThemeId } from "./theme";
 import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
 
@@ -61,6 +64,22 @@ export default function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dockTab, setDockTab] = useState<DockTab>("watch");
+  // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
+  // release; defaults match the pre-resize layout.
+  const [panelWidths, setPanelWidths] = useState<Record<PanelId, number>>(() => ({
+    palette: loadPanelWidth("palette"),
+    dock: loadPanelWidth("dock"),
+  }));
+  const resizePanel = useCallback((id: PanelId, width: number) => {
+    setPanelWidths((prev) => (prev[id] === width ? prev : { ...prev, [id]: width }));
+  }, []);
+  const commitPanel = useCallback(
+    (id: PanelId, width: number) => {
+      resizePanel(id, width);
+      savePanelWidth(id, width);
+    },
+    [resizePanel],
+  );
   const [animate, setAnimate] = useState(true);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [pathOn, setPathOn] = useState(false);
@@ -584,7 +603,7 @@ export default function App() {
           </div>
         ) : (
           <>
-            <aside className="palette">
+            <aside className="palette" style={{ width: panelWidths.palette }}>
               {PALETTE.map((g) => (
                 <div className="palette-group" key={g.group}>
                   <div className="palette-group-title">{g.group}</div>
@@ -597,7 +616,8 @@ export default function App() {
                       onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
                       title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
                     >
-                      {compSpec(t).caption({})}
+                      <CompIcon type={t} />
+                      <span className="palette-item-label">{compSpec(t).caption({})}</span>
                     </button>
                   ))}
                 </div>
@@ -626,13 +646,22 @@ export default function App() {
                           }}
                           title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
                         >
-                          {c.name}
+                          <CompIcon type="subcircuit" />
+                          <span className="palette-item-label">{c.name}</span>
                         </button>
                       ),
                   )}
                 </div>
               )}
             </aside>
+            <ResizeHandle
+              panel="palette"
+              side="left"
+              width={panelWidths.palette}
+              defaultWidth={DEFAULT_PANEL_WIDTHS.palette}
+              onResize={(w) => resizePanel("palette", w)}
+              onCommit={(w) => commitPanel("palette", w)}
+            />
             <div className="editor-wrap">
               <EditorCanvas
                 ref={editorRef}
@@ -647,9 +676,18 @@ export default function App() {
                 violations={violationMarkers}
               />
             </div>
+            <ResizeHandle
+              panel="dock"
+              side="right"
+              width={panelWidths.dock}
+              defaultWidth={DEFAULT_PANEL_WIDTHS.dock}
+              onResize={(w) => resizePanel("dock", w)}
+              onCommit={(w) => commitPanel("dock", w)}
+            />
             <RightDock
               tab={dockTab}
               onTab={setDockTab}
+              width={panelWidths.dock}
               inspector={
                 <InspectorPanel
                   doc={doc}
@@ -803,6 +841,10 @@ export default function App() {
                 <tr>
                   <td>Middle-drag / Space+drag</td>
                   <td>pan</td>
+                </tr>
+                <tr>
+                  <td>Panel edges</td>
+                  <td>drag to resize the palette / dock (double-click resets)</td>
                 </tr>
               </tbody>
             </table>

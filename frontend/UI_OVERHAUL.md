@@ -259,3 +259,37 @@ terminal's world position via the camera).
 - Inspector: per-field scrub-to-edit; multi-select batch edits.
 - Separating the statusbar cursor readout from hover-rate re-renders
   (pre-existing; unaffected by this pass).
+
+## 7. Second pass (2026-10-15): resizable panels + palette glyphs
+
+Team direction after the first pass. Per the human, the **Watch tab stays**
+("keep the watch tab for now") — no changes to §3's dock contract.
+
+**Resizable side panels.** The palette and the right dock are resizable by
+dragging the separator strip between the panel and the canvas:
+
+- Bounds/defaults: palette 150–320 px (default 190), dock 220–420 px
+  (default 256). `src/panels.ts` owns clamp/load/save; `App` holds the live
+  widths and persists on release (`csx.panel.palette`, `csx.panel.dock`).
+- Interaction: pointer drag with capture (live re-layout, one localStorage
+  write on release); double-click resets the default; the handle is a
+  focusable `role="separator"` with Arrow-key stepping (±8 px).
+- The separator line lives in the handle; the panels' former static
+  borders are gone.
+
+**Palette component glyphs.** Every palette entry renders a small SVG
+miniature of the component next to its name (`components/CompIcon.tsx`):
+
+- gate bodies come from the real `gateShape` geometry and pin stubs/dots
+  from the catalog's pin specs — the sidebar is a faithful miniature of
+  what gets placed, same curves as the canvas;
+- box families carry a short glyph (+ − × ÷ = ~ «, REG/RAM/ROM, DEC, 1, 8);
+  clock/probe/LED get bespoke silhouettes; subcircuit modules get an inset
+  border. Icons draw in `currentColor`, so every theme (incl. OLED) styles
+  them automatically;
+- the palette is a responsive grid (`auto-fill, minmax(84px, 1fr)`) — a
+  wider panel simply shows more columns.
+
+**Acceptance:** `e2e/panels.spec.ts` (drag / persist / reset / clamp /
+keyboard + icon coverage) and `src/panels.test.ts` (clamp / load / save)
+pass; lint / unit / build / e2e green.
