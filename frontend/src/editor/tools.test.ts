@@ -68,6 +68,22 @@ describe("placing", () => {
     tool.down({ x: 30, y: 20 }, PI());
     expect(doc.circuit(0).components.at(-1)?.rot).toBe("S");
   });
+
+  it("arrow rotation goes the other way (ccw) for the selection and ghost", () => {
+    const { doc, tool, and } = setup();
+    tool.startPlacing("gate.or");
+    tool.rotateSelection(true); // ghost: E → N
+    tool.down({ x: 30, y: 20 }, PI());
+    expect(doc.circuit(0).components.at(-1)?.rot).toBe("N");
+    tool.cancel();
+    // Selection: E → N with ccw, as one undoable op.
+    tool.down({ x: 12, y: 11 }, PI()); // the AND's body
+    tool.up(PI());
+    tool.rotateSelection(true);
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("N");
+    tool.rotateSelection();
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("E");
+  });
 });
 
 describe("wiring", () => {

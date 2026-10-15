@@ -330,11 +330,13 @@ export class CircuitDocument {
     this.exec(label, key, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
   }
 
-  /** Cycle rotation (E→S→W→N) for a set of components as one command. */
-  rotateComponents(circuitIdx: number, ids: ReadonlySet<string>): void {
+  /** Cycle rotation for a set of components as one command (ccw = reverse). */
+  rotateComponents(circuitIdx: number, ids: ReadonlySet<string>, ccw = false): void {
     if (ids.size === 0) return;
     const c = this.circuit(circuitIdx);
-    const components = c.components.map((x) => (ids.has(x.id) ? { ...x, rot: nextRot(x.rot) } : x));
+    const components = c.components.map((x) =>
+      ids.has(x.id) ? { ...x, rot: ccw ? prevRot(x.rot) : nextRot(x.rot) } : x,
+    );
     // Pins rotate about the body center: wires glued to a rotated component
     // must follow (re-anchored + re-stubbed along the new facing). Requires
     // the editor's `pinGeometry` hook; without it, geometry stays untouched.
@@ -812,6 +814,21 @@ function nextRot(rot: CsxComponent["rot"]): CsxComponent["rot"] {
     case "W":
       return "N";
     case "N":
+      return "E";
+  }
+}
+
+/** Inverse cycle (E→N→W→S) — arrow-key rotation the other way (§20). */
+function prevRot(rot: CsxComponent["rot"]): CsxComponent["rot"] {
+  switch (rot) {
+    case undefined:
+    case "E":
+      return "N";
+    case "N":
+      return "W";
+    case "W":
+      return "S";
+    case "S":
       return "E";
   }
 }

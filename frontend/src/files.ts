@@ -91,7 +91,47 @@ export async function pickSavePath(
     defaultPath: currentPath ?? suggestedName,
     filters: CSX_FILTERS,
   });
-  return sel === null ? null : withCsxExtension(sel);
+  // Cancelled: the plugin answers null/undefined (defensively also ""), and a
+  // blank answer must never be turned into a write (UI_OVERHAUL §20).
+  const picked = typeof sel === "string" ? sel.trim() : "";
+  return picked === "" ? null : withCsxExtension(picked);
+}
+
+/**
+ * Browser-mode save: prefer the File System Access API (Chromium), which gives
+ * a real Save-As dialog **and a cancel signal**; fall back to a download where
+ * it is unavailable (or under automation, where a native picker could not be
+ * driven). Returns false when the user cancelled.
+ */
+export async function saveTextFile(name: string, text: string): Promise<boolean> {
+  const picker = (
+    window as unknown as {
+      showSaveFilePicker?: (opts: unknown) => Promise<{
+        createWritable: () => Promise<{
+          write: (data: string) => Promise<void>;
+          close: () => Promise<void>;
+        }>;
+      }>;
+    }
+  ).showSaveFilePicker;
+  const automated = typeof navigator !== "undefined" && navigator.webdriver === true;
+  if (typeof picker === "function" && !automated) {
+    try {
+      const handle = await picker({
+        suggestedName: withCsxExtension(name),
+        types: [{ description: "CircuitSim++ circuit", accept: { "application/json": [".csx"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+      return true;
+    } catch (err) {
+      // AbortError = the user cancelled; anything else falls back to download.
+      if (err instanceof DOMException && err.name === "AbortError") return false;
+    }
+  }
+  downloadTextFile(name, text);
+  return true;
 }
 
 /** Browser-mode save: deliver the serialized document as a download. */

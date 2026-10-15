@@ -61,17 +61,23 @@ export default function MenuBar({
   }, [open]);
 
   return (
-    <div className="menubar" ref={barRef}>
+    <div
+      className="menubar"
+      ref={barRef}
+      // Hover opens (UI_OVERHAUL §20); leaving the bar (or its popup, which is
+      // a child) closes again.
+      onMouseLeave={() => setOpen(null)}
+    >
       {menus.map((m) => (
         <div className="menu" key={m.label}>
           <button
             className={`menu-btn${open === m.label ? " active" : ""}`}
             aria-haspopup="menu"
             aria-expanded={open === m.label}
-            onClick={() => setOpen(open === m.label ? null : m.label)}
-            onMouseEnter={() => {
-              if (open !== null) setOpen(m.label);
-            }}
+            // Click only ever OPENS (hover already opened it — toggling here
+            // would close a menu the pointer is resting on).
+            onClick={() => setOpen(m.label)}
+            onMouseEnter={() => setOpen(m.label)}
           >
             {m.label}
           </button>

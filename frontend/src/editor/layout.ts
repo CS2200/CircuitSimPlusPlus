@@ -122,3 +122,18 @@ export function nextRotation(rot: Rotation | undefined): Rotation {
       return "E";
   }
 }
+
+/** Inverse of nextRotation (used by arrow-key rotation, UI_OVERHAUL §20). */
+export function prevRotation(rot: Rotation | undefined): Rotation {
+  switch (rot) {
+    case undefined:
+    case "E":
+      return "N";
+    case "N":
+      return "W";
+    case "W":
+      return "S";
+    case "S":
+      return "E";
+  }
+}

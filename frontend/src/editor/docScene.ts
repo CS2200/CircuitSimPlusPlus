@@ -164,8 +164,6 @@ export class DocScene {
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
   private wireMismatch: boolean[] = [];
-  /** One ⚠ badge position per mismatched net (deduped, drawn on top). */
-  private mismatchMarks: Vec2[] = [];
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -214,23 +212,6 @@ export class DocScene {
       const net = netId !== undefined ? this.nets.nets[netId] : undefined;
       return inferNetBits(net, this.layouts).conflict.length > 0;
     });
-    this.mismatchMarks = [];
-    {
-      const marked = new Set<number>();
-      c.wires.forEach((w, i) => {
-        const netId = this.nets.wireToNet.get(i);
-        if (netId === undefined || !this.wireMismatch[i] || marked.has(netId)) return;
-        marked.add(netId);
-        const pts = w.points;
-        if (pts.length >= 2) {
-          const k = Math.floor((pts.length - 1) / 2);
-          this.mismatchMarks.push({
-            x: (pts[k][0] + pts[k + 1][0]) / 2,
-            y: (pts[k][1] + pts[k + 1][1]) / 2,
-          });
-        }
-      });
-    }
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
       c.wires,
@@ -802,19 +783,6 @@ export class DocScene {
           );
         }
       }
-    }
-
-    // Bitsize-mismatch badges (UI_OVERHAUL §17): one ⚠ per offending net,
-    // drawn AFTER the parts so it reads whatever the wire colors are.
-    if (this.mismatchMarks.length > 0) {
-      for (const m of this.mismatchMarks) {
-        renderer.drawText(m.x, m.y - 0.55, "⚠ width", {
-          color: theme.violation,
-          size: 0.8,
-          align: "center",
-        });
-      }
-      renderer.flush();
     }
 
     // Tool ghosts.

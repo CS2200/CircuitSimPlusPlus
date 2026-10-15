@@ -635,3 +635,28 @@ one `--update-snapshots` run on Linux.
 **Acceptance:** frontend lint / 262 unit / build / 35-of-35 e2e green (the
 fileops sim-bar test asserts the notch marks; the canvas screenshot specs
 freeze animations).
+
+## 20. Follow-up batch K (2026-10-16): hover menus, save-cancel, arrows
+
+- **Menus open on hover.** Moving the pointer onto File/Edit/Help opens that
+  menu, moving across the bar switches menus, and leaving the bar (or its
+  popup, which is a child) closes it. A click now only ever OPENS: hover has
+  already opened it, so a click-to-toggle would close a menu the pointer is
+  resting on.
+- **Cancel is not a save.** Three layers: the browser Save uses the File System
+  Access picker (`showSaveFilePicker`) where available — a real Save-As dialog
+  that _reports cancel_ — with the download shim as fallback (and under
+  automation, where a native picker could not be driven); the Tauri picker
+  treats `null`/`undefined`/blank as cancel (previously a blank answer became
+  `.csx` and looked like a successful save); and `doSave` refuses a blank path.
+  Cancel now writes nothing, marks nothing clean and toasts nothing.
+- **Width mismatch: the pulse is the whole signal.** The "⚠ width" text badge
+  is gone; the pulsing amber ring (which reads over any wire color) is it. The
+  Inspector still spells out the mixed widths when such a wire is selected.
+- **Arrow-key rotation.** ← / → rotate the selection and the placement ghost
+  counter-clockwise / clockwise (R stays clockwise; the reverse cycle is a new
+  `prevRotation`, and a CCW rotate is still one undoable op). The canvas key
+  handler also ignores events from buttons, inputs and the panel resize
+  handles, so rail/resize keyboard use isn't hijacked.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.

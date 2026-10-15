@@ -19,7 +19,7 @@ import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
 import { SimController } from "./sim/controller";
-import { baseName, downloadTextFile, isTauri, openCircuitFile, pickSavePath } from "./files";
+import { baseName, isTauri, openCircuitFile, pickSavePath, saveTextFile } from "./files";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import { loadBoolPref, PREF_GRID, PREF_PULSES, PREF_UPDATE_CHECK, saveBoolPref } from "./prefs";
 import {
@@ -294,6 +294,7 @@ export default function App() {
 
   const doSave = useCallback(
     async (path: string) => {
+      if (path.trim() === "") return; // no target (cancelled dialog) — never a "save"
       try {
         const res = await sim.save(doc, path);
         if (!res.ok) {
@@ -320,12 +321,15 @@ export default function App() {
         })
         .catch((err) => toast(`Save failed: ${String(err)}`));
     } else {
-      // The browser fallback cannot write files — it downloads instead.
-      downloadTextFile(suggested, doc.toJson());
-      doc.markClean();
-      setFilePath(doc.name);
-      editorRef.current?.refresh();
-      toast(`Downloaded ${suggested}`);
+      // The browser has no filesystem: the File System Access picker writes a
+      // real file (and reports cancel); the download shim is the fallback.
+      void saveTextFile(suggested, doc.toJson()).then((saved) => {
+        if (!saved) return; // cancelled — nothing was written
+        doc.markClean();
+        setFilePath(doc.name);
+        editorRef.current?.refresh();
+        toast(`Saved ${suggested}`);
+      });
     }
   }, [doc, filePath, doSave, toast]);
 
@@ -879,7 +883,11 @@ export default function App() {
                 </tr>
                 <tr>
                   <td>R</td>
-                  <td>rotate selection / placement ghost</td>
+                  <td>rotate selection / placement ghost (clockwise)</td>
+                </tr>
+                <tr>
+                  <td>← / →</td>
+                  <td>rotate selection / placement ghost (counter-clockwise / clockwise)</td>
                 </tr>
                 <tr>
                   <td>Del / Backspace</td>
