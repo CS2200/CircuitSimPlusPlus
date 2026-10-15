@@ -861,8 +861,8 @@ Four requests on top of §25/§26, all in the Inspector and Settings panels.
   `select`-kind attrs: radix / shift / extend mode / subcircuit) and in the
   **Settings** panel (default bit width / gate inputs / clock speed / default
   name position). The list renders **inline** (not absolutely positioned): the dock
-  and the settings pane both scroll, and a floating popup would be clipped by
-  them. Escape and outside-click close it.
+  and the settings pane both scroll. (Superseded by §29: the list is now a
+  portaled overlay rather than inline.) Escape and outside-click close it.
 - **Prettier `endOfLine: "auto"`** in `frontend/.prettierrc.json`. The Windows
   checkout is CRLF (`core.autocrlf=true`, no `.gitattributes`) while Prettier
   defaults to LF, so every CRLF file failed `prettier --check`. `auto` accepts
@@ -872,3 +872,35 @@ Four requests on top of §25/§26, all in the Inspector and Settings panels.
 170 core + 12 CLI + 8 golden tests, clippy/fmt clean. The two settings selects
 now click instead of `selectOption`, and `editor.spec` drives the Inspector's
 Label side select (writes/clears `namePos`) in place.
+
+## 29. Follow-up batch T (2026-10-16): overlay dropdowns, quieter pins, tidier memory
+
+Three polish fixes.
+
+- **Dropdowns overlay instead of reflowing.** `Select` now renders its option
+  list through `createPortal(…, document.body)` with `position: fixed` and a
+  computed anchor (left/min-width/max-width from the button, top-or-bottom +
+  max-height from the free space), so the list **floats over** the panel instead
+  of pushing the rows down, and is never clipped by the scrolling parent. It
+  flips above the button when the space below is tight, repositions on scroll /
+  resize, and sits at `z-index: 200` so it is clickable over the settings modal
+  (`z-index: 100`). Theme variables live on `:root`, so a body-level portal still
+  inherits them. `editor.spec` guards the behaviour: the panel's `scrollHeight`
+  is unchanged while the list is open.
+- **Concise pin hover.** The pin tooltip is now a single line — the pin name,
+  with its width appended only when it is wider than one bit (`din · 8b`) —
+  instead of the old two-line `name` + `kind · N b` card, and `drawCard`'s
+  padding/line-height/type size are all smaller.
+- **Tidier RAM/ROM panel.** The memory-image controls sit under a small
+  uppercase **Memory image** subhead; the file picker and hex-editor buttons are
+  full-width action rows (`inspector-buttons-full`) rather than a lopsided
+  label/control pair, the depth field is labelled **Depth** with its hint
+  ("Words — a power of two, up to 2^20.") moved into the hint line, and the footer
+  hint is one short sentence.
+- **Test-race fix.** `memory.spec`'s `selectImem` clicks by world coordinates,
+  but the `?simdemo=1` view auto-fits its camera after mount; reading the camera
+  before it settled clicked the wrong point (this failed on the prior commit
+  too). A `ready()` helper now waits for the camera to stop changing before
+  computing screen coordinates → 6-of-6 stable.
+
+**Acceptance:** frontend lint / 292 unit / build green; 44-of-44 e2e green.

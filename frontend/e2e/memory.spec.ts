@@ -37,8 +37,29 @@ async function world(page: Page, wx: number, wy: number): Promise<{ x: number; y
   };
 }
 
+/**
+ * Wait until the mock demo has loaded and its camera has settled. The demo
+ * auto-fits its view on mount; reading the camera before that yields a stale
+ * origin and the click lands on the wrong point (a real race in this flow).
+ */
+async function ready(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const w = window as unknown as {
+      __circuitCamera?: () => { x: number; y: number; scale: number };
+      __camKey?: string;
+    };
+    const c = w.__circuitCamera?.();
+    if (c == null) return false;
+    const key = `${c.x},${c.y},${c.scale}`;
+    const settled = w.__camKey === key;
+    w.__camKey = key;
+    return settled;
+  });
+}
+
 /** Select imem (body center at world (7,17) in the mock demo). */
 async function selectImem(page: Page): Promise<void> {
+  await ready(page);
   const p = await world(page, 7, 17);
   await page.mouse.click(p.x, p.y);
   await expect(page.locator(".inspector-type")).toHaveText("mem.ram");

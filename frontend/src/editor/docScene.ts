@@ -988,13 +988,12 @@ export class DocScene {
     // Hover feedback (pins only — idle wire hover does nothing):
     const hit = overlay.hoverHit;
     if (hit?.kind === "pin") {
-      // accent ring + name tooltip
+      // Accent ring + one concise line: the pin name, plus its width only
+      // when it is wider than a single bit (§29).
       renderer.drawDots([hit.pos], PIN_R * 1.5, theme.accent);
       const spec = this.layouts.get(hit.compId)?.pins.find((p) => p.name === hit.pin);
-      drawCard(renderer, theme, { x: hit.pos.x + 0.7, y: hit.pos.y - 1.4 }, [
-        hit.pin,
-        spec !== undefined ? `${spec.kind} · ${spec.bitsize}b` : "",
-      ]);
+      const bits = spec !== undefined && spec.bitsize > 1 ? ` · ${spec.bitsize}b` : "";
+      drawCard(renderer, theme, { x: hit.pos.x + 0.6, y: hit.pos.y - 1.0 }, [`${hit.pin}${bits}`]);
     } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
       // junction-on-drop preview (only while routing a wire)
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
@@ -1016,10 +1015,10 @@ export class DocScene {
 
 /** Small floating card (tooltip / info popup) drawn near a world point. */
 function drawCard(renderer: Renderer, theme: Theme, pos: Vec2, lines: string[]): void {
-  const size = 0.9;
-  const lineH = 1.3;
-  const padX = 0.5;
-  const padY = 0.4;
+  const size = 0.8;
+  const lineH = 1.1;
+  const padX = 0.45;
+  const padY = 0.32;
   const w = Math.max(...lines.map((l) => l.length)) * size * 0.62 + 2 * padX;
   const h = lines.length * lineH + 2 * padY;
   renderer.drawPath(rectPath(pos.x, pos.y, w, h), { fill: theme.panel });

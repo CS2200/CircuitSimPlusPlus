@@ -379,32 +379,30 @@ export default function InspectorPanel({
       {isMemory && (
         <>
           <div className="inspector-sep" />
+          <div className="inspector-subhead">Memory image</div>
           <div className="inspector-row">
             <span>Autoload</span>
             <span
               className="inspector-file"
               title={autoload === "" ? "no autoload file" : autoload}
             >
-              {autoload === "" ? "(none)" : autoload}
+              {autoload === "" ? "None" : autoload}
             </span>
           </div>
-          <div className="inspector-row">
-            <span />
-            <div className="inspector-buttons">
-              <button className="secondary" onClick={() => void chooseAutoload()}>
-                Choose file…
-              </button>
-              <button
-                className="secondary"
-                disabled={autoload === ""}
-                onClick={() => {
-                  commitAttr("autoload", null);
-                  onNotify?.("Autoload cleared");
-                }}
-              >
-                Clear
-              </button>
-            </div>
+          <div className="inspector-buttons inspector-buttons-full">
+            <button className="secondary" onClick={() => void chooseAutoload()}>
+              Choose file…
+            </button>
+            <button
+              className="secondary"
+              disabled={autoload === ""}
+              onClick={() => {
+                commitAttr("autoload", null);
+                onNotify?.("Autoload cleared");
+              }}
+            >
+              Clear
+            </button>
           </div>
           <div className="inspector-row">
             <span>Contents</span>
@@ -414,17 +412,13 @@ export default function InspectorPanel({
                 : `${contentsWords} word${contentsWords === 1 ? "" : "s"}`}
             </span>
           </div>
-          <div className="inspector-row">
-            <span />
-            <div className="inspector-buttons">
-              <button className="secondary" onClick={() => setMemOpen(true)}>
-                Edit hex…
-              </button>
-            </div>
+          <div className="inspector-buttons inspector-buttons-full">
+            <button className="secondary" onClick={() => setMemOpen(true)}>
+              Edit hex…
+            </button>
           </div>
           <p className="settings-hint">
-            Autoload a .hex image from next to the circuit, or paste values and embed them in the
-            file.
+            Loads a .hex file next to the circuit, or embeds pasted values in the file.
           </p>
         </>
       )}
