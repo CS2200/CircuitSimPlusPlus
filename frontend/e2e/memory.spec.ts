@@ -1,11 +1,12 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
- * Inspector memory loading (UI_OVERHAUL §11): mem.ram/mem.rom get two loading
- * methods — paste hex values into a table dialog (writes `attrs.contents`),
- * or pick a `.hex` image with the file selector (autoload path in the Tauri
- * shell; embedded image in browser/mock mode, which is how e2e runs). The
- * old Watch-tab memory inspector is retired for now.
+ * Inspector memory loading (UI_OVERHAUL §11/§14): mem.ram/mem.rom get two
+ * loading methods — a hex GRID where you select a cell and paste the values
+ * (they fill from that address; `attrs.contents`), or a `.hex` file picked
+ * with the file selector (autoload path in the Tauri shell; embedded image in
+ * browser/mock mode, which is how e2e runs). The old Watch-tab memory
+ * inspector is retired for now.
  */
 
 interface CsxDoc {
@@ -47,19 +48,42 @@ function imemAttrs(d: CsxDoc): Record<string, unknown> | undefined {
   return d.circuits[0].components.find((c) => c.type === "mem.ram" && c.name === "imem")?.attrs;
 }
 
-test("Inspector memory: paste hex into the table and apply it to contents", async ({ page }) => {
+/** Paste text into an element (synthetic paste event: no clipboard grants). */
+async function pasteInto(target: Locator, text: string): Promise<void> {
+  await target.evaluate((el, value) => {
+    const data = new DataTransfer();
+    data.setData("text/plain", value);
+    el.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+    );
+  }, text);
+}
+
+test("Inspector memory: select a cell, paste, and apply to contents", async ({ page }) => {
   await page.goto("/?simdemo=1");
   await selectImem(page);
 
   await page.getByRole("button", { name: "Edit hex…" }).click();
   const dialog = page.getByRole("dialog", { name: "Memory contents" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("textbox").fill("0a 0b 2-ff");
 
-  // The popup table shows every value in hex, padded to the memory width.
-  await expect(dialog.locator(".mem-table")).toContainText("0000000a");
-  await expect(dialog.locator(".mem-table")).toContainText("000000ff");
-  await expect(dialog).toContainText("4 of");
+  // Select the first cell and paste — values fill from there, no paste box.
+  await dialog.locator('input[data-addr="0"]').click();
+  await pasteInto(dialog, "0a 0b 2-ff");
+  await expect(dialog.locator('input[data-addr="0"]')).toHaveValue("0000000a");
+  await expect(dialog.locator('input[data-addr="1"]')).toHaveValue("0000000b");
+  await expect(dialog.locator('input[data-addr="2"]')).toHaveValue("000000ff");
+  await expect(dialog.locator('input[data-addr="3"]')).toHaveValue("000000ff");
+
+  // A later cell pastes from THAT cell onward.
+  await dialog.locator('input[data-addr="8"]').click();
+  await pasteInto(dialog, "deadbeef");
+  await expect(dialog.locator('input[data-addr="8"]')).toHaveValue("deadbeef");
+  await expect(dialog.locator('input[data-addr="9"]')).toHaveValue("");
+
+  // Typing into one cell edits just that word.
+  await dialog.locator('input[data-addr="9"]').fill("2a");
+  await expect(dialog.locator('input[data-addr="9"]')).toHaveValue("0000002a");
 
   await dialog.getByRole("button", { name: "Apply" }).click();
   await expect(dialog).not.toBeVisible();
@@ -67,6 +91,7 @@ test("Inspector memory: paste hex into the table and apply it to contents", asyn
   const contents = String(imemAttrs(await doc(page))?.contents ?? "");
   expect(contents).toContain("0000000a");
   expect(contents).toContain("2-000000ff"); // canonical run encoding
+  expect(contents).toContain("0000002a");
 });
 
 test("Inspector memory: choosing a .hex file embeds the image (browser mode)", async ({ page }) => {

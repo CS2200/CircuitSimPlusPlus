@@ -768,6 +768,7 @@ export default function App() {
                     }}
                   >
                     <PaletteGroupIcon group={g} />
+                    <span className="palette-rail-label">{g}</span>
                   </button>
                 ))}
               </div>

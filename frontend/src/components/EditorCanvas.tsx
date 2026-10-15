@@ -320,7 +320,7 @@ export default forwardRef<
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}
       onPointerMove={(w) => tool.move(w)}
-      onPointerUp={(_w, info) => tool.up(info)}
+      onPointerUp={(w, info) => tool.up(info, w)}
       onDoubleClick={(w) => tool.doubleClick(w)}
       onHover={(w) => {
         cursorRef.current = w;

@@ -219,7 +219,7 @@ export class MockCore implements CoreApi {
       for (const comp of circuit.components) {
         if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
           const depth = Math.min(4096, numAttr(comp.attrs, "depth", IMEM_WORDS));
-          const image = mockAutoloadImage(comp.attrs?.autoload, depth);
+          const image = mockMemoryImage(comp.attrs, depth);
           this.mems.set(comp.name, new Uint32Array(image));
           this.autoloads.set(comp.name, image);
         }
@@ -621,10 +621,31 @@ function numAttr(attrs: Record<string, unknown> | undefined, key: string, dflt: 
  * words and count-value runs). Any other path yields an empty image.
  */
 function mockAutoloadImage(autoload: unknown, depth: number): Uint32Array {
+  if (typeof autoload !== "string" || !autoload.startsWith("hex:")) return new Uint32Array(depth);
+  return mockRleHexImage(autoload.slice(4), depth);
+}
+
+/**
+ * Mock memory image for one component: the engine validates the embedded
+ * `attrs.contents` image (docs/format-v2.md §7) and applies `.hex` autoload
+ * files at load; the mock has no filesystem, so it honors `contents` first
+ * (what the Inspector writes) and falls back to the dev-only `hex:` autoload
+ * convention above.
+ */
+function mockMemoryImage(
+  attrs: Readonly<Record<string, unknown>> | undefined,
+  depth: number,
+): Uint32Array {
+  const embedded = attrs?.contents;
+  if (typeof embedded === "string") return mockRleHexImage(embedded, depth);
+  return mockAutoloadImage(attrs?.autoload, depth);
+}
+
+/** rle-hex-v1 words/runs into a zero-padded image (format-v2 §7). */
+function mockRleHexImage(text: string, depth: number): Uint32Array {
   const image = new Uint32Array(depth);
-  if (typeof autoload !== "string" || !autoload.startsWith("hex:")) return image;
   let addr = 0;
-  for (const tok of autoload.slice(4).trim().split(/\s+/)) {
+  for (const tok of text.trim().split(/\s+/)) {
     const run = /^(\d+)-([0-9a-fA-F]+)$/.exec(tok);
     if (run !== null) {
       const n = Number(run[1]);

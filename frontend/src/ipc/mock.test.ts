@@ -58,6 +58,33 @@ describe("mock core (U9)", () => {
       await expect(mock.api.loadCircuit({})).rejects.toThrow("path or bytes");
     });
 
+    it("applies an embedded memory image (attrs.contents) on load", async () => {
+      const csx = JSON.stringify({
+        format: "circuitsim-plus-plus",
+        version: 2,
+        name: "contents",
+        settings: { delayModel: "delay", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+        circuits: [
+          {
+            name: "main",
+            components: [
+              {
+                id: "c0",
+                type: "mem.ram",
+                pos: [0, 0],
+                name: "ram0",
+                attrs: { bitsize: 8, depth: 4, contents: "2-2a 7f" },
+              },
+            ],
+            wires: [],
+          },
+        ],
+      });
+      const res = await mock.api.loadCircuit({ bytes: new TextEncoder().encode(csx) });
+      expect(res.ok).toBe(true);
+      const words = await mock.api.memRead("ram0", 0, 4);
+      expect(words.map((w) => parseInt(w.v, 16))).toEqual([0x2a, 0x2a, 0x7f, 0]);
+    });
     it("emits an initial full-state batch so the UI can paint (v1.1: full: true)", () => {
       expect(diffs).toHaveLength(1);
       expect(diffs[0].cycle).toBe(0);

@@ -1,16 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Wire styling (UI_OVERHAUL §12): selecting a wire opens the Inspector's
- * wire section — a color swatch row and a width control. Width comes from
- * the driving pin (format-v2 §5.2), so the control edits the source
- * component's `bitsize`; color is stored on the wire itself.
+ * Wire interactions (UI_OVERHAUL §12/§13):
+ *  - drag-wiring: press on a pin, sweep, release on a pin → the wire commits
+ *    (a drag-release used to commit nothing, leaving the gesture in routing
+ *    mode so every later click bent the phantom wire — the reported "clicking
+ *    a wire re-routes it" bug);
+ *  - the Inspector's wire section: color swatches + a width control that
+ *    edits the net's driving component `bitsize` (format-v2 §5.2).
  */
 
 interface CsxDoc {
   circuits: {
     components: { id: string; type: string; attrs?: Record<string, unknown> }[];
-    wires: { color?: string }[];
+    wires: { color?: string; points: [number, number][] }[];
   }[];
 }
 
@@ -39,16 +42,50 @@ async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
   await page.mouse.click(p.x, p.y);
 }
 
-test("wire section: color swatch and width (driver bitsize)", async ({ page }) => {
+/** AND at (2.5,1.5), NOT at (11.5,1) — bodies [0,0] and [10,0]. */
+async function placeParts(page: Page): Promise<void> {
   await page.goto("/");
-
-  // AND centered at (2.5,1.5) → body [0,0]; NOT centered at (11.5,1) → [10,0].
   await page.getByRole("button", { name: "AND", exact: true }).click();
   await clickWorld(page, 2.5, 1.5);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "NOT", exact: true }).click();
   await clickWorld(page, 11.5, 1);
   await page.keyboard.press("Escape");
+}
+
+test("drag-wiring: releasing on the target pin commits the wire", async ({ page }) => {
+  await placeParts(page);
+
+  // Press on AND.out (5,1.5), sweep to NOT.in (10,1), release there.
+  const a = await world(page, 5, 1.5);
+  const b = await world(page, 10, 1);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  await page.mouse.up();
+
+  let d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(1);
+  expect(d.circuits[0].wires[0].points[0]).toEqual([5, 1.5]);
+  expect(d.circuits[0].wires[0].points.at(-1)).toEqual([10, 1]);
+  const settled = JSON.stringify(d.circuits[0].wires[0].points);
+
+  // Clicking the wire selects it (no re-route, no stray wire)…
+  await clickWorld(page, 7.5, 1.5);
+  await expect(page.locator(".inspector-id")).toHaveText(/wire/);
+
+  // …and clicking a component afterwards selects THAT component instead of
+  // bending the wire (the "even if I click something else it reroutes it" bug).
+  await clickWorld(page, 2.5, 1.5);
+  await expect(page.locator(".inspector-type")).toHaveText("gate.and");
+  await clickWorld(page, 20, 4);
+  d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(1);
+  expect(JSON.stringify(d.circuits[0].wires[0].points)).toBe(settled);
+});
+
+test("wire section: color swatch and width (driver bitsize)", async ({ page }) => {
+  await placeParts(page);
 
   // Wire AND.out (5,1.5) → NOT.in (10,1); then select it on a segment interior.
   await clickWorld(page, 5, 1.5);

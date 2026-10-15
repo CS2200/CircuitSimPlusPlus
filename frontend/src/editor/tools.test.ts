@@ -109,16 +109,46 @@ describe("wiring", () => {
     ]);
   });
 
-  it("dragging from a pin behaves like clicking it: release commits nothing", () => {
+  it("dragging pin → pin finishes the wire on release (UI_OVERHAUL §13)", () => {
     const { doc, tool, and, not } = setup();
     tool.down({ x: 15, y: 11.5 }, PI()); // press on and.out
-    tool.move({ x: 17, y: 9 }); // drag out
+    tool.move({ x: 17, y: 9 }); // sweep out
     tool.move({ x: 20, y: 11 }); // over not.in
-    tool.up(PI()); // release → NOTHING commits (click-driven routing only)
-    expect(doc.circuit(0).wires).toHaveLength(0);
-    expect(tool.isWiring).toBe(true);
-    tool.down({ x: 20, y: 11 }, PI()); // the CLICK finishes the wire
+    tool.up(PI(), { x: 20, y: 11 }); // release → the wire commits HERE
+    const wires = doc.circuit(0).wires;
+    expect(wires).toHaveLength(1);
+    expect(wires[0].a).toEqual({ comp: and, pin: "out" });
+    expect(wires[0].b).toEqual({ comp: not, pin: "in" });
+    expect(wires[0].points).toEqual([
+      [15, 11.5],
+      [19, 11.5],
+      [19, 11],
+      [20, 11],
+    ]);
+    expect(tool.isWiring).toBe(false);
+
+    // …and the next click SELECTS the wire instead of re-routing it.
+    tool.down({ x: 17.5, y: 11.5 }, PI());
     tool.up(PI());
+    expect(doc.circuit(0).wires).toHaveLength(1);
+    expect(tool.isWiring).toBe(false);
+  });
+
+  it("a swept release over empty space keeps routing (nothing to attach to)", () => {
+    const { doc, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.move({ x: 15, y: 6 });
+    tool.up(PI(), { x: 15, y: 6 });
+    expect(tool.isWiring).toBe(true);
+    expect(doc.circuit(0).wires).toHaveLength(0);
+    tool.cancel();
+  });
+
+  it("a swept release on a part's body attaches to its nearest pin", () => {
+    const { doc, tool, and, not } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI()); // press on and.out
+    tool.move({ x: 20.8, y: 11.2 }); // onto the NOT's body, nearest in (20,11)
+    tool.up(PI(), { x: 20.8, y: 11.2 });
     const wires = doc.circuit(0).wires;
     expect(wires).toHaveLength(1);
     expect(wires[0].a).toEqual({ comp: and, pin: "out" });

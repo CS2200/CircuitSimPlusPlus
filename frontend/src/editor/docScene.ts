@@ -201,6 +201,18 @@ export class DocScene {
       : { kind: "pin", compId: best.compId, pin: best.pin, pos: best.pos };
   }
 
+  /** Nearest pin of ONE component (drop-on-part wiring, UI_OVERHAUL §13). */
+  nearestPinOf(compId: string, world: Vec2): { pin: string; pos: Vec2 } | null {
+    const layout = this.layouts.get(compId);
+    if (layout === undefined || layout.pins.length === 0) return null;
+    let best: { pin: string; pos: Vec2; d: number } | null = null;
+    for (const p of layout.pins) {
+      const d = Math.hypot(world.x - p.x, world.y - p.y);
+      if (best === null || d < best.d) best = { pin: p.name, pos: { x: p.x, y: p.y }, d };
+    }
+    return best === null ? null : { pin: best.pin, pos: best.pos };
+  }
+
   /** Nearest wire segment within tolerance (junction placement + selection). */
   pickWire(world: Vec2, tol = PICK_TOL): WireHit | null {
     const candidates = this.wireIndex.queryRect(inflateRect(pointRect(world), tol));

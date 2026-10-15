@@ -424,3 +424,46 @@ green.
 golden + 12 cli); frontend lint / 252 unit / build / 33-of-33 e2e green
 (new `wires.spec.ts` + rewritten `memory.spec.ts`; screenshot baselines
 unchanged).
+
+## 13. Follow-up batch D (2026-10-16): rail labels + drag-wiring
+
+- **Activity rail:** every rail button now shows its group name under the icon
+  (`palette-rail-label`; the rail widens 56 → 68 px). The palette _panel_ width
+  is unchanged, so canvas geometry and the sheet-tab inset are unaffected.
+- **Wire gesture** — the report was "drag a wire from one component to another,
+  then I click the wire and it re-routes it, and even clicking something else
+  re-routes it, making the entire thing unusable". Routing was click-only: a
+  press → sweep → release produced **nothing** and left the machine in wiring
+  mode, so every later click planted another waypoint on the phantom wire.
+  The machine now tracks the press (`pressStart`/`pressSwept`) and a **swept
+  release finishes the wire** on whatever is under the pointer:
+  1. a pin or wire within `RELEASE_PIN_TOL` (1 grid unit), else
+  2. the nearest pin of the part you dropped on (`DocScene.nearestPinOf`) —
+     big parts are mostly body, and missing the terminal by a hair used to
+     strand the gesture, else
+  3. nothing to attach to (empty space) → routing continues, exactly as a
+     click there would.
+     Click-click wiring is untouched: a press without movement still plants a
+     waypoint, and the next click finishes.
+- Regression tests: `tools.test.ts` (drag-release commits; empty-space release
+  keeps routing; drop-on-body snaps to the nearest pin) and `wires.spec.ts`
+  (drag-wiring commits, then clicking the wire _selects_ it, and clicking a
+  component selects that component with the route unchanged).
+
+## 14. Follow-up batch E (2026-10-16): memory grid editor
+
+- The RAM/ROM contents dialog is a **hex grid**, not a paste box: 16 × 16 cells
+  per page (address gutter + page nav over the whole depth). Click a cell and
+  paste — values fill from that address onward (same `rle-hex-v1` parser, so
+  `4-00` runs work) — or type into a cell (hex only, clamped to the word width,
+  empty clears). Arrow keys walk the grid; the focused cell is the selection.
+  Applying writes the canonical image to `attrs.contents`.
+- The dialog opts out of the generic help card's 480 px `max-width`
+  (`help-card.mem-dialog`) so a full 16-column row fits.
+- `mock.ts` honors the embedded `attrs.contents` image (what the Inspector
+  writes) before the dev-only `hex:` autoload convention, matching the engine
+  (`behavior.rs::init_words`).
+
+**Acceptance:** frontend lint / 254 unit / build / 34-of-34 e2e green (new
+drag-wiring `wires.spec.ts` test, grid-based `memory.spec.ts`, a mock
+`contents` test); screenshot baselines unchanged.

@@ -339,11 +339,12 @@ body {
   background: var(--panel);
 }
 
-/* Activity rail (UI_OVERHAUL §8): one icon per component group. Hovering,
- * focusing, or clicking a group switches the body beside it. */
+/* Activity rail (UI_OVERHAUL §8): one icon per component group, with the
+ * group's name underneath (§13); hovering, focusing, or clicking a group
+ * switches the body beside it. */
 .palette-rail {
   flex: none;
-  width: 56px;
+  width: 68px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -356,16 +357,29 @@ body {
 .palette-rail-btn {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   flex: none;
-  width: 44px;
-  height: 44px;
+  width: 60px;
+  min-height: 44px;
+  padding: 5px 2px;
   background: transparent;
   color: var(--text-dim);
   border: none;
   border-radius: 10px;
   cursor: pointer;
+}
+
+.palette-rail-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6rem;
+  line-height: 1.15;
+  text-align: center;
 }
 
 .palette-rail-btn:hover {
@@ -967,10 +981,13 @@ body {
 
 /* ---- memory contents dialog (UI_OVERHAUL §11) ---- */
 
-.mem-dialog {
+/* Wider than the generic help card (`.help-card` caps at 480px): the memory
+ * grid wants a full 16-column row visible. */
+.help-card.mem-dialog {
   display: flex;
   flex-direction: column;
-  width: min(52rem, calc(100vw - 2rem));
+  width: min(74rem, calc(100vw - 2rem));
+  max-width: none;
   max-height: 84vh;
 }
 
@@ -1005,8 +1022,28 @@ body {
   width: 100%;
 }
 
+/* Editable hex cell (UI_OVERHAUL §14): click to select, paste to fill from
+ * here. The input's width comes from the word's hex width (inline style). */
 .mem-table .mem-cell {
-  min-width: 3.6rem;
+  min-width: 0;
+  padding: 0.1rem 0.25rem;
+  text-align: right;
+}
+
+.mem-cell-input {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  padding: 0.05rem 0;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
+}
+
+.mem-cell:focus-within {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .mem-dialog-foot {
