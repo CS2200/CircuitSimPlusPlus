@@ -167,6 +167,12 @@ export default function InspectorPanel({
             width comes from {driver.compId}.{driver.pin}
           </p>
         )}
+        {wire.info.widths.length > 1 && (
+          <p className="inspector-note">
+            Width mismatch: this net mixes {wire.info.widths.join(" / ")}-bit pins — the engine
+            reports it at load.
+          </p>
+        )}
         <div className="inspector-row">
           <span>Color</span>
           <div className="wire-colors">

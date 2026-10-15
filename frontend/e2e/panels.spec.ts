@@ -95,7 +95,7 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await checkGroup("Wiring", "PIN");
   await checkGroup("Plexers", "MUX");
   await checkGroup("Plexers", "DECODER");
-  await checkGroup("Arithmetic", "ADD");
+  await checkGroup("Arithmetic", "+");
   await checkGroup("Memory", "RAM");
   await checkGroup("I/O", "LED");
   await checkGroup("Gates", "NAND");

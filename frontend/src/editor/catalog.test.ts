@@ -9,6 +9,28 @@ import type { CsxCircuit } from "../model/csx";
  * order, subcircuit inputs on the left edge, outputs on the right.
  */
 
+describe("body marks (UI_OVERHAUL §17)", () => {
+  it("arithmetic parts use the symbol, not an abbreviation", () => {
+    const marks = [
+      "arith.adder",
+      "arith.subtractor",
+      "arith.multiplier",
+      "arith.divider",
+      "arith.comparator",
+      "arith.negator",
+      "arith.shifter",
+    ].map((t) => compSpec(t).caption({}));
+    expect(marks).toEqual(["+", "\u2212", "\u00d7", "\u00f7", "=", "~", "\u00ab"]);
+  });
+
+  it("non-symbol families keep a short abbreviation", () => {
+    expect(compSpec("mem.register").caption({})).toBe("REG");
+    expect(compSpec("mem.ram").caption({})).toBe("RAM");
+    expect(compSpec("plexers.mux").caption({})).toBe("MUX");
+    expect(compSpec("plexers.decoder").caption({})).toBe("DECODER");
+  });
+});
+
 function pin(name: string, attrs?: Record<string, unknown>, id?: string) {
   return { id: id ?? name, type: "wiring.pin", pos: [0, 0] as [number, number], name, attrs };
 }

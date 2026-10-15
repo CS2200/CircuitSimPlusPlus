@@ -532,3 +532,38 @@ run on Linux.
 **Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green (the
 subcircuit e2e now drives creation through the "+" tab and rename through a
 double-click on the tab box; the palette rail test asserts DECODER).
+
+## 17. Follow-up batch H (2026-10-16): labels, alignment, mismatch, wire color
+
+- **One labeling rule** (the "consistent method" ask). A component body ALWAYS
+  shows its **type mark**:
+  1. the **symbol** where the family has one — the arithmetic family is now
+     `+ − × ÷ = ~ «` (matching the palette icons) instead of `ADD/SUB/MUL/…`;
+  2. the **shape itself** for shaped parts (gates, plexers);
+  3. otherwise a **short abbreviation** (`REG`, `RAM`, `ROM`, `MUX`, `DEMUX`,
+     `DECODER`, `PIN`, `CLK`, `BTN`, `LED`, `EXT`, …).
+     A user-assigned **name is drawn above the part** and never replaces the
+     mark (previously a named box swapped its mark for the name); value parts
+     (constant / probe / register) still show the live value in place of the
+     mark with the name above. So `imem` now reads "RAM" with "imem" above it.
+- **Inspector alignment**: `.inspector-row` is a two-column grid (flexible
+  label track + fixed control track, controls `width: 100%`), so every
+  input/select/button group lines up down the panel instead of drifting with
+  its label.
+- **Bitsize mismatch, clearly visible**: a net whose pins disagree (format-v2
+  width rules) gets an **amber halo under the wire core** and a **⚠ width
+  badge** once per net — color-independent, so it reads over bus hues and
+  custom wire colors (the old "turn it yellow" recolor was lost once wires got
+  colors). Selecting such a wire also shows the exact widths in the Inspector
+  ("this net mixes 1 / 32-bit pins — the engine reports it at load").
+- **Default wire color**: wires with **no signal yet** (nothing simulated, or a
+  wire added after the current sim load) were drawn in the near-black
+  `--wire-disconnected`, so a freshly drawn wire looked dead. That variable is
+  now each theme's visible **default wire** color (a slate in dark/OLED/
+  midnight/contrast, mid-grey in the light/paper themes), so drawing a wire
+  looks like a wire until a simulation replaces it with per-state colors.
+
+**Acceptance:** frontend lint / 256 unit / build / 35-of-35 e2e green. The three
+sim demo baselines were regenerated (the mismatch halos and the new body
+marks/value layout are intentional); the committed Linux baselines still need
+one `--update-snapshots` run on Linux.

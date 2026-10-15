@@ -303,7 +303,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
       { name: "c_out", dx: 3, dy: 4, kind: "out" },
     ],
-    "ADD",
+    "+",
   ),
   "arith.subtractor": boxSpec(
     6,
@@ -313,7 +313,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
-    "SUB",
+    "\u2212",
   ),
   "arith.multiplier": boxSpec(
     6,
@@ -323,7 +323,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
-    "MUL",
+    "\u00d7",
   ),
   "arith.divider": boxSpec(
     6,
@@ -333,7 +333,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
     ],
-    "DIV",
+    "\u00f7",
   ),
   "arith.comparator": boxSpec(
     6,
@@ -345,7 +345,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "eq", dx: 6, dy: 2, kind: "out" },
       { name: "gt", dx: 6, dy: 3, kind: "out" },
     ],
-    "CMP",
+    "=",
   ),
   "arith.negator": boxSpec(
     4,
@@ -354,7 +354,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "out", dx: 4, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
-    "NEG",
+    "~",
   ),
   "arith.shifter": boxSpec(
     6,
@@ -364,7 +364,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "amt", dx: 3, dy: 3, kind: "in" },
       { name: "out", dx: 6, dy: 1.5, kind: "out", bitsize: BUS_WIDTH },
     ],
-    "SHIFT",
+    "\u00ab",
   ),
   "arith.bit-extender": boxSpec(
     4,

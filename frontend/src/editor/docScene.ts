@@ -160,6 +160,10 @@ export class DocScene {
   private wireIndex = new UniformGrid(CELL);
   private wireNetId: (number | undefined)[] = [];
   private wireBits: number[] = [];
+  /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
+  private wireMismatch: boolean[] = [];
+  /** One ⚠ badge position per mismatched net (deduped, drawn on top). */
+  private mismatchMarks: Vec2[] = [];
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -201,6 +205,30 @@ export class DocScene {
       if (inf.conflict.length > 0) return Math.max(1, inf.conflict[inf.conflict.length - 1]);
       return Math.max(1, inf.bits ?? 1);
     });
+    // Bitsize mismatch (UI_OVERHAUL §17): a net whose pins declare different
+    // widths is flagged per wire (amber halo) and once per net (⚠ badge).
+    this.wireMismatch = c.wires.map((_, i) => {
+      const netId = this.nets.wireToNet.get(i);
+      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
+      return inferNetBits(net, this.layouts).conflict.length > 0;
+    });
+    this.mismatchMarks = [];
+    {
+      const marked = new Set<number>();
+      c.wires.forEach((w, i) => {
+        const netId = this.nets.wireToNet.get(i);
+        if (netId === undefined || !this.wireMismatch[i] || marked.has(netId)) return;
+        marked.add(netId);
+        const pts = w.points;
+        if (pts.length >= 2) {
+          const k = Math.floor((pts.length - 1) / 2);
+          this.mismatchMarks.push({
+            x: (pts[k][0] + pts[k + 1][0]) / 2,
+            y: (pts[k][1] + pts[k + 1][1]) / 2,
+          });
+        }
+      });
+    }
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
       c.wires,
@@ -483,10 +511,15 @@ export class DocScene {
       // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
       // bit buses read as clearly different weights beside a 1-bit wire.
       const width = wireWidthForBits(bits);
-      // Selection is an accent HALO under the core rather than a repaint, so
-      // a wire color you just picked shows immediately (UI_OVERHAUL §15).
+      // Halos nest: mismatch (widest) → selection → core. The mismatch ring is
+      // amber so it reads over any wire color or bus hue (UI_OVERHAUL §17);
+      // selection is an accent halo under the core so a color you just picked
+      // shows immediately (§15).
+      if (this.wireMismatch[i]) {
+        renderer.drawPath(this.wirePaths[i], { stroke: theme.violation, lineWidth: width * 2.5 });
+      }
       if (selected) {
-        renderer.drawPath(this.wirePaths[i], { stroke: theme.accent, lineWidth: width * 2 });
+        renderer.drawPath(this.wirePaths[i], { stroke: theme.accent, lineWidth: width * 1.9 });
       }
       renderer.drawPath(this.wirePaths[i], {
         stroke,
@@ -563,11 +596,15 @@ export class DocScene {
           strokeStyle,
         );
         const spec = compSpec(comp.type);
-        let caption =
-          comp.name !== undefined && comp.name !== "" ? comp.name : spec.caption(comp.attrs ?? {});
+        // The body ALWAYS shows the type mark: a symbol where the family has
+        // one (arith: + − × ÷ = ~ «), otherwise a short abbreviation (REG, RAM,
+        // MUX, …). A user-assigned name is drawn ABOVE the part and never
+        // replaces the mark, so a named part stays recognizable
+        // (UI_OVERHAUL §17).
+        let caption = spec.caption(comp.attrs ?? {});
         // Value display (UX): constants always show their configured value;
-        // probes and registers show the live sim value, with the name moved
-        // above the box and the value repeated next to the wire pin.
+        // probes and registers show the live sim value in place of the mark,
+        // repeated next to the wire pin.
         let valueText: string | null = null;
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
@@ -584,24 +621,22 @@ export class DocScene {
             valueText = formatValue(val, probeDisplayMode(comp.attrs?.display));
           }
         }
-        if (valueText !== null) {
-          caption = valueText;
-          if (comp.name !== undefined && comp.name !== "") {
-            renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+        if (valueText !== null) caption = valueText;
+        if (comp.name !== undefined && comp.name !== "") {
+          renderer.drawText(cx, layout.rect.y - 0.8, comp.name, {
+            color: theme.textDim,
+            size: 0.9,
+            align: "center",
+          });
+        }
+        if (valueText !== null && valuePin !== null) {
+          const pin = layout.pins.find((p) => p.name === valuePin);
+          if (pin !== undefined) {
+            renderer.drawText(pin.x, pin.y - 0.7, valueText, {
               color: theme.textDim,
-              size: 0.9,
+              size: 0.7,
               align: "center",
             });
-          }
-          if (valuePin !== null) {
-            const pin = layout.pins.find((p) => p.name === valuePin);
-            if (pin !== undefined) {
-              renderer.drawText(pin.x, pin.y - 0.7, valueText, {
-                color: theme.textDim,
-                size: 0.7,
-                align: "center",
-              });
-            }
           }
         }
         renderer.drawText(
@@ -751,6 +786,19 @@ export class DocScene {
           );
         }
       }
+    }
+
+    // Bitsize-mismatch badges (UI_OVERHAUL §17): one ⚠ per offending net,
+    // drawn AFTER the parts so it reads whatever the wire colors are.
+    if (this.mismatchMarks.length > 0) {
+      for (const m of this.mismatchMarks) {
+        renderer.drawText(m.x, m.y - 0.55, "⚠ width", {
+          color: theme.violation,
+          size: 0.8,
+          align: "center",
+        });
+      }
+      renderer.flush();
     }
 
     // Tool ghosts.
