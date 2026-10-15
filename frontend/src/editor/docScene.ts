@@ -71,6 +71,84 @@ function probeDisplayMode(attr: unknown): ValueMode {
   return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
 }
 
+// ---- family tints, pin markers and live values (UI_OVERHAUL §21) ----
+
+type TintRole = "in" | "out" | "arith" | "plexer" | "memory" | "io";
+
+/** Family tint a component body takes (null = the plain panel colour). */
+function tintRoleOf(comp: CsxComponent): TintRole | null {
+  if (comp.type === "wiring.pin") return comp.attrs?.isOutput === true ? "out" : "in";
+  if (comp.type.startsWith("arith.")) return "arith";
+  if (comp.type.startsWith("plexers.")) return "plexer";
+  if (comp.type.startsWith("mem.")) return "memory";
+  if (comp.type.startsWith("io.")) return "io";
+  return null; // gates keep the classic look; wiring parts stay neutral
+}
+
+/** Theme colour behind a tint role / pin kind. */
+function tintColor(theme: Theme, role: TintRole): string {
+  switch (role) {
+    case "in":
+      return theme.bus[2];
+    case "out":
+      return theme.bus[0];
+    case "arith":
+      return theme.bus[4];
+    case "plexer":
+      return theme.bus[3];
+    case "memory":
+      return theme.bus[1];
+    case "io":
+      return theme.accent;
+  }
+}
+
+/** Mix `base` toward `other` by `t` (0..1); unchanged if either is not a hex. */
+function mixHex(base: string, other: string, t: number): string {
+  const parse = (hex: string): number[] | null => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (m === null) return null;
+    const n = Number.parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const a = parse(base);
+  const b = parse(other);
+  if (a === null || b === null) return base;
+  return `#${a
+    .map((v, i) => Math.round(v + (b[i] - v) * t))
+    .map((v) => v.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+/** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
+function fitTextSize(text: string, w: number, h: number, base = 1): number {
+  const byWidth = (w * 0.92) / Math.max(1, text.length * 0.62);
+  return Math.max(0.5, Math.min(base, byWidth, h * 0.6));
+}
+
+/**
+ * Pin whose net value is shown on the body (UI_OVERHAUL §21): clocks, pins,
+ * probes, registers, RAM/ROM and I/O parts are all live readouts.
+ */
+const VALUE_PIN: Readonly<Record<string, string>> = {
+  "wiring.clock": "out",
+  "wiring.pin": "pin",
+  "wiring.probe": "in",
+  "mem.register": "q",
+  "mem.ram": "dout",
+  "mem.rom": "out",
+  "io.led": "in",
+  "io.hexdisplay": "in",
+};
+
+/** Parts that also repeat their value next to the source pin (§21). */
+const VALUE_REPEAT: ReadonlySet<string> = new Set([
+  "wiring.probe",
+  "mem.register",
+  "mem.ram",
+  "mem.rom",
+]);
+
 /** Point at arc-length fraction t ∈ [0,1] along a polyline. */
 function pointAlong(points: [number, number][], t: number): Vec2 {
   const first = points[0];
@@ -449,6 +527,7 @@ export class DocScene {
     overlay: SceneOverlay,
     sim?: SimOverlay,
     grid = false,
+    showValues = true,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
 
@@ -531,13 +610,25 @@ export class DocScene {
     }
 
     // Components layer.
-    const pinDots: Vec2[] = [];
+    const inDots: Vec2[] = [];
+    const outDots: Vec2[] = [];
+    const otherDots: Vec2[] = [];
     for (const comp of this.components) {
       const layout = this.layouts.get(comp.id)!;
       if (!rectIntersects(layout.rect, visible)) continue;
       const selected = selection.hasComponent(comp.id);
+      // Family tint (UI_OVERHAUL §21): a hint of the part's family on its body
+      // and a stronger hint on its outline, so pins/memory/arithmetic read
+      // apart at a glance without shouting.
+      const role = tintRoleOf(comp);
+      const tint = role === null ? null : tintColor(theme, role);
+      const bodyFill = tint === null ? theme.panel : mixHex(theme.panel, tint, 0.1);
       const strokeStyle = {
-        stroke: selected ? theme.accent : theme.panelBorder,
+        stroke: selected
+          ? theme.accent
+          : tint === null
+            ? theme.panelBorder
+            : mixHex(theme.panelBorder, tint, 0.5),
         lineWidth: selected ? 0.22 : 0.12,
       };
       // Distinctive shape (local EAST frame → rotated about the body's
@@ -551,7 +642,7 @@ export class DocScene {
       const cy = layout.rect.y + layout.rect.h / 2;
       const shape = gateShape(comp.type, cx - local.w / 2, cy - local.h / 2, local.w, local.h);
       if (shape !== null) {
-        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: theme.panel });
+        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: bodyFill });
         renderer.drawPath(rotatePath(shape.body, cx, cy, rot), strokeStyle);
         for (const extra of shape.extra) {
           renderer.drawPath(rotatePath(extra, cx, cy, rot), strokeStyle);
@@ -562,13 +653,6 @@ export class DocScene {
           const b = shape.outBubble;
           const p = rotPt(b.x, b.y, cx, cy, rot);
           bubbles.push(p);
-        }
-        const negate = comp.attrs?.negateInputs;
-        if (Array.isArray(negate)) {
-          for (const pinName of negate) {
-            const pin = layout.pins.find((p) => p.name === pinName);
-            if (pin !== undefined) bubbles.push({ x: pin.x, y: pin.y });
-          }
         }
         for (const b of bubbles) {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
@@ -583,13 +667,22 @@ export class DocScene {
           });
         }
       } else {
-        renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
-          fill: theme.panel,
-        });
-        renderer.drawPath(
-          rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h),
-          strokeStyle,
-        );
+        // Input pins are square, output pins are rounded (UI_OVERHAUL §21).
+        const outPin = comp.type === "wiring.pin" && comp.attrs?.isOutput === true;
+        const bodyPath = outPin
+          ? roundedPath(
+              [
+                { x: layout.rect.x, y: layout.rect.y },
+                { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
+                { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
+                { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
+                { x: layout.rect.x, y: layout.rect.y },
+              ],
+              layout.rect.h / 2,
+            )
+          : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+        renderer.drawPath(bodyPath, { fill: bodyFill });
+        renderer.drawPath(bodyPath, strokeStyle);
         const spec = compSpec(comp.type);
         // The body ALWAYS shows the type mark: a symbol where the family has
         // one (arith: + − × ÷ = ~ «), otherwise a short abbreviation (REG, RAM,
@@ -597,23 +690,26 @@ export class DocScene {
         // replaces the mark, so a named part stays recognizable
         // (UI_OVERHAUL §17).
         let caption = spec.caption(comp.attrs ?? {});
-        // Value display (UX): constants always show their configured value;
-        // probes and registers show the live sim value in place of the mark,
-        // repeated next to the wire pin.
+        // Live values (UI_OVERHAUL §21): constants always show their configured
+        // value; clocks, pins, probes, registers, RAM/ROM and I/O show the value
+        // on their VALUE_PIN net in place of the mark, with a repeat by the pin.
         let valueText: string | null = null;
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
           valueText = String(comp.attrs.value);
-        } else if (
-          (comp.type === "wiring.probe" || comp.type === "mem.register") &&
-          sim !== undefined
-        ) {
-          valuePin = comp.type === "wiring.probe" ? "in" : "q";
-          const docNet = this.nets.pinToNet.get(`${comp.id}:${valuePin}`);
-          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
-          const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
-          if (val !== undefined) {
-            valueText = formatValue(val, probeDisplayMode(comp.attrs?.radix));
+        } else if (sim !== undefined && showValues) {
+          const pinName = VALUE_PIN[comp.type];
+          if (pinName !== undefined) {
+            const docNet = this.nets.pinToNet.get(`${comp.id}:${pinName}`);
+            const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+            const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
+            if (val !== undefined) {
+              // A single-bit readout is a plain 0/1 — no hex prefix (§21).
+              const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? 1) : 1;
+              const mode = bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
+              valueText = formatValue(val, mode);
+              valuePin = pinName;
+            }
           }
         }
         if (valueText !== null) caption = valueText;
@@ -624,23 +720,30 @@ export class DocScene {
             align: "center",
           });
         }
-        if (valueText !== null && valuePin !== null) {
+        // The value is also repeated next to the pin it comes from, for the
+        // bigger readouts (registers/probes/memory) — a pin part's whole body
+        // already IS that pin, and small I/O parts would just get noisy.
+        if (valueText !== null && valuePin !== null && VALUE_REPEAT.has(comp.type)) {
           const pin = layout.pins.find((p) => p.name === valuePin);
           if (pin !== undefined) {
             renderer.drawText(pin.x, pin.y - 0.7, valueText, {
-              color: theme.textDim,
+              color: theme.text,
               size: 0.7,
               align: "center",
             });
           }
         }
         renderer.drawText(
-          layout.rect.x + layout.rect.w / 2,
-          layout.rect.y + layout.rect.h / 2,
+          cx,
+          cy,
           caption,
-          // Mark scale: symbols (+ − × ÷ …) read better a little larger
-          // (UI_OVERHAUL §18).
-          { color: theme.textDim, size: spec.markSize ?? 1.0, align: "center" },
+          // Values (and symbols, §18) are sized to fit the body, so a 32-bit
+          // readout on a small part stays inside it.
+          {
+            color: valueText !== null ? theme.text : theme.textDim,
+            size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
+            align: "center",
+          },
         );
         // Subcircuit instances: label each interface pin just inside the
         // box (inputs at the left edge, outputs at the right).
@@ -656,10 +759,26 @@ export class DocScene {
           }
         }
       }
-      for (const p of layout.pins) pinDots.push({ x: p.x, y: p.y });
+      for (const p of layout.pins) {
+        const dot = { x: p.x, y: p.y };
+        if (p.kind === "out") outDots.push(dot);
+        else if (p.kind === "in") inDots.push(dot);
+        else otherDots.push(dot);
+      }
     }
     renderer.flush();
-    renderer.drawDots(pinDots, PIN_R, theme.textDim);
+    // Pin markers (UI_OVERHAUL §21): input pins are squares, output pins are
+    // circles, and a muted colour says which side of the part they are on.
+    const inMark = mixHex(theme.panel, theme.bus[2], 0.55);
+    const outMark = mixHex(theme.panel, theme.bus[0], 0.6);
+    renderer.drawDots(inDots, PIN_R, inMark);
+    renderer.drawDots(otherDots, PIN_R, theme.textDim);
+    if (outDots.length > 0) {
+      for (const d of outDots) {
+        renderer.drawPath(circlePath(d.x, d.y, PIN_R), { fill: outMark });
+      }
+      renderer.flush();
+    }
 
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);

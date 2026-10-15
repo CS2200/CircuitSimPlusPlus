@@ -344,10 +344,33 @@ export class CircuitDocument {
   /** Cycle rotation for a set of components as one command (ccw = reverse). */
   rotateComponents(circuitIdx: number, ids: ReadonlySet<string>, ccw = false): void {
     if (ids.size === 0) return;
+    this.applyRotation(circuitIdx, ids, ccw ? prevRot : nextRot, "rotate");
+  }
+
+  /**
+   * Point a set of components at an ABSOLUTE facing (arrow keys, §22): the
+   * arrow that matches the direction makes the part face that way, whatever it
+   * faced before. No-op when they already face that way.
+   */
+  setRotation(circuitIdx: number, ids: ReadonlySet<string>, rot: CsxComponent["rot"]): void {
+    if (ids.size === 0) return;
     const c = this.circuit(circuitIdx);
-    const components = c.components.map((x) =>
-      ids.has(x.id) ? { ...x, rot: ccw ? prevRot(x.rot) : nextRot(x.rot) } : x,
+    const already = [...ids].every(
+      (id) => (c.components.find((x) => x.id === id)?.rot ?? "E") === rot,
     );
+    if (already) return;
+    this.applyRotation(circuitIdx, ids, () => rot, `face ${rot ?? "E"}`);
+  }
+
+  /** Shared rotation op: remap each selected part's rotation, fix its wires. */
+  private applyRotation(
+    circuitIdx: number,
+    ids: ReadonlySet<string>,
+    map: (rot: CsxComponent["rot"]) => CsxComponent["rot"],
+    verb: string,
+  ): void {
+    const c = this.circuit(circuitIdx);
+    const components = c.components.map((x) => (ids.has(x.id) ? { ...x, rot: map(x.rot) } : x));
     // Pins rotate about the body center: wires glued to a rotated component
     // must follow (re-anchored + re-stubbed along the new facing). Requires
     // the editor's `pinGeometry` hook; without it, geometry stays untouched.
@@ -357,7 +380,7 @@ export class CircuitDocument {
       const byId = new Map(components.map((x) => [x.id, x]));
       wires = c.wires.map((w) => this.reanchorRotatedWire(w, ids, byId, geom));
     }
-    const label = ids.size === 1 ? `rotate ${[...ids][0]}` : `rotate ${ids.size} components`;
+    const label = ids.size === 1 ? `${verb} ${[...ids][0]}` : `${verb} ${ids.size} components`;
     this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
   }
 

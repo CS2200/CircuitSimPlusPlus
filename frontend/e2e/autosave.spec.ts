@@ -82,6 +82,7 @@ test("autosave can be turned off in Settings", async ({ page }) => {
   await page.getByRole("button", { name: "File", exact: true }).click();
   await page.getByRole("menuitem", { name: "Settings…" }).click();
   const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Autosave" }).click();
   await settings.getByRole("checkbox", { name: /^Autosave/ }).uncheck();
   await page.keyboard.press("Escape");
   await expect(page.locator(INDICATOR)).toHaveText("Autosave off");

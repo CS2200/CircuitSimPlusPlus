@@ -69,19 +69,31 @@ describe("placing", () => {
     expect(doc.circuit(0).components.at(-1)?.rot).toBe("S");
   });
 
-  it("arrow rotation goes the other way (ccw) for the selection and ghost", () => {
+  it("arrows point the ghost and the selection at an absolute facing", () => {
     const { doc, tool, and } = setup();
+    // Ghost: an arrow sets the facing outright (and is idempotent).
     tool.startPlacing("gate.or");
-    tool.rotateSelection(true); // ghost: E → N
+    tool.faceSelection("N");
+    tool.faceSelection("N");
     tool.down({ x: 30, y: 20 }, PI());
     expect(doc.circuit(0).components.at(-1)?.rot).toBe("N");
     tool.cancel();
-    // Selection: E → N with ccw, as one undoable op.
+
+    // Selection: right → East, left → West, up → North (absolute, not a step).
     tool.down({ x: 12, y: 11 }, PI()); // the AND's body
     tool.up(PI());
-    tool.rotateSelection(true);
+    tool.faceSelection("W");
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("W");
+    tool.faceSelection("N");
     expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("N");
+    tool.faceSelection("S");
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("S");
+    tool.faceSelection("E");
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("E");
+    // R still steps the cycle (E→S), and ccw reverses it.
     tool.rotateSelection();
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("S");
+    tool.rotateSelection(true);
     expect(doc.circuit(0).components.find((c) => c.id === and)?.rot).toBe("E");
   });
 });

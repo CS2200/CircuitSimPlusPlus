@@ -248,7 +248,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
           "pos": [15, 10],
           "rot": "E",
           "name": "",                 // optional; REQUIRED on autograder-exposed parts
-          "attrs": { "bitsize": 32, "negateInputs": ["b"], "delay": null }
+          "attrs": { "bitsize": 32, "delay": null }
           // pins have no connectivity fields at all — wires own connectivity
         },
         {

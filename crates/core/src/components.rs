@@ -10,8 +10,6 @@
 //!
 //! Only interfaces live here — no simulation behavior (task B4).
 
-use std::collections::BTreeSet;
-
 use serde_json::{Map, Value as Json};
 
 use crate::api::{CompId, LoadError, LoadErrorKind};
@@ -26,7 +24,8 @@ use crate::value::Value;
 /// grader container (a `Value` is ~100 bytes of struct + heap).
 pub const MAX_BITSIZE: u32 = 32;
 /// Max inputs on a multi-input gate (`inputs` attr).
-pub const MAX_GATE_INPUTS: u32 = 64;
+/// Gate input cap (UI_OVERHAUL §24: the palette stops at 32).
+pub const MAX_GATE_INPUTS: u32 = 32;
 /// Max select bits on mux/demux (`selectBits`) and input bits on decoder
 /// (`inputBits`).
 pub const MAX_SELECT_BITS: u32 = 8;
@@ -168,8 +167,6 @@ pub enum CompKind {
         bitsize: u32,
         /// Number of inputs (`inputs` attr, ≥ 2).
         inputs: u32,
-        /// Names of input pins to invert (`negateInputs` attr).
-        negate_inputs: Vec<String>,
     },
     /// Tri-state controlled buffer (`wiring.controlled-buffer`).
     ControlledBuffer {
@@ -469,31 +466,6 @@ impl<'a> AttrCheck<'a> {
         v
     }
 
-    /// List of strings (e.g. `negateInputs`).
-    fn string_list(&mut self, name: &str) -> Vec<String> {
-        match self.attrs.get(name) {
-            None => Vec::new(),
-            Some(Json::Array(items)) => {
-                let mut out = Vec::with_capacity(items.len());
-                for it in items {
-                    match it.as_str() {
-                        Some(s) => out.push(s.to_string()),
-                        None => self
-                            .issues
-                            .push(format!("attr '{name}' entries must be strings, got {it}")),
-                    }
-                }
-                out
-            }
-            Some(other) => {
-                self.issues.push(format!(
-                    "attr '{name}' must be an array of strings, got {other}"
-                ));
-                Vec::new()
-            }
-        }
-    }
-
     /// Every attribute key must be known — a typo'd attr name is an error,
     /// not silently ignored.
     fn finish(&mut self) {
@@ -527,24 +499,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (vec![PinSig::i("in", b), PinSig::o("out", b)], c, kind)
         }
         "gate.and" | "gate.or" | "gate.xor" | "gate.nand" | "gate.nor" | "gate.xnor" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs", "negateInputs"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs"]);
             let b = c.bitsize(1);
             let inputs = c.uint("inputs", 2, 2, MAX_GATE_INPUTS);
-            let negate = c.string_list("negateInputs");
             c.finish();
             let mut pins: Vec<PinSig> = (0..inputs)
                 .map(|i| PinSig::i(format!("in{i}"), b))
                 .collect();
             pins.push(PinSig::o("out", b));
-            let names: BTreeSet<&str> = pins.iter().map(|p| p.name.as_str()).collect();
-            for name in &negate {
-                if !names.contains(name.as_str()) || name == "out" {
-                    c_issue(
-                        &mut c,
-                        format!("negateInputs entry '{name}' is not one of its input pins"),
-                    );
-                }
-            }
             let op = match type_ {
                 "gate.and" => GateOp::And,
                 "gate.or" => GateOp::Or,
@@ -557,7 +519,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 op,
                 bitsize: b,
                 inputs,
-                negate_inputs: negate,
             };
             (pins, c, kind)
         }
@@ -1104,14 +1065,14 @@ mod tests {
 
     #[test]
     fn gate_pin_names_and_negation() {
-        let (p, e) = pins("gate.and", json!({"inputs": 3, "negateInputs": ["in2"]}));
+        let (p, e) = pins("gate.and", json!({"inputs": 3}));
         assert_eq!(p.unwrap(), vec!["in0", "in1", "in2", "out"]);
         assert!(e.is_empty());
 
-        // Negating a non-existent input is an error.
-        let (_, e) = pins("gate.and", json!({"inputs": 2, "negateInputs": ["in2"]}));
+        // `negateInputs` was removed (UI_OVERHAUL §24): it is now unknown.
+        let (_, e) = pins("gate.and", json!({"inputs": 2, "negateInputs": ["in1"]}));
         assert_eq!(e.len(), 1);
-        assert!(e[0].message.contains("negateInputs"));
+        assert!(e[0].message.contains("negateInputs"), "{:?}", e[0]);
 
         // Defaults: 2 inputs, 1 bit.
         let (p, e) = pins("gate.xor", json!({}));

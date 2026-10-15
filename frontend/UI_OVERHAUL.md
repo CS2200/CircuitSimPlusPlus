@@ -660,3 +660,129 @@ freeze animations).
   handles, so rail/resize keyboard use isn't hijacked.
 
 **Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.
+
+## 21. Follow-up batch L (2026-10-16): live values, pin shapes, family colour
+
+- **Live values on the body.** Clocks, pin parts, probes, registers, RAM/ROM,
+  LEDs and hex displays now show the value on their read pin (`VALUE_PIN`) in
+  place of their type mark, plus the part's name above — the same live-readout
+  treatment probes/registers already had. A single-bit readout reads `0`/`1`
+  (no `0x` prefix); wider ones honour the part's `radix`. The value repeats next
+  to the source pin only for the big readouts (probe/register/memory): a pin
+  part's body _is_ that pin, and small I/O parts would just get noisy.
+- **Text fits the body.** Both the mark and the value are auto-sized to the
+  body (`fitTextSize`), so a 32-bit readout on a 2×1 pin stays inside it, and
+  values are drawn in the brighter text colour to stand apart from type marks.
+- **Pin shapes.** Every input pin marker is a **square**, every output pin
+  marker is a **circle** (inout stays square, junction/corner dots unchanged) —
+  so a part's direction is readable from any component. The `wiring.pin`
+  _component_ follows the same rule: an input pin is a square body, an output
+  pin a rounded (stadium) body.
+- **Family colour.** Components that belong to a family get a subtle tint —
+  a 10 % body fill and a 50 % outline — from the theme's existing palette:
+  input pins cyan, output pins amber, memory purple, arithmetic lime, plexers
+  pink, I/O the accent colour. Gates keep the classic look and wiring parts
+  stay neutral. Pin markers are the same colours, muted, so they read as
+  colour-coded without shouting.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (baselines
+regenerated locally; Linux still wants one `--update-snapshots` run).
+
+## 22. Follow-up batch M (2026-10-16): arrows set the facing
+
+- **Arrows are absolute, not a step.** The arrow whose direction matches the
+  way a part should point is the one that does it: **→ faces East, ← West,
+  ↑ North, ↓ South**, for the selection and the placement ghost alike. Pressing
+  → on a part already facing east does nothing; pressing ← makes it face west
+  whatever it faced before. `R` still steps the E→S→W→N cycle (one undoable op
+  per change, and the wired-pin repair still runs, since `applyRotation` is now
+  shared by the cycle and the absolute setter).
+- The canvas key handler ignores real text fields (and open dialogs); widgets
+  that own arrow keys (palette rail, resize handles) stop the event instead
+  (§23).
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green.
+
+## 23. Follow-up batch N (2026-10-16): values from the start, arrow focus
+
+- **Values are live from the start.** Adopting a document (mount, File → New,
+  File → Open) now loads it into the engine, so clocks, pins, probes,
+  registers, RAM/ROM and I/O show their value immediately instead of their type
+  mark — opening a circuit (or the `?simdemo=1` demo) no longer needs a
+  transport command first. `store.onLoaded` already preserved the load-time
+  full-state batch; the missing piece was triggering a load on identity change,
+  and that effect must depend on the document identity only — depending on the
+  store version re-entered while `loaded` was still false and looped. Edits
+  afterwards keep the last known values until the next command (U6).
+- **A placed component is selected.** Placing now leaves the new part selected,
+  so the natural follow-up — arrows/R to orient it, Del to remove it, the
+  Inspector to edit it — acts on it immediately instead of on nothing.
+- **Arrow focus trap fixed.** After picking a palette item the button keeps
+  focus, and the canvas key handler used to bail on any BUTTON target, so
+  R/arrows appeared dead. It now ignores only real text fields (and open
+  dialogs), and the widgets that own arrow keys stop propagation. So: place a
+  part with the palette, press ↑, and it faces up — no clicking back into the
+  canvas first.
+
+**Acceptance:** frontend lint / 263 unit / build / 35-of-35 e2e green (canvas
+baselines regenerated: they now include live readouts).
+
+## 24. Follow-up batch O (2026-10-16): negateInputs out, 32 inputs, pins bottom
+
+- **`negateInputs` is gone** (human decision) — from the engine
+  (`CompKind::Gate` lost its `negate_inputs`, the string-list attr helper went
+  with it, and the De Morgan test became a truth-table test for the NAND/NOR/
+  XNOR _types_), from the frontend (the Inspector field, the `list` field kind
+  and the bubble pass), and from the docs so they match the code:
+  `docs/format-v2.md` §4 (the gate row) + §4's deviations note, and the
+  DESIGN.md §5.2 sample document. A file carrying `negateInputs` now fails
+  validation as an unknown attr (asserted in `components.rs`).
+- **Gate inputs cap at 32** (`MAX_GATE_INPUTS`, the Inspector's max) and
+  `docs/format-v2.md` says 2..=32 accordingly.
+- **Clock/reset inputs moved to the bottom edge** of the memory parts, data-sheet
+  style: `mem.register` gained the `rst` pin the format defines (d/en left,
+  clk/rst bottom, q right), `mem.ram` puts `we`/`clk` on the bottom and uses the
+  format's `din`/`dout` names, and `mem.rom` is `addr`/`out` only. `VALUE_PIN`
+  follows the renamed read pins (ram → dout, rom → out).
+
+**Acceptance:** `cargo fmt`/`clippy -D warnings`/`test` green (12 cli + 167 core
+
+- 8 golden); frontend lint / 263 unit / build / 36-of-36 e2e green.
+
+## 25. Follow-up batch P (2026-10-16): modern settings panel
+
+- **Sectioned panel**: the Settings dialog is now a two-pane settings panel —
+  a nav column (Appearance / Canvas / Editing / Simulation / Startup) and the
+  section's controls beside it, in rows (label + hint left, control right) that
+  mirror the Inspector. Same live-apply, no-Apply-button model, same footer.
+- **More themes** (11): OLED, Dark, Midnight, **Nord**, **Dracula**,
+  **Gruvbox**, **Solarized**, High contrast, Light, Paper, **Solarized Light** —
+  each one CSS block plus a catalog entry (themes stay data).
+- **More accents** (14): theme default plus blue, indigo, violet, fuchsia, rose,
+  red, orange, amber, lime, green, teal, cyan, slate.
+- **More settings**: _Canvas_ — show grid, **show live values**, animate signal
+  pulses, **show the performance overlay**; _Editing_ — **default bit width**
+  and **default gate inputs**, seeded onto newly placed parts; _Simulation_ —
+  **default clock speed** (where the transport slider starts). All persist per
+  machine (`csx.*`), all are reset by "Reset to defaults", and the e2e covers
+  the nav, a new theme/accent and the placement seeds.
+
+**Acceptance:** frontend lint / 263 unit / build / 36-of-36 e2e green.
+
+## 26. Follow-up batch Q (2026-10-16): settings shell, no delay field
+
+- **Settings panel padding + fixed size.** The panel now owns the padding
+  (`1rem 1.25rem 1.05rem`) and the head/nav/pane use it instead of growing their
+  own insets, so everything lines up on one left edge; the pane and the nav
+  reserve their scrollbar gutter (`scrollbar-gutter: stable`) so the content
+  width does not shift between sections. The panel's **height is fixed**
+  (`min(88vh, 44rem)`), so switching from Appearance to Startup no longer
+  resizes the dialog — asserted in the e2e by comparing the panel's box across
+  two sections.
+- **No delay field.** The Inspector no longer offers the per-instance `delay`
+  override for any part (§25 had just added it). Timing is presented as
+  unit-wide, matching the course model. The attr itself stays in the format
+  (`format-v2` §4/§6) and the engine still accepts it — a file that carries one
+  still loads; the panel simply doesn't offer it, so no doc change is needed.
+
+**Acceptance:** frontend lint / 263 unit / build / 37-of-37 e2e green.

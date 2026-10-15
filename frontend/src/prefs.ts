@@ -13,6 +13,17 @@ export const PREF_GRID = "csx.grid";
 export const PREF_AUTOSAVE = "csx.autosave";
 /** Autosave also rewrites the real `.csx` (named documents only). */
 export const PREF_AUTOSAVE_FILE = "csx.autosave.file";
+/** Live value readouts on parts (UI_OVERHAUL §25) — on by default. */
+export const PREF_SHOW_VALUES = "csx.showValues";
+/** Frame-rate overlay in the canvas corner —
+ *  off by default. */
+export const PREF_SHOW_PERF = "csx.showPerf";
+/** Bit width seeded on newly placed parts. */
+export const PREF_DEFAULT_BITS = "csx.defaultBits";
+/** Gate input count seeded on newly placed gates. */
+export const PREF_DEFAULT_INPUTS = "csx.defaultInputs";
+/** Where the transport speed slider starts (exponent: hz = 10^(exp/10)). */
+export const PREF_DEFAULT_HZ = "csx.defaultHz";
 
 export function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
@@ -28,6 +39,26 @@ export function loadBoolPref(key: string, fallback: boolean): boolean {
 export function saveBoolPref(key: string, value: boolean): void {
   try {
     localStorage.setItem(key, value ? "1" : "0");
+  } catch {
+    /* preference is best-effort */
+  }
+}
+
+/** Integer preference; missing/corrupt/unreadable → the fallback. */
+export function loadNumPref(key: string, fallback: number): number {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    const n = Number(v);
+    return Number.isInteger(n) ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveNumPref(key: string, value: number): void {
+  try {
+    localStorage.setItem(key, String(value));
   } catch {
     /* preference is best-effort */
   }

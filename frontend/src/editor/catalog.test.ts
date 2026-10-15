@@ -45,15 +45,15 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
   const keys = (type: string): string[] => editableAttrs(type).map((f) => f.key);
 
   it("exposes every attr the engine accepts, with format-v2 names", () => {
-    // No `delay`: timing is unit-wide (from the delay table), never a
-    // per-instance attr.
+    // Timing is unit-wide (format-v2 §6): the panel offers no `delay` field
+    // for any part (§26).
     expect(keys("arith.shifter")).toEqual(["bitsize", "shift"]);
     expect(keys("arith.bit-extender")).toEqual(["inBits", "outBits", "mode"]);
     expect(keys("plexers.mux")).toEqual(["bitsize", "selectBits"]);
     expect(keys("plexers.decoder")).toEqual(["inputBits"]);
     expect(keys("wiring.probe")).toEqual(["bitsize", "radix"]);
     expect(keys("wiring.splitter")).toEqual(["splits"]);
-    expect(keys("gate.and")).toEqual(["bitsize", "inputs", "negateInputs"]);
+    expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
     expect(keys("mem.ram")).toEqual(["bitsize", "depth"]);
     expect(keys("io.button")).toEqual(["bitsize"]);

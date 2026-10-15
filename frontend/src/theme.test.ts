@@ -56,7 +56,7 @@ describe("theme catalog", () => {
 
   it("isThemeId accepts exactly the catalog ids", () => {
     for (const t of THEMES) expect(isThemeId(t.id)).toBe(true);
-    for (const bad of ["", "solarized", 42, null, undefined, {}]) {
+    for (const bad of ["", "vscode", 42, null, undefined, {}]) {
       expect(isThemeId(bad)).toBe(false);
     }
   });

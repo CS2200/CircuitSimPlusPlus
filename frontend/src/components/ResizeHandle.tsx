@@ -93,6 +93,7 @@ export default function ResizeHandle({
         const step = e.key === growKey ? 8 : e.key === shrinkKey ? -8 : 0;
         if (step === 0) return;
         e.preventDefault();
+        e.stopPropagation(); // resize keys must not reach the canvas (§22)
         const next = clampPanelWidth(panel, latest.current + step);
         apply(next);
         onCommit(next);

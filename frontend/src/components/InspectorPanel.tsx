@@ -520,35 +520,6 @@ function FieldRow({
     );
   }
 
-  if (field.kind === "list") {
-    const list = Array.isArray(value)
-      ? value.filter((v): v is string => typeof v === "string")
-      : [];
-    const text = draft?.key === key ? draft.text : list.join(", ");
-    return (
-      <label className="inspector-row">
-        <span>{field.label}</span>
-        <input
-          value={text}
-          placeholder={field.placeholder}
-          onChange={(e) => onDraft({ key, text: e.target.value })}
-          onBlur={() => {
-            if (draft?.key !== key) return;
-            const items = draft.text
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s !== "");
-            onCommitAttr(field.key, items);
-            onDraft(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
-        />
-      </label>
-    );
-  }
-
   if (field.kind === "splits") {
     const text = draft?.key === key ? draft.text : splitsToText(value);
     return (

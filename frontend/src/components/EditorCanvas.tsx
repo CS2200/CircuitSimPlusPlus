@@ -82,6 +82,10 @@ export default forwardRef<
     pulsesOn?: boolean;
     /** Coarse canvas grid (Settings → Canvas, UI_OVERHAUL §15); default off. */
     gridOn?: boolean;
+    /** Live value readouts on parts (Settings → Canvas, §25); default on. */
+    showValues?: boolean;
+    /** Frame-rate overlay in the canvas corner (Settings → Canvas); default off. */
+    showPerf?: boolean;
   }
 >(function EditorCanvas(
   {
@@ -96,6 +100,8 @@ export default forwardRef<
     violations,
     pulsesOn = true,
     gridOn = false,
+    showValues = true,
+    showPerf = false,
   },
   ref,
 ) {
@@ -213,6 +219,7 @@ export default forwardRef<
         { ...tool.overlay(), now: pulsesOn ? tMs : undefined },
         simOverlay,
         gridOn,
+        showValues,
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutate-in-place sim store
@@ -229,6 +236,7 @@ export default forwardRef<
       pulsesLive,
       pulsesOn,
       gridOn,
+      showValues,
     ],
   );
 
@@ -257,16 +265,18 @@ export default forwardRef<
   // keyboard map
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Ignore keys aimed at a text field or while a dialog is open. Buttons
+      // are NOT excluded: after picking a palette item the button keeps focus,
+      // and R/Delete/arrows must still drive the canvas (widgets that own an
+      // arrow key stop it from propagating instead — §22).
       const target = e.target as HTMLElement | null;
       if (
         target !== null &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "BUTTON" ||
-          target.closest(".resize-handle") !== null)
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
       ) {
         return;
       }
+      if (document.querySelector(".help-overlay") !== null) return;
       const mod = e.ctrlKey || e.metaKey;
       let handled = true;
       if (mod && !e.shiftKey && e.key.toLowerCase() === "z") doc.undo();
@@ -281,10 +291,12 @@ export default forwardRef<
       else if (e.key === "Escape") tool.cancel();
       else if (e.key === "Delete" || e.key === "Backspace") tool.deleteSelection();
       else if (e.key.toLowerCase() === "r" && !mod) tool.rotateSelection();
-      // Arrow keys rotate the selection (← counter-clockwise, → clockwise) and
-      // the placement ghost while placing (UI_OVERHAUL §20).
-      else if (e.key === "ArrowRight" && !mod) tool.rotateSelection();
-      else if (e.key === "ArrowLeft" && !mod) tool.rotateSelection(true);
+      // Arrows point the selection / placement ghost AT that direction:
+      // right → East, left → West, up → North, down → South (UI_OVERHAUL §22).
+      else if (e.key === "ArrowRight" && !mod) tool.faceSelection("E");
+      else if (e.key === "ArrowLeft" && !mod) tool.faceSelection("W");
+      else if (e.key === "ArrowUp" && !mod) tool.faceSelection("N");
+      else if (e.key === "ArrowDown" && !mod) tool.faceSelection("S");
       else if (e.key.toLowerCase() === "x" && !mod) tool.flipRoute();
       else handled = false;
       if (handled) {
@@ -360,6 +372,7 @@ export default forwardRef<
       draw={draw}
       revision={tick + simVersion}
       animate={pulsesLive || (pulsesOn && mismatchLive)}
+      showPerf={showPerf}
       themeName={themeName}
       sceneBounds={initialBounds}
       onPointerDown={(w, info) => tool.down(w, info)}
