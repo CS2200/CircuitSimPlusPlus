@@ -131,6 +131,52 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
+/** Pointed hexagon body for the probe (UI_OVERHAUL §36) — a shape that says
+ * "probe" without a type word. */
+function probeBodyPath(r: Rect): PathCmd[] {
+  const k = Math.min(r.h, r.w / 2);
+  return roundedPath(
+    [
+      { x: r.x + k / 2, y: r.y },
+      { x: r.x + r.w - k / 2, y: r.y },
+      { x: r.x + r.w, y: r.y + r.h / 2 },
+      { x: r.x + r.w - k / 2, y: r.y + r.h },
+      { x: r.x + k / 2, y: r.y + r.h },
+      { x: r.x, y: r.y + r.h / 2 },
+      { x: r.x + k / 2, y: r.y },
+    ],
+    0.08,
+  );
+}
+
+/** A clock face (dial + two hands) drawn instead of a type word (§36). */
+function drawClockGlyph(renderer: Renderer, theme: Theme, cx: number, cy: number): void {
+  const r = 0.6;
+  const ink = { stroke: theme.textDim, lineWidth: 0.12 };
+  renderer.drawPath(circlePath(cx, cy, r), ink);
+  renderer.drawPath(
+    roundedPath(
+      [
+        { x: cx, y: cy },
+        { x: cx, y: cy - r * 0.62 },
+      ],
+      0,
+    ),
+    ink,
+  );
+  renderer.drawPath(
+    roundedPath(
+      [
+        { x: cx, y: cy },
+        { x: cx + r * 0.46, y: cy + r * 0.3 },
+      ],
+      0,
+    ),
+    ink,
+  );
+  renderer.flush();
+}
+
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
 function fitTextSize(text: string, w: number, h: number, base = 1): number {
   const byWidth = (w * 0.92) / Math.max(1, text.length * 0.62);
@@ -723,20 +769,24 @@ export class DocScene {
           });
         }
       } else {
-        // Input pins are square, output pins are rounded (UI_OVERHAUL §21).
+        // Input pins are square, output pins are rounded (UI_OVERHAUL §21); the
+        // probe gets its own pointed-hexagon body (§36).
         const outPin = comp.type === "wiring.pin" && comp.attrs?.isOutput === true;
-        const bodyPath = outPin
-          ? roundedPath(
-              [
-                { x: layout.rect.x, y: layout.rect.y },
-                { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
-                { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
-                { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
-                { x: layout.rect.x, y: layout.rect.y },
-              ],
-              layout.rect.h / 2,
-            )
-          : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+        const bodyPath =
+          comp.type === "wiring.probe"
+            ? probeBodyPath(layout.rect)
+            : outPin
+              ? roundedPath(
+                  [
+                    { x: layout.rect.x, y: layout.rect.y },
+                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
+                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
+                    { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
+                    { x: layout.rect.x, y: layout.rect.y },
+                  ],
+                  layout.rect.h / 2,
+                )
+              : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
         renderer.drawPath(bodyPath, { fill: bodyFill });
         renderer.drawPath(bodyPath, strokeStyle);
         const spec = compSpec(comp.type);
@@ -792,7 +842,8 @@ export class DocScene {
         }
         // The comparator's three outputs each get their own relation symbol
         // next to the pin (<, =, >) instead of one centered mark
-        // (UI_OVERHAUL §31).
+        // (UI_OVERHAUL §31); a clock/idle probe draws its own glyph instead of a
+        // type word, and a probe shows ONLY its live value (§36).
         if (comp.type === "arith.comparator") {
           const REL: Record<string, string> = { lt: "<", eq: "=", gt: ">" };
           for (const p of layout.pins) {
@@ -806,6 +857,10 @@ export class DocScene {
               align: "right",
             });
           }
+        } else if (comp.type === "wiring.clock" && valueText === null) {
+          drawClockGlyph(renderer, theme, cx, cy);
+        } else if (comp.type === "wiring.probe" && valueText === null) {
+          // no type word — the pointed shape already says "probe"
         } else {
           renderer.drawText(
             cx,

@@ -576,7 +576,7 @@ body {
  * switches the body beside it. */
 .palette-rail {
   flex: none;
-  width: 68px;
+  width: 74px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -595,7 +595,7 @@ body {
   justify-content: center;
   gap: 2px;
   flex: none;
-  width: 60px;
+  width: 66px;
   min-height: 44px;
   padding: 5px 2px;
   background: transparent;
@@ -611,7 +611,10 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.6rem;
-  line-height: 1.15;
+  /* Tall enough that the descender of a "g"/"y" is not clipped by the
+   * horizontal-overflow ellipsis box (UI_OVERHAUL §36). */
+  line-height: 1.4;
+  padding-bottom: 1px;
   text-align: center;
 }
 

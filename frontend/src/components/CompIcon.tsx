@@ -70,13 +70,15 @@ const RENDER_HEIGHT = 20;
 
 export default function CompIcon({
   type,
+  attrs = {},
   height = RENDER_HEIGHT,
 }: {
   type: string;
+  /** Type attrs that affect the silhouette (e.g. a pin's `isOutput`). */
+  attrs?: Record<string, unknown>;
   /** Rendered height in CSS px (default 14; the rail uses a larger size). */
   height?: number;
 }) {
-  const attrs = {};
   const { w, h } = compSize({ type, attrs }, []);
   const pins = compPins({ type, attrs }, []);
   const pad = 0.75;
@@ -84,7 +86,7 @@ export default function CompIcon({
   const vbH = h + 2 * pad;
   const shape = gateShape(type, 0, 0, w, h);
   const glyph = GLYPHS[type];
-  const caption = compSpec(type).caption({});
+  const caption = compSpec(type).caption(attrs);
 
   return (
     <svg

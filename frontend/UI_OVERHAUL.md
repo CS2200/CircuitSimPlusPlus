@@ -1046,3 +1046,33 @@ committed screenshot baselines need the usual `--update-snapshots` pass on CI.
 
 **Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green (the
 demo/theme screenshot specs stay within their 2% `maxDiffPixelRatio`).
+
+## 36. Follow-up batch AA (2026-10-16): rail label, constant 0, clock glyph, probe, Ctrl+X, split pins
+
+- **Rail label no longer clips.** `.palette-rail-label` used `line-height: 1.15`
+  with `overflow: hidden` (needed for the ellipsis on long names), which cut the
+  descender of the "g" in **Wiring**. The line box is now tall enough
+  (`line-height: 1.4` + a hair of bottom padding) and the rail/button are a touch
+  wider (74/66px).
+- **A constant always has a value.** `defaultAttrs("wiring.constant")` seeds
+  `value: "0"`, so a placed constant drives its net from the first click and the
+  Inspector shows `0` instead of an empty field.
+- **The clock draws a clock face.** `wiring.clock` no longer shows the word
+  `CLK`: idle it draws a dial + two hands (`drawClockGlyph`), and a live readout
+  replaces it while simulating.
+- **The probe has its own shape and only shows a value.** A probe body is a
+  pointed hexagon (`probeBodyPath`) rather than a rectangle, and it never prints
+  `PROBE` — it shows only its live value (and the value repeats by its pin while
+  simulating).
+- **Ctrl+X cuts.** `ToolMachine.cut()` copies the selection then deletes it as one
+  op; the canvas key handler binds `Ctrl/Cmd+X` and the **Edit ▸ Cut** menu item
+  (`Ctrl+X`) drives the same path. (Previously `Ctrl+X` did nothing.)
+- **Input and output pins are separate palette tiles.** `PALETTE` entries became
+  `PaletteItem { type, label?, attrs?, rot? }`, so the Wiring group offers
+  **INPUT** and **OUTPUT** — both place `wiring.pin`, the output seeding
+  `isOutput: true` and `rot: "W"`. `startPlacing` and the drag payload carry the
+  seed rot, `CompIcon` takes `attrs` so the two tiles draw differently, and the
+  Inspector's **Output pin** toggle (and `commitAsOutput`) is gone — the
+  direction is chosen by which tile you place.
+
+**Acceptance:** frontend lint / 292 unit / build green; 45-of-45 e2e green.

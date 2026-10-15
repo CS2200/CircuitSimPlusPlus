@@ -160,9 +160,14 @@ export class ToolMachine {
 
   // ---- external triggers ----
 
-  startPlacing(type: string, sticky = false, attrs?: Record<string, unknown>): void {
+  startPlacing(
+    type: string,
+    sticky = false,
+    attrs?: Record<string, unknown>,
+    rot: CsxComponent["rot"] = "E",
+  ): void {
     this.cancel();
-    this.placing = { type, pos: { x: 0, y: 0 }, rot: "E", attrs, sticky };
+    this.placing = { type, pos: { x: 0, y: 0 }, rot, attrs, sticky };
     this.changed();
   }
 
@@ -542,6 +547,15 @@ export class ToolMachine {
 
   deleteSelection(): void {
     if (this.selection.isEmpty) return;
+    this.doc.deleteSelection(this.circuitIdx(), this.selection.components, this.selection.wires);
+    this.selection.clear();
+    this.changed();
+  }
+
+  /** Cut (UI_OVERHAUL §36): copy the selection, then delete it. */
+  cut(): void {
+    if (this.selection.isEmpty) return;
+    this.clipboard = copySelection(this.doc.circuit(this.circuitIdx()), this.selection.components);
     this.doc.deleteSelection(this.circuitIdx(), this.selection.components, this.selection.wires);
     this.selection.clear();
     this.changed();

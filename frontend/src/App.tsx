@@ -1081,6 +1081,12 @@ export default function App() {
           },
           { kind: "sep" },
           {
+            label: "Cut",
+            shortcut: "Ctrl+X",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => editorRef.current?.cut(),
+          },
+          {
             label: "Copy",
             shortcut: "Ctrl+C",
             disabled: (status?.selection ?? 0) === 0,
@@ -1393,24 +1399,43 @@ export default function App() {
                             </button>
                           ),
                       )
-                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.types ?? []).map(
-                        (t) => (
-                          <button
-                            key={t}
-                            className={`palette-item${status?.placing === t ? " active" : ""}`}
-                            draggable
-                            onClick={(e) =>
-                              editorRef.current?.startPlacing(t, e.shiftKey, placementAttrs(t))
-                            }
-                            onDragStart={(e) => e.dataTransfer.setData("text/x-csx-type", t)}
-                            title={`${t} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
-                          >
-                            <CompIcon type={t} />
-                            <span className="palette-item-label">
-                              {compSpec(t).label ?? compSpec(t).caption({})}
-                            </span>
-                          </button>
-                        ),
+                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.items ?? []).map(
+                        (item) => {
+                          const spec = compSpec(item.type);
+                          const label = item.label ?? spec.label ?? spec.caption({});
+                          const seed = { ...(placementAttrs(item.type) ?? {}), ...item.attrs };
+                          return (
+                            <button
+                              key={`${item.type}:${item.label ?? ""}`}
+                              className={`palette-item${status?.placing === item.type ? " active" : ""}`}
+                              draggable
+                              onClick={(e) =>
+                                editorRef.current?.startPlacing(
+                                  item.type,
+                                  e.shiftKey,
+                                  Object.keys(seed).length === 0 ? undefined : seed,
+                                  item.rot,
+                                )
+                              }
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/x-csx-type", item.type);
+                                if (item.attrs !== undefined) {
+                                  e.dataTransfer.setData(
+                                    "text/x-csx-attrs",
+                                    JSON.stringify(item.attrs),
+                                  );
+                                }
+                                if (item.rot !== undefined) {
+                                  e.dataTransfer.setData("text/x-csx-rot", item.rot);
+                                }
+                              }}
+                              title={`${label} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
+                            >
+                              <CompIcon type={item.type} attrs={item.attrs} />
+                              <span className="palette-item-label">{label}</span>
+                            </button>
+                          );
+                        },
                       )}
                 </div>
               </div>

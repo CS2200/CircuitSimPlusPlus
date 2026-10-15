@@ -242,6 +242,9 @@ function splitterSpec(): CompSpec {
  */
 export function defaultAttrs(type: string): Record<string, unknown> | undefined {
   if (type === "wiring.splitter") return { splits: { ...DEFAULT_SPLITS } };
+  // A constant always carries a value so it drives its net from the start
+  // (UI_OVERHAUL §36): default 0.
+  if (type === "wiring.constant") return { value: "0" };
   return undefined;
 }
 
@@ -552,40 +555,71 @@ export function compSpec(type: string): CompSpec {
 }
 
 /** Palette entries grouped for the UI, in registry order. */
-export const PALETTE: { group: string; types: string[] }[] = [
+/** A palette tile: the type it places plus an optional placement seed. */
+export interface PaletteItem {
+  /** Component type this tile places. */
+  type: string;
+  /** Tile label override (defaults to the spec's label/caption). */
+  label?: string;
+  /** Attrs seeded on placement, merged over `defaultAttrs` + Editing prefs. */
+  attrs?: Record<string, unknown>;
+  /** Seed rotation (defaults east); an output pin seeds west. */
+  rot?: CsxComponent["rot"];
+}
+
+export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   {
     group: "Gates",
-    types: [
-      "gate.and",
-      "gate.or",
-      "gate.xor",
-      "gate.not",
-      "gate.buffer",
-      "gate.nand",
-      "gate.nor",
-      "gate.xnor",
+    items: [
+      { type: "gate.and" },
+      { type: "gate.or" },
+      { type: "gate.xor" },
+      { type: "gate.not" },
+      { type: "gate.buffer" },
+      { type: "gate.nand" },
+      { type: "gate.nor" },
+      { type: "gate.xnor" },
     ],
   },
   {
     group: "Wiring",
-    types: ["wiring.pin", "wiring.constant", "wiring.clock", "wiring.splitter", "wiring.probe"],
-  },
-  { group: "Plexers", types: ["plexers.mux", "plexers.demux", "plexers.decoder"] },
-  {
-    group: "Arithmetic",
-    types: [
-      "arith.adder",
-      "arith.subtractor",
-      "arith.multiplier",
-      "arith.divider",
-      "arith.comparator",
-      "arith.negator",
-      "arith.shifter",
-      "arith.bit-extender",
+    // Input and output are SEPARATE tiles (UI_OVERHAUL §36): the direction is
+    // chosen by which pin you place, never by an Inspector toggle. An output
+    // pin seeds `isOutput` and faces west (body points right).
+    items: [
+      { type: "wiring.pin", label: "INPUT" },
+      { type: "wiring.pin", label: "OUTPUT", attrs: { isOutput: true }, rot: "W" },
+      { type: "wiring.constant" },
+      { type: "wiring.clock" },
+      { type: "wiring.splitter" },
+      { type: "wiring.probe" },
     ],
   },
-  { group: "Memory", types: ["mem.register", "mem.ram", "mem.rom"] },
-  { group: "I/O", types: ["io.button", "io.led", "io.hexdisplay"] },
+  {
+    group: "Plexers",
+    items: [{ type: "plexers.mux" }, { type: "plexers.demux" }, { type: "plexers.decoder" }],
+  },
+  {
+    group: "Arithmetic",
+    items: [
+      { type: "arith.adder" },
+      { type: "arith.subtractor" },
+      { type: "arith.multiplier" },
+      { type: "arith.divider" },
+      { type: "arith.comparator" },
+      { type: "arith.negator" },
+      { type: "arith.shifter" },
+      { type: "arith.bit-extender" },
+    ],
+  },
+  {
+    group: "Memory",
+    items: [{ type: "mem.register" }, { type: "mem.ram" }, { type: "mem.rom" }],
+  },
+  {
+    group: "I/O",
+    items: [{ type: "io.button" }, { type: "io.led" }, { type: "io.hexdisplay" }],
+  },
 ];
 
 export function isKnownType(type: string): boolean {
@@ -744,15 +778,10 @@ function baseFields(type: string): AttrField[] {
   }
   switch (type) {
     case "wiring.pin":
+      // Direction (input/output) is chosen by the palette tile, not here
+      // (UI_OVERHAUL §36) — so the panel only edits width + radix.
       return [
         BITSIZE_FIELD,
-        {
-          key: "isOutput",
-          label: "Output pin",
-          kind: "boolean",
-          group: "Options",
-          hint: "An output pin is driven by this circuit; an input pin drives its net.",
-        },
         { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
       ];
     case "wiring.constant":
