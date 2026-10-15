@@ -112,6 +112,25 @@ test("Settings: the canvas grid overlay toggles and persists", async ({ page }) 
   await expect(gridToggle()).toBeChecked();
 });
 
+test("Settings: the panel keeps its size when switching sections", async ({ page }) => {
+  await page.goto("/");
+  await openSettings(page);
+  const card = page.locator(".settings-panel");
+  const first = await card.boundingBox();
+  expect(first).not.toBeNull();
+
+  // Appearance (tall) → Startup (short): the dialog must not resize (§26).
+  await openSection(page, "Startup");
+  const second = await card.boundingBox();
+  expect(second).not.toBeNull();
+  expect(second?.width).toBe(first?.width);
+  expect(second?.height).toBe(first?.height);
+
+  // …and it still fits the viewport.
+  const view = page.viewportSize();
+  expect(first!.height).toBeLessThanOrEqual((view?.height ?? 0) * 0.9);
+});
+
 test("Settings: sectioned panel — new themes, accents and editing prefs persist", async ({
   page,
 }) => {

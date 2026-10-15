@@ -768,3 +768,21 @@ baselines regenerated: they now include live readouts).
   the nav, a new theme/accent and the placement seeds.
 
 **Acceptance:** frontend lint / 263 unit / build / 36-of-36 e2e green.
+
+## 26. Follow-up batch Q (2026-10-16): settings shell, no delay field
+
+- **Settings panel padding + fixed size.** The panel now owns the padding
+  (`1rem 1.25rem 1.05rem`) and the head/nav/pane use it instead of growing their
+  own insets, so everything lines up on one left edge; the pane and the nav
+  reserve their scrollbar gutter (`scrollbar-gutter: stable`) so the content
+  width does not shift between sections. The panel's **height is fixed**
+  (`min(88vh, 44rem)`), so switching from Appearance to Startup no longer
+  resizes the dialog — asserted in the e2e by comparing the panel's box across
+  two sections.
+- **No delay field.** The Inspector no longer offers the per-instance `delay`
+  override for any part (§25 had just added it). Timing is presented as
+  unit-wide, matching the course model. The attr itself stays in the format
+  (`format-v2` §4/§6) and the engine still accepts it — a file that carries one
+  still loads; the panel simply doesn't offer it, so no doc change is needed.
+
+**Acceptance:** frontend lint / 263 unit / build / 37-of-37 e2e green.

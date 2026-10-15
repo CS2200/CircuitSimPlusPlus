@@ -659,18 +659,6 @@ const HEX_BITSIZE_FIELD: AttrField = {
   hint: "A hex display decodes four bits per digit.",
 };
 
-/** Per-instance timing override, offered last on every part (format-v2 §6). */
-const DELAY_FIELD: AttrField = {
-  key: "delay",
-  label: "Delay override",
-  kind: "number",
-  min: 0,
-  max: 1_000_000,
-  placeholder: "auto",
-  group: "Timing",
-  hint: "Raw timing units; blank uses the delay table.",
-};
-
 const RADIX_OPTIONS = [
   { value: "unsigned", label: "Unsigned" },
   { value: "signed", label: "Signed" },
@@ -678,19 +666,17 @@ const RADIX_OPTIONS = [
 ];
 
 /**
- * Every attribute format-v2 §4 defines for a type, grouped for the Inspector
+ * Every attribute the panel offers for a type, grouped for the Inspector
  * (§18): Width / Options. Names and defaults mirror the engine's
- * `components.rs` so what the panel writes is exactly what loads. The shared
- * per-instance `delay` override (format-v2 §4/§6) is appended for every type
- * that accepts it.
+ * `components.rs` so what the panel writes is exactly what loads. Timing is
+ * unit-wide — the per-instance `delay` attr stays in the format (§4/§6) but is
+ * deliberately not offered here (§26).
  */
 export function editableAttrs(type: string): AttrField[] {
-  const fields = baseFields(type);
-  if (fields.length === 0 || type === "subcircuit") return fields;
-  return [...fields, DELAY_FIELD];
+  return baseFields(type);
 }
 
-/** A type's own fields, without the shared `delay` override. */
+/** A type's own fields (the panel offers no `delay` override, §26). */
 function baseFields(type: string): AttrField[] {
   if (type.startsWith("gate.")) {
     const fields: AttrField[] = [BITSIZE_FIELD];

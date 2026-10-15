@@ -1398,37 +1398,37 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* Sectioned settings panel (UI_OVERHAUL §25): nav column + section pane. */
+/* Sectioned settings panel (UI_OVERHAUL §25/§26): nav column + section pane.
+ * The height is FIXED so switching sections never resizes the dialog. */
 .settings-panel {
   display: flex;
   flex-direction: column;
   width: min(56rem, calc(100vw - 2rem));
-  max-height: min(88vh, 44rem);
+  height: min(88vh, 44rem);
   overflow: hidden;
-  padding: 1rem 0 1.1rem;
+  padding: 1rem 1.25rem 1.05rem;
 }
 
 .settings-panel .settings-head {
-  padding: 0 1.2rem;
+  padding: 0 0 0.7rem;
 }
 
 .settings-body {
   display: flex;
   flex: 1;
   min-height: 0;
-  gap: 0.9rem;
-  padding: 0.2rem 0 0.4rem;
 }
 
 .settings-nav {
   flex: none;
-  width: 10.5rem;
+  width: 11rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 0.6rem 0 1.2rem;
+  padding: 0.15rem 0.9rem 0.15rem 0;
   border-right: 1px solid var(--panel-border);
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .settings-nav-btn {
@@ -1457,7 +1457,15 @@ body {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 0 1.2rem 0 0.3rem;
+  /* Reserved scrollbar gutter: the pane's content width (and so the dialog's
+   * look) stays identical whichever section is open (§26). */
+  scrollbar-gutter: stable;
+  padding: 0.15rem 0 0.3rem 1.15rem;
+}
+
+.settings-panel .settings-foot {
+  padding: 0.75rem 0 0;
+  margin-top: 0.6rem;
 }
 
 /* Rows read like the Inspector: label+hint left, the control on the right. */
