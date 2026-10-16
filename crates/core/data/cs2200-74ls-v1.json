@@ -16,6 +16,7 @@
     "plexers.mux": { "prop": 12 },
     "plexers.demux": { "prop": 12 },
     "plexers.decoder": { "prop": 12 },
+    "plexers.priority-decoder": { "prop": 12 },
     "arith.adder": { "prop": 15, "perBit": 4 },
     "arith.subtractor": { "prop": 15, "perBit": 4 },
     "arith.multiplier": { "prop": 15 },

@@ -45,6 +45,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   "mem.ram": "RAM",
   "mem.rom": "ROM",
   "plexers.decoder": "DECODER",
+  "plexers.priority-decoder": "PRIO DEC",
   "wiring.constant": "1",
   "io.hexdisplay": "8",
   "misc.text": "T",

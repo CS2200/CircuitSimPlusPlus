@@ -141,6 +141,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `plexers.mux` | `in0`..`in{2^sel−1}`, `sel`, `out` | `bitsize` (1), `selectBits` (1; 1..=8) |
 | `plexers.demux` | `in`, `sel`, `out0`..`out{2^sel−1}` | `bitsize` (1), `selectBits` (1) |
 | `plexers.decoder` | `in`, `out0`..`out{2^in−1}` | `inputBits` (2; 1..=8) |
+| `plexers.priority-decoder` | `in0`..`in{N−1}`, `out` (⌈log₂N⌉ bits), `valid` | `inputBits` (4; 2..=8). Highest-numbered asserted input line → its binary index on `out`; `valid` high iff any input is asserted |
 | `arith.adder` | `a`, `b`, `cin`, `out`, `cout` | `bitsize` (1) |
 | `arith.subtractor` | `a`, `b`, `bin`, `out`, `bout` | `bitsize` (1) |
 | `arith.multiplier` | `a`, `b`, `out` (out = 2×bitsize) | `bitsize` (1) |

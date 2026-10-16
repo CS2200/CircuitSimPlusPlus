@@ -1454,10 +1454,34 @@ benchmark p95 gate is environmental).
   label sits in the constant's bottom-right corner, so its display style is never
   ambiguous.
 - **Double-click a constant to edit its value.** Double-clicking a constant now
-  selects it *and* drops the caret straight into its **Value** input in the
+  selects it _and_ drops the caret straight into its **Value** input in the
   Inspector (`onEditComponent(compId, "value")` → `focusField` prop → the field
   focuses and selects on the next render).
 
 **Acceptance:** frontend lint / build green; 6 editor e2e pass (constant radix +
 double-click focus covered); core tests green (`cargo test -p csim-core`, 171 +
 8 golden).
+
+## 54. Follow-up batch AS (2026-10-16): the priority decoder
+
+- **New Plexers tile: Priority Decoder** (`plexers.priority-decoder`). The user
+  asked for this by name and confirmed the behavior: the **highest-numbered
+  asserted input line** (`in0` = lowest priority) is encoded as its **binary
+  index** on `out` (⌈log₂N⌉ bits), with a `valid` output that is high iff any
+  input line is asserted. Behaviorally that is the standard _priority encoder_;
+  the type string and the palette tile keep the course's "priority decoder"
+  wording.
+- **Engine-first.** `CompKind::PriorityDecoder` + `BehaviorKind::PriorityDecoder`
+  with `inputBits` (2..=8, default 4); pins `in0..in{N−1}` (1 bit each), `out`
+  (⌈log₂N⌉ bits), `valid` (1 bit). Every input line consumes (format-v2 §4 /
+  behavior module consume table). An `X` on a line above every known `1` leaves
+  the result unknown (`out` and `valid` are `X`); an `X` below a higher `1` is
+  masked. Delay-table entry `plexers.priority-decoder` = 12 ns, matching the
+  other plexers.
+- **Frontend** mirrors it: a 4-wide box, input lines spread down the left edge,
+  `out`/`valid` on the right, body caption `PRIO DEC`; the palette keeps the
+  human name **Priority Decoder**. The Inspector edits **Input lines** (2–8).
+
+**Acceptance:** frontend lint / 303 unit / build green; core `cargo test -p
+csim-core` 173 + 8 golden; e2e covers the tile (`panels.spec`) and placement +
+line-count edit (`editor.spec`).

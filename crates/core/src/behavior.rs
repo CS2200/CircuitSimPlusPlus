@@ -28,7 +28,7 @@
 //! | gates (incl. not/buffer) | every input |
 //! | controlled buffer | `en` always; `in` only while `en ≠ 0` |
 //! | mux | `sel` always; the selected data input (all of them if `sel` is X) |
-//! | demux / decoder | all inputs |
+//! | demux / decoder / priority decoder | all inputs |
 //! | arithmetic | all inputs |
 //! | register (rising edge only) | `en`, `rst` always; `d` only when `en ≠ 0` and `rst ≠ 1` |
 //! | RAM | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
@@ -60,7 +60,7 @@
 
 use serde_json::{Map, Value as Json};
 
-use crate::components::{CompConfig, CompKind, ExtendMode, GateOp, ShiftMode};
+use crate::components::{index_bits, CompConfig, CompKind, ExtendMode, GateOp, ShiftMode};
 use crate::value::{Bit, Value};
 
 /// A floating (`Z`) value reached a consumer that requires a driven value
@@ -165,6 +165,11 @@ enum BehaviorKind {
         select_bits: u32,
     },
     Decoder {
+        input_bits: u32,
+    },
+    /// Priority encoder (the `plexers.priority-decoder` tile): highest
+    /// asserted input line → its binary index, plus a `valid` flag.
+    PriorityDecoder {
         input_bits: u32,
     },
     Adder {
@@ -277,6 +282,9 @@ impl Behavior {
                 select_bits: *select_bits,
             },
             CompKind::Decoder { input_bits } => BehaviorKind::Decoder {
+                input_bits: *input_bits,
+            },
+            CompKind::PriorityDecoder { input_bits } => BehaviorKind::PriorityDecoder {
                 input_bits: *input_bits,
             },
             CompKind::Adder { bitsize } => BehaviorKind::Adder { bitsize: *bitsize },
@@ -453,6 +461,42 @@ impl Behavior {
                     Ok(outs)
                 } else {
                     Ok(vec![Value::x(1); n])
+                }
+            }
+            BehaviorKind::PriorityDecoder { input_bits } => {
+                let n = *input_bits as usize;
+                let lines = &ins[..n];
+                // Every line can affect the index or `valid`, so all consume.
+                for (i, v) in lines.iter().enumerate() {
+                    consume(v, format!("in{i}"))?;
+                }
+                let out_bits = index_bits(*input_bits);
+                // Highest asserted line wins. An X on a line of higher
+                // priority than any known 1 leaves the result unknown.
+                let mut chosen = None;
+                let mut unknown = false;
+                for i in (0..n).rev() {
+                    match lines[i].bit(0) {
+                        Bit::One => {
+                            chosen = Some(i);
+                            break;
+                        }
+                        Bit::X => {
+                            unknown = true;
+                            break;
+                        }
+                        Bit::Zero | Bit::Z => {}
+                    }
+                }
+                if unknown {
+                    return Ok(vec![Value::x(out_bits), Value::x(1)]);
+                }
+                match chosen {
+                    Some(i) => Ok(vec![
+                        Value::from_u64(out_bits, i as u64),
+                        Value::from_u64(1, 1),
+                    ]),
+                    None => Ok(vec![Value::zero(out_bits), Value::zero(1)]),
                 }
             }
             BehaviorKind::Adder { bitsize } => {
@@ -705,6 +749,7 @@ impl Behavior {
             BehaviorKind::Mux { bitsize, .. } => ("plexers.mux", *bitsize),
             BehaviorKind::Demux { bitsize, .. } => ("plexers.demux", *bitsize),
             BehaviorKind::Decoder { .. } => ("plexers.decoder", 1),
+            BehaviorKind::PriorityDecoder { .. } => ("plexers.priority-decoder", 1),
             BehaviorKind::Adder { bitsize } => ("arith.adder", *bitsize),
             BehaviorKind::Subtractor { bitsize } => ("arith.subtractor", *bitsize),
             BehaviorKind::Multiplier { bitsize } => ("arith.multiplier", *bitsize),
@@ -1193,6 +1238,36 @@ mod tests {
             .all(|(i, o)| *o == k(1, (i == 5) as u64)));
         let ins = [Value::x(3)];
         assert_eq!(dec.eval(&refs(&ins)).unwrap(), vec![Value::x(1); 8]);
+    }
+
+    #[test]
+    fn priority_decoder() {
+        // 4 lines → 2-bit index; in3 has the highest priority.
+        let p = mk("plexers.priority-decoder", json!({"inputBits": 4}));
+        let only1 = [k(1, 0), k(1, 1), k(1, 0), k(1, 0)];
+        assert_eq!(p.eval(&refs(&only1)).unwrap(), vec![k(2, 1), k(1, 1)]);
+        // in1 and in3 asserted → in3 wins.
+        let hi = [k(1, 0), k(1, 1), k(1, 0), k(1, 1)];
+        assert_eq!(p.eval(&refs(&hi)).unwrap(), vec![k(2, 3), k(1, 1)]);
+        // Nothing asserted → index 0, valid low.
+        let none = [k(1, 0), k(1, 0), k(1, 0), k(1, 0)];
+        assert_eq!(p.eval(&refs(&none)).unwrap(), vec![k(2, 0), k(1, 0)]);
+        // An X above every known 1 leaves the result unknown.
+        let x_hi = [k(1, 1), k(1, 0), k(1, 0), Value::x(1)];
+        assert_eq!(
+            p.eval(&refs(&x_hi)).unwrap(),
+            vec![Value::x(2), Value::x(1)]
+        );
+        // An X below a higher 1 is masked.
+        let x_lo = [Value::x(1), k(1, 1), k(1, 0), k(1, 0)];
+        assert_eq!(p.eval(&refs(&x_lo)).unwrap(), vec![k(2, 1), k(1, 1)]);
+        // Floating line → halt (all inputs consume).
+        let z = [Value::z(1), k(1, 0), k(1, 0), k(1, 0)];
+        assert_eq!(p.eval(&refs(&z)), Err(FloatingRead::at("in0")));
+        // 8 lines → 3-bit index; in7 wins over in0.
+        let p8 = mk("plexers.priority-decoder", json!({"inputBits": 8}));
+        let ins8: Vec<Value> = (0..8).map(|i| k(1, u64::from(i == 0 || i == 7))).collect();
+        assert_eq!(p8.eval(&refs(&ins8)).unwrap(), vec![k(3, 7), k(1, 1)]);
     }
 
     // ---- Arithmetic ----------------------------------------------------

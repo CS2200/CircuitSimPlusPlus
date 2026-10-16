@@ -182,6 +182,42 @@ function plexerSpec(
   };
 }
 
+/**
+ * Priority decoder (`plexers.priority-decoder`): N single-bit input lines
+ * (in0 = lowest priority) → the binary index of the highest-numbered
+ * asserted line (`out`, ⌈log2 N⌉ bits) plus a `valid` flag, on the right
+ * edge. Named for the palette wording the course uses (UI_OVERHAUL §54);
+ * behaviorally it is the standard priority encoder.
+ */
+function priorityDecoderSpec(): CompSpec {
+  const lines = (attrs: Readonly<Record<string, unknown>>) =>
+    Math.max(2, numAttr(attrs, "inputBits", 4));
+  const height = (attrs: Readonly<Record<string, unknown>>) => Math.max(4, lines(attrs) + 1);
+  return {
+    width: () => 4,
+    height,
+    pins: (attrs) => {
+      const count = lines(attrs);
+      const h = height(attrs);
+      const outBits = Math.max(1, 32 - Math.clz32(count - 1));
+      const pins: PinSpec[] = [];
+      for (let i = 0; i < count; i++) {
+        pins.push({
+          name: `in${i}`,
+          dx: 0,
+          dy: ((i + 1) * h) / (count + 1),
+          kind: "in",
+          bitsize: 1,
+        });
+      }
+      pins.push({ name: "out", dx: 4, dy: h / 3, kind: "out", bitsize: outBits });
+      pins.push({ name: "valid", dx: 4, dy: (2 * h) / 3, kind: "out", bitsize: 1 });
+      return pins;
+    },
+    caption: () => "PRIO DEC",
+  };
+}
+
 const BUS_WIDTH = 32; // sentinel: attr-driven bus pin (boxSpec resolves via bitsOf)
 
 /** Default splitter mapping (format-v2 §4 requires `splits`): b{i} = bus bit i. */
@@ -415,6 +451,7 @@ const REGISTRY: Record<string, CompSpec> = {
   "plexers.mux": plexerSpec("MUX", "in"),
   "plexers.demux": plexerSpec("DEMUX", "out"),
   "plexers.decoder": plexerSpec("DECODER", "out-no-in", "inputBits", 2),
+  "plexers.priority-decoder": priorityDecoderSpec(),
 
   // Arithmetic
   "arith.adder": boxSpec(
@@ -632,7 +669,12 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   },
   {
     group: "Plexers",
-    items: [{ type: "plexers.mux" }, { type: "plexers.demux" }, { type: "plexers.decoder" }],
+    items: [
+      { type: "plexers.mux" },
+      { type: "plexers.demux" },
+      { type: "plexers.decoder" },
+      { type: "plexers.priority-decoder", label: "Priority Decoder" },
+    ],
   },
   {
     group: "Arithmetic",
@@ -922,6 +964,19 @@ function baseFields(type: string): AttrField[] {
           max: 8,
           placeholder: "2",
           group: "Width",
+        },
+      ];
+    case "plexers.priority-decoder":
+      return [
+        {
+          key: "inputBits",
+          label: "Input lines",
+          kind: "number",
+          min: 2,
+          max: 8,
+          placeholder: "4",
+          group: "Width",
+          hint: "2–8 lines; in0 is the lowest priority.",
         },
       ];
     case "mem.register":

@@ -38,6 +38,7 @@ describe("body marks (UI_OVERHAUL §17)", () => {
     expect(compSpec("mem.ram").caption({})).toBe("RAM");
     expect(compSpec("plexers.mux").caption({})).toBe("MUX");
     expect(compSpec("plexers.decoder").caption({})).toBe("DECODER");
+    expect(compSpec("plexers.priority-decoder").caption({})).toBe("PRIO DEC");
   });
 });
 
@@ -51,6 +52,7 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("arith.bit-extender")).toEqual(["inBits", "outBits", "mode"]);
     expect(keys("plexers.mux")).toEqual(["bitsize", "selectBits"]);
     expect(keys("plexers.decoder")).toEqual(["inputBits"]);
+    expect(keys("plexers.priority-decoder")).toEqual(["inputBits"]);
     expect(keys("wiring.probe")).toEqual(["bitsize", "radix"]);
     expect(keys("wiring.splitter")).toEqual(["splits"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);

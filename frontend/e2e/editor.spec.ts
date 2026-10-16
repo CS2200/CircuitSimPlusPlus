@@ -263,3 +263,23 @@ test("constant: radix display + double-click jumps into the value", async ({ pag
   const c = d.circuits[0].components.find((x) => x.type === "wiring.constant");
   expect(c?.attrs?.radix).toBe("bin");
 });
+
+test("priority decoder: places from Plexers and edits its line count", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Plexers"]').click();
+  await page.getByRole("button", { name: "Priority Decoder", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  const placed = () =>
+    doc(page).then((d) =>
+      d.circuits[0].components.find((c) => c.type === "plexers.priority-decoder"),
+    );
+  expect(await placed()).toBeTruthy();
+
+  // The line count is a 2..8 field (default 4); editing it writes the attr.
+  await page.getByLabel("Input lines").fill("8");
+  expect((await placed())?.attrs?.inputBits).toBe(8);
+});

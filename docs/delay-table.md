@@ -143,6 +143,7 @@ A table is rejected (all issues reported at once) when:
 | gate.xor/xnor              |   12 |      — |     — |    — |      — |
 | wiring.controlled-buffer   |   10 |      — |     — |    — |      — |
 | plexers.mux/demux/decoder  |   12 |      — |     — |    — |      — |
+| plexers.priority-decoder   |   12 |      — |     — |    — |      — |
 | arith.adder/subtractor     |   15 |      4 |     — |    — |      — |
 | arith.multiplier/divider   |   15 |      — |     — |    — |      — |
 | arith.comparator/negator   |   15 |      — |     — |    — |      — |
