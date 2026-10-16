@@ -145,6 +145,8 @@ export class ToolMachine {
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
   /** Fired when a component is double-clicked (opens the right-dock Inspector). */
   onEditComponent?: (compId: string) => void;
+  /** Fired by Shift+click on a clock: step the simulation one tick (§47). */
+  onTick?: () => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
   onOpenSubcircuit?: (circuit: string) => void;
   /** Bumped on every state change so the host re-renders. */
@@ -305,6 +307,15 @@ export class ToolMachine {
     const comp = this.scene.pickComponent(world);
     if (comp !== null) {
       if (info.shiftKey) {
+        // Shift+click a clock ticks the sim once, in place (UI_OVERHAUL §47) —
+        // an in-place way to advance the waveform you're looking at.
+        const hit = this.doc
+          .circuit(this.circuitIdx())
+          .components.find((x) => x.id === comp.compId);
+        if (hit?.type === "wiring.clock") {
+          this.onTick?.();
+          return;
+        }
         this.selection.toggleComponent(comp.compId);
       } else if (!this.selection.hasComponent(comp.compId)) {
         this.selection.set([comp.compId], []);

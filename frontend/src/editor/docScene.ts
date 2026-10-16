@@ -131,30 +131,49 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
-/** A clock face (dial + two hands) drawn instead of a type word (§36). */
-function drawClockGlyph(renderer: Renderer, theme: Theme, cx: number, cy: number): void {
-  const r = 0.6;
-  const ink = { stroke: theme.textDim, lineWidth: 0.12 };
-  renderer.drawPath(circlePath(cx, cy, r), ink);
+/**
+ * A clock's square wave (UI_OVERHAUL §47): it shows the level the clock drives
+ * AND the edge that just happened (▲ rising / ▼ falling), so ticking is visible
+ * at a glance. `high === null` (no sim value) draws a neutral wave with no edge
+ * marker.
+ */
+function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boolean | null): void {
+  const x0 = rect.x + 0.3;
+  const x1 = rect.x + rect.w - 0.3;
+  const yHi = rect.y + rect.h * 0.34;
+  const yLo = rect.y + rect.h * 0.66;
+  const t = (x1 - x0) / 3;
+  const levels = [false, true, high ?? false];
+  const wave: PathCmd[] = [];
+  let y = levels[0] === true ? yHi : yLo;
+  wave.push({ t: "M", x: x0, y });
+  for (let i = 1; i < 3; i++) {
+    const nx = x0 + t * i;
+    wave.push({ t: "L", x: nx, y });
+    const ny = levels[i] === true ? yHi : yLo;
+    if (ny !== y) wave.push({ t: "L", x: nx, y: ny });
+    y = ny;
+  }
+  wave.push({ t: "L", x: x1, y });
+  renderer.drawPath(wave, { stroke: theme.textDim, lineWidth: 0.12 });
+  renderer.flush();
+  if (high === null) return;
+
+  // ▲ on the rising edge / ▼ on the falling one, at the last transition.
+  const edgeX = high ? x0 + t : x0 + 2 * t;
+  const midY = (yHi + yLo) / 2;
+  const tipY = high ? midY - 0.34 : midY + 0.34;
+  const back = high ? 0.2 : -0.2;
   renderer.drawPath(
-    roundedPath(
-      [
-        { x: cx, y: cy },
-        { x: cx, y: cy - r * 0.62 },
-      ],
-      0,
-    ),
-    ink,
-  );
-  renderer.drawPath(
-    roundedPath(
-      [
-        { x: cx, y: cy },
-        { x: cx + r * 0.46, y: cy + r * 0.3 },
-      ],
-      0,
-    ),
-    ink,
+    [
+      { t: "M", x: edgeX, y: midY },
+      { t: "L", x: edgeX, y: tipY },
+      { t: "M", x: edgeX - 0.18, y: tipY + back },
+      { t: "L", x: edgeX, y: tipY },
+      { t: "M", x: edgeX + 0.18, y: tipY + back },
+      { t: "L", x: edgeX, y: tipY },
+    ],
+    { stroke: theme.accent, lineWidth: 0.1 },
   );
   renderer.flush();
 }
@@ -322,6 +341,9 @@ export class DocScene {
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
   private wireMismatch: boolean[] = [];
+  /** Last level a clock drove, and when it flipped (UI_OVERHAUL §47). */
+  private clockLevel = new Map<string, boolean>();
+  private clockChangedAt = new Map<string, number>();
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -971,8 +993,34 @@ export class DocScene {
               align: "right",
             });
           }
-        } else if (comp.type === "wiring.clock" && valueText === null) {
-          drawClockGlyph(renderer, theme, cx, cy);
+        } else if (comp.type === "wiring.clock") {
+          // A clock shows a square wave + the edge that just happened (§47), and
+          // flashes briefly when its level flips, so a tick is unmissable.
+          const high = valueText === null ? null : valueText !== "0";
+          if (high !== null) {
+            const prev = this.clockLevel.get(comp.id);
+            if (prev !== undefined && prev !== high && overlay.now !== undefined) {
+              this.clockChangedAt.set(comp.id, overlay.now);
+            }
+            this.clockLevel.set(comp.id, high);
+          }
+          const at = this.clockChangedAt.get(comp.id);
+          if (at !== undefined && overlay.now !== undefined) {
+            const k = 1 - (overlay.now - at) / 450;
+            if (k > 0) {
+              renderer.drawPath(
+                rectPath(
+                  layout.rect.x - 0.25,
+                  layout.rect.y - 0.25,
+                  layout.rect.w + 0.5,
+                  layout.rect.h + 0.5,
+                ),
+                { stroke: theme.accent, lineWidth: 0.16, alpha: k },
+              );
+              renderer.flush();
+            }
+          }
+          drawClockWave(renderer, theme, layout.rect, high);
         } else if (comp.type === "wiring.probe" && valueText === null) {
           // no type word — the pointed shape already says "probe"
         } else {

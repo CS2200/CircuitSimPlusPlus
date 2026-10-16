@@ -222,3 +222,22 @@ test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ 
   // It carries the bit-width field (the `in`/`out` bus).
   await expect(page.locator(".inspector-id")).toBeVisible();
 });
+
+test("clock: Shift+click ticks the sim in place", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "CLK", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+  await expect(page.locator(".app-statusbar")).toContainText("1 selected");
+
+  // Shift+click the clock is consumed as a TICK, not a selection toggle
+  // (UI_OVERHAUL §47): the selection must stay put.
+  await page.keyboard.down("Shift");
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.up("Shift");
+  await expect(page.locator(".app-statusbar")).toContainText("1 selected");
+});

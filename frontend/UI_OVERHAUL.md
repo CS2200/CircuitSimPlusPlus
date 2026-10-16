@@ -1326,3 +1326,22 @@ month-old one to one a day).
   longer duplicated outside the body.
 
 **Acceptance:** frontend lint / 303 unit / build green; e2e unchanged.
+
+## 47. Follow-up batch AL (2026-10-16): a clock you can tick and read
+
+- **The clock shows a square wave + its last edge.** `drawClockWave` replaces the
+  idle clock face: a low→high→current square wave whose final segment is the
+  level the clock currently drives, with an **▲ rising / ▼ falling** marker on
+  the transition that just happened. Idle (no sim value) draws a neutral wave.
+- **Shift+click a clock ticks the sim in place.** `ToolMachine.onTick` fires when
+  a Shift+click lands on a `wiring.clock` (instead of toggle-selecting it);
+  `EditorCanvas` loads the session on demand and calls `stepTick` — the same path
+  as the transport's Ctrl+J, but at the part you're looking at.
+- **The tick is visible.** When a clock's level flips, its outline flashes in the
+  accent colour (fading over ~450 ms while the canvas is animating), in addition
+  to the waveform/edge marker. `editor.spec` guards that the Shift+click is
+  consumed as a tick and does not toggle the selection.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e green — the
+stress-scene _benchmark_ p95 gate fails on this machine (rAF ~40 fps); it also
+fails with these changes stashed, so it is load, not a regression.

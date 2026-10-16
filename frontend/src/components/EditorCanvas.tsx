@@ -147,6 +147,21 @@ export default forwardRef<
     };
   }, [tool, onEditComponent, onOpenSubcircuit]);
 
+  // Shift+click a clock ticks the sim once (UI_OVERHAUL §47): load on demand
+  // like the transport's Ctrl+J, then step.
+  useEffect(() => {
+    tool.onTick = () => {
+      if (sim === undefined) return;
+      void (async () => {
+        if (!sim.store.loaded && !(await sim.load(doc))) return;
+        await sim.stepTick();
+      })();
+    };
+    return () => {
+      tool.onTick = undefined;
+    };
+  }, [tool, sim, doc]);
+
   // Center the camera once per document (never re-center on edits).
   const initialBounds = useMemo(() => {
     scene.sync(doc, 0);
