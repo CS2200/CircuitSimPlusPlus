@@ -441,10 +441,11 @@ const REGISTRY: Record<string, CompSpec> = {
     "CONST",
   ),
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
+  // Roomier than a bare hexagon so a multi-bit readout fits (UI_OVERHAUL §56).
   "wiring.probe": boxSpec(
+    3,
     2,
-    1,
-    [{ name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BUS_WIDTH }],
+    [{ name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH }],
     "PROBE",
   ),
   "wiring.splitter": splitterSpec(),
@@ -817,6 +818,19 @@ const RADIX_OPTIONS = [
 ];
 
 /**
+ * A readout's display base as the same segmented buttons the constant uses
+ * (UI_OVERHAUL §56) — pins and probes show a bus value, so their `radix` is a
+ * display mode rather than a stored base.
+ */
+const RADIX_FIELD: AttrField = {
+  key: "radix",
+  label: "Show as",
+  kind: "radix",
+  group: "Options",
+  options: RADIX_OPTIONS,
+};
+
+/**
  * Every attribute the panel offers for a type, grouped for the Inspector
  * (§18): Width / Options. Names and defaults mirror the engine's
  * `components.rs` so what the panel writes is exactly what loads. Timing is
@@ -894,24 +908,14 @@ function baseFields(type: string): AttrField[] {
     case "wiring.pin":
       // Direction (input/output) is chosen by the palette tile, not here
       // (UI_OVERHAUL §36) — so the panel only edits width + radix.
-      return [
-        BITSIZE_FIELD,
-        { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-      ];
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "wiring.constant":
       // The value is edited in whichever radix is selected, so you never have
       // to think in hex unless you pick hex (UI_OVERHAUL §55); double-click
       // jumps straight into the value input.
       return [
         BITSIZE_FIELD,
-        {
-          key: "value",
-          label: "Value",
-          kind: "radix-value",
-          placeholder: "0",
-          group: "Options",
-          hint: "Typed in the selected base; must fit the bit size.",
-        },
+        { key: "value", label: "Value", kind: "radix-value", placeholder: "0", group: "Options" },
         {
           key: "radix",
           label: "Show as",
@@ -957,10 +961,7 @@ function baseFields(type: string): AttrField[] {
         },
       ];
     case "wiring.probe":
-      return [
-        BITSIZE_FIELD,
-        { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-      ];
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "plexers.mux":
     case "plexers.demux":
       return [

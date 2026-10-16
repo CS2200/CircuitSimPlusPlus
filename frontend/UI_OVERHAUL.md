@@ -1516,3 +1516,23 @@ line-count edit (`editor.spec`).
 **Acceptance:** frontend lint / 305 unit / build green; e2e 54-of-55 (the stress
 benchmark p95 gate is environmental); new unit tests cover the wire-deselect and
 cursor behavior.
+
+## 56. Follow-up batch AU (2026-10-16): probe size, readout buttons, value ellipsis
+
+- **The constant's value hint is gone.** The right panel no longer shows "Typed
+  in the selected base…" under **Value**.
+- **The probe is roomier and picks its base with buttons.** `wiring.probe` grew
+  to 3×2 so a multi-bit readout fits, and its **Show as** is now the same
+  segmented-button chooser the constant uses instead of a "Radix" dropdown. The
+  pin's readout gets the same chooser. (Their `radix` is a _display mode_ —
+  unsigned / signed / hex, validated by the engine — so the buttons offer those
+  three rather than the constant's hex / bin / dec.)
+- **Long readouts ellipsize instead of overflowing.** A value that would overrun
+  its body is shortened with a trailing `…` at a readable size (≥ 0.6) rather
+  than shrunk to a hairline or spilling off the part — constants, probes, pins,
+  registers, LEDs and a RAM/ROM's `Addr:`/`Data:` lines all go through
+  `fitValueLine`. **Hovering the part then shows the full value in a card above
+  it** (`DocScene.truncated` → `drawCard`).
+
+**Acceptance:** frontend lint / 307 unit / build green; e2e 54-of-55; new
+`docScene.test.ts` pins `fitValueLine` (short values stay whole, wide ones fit).

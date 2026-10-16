@@ -229,6 +229,26 @@ function fitTextSize(text: string, w: number, h: number, base = 1): number {
 }
 
 /**
+ * A live value line sized to fit a body, shortening with an ellipsis when the
+ * value is too long (UI_OVERHAUL §56) — a 32-bit binary readout stays inside
+ * the part, and hovering shows the whole thing. `size` stays readable (≥ 0.6);
+ * the surplus is cut rather than shrunk to an unreadable hairline.
+ */
+export function fitValueLine(
+  text: string,
+  w: number,
+  h: number,
+  base = 1,
+): { text: string; size: number; full: boolean } {
+  const avail = w * 0.86;
+  const maxSize = Math.max(0.5, Math.min(base, h * 0.6));
+  const size = Math.max(0.6, Math.min(maxSize, avail / (Math.max(1, text.length) * 0.62)));
+  const maxChars = Math.max(1, Math.floor(avail / (size * 0.62)));
+  if (text.length <= maxChars) return { text, size, full: true };
+  return { text: `${text.slice(0, Math.max(1, maxChars - 1))}…`, size, full: false };
+}
+
+/**
  * Pin whose net value is shown on the body (UI_OVERHAUL §21): clocks, pins,
  * probes, registers, RAM/ROM and I/O parts are all live readouts.
  */
@@ -396,6 +416,11 @@ export class DocScene {
   /** Last level a clock drove, and when it flipped (UI_OVERHAUL §47). */
   private clockLevel = new Map<string, boolean>();
   private clockChangedAt = new Map<string, number>();
+  /**
+   * Full value text per component whose on-body readout had to be shortened
+   * with an ellipsis this frame (UI_OVERHAUL §56); hover reveals it.
+   */
+  private truncated = new Map<string, string>();
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -706,6 +731,7 @@ export class DocScene {
     showValues = true,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
+    this.truncated.clear();
 
     // Behind everything (the renderer has already filled the background).
     if (grid) this.drawGrid(renderer, theme, camera, view);
@@ -1062,7 +1088,6 @@ export class DocScene {
             }
           }
         }
-        if (valueText !== null && !isMemory) caption = valueText;
         // Static fallback (UI_OVERHAUL §40): with no live sim value, a probe
         // still reads what it is wired to (a directly connected constant).
         if (valueText === null && comp.type === "wiring.probe") {
@@ -1072,6 +1097,7 @@ export class DocScene {
             valuePin = "in";
           }
         }
+        if (valueText !== null && !isMemory) caption = valueText;
         // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
         // §48), and over a stale Z/X (§51).
         if (isMemory && addrText === null) {
@@ -1103,13 +1129,19 @@ export class DocScene {
         if (isMemory) {
           const mc = layout.rect.x + layout.rect.w / 2;
           const mid = layout.rect.y + layout.rect.h / 2;
-          [caption, `Addr: ${addrText ?? "—"}`, `Data: ${valueText ?? "—"}`].forEach((line, i) => {
-            renderer.drawText(mc, mid + (i - 1) * 1.2, line, {
+          const lines = [caption, `Addr: ${addrText ?? "—"}`, `Data: ${valueText ?? "—"}`];
+          let cut = false;
+          lines.forEach((line, i) => {
+            const fit = fitValueLine(line, layout.rect.w, layout.rect.h, 0.9);
+            if (!fit.full) cut = true;
+            renderer.drawText(mc, mid + (i - 1) * 1.2, fit.text, {
               color: theme.textDim,
-              size: 0.9,
+              size: fit.size,
               align: "center",
             });
           });
+          // Hover reveals the full Address/Data readouts (§56).
+          if (cut) this.truncated.set(comp.id, lines.slice(1).join("   "));
         }
         // The comparator's three outputs each get their own relation symbol
         // next to the pin (<, =, >) instead of one centered mark
@@ -1183,16 +1215,24 @@ export class DocScene {
           // (the pointed shape already says "probe", UI_OVERHAUL §36).
         } else if (isMemory) {
           // RAM/ROM drew its stacked Addr/Data lines above.
+        } else if (valueText !== null && !isMemory) {
+          // A live (or static) value line: keep it readable and shorten with an
+          // ellipsis when a wide readout (e.g. 32-bit binary) would overrun the
+          // body — hovering then reveals the whole thing (UI_OVERHAUL §56).
+          const line = fitValueLine(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0);
+          if (!line.full) this.truncated.set(comp.id, caption);
+          renderer.drawText(cx, cy, line.text, {
+            color: theme.textDim,
+            size: line.size,
+            align: "center",
+          });
         } else {
           renderer.drawText(
             cx,
             cy,
             caption,
-            // Values (and symbols, §18) are sized to fit the body, so a 32-bit
-            // readout on a small part stays inside it.
+            // Type marks/symbols are sized to fit the body (§18).
             {
-              // Values read in the light caption style everywhere — constants
-              // included (UI_OVERHAUL §50).
               color: theme.textDim,
               size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
               align: "center",
@@ -1451,6 +1491,14 @@ export class DocScene {
     } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
       // junction-on-drop preview (only while routing a wire)
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
+    } else if (hit?.kind === "component") {
+      // A readout that had to be shortened on the body shows its full value
+      // above the part on hover (UI_OVERHAUL §56).
+      const full = this.truncated.get(hit.compId);
+      const layout = this.layouts.get(hit.compId);
+      if (full !== undefined && layout !== undefined) {
+        drawCard(renderer, theme, { x: layout.rect.x, y: layout.rect.y - 1.5 }, [full]);
+      }
     }
 
     // Wire info card (shift+click): just the value on the wire (UX
