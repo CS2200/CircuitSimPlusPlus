@@ -1485,3 +1485,34 @@ double-click focus covered); core tests green (`cargo test -p csim-core`, 171 +
 **Acceptance:** frontend lint / 303 unit / build green; core `cargo test -p
 csim-core` 173 + 8 golden; e2e covers the tile (`panels.spec`) and placement +
 line-count edit (`editor.spec`).
+
+## 55. Follow-up batch AT (2026-10-16): LED, slider, wire drag, previews, constants
+
+- **The LED has no bit size.** `io.led`'s Inspector drops its `bitsize` picker
+  (it is a 1-bit indicator); new LEDs no longer seed one.
+- **The brightness slider reaches the end.** The shared `.inspector-row input`
+  rule gave the range input 8 px padding + a border, insetting the track so the
+  fill stopped short of the end. The slider now resets padding/border and draws
+  an explicit `--fill` gradient from its value, so 100 lights the whole bar.
+- **A dragged wire lets go.** Releasing a wire drag (a moved bend, or a
+  junction-wire dropped without connecting) now clears the wire's selection
+  instead of leaving it highlighted; press the handle again to highlight and
+  keep dragging (`ToolMachine.deselectWires`).
+- **The canvas cursor says what a press will do.** Hovering a **pin** shows
+  `crosshair` (wiring — the next click moves the wire), a wire **bend** shows
+  `move`, a **wire** shows `pointer`, a component drag shows `move`, and a
+  placement ghost shows `copy` (`ToolMachine.cursor` → `CanvasHost.cursor`).
+  Idle space keeps the pan cursor.
+- **The output pin's preview matches.** The placement ghost and the palette icon
+  drew a plain rectangle for an output pin; both now use the same rounded
+  stadium the placed part uses (terminal facing left, since an output pin seeds
+  rotation W).
+- **Constants read and edit in their own base.** The body grew to 3x2 so the
+  value fits, the corner `hex`/`bin`/`dec` tag is gone, **Show as** is a
+  3-button segmented chooser, and the **Value** input is typed and shown in the
+  selected base (no forced hex string) — it is converted to the stored hex on
+  commit and rejected if it does not fit the bit width.
+
+**Acceptance:** frontend lint / 305 unit / build green; e2e 54-of-55 (the stress
+benchmark p95 gate is environmental); new unit tests cover the wire-deselect and
+cursor behavior.

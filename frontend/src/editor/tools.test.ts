@@ -286,6 +286,44 @@ describe("wiring", () => {
     expect(doc.circuit(0).components).toHaveLength(2);
   });
 
+  it("a dragged bend deselects the wire on release; pressing it re-selects (§55)", () => {
+    const { sel, tool, sync } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    sync();
+    // press the bend: the wire highlights while you drag it…
+    tool.down({ x: 19, y: 11.5 }, PI());
+    expect(sel.hasWire(0)).toBe(true);
+    tool.move({ x: 21, y: 9 });
+    tool.up(PI());
+    // …and is no longer selected once released…
+    expect(sel.hasWire(0)).toBe(false);
+    sync();
+    // …but pressing the handle again highlights it for another drag.
+    tool.down({ x: 21, y: 11.5 }, PI());
+    expect(sel.hasWire(0)).toBe(true);
+  });
+
+  it("the canvas cursor hints at pins, wires and idle space (UI_OVERHAUL §55)", () => {
+    const { tool, sync } = setup();
+    // over the AND's in0 pin → wiring
+    tool.hover({ x: 10, y: 11 });
+    expect(tool.cursor).toBe("crosshair");
+    // draw a wire, then hover its body → draggable
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    sync();
+    tool.hover({ x: 17, y: 11.5 });
+    expect(tool.cursor).toBe("pointer");
+    // empty space → the CSS pan cursor stands
+    tool.hover({ x: 40, y: 40 });
+    expect(tool.cursor).toBeUndefined();
+  });
+
   it("a bend drag that cannot move does not change the wire", () => {
     const { doc, tool } = setup();
     tool.down({ x: 15, y: 11.5 }, PI());

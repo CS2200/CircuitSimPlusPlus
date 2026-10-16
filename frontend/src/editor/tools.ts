@@ -41,6 +41,9 @@ import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } fr
  * sees clicks and plain-left gestures.
  */
 
+/** What the pointer is over, for the canvas cursor hint (UI_OVERHAUL §55). */
+type HoverCursor = "none" | "pin" | "bend" | "wire" | "target";
+
 type DragState =
   | { kind: "idle" }
   | {
@@ -133,6 +136,10 @@ export class ToolMachine {
     sticky: boolean;
   } | null = null;
   private hoverHit: Hit | null = null;
+  /** What the pointer is over — drives the canvas cursor hint (§55). */
+  private hoverCursor: HoverCursor = "none";
+  /** The wire a press started on (a bend drag or a junction wire), if any. */
+  private pressWireIdx: number | null = null;
   private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
   /**
    * Left-press origin and whether the pointer has swept past
@@ -186,6 +193,7 @@ export class ToolMachine {
     this.wireInfo = null;
     this.pressStart = null;
     this.pressSwept = false;
+    this.pressWireIdx = null;
     if (any) this.changed();
   }
 
@@ -217,6 +225,7 @@ export class ToolMachine {
     // Track this press: a press that sweeps (before releasing) is a drag.
     this.pressStart = world;
     this.pressSwept = false;
+    this.pressWireIdx = null;
 
     if (this.placing !== null) {
       const p = this.placing;
@@ -271,6 +280,7 @@ export class ToolMachine {
       if (!this.selection.hasWire(corner.wireIdx)) {
         this.selection.set([], [corner.wireIdx]);
       }
+      this.pressWireIdx = corner.wireIdx;
       this.drag = {
         kind: "wire-bend",
         wireIdx: corner.wireIdx,
@@ -294,6 +304,7 @@ export class ToolMachine {
       if (!this.selection.hasWire(wire.wireIdx)) {
         this.selection.set([], [wire.wireIdx]);
       }
+      this.pressWireIdx = wire.wireIdx;
       // a DRAG from a wire starts wiring with a junction at the press point
       this.drag = {
         kind: "maybe-drag",
@@ -462,8 +473,10 @@ export class ToolMachine {
   up(info: PointerInfo, world?: Vec2): void {
     if (info.button !== 0) return;
     const swept = this.pressSwept;
+    const fromWire = this.pressWireIdx;
     this.pressStart = null;
     this.pressSwept = false;
+    this.pressWireIdx = null;
     // Wiring (UI_OVERHAUL §13) supports both gestures:
     //  - click-click: a press WITHOUT movement commits nothing — the next
     //    click plants a waypoint or finishes the wire (unchanged);
@@ -483,6 +496,12 @@ export class ToolMachine {
         }
       }
       this.drag = { kind: "idle" };
+      // A junction-wire dragged off a wire and dropped without connecting
+      // leaves the source wire unselected (UI_OVERHAUL §55).
+      if (swept && fromWire !== null) {
+        this.deselectWires();
+        this.changed();
+      }
       return;
     }
     if (this.drag.kind === "boxing") {
@@ -499,7 +518,26 @@ export class ToolMachine {
       }
     }
     this.drag = { kind: "idle" };
+    // A wire grabbed and dragged (a bend moved) must not stay highlighted once
+    // released — press the handle again to keep editing it (UI_OVERHAUL §55).
+    if (swept && fromWire !== null) this.deselectWires();
     this.changed();
+  }
+
+  /** Clear the wire selection but keep selected components (UI_OVERHAUL §55). */
+  private deselectWires(): void {
+    if (this.selection.wires.size > 0) {
+      this.selection.set(new Set(this.selection.components), []);
+    }
+  }
+
+  /** Classify what is under the pointer for the cursor hint (UI_OVERHAUL §55). */
+  private hoverCursorAt(world: Vec2): HoverCursor {
+    if (this.wiring !== null) return "target";
+    if (this.scene.pickPin(world) !== null) return "pin";
+    if (this.scene.pickWireCorner(world) !== null) return "bend";
+    if (this.scene.pickWire(world) !== null) return "wire";
+    return "none";
   }
 
   hover(world: Vec2): void {
@@ -507,6 +545,13 @@ export class ToolMachine {
       this.placing = { ...this.placing, pos: world };
       this.changed();
       return;
+    }
+    // Cursor hint (UI_OVERHAUL §55): signal what a press here would grab or
+    // start, so wiring/dragging is discoverable.
+    const cursor = this.hoverCursorAt(world);
+    if (cursor !== this.hoverCursor) {
+      this.hoverCursor = cursor;
+      this.changed();
     }
     // While wiring, pins + wires are live targets (junction preview); idle
     // hover is pins first (net-extent highlight) then component bodies (so
@@ -635,6 +680,24 @@ export class ToolMachine {
 
   get isBusy(): boolean {
     return this.wiring !== null || this.placing !== null || this.drag.kind !== "idle";
+  }
+
+  /** CSS cursor for the canvas given the current gesture/hover (UI_OVERHAUL §55). */
+  get cursor(): string | undefined {
+    if (this.placing !== null) return "copy";
+    if (this.wiring !== null) return "crosshair";
+    if (this.drag.kind === "wire-bend") return "grabbing";
+    if (this.drag.kind === "dragging") return "move";
+    switch (this.hoverCursor) {
+      case "pin":
+        return "crosshair";
+      case "bend":
+        return "move";
+      case "wire":
+        return "pointer";
+      default:
+        return undefined; // leave the pan cursor to the CSS
+    }
   }
 
   get placingType(): string | null {

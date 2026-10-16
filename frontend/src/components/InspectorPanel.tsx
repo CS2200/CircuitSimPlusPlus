@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
 import { editableAttrs, compPins, type AttrField } from "../editor/catalog";
@@ -8,6 +8,36 @@ import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
 import NumberPicker from "./NumberPicker";
 import Select from "./Select";
+
+/**
+ * Render a constant's stored hex value in the chosen base for its value input
+ * (UI_OVERHAUL §55). No `0x`/`0b` prefix — you type digits, not source.
+ */
+function formatRadixValue(hex: string, radix: string, bits: number): string {
+  const n = Number.parseInt(hex === "" ? "0" : hex, 16);
+  if (!Number.isFinite(n)) return hex;
+  if (radix === "bin") return n.toString(2).padStart(Math.min(32, Math.max(1, bits)), "0");
+  if (radix === "dec") return String(n);
+  return hex.toUpperCase();
+}
+
+/**
+ * Parse a constant value typed in `radix` back to a normalized hex string, or
+ * null when it is not a valid/representable value for the bit width.
+ */
+function parseRadixValue(text: string, radix: string, bits: number): string | null {
+  const t = text
+    .trim()
+    .replace(/^0[xX]/, "")
+    .replace(/^0[bB]/, "");
+  if (t === "") return "0";
+  const ok = radix === "bin" ? /^[01]+$/ : radix === "dec" ? /^[0-9]+$/ : /^[0-9a-fA-F]+$/;
+  if (!ok.test(t)) return null;
+  const n = Number.parseInt(t, radix === "bin" ? 2 : radix === "dec" ? 10 : 16);
+  if (!Number.isFinite(n)) return null;
+  if (n >= 2 ** Math.min(32, Math.max(1, bits))) return null; // doesn't fit
+  return n.toString(16);
+}
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -593,6 +623,8 @@ function FieldRow({
 
   if (field.kind === "slider") {
     const n = typeof value === "number" ? value : field.dflt;
+    const span = field.max - field.min;
+    const pct = span <= 0 ? 0 : ((n - field.min) / span) * 100;
     return (
       <div className="inspector-row">
         <span>{field.label}</span>
@@ -603,6 +635,7 @@ function FieldRow({
             max={field.max}
             value={n}
             aria-label={field.label}
+            style={{ "--fill": `${pct}%` } as CSSProperties}
             onChange={(e) => onCommitAttr(field.key, Number(e.target.value))}
           />
           <span className="inspector-slider-value">{n}</span>
@@ -693,6 +726,58 @@ function FieldRow({
           type="color"
           value={current}
           onChange={(e) => onCommitAttr(field.key, e.target.value)}
+        />
+      </label>
+    );
+  }
+
+  if (field.kind === "radix") {
+    // A segmented base chooser (UI_OVERHAUL §55) — three buttons, one active.
+    const current = typeof value === "string" ? value : (field.options[0]?.value ?? "hex");
+    return (
+      <div className="inspector-field">
+        <span className="inspector-field-label">{field.label}</span>
+        <div className="radix-buttons" role="radiogroup" aria-label={field.label}>
+          {field.options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={o.value === current}
+              className={`radix-button${o.value === current ? " active" : ""}`}
+              onClick={() => onCommitAttr(field.key, o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (field.kind === "radix-value") {
+    // The constant's value, read and typed in its selected base (§55).
+    const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "hex";
+    const bits = typeof comp.attrs?.bitsize === "number" ? comp.attrs.bitsize : 1;
+    const hex = typeof value === "string" ? value : "0";
+    const shown = draft?.key === key ? draft.text : formatRadixValue(hex, radix, bits);
+    return (
+      <label className="inspector-row">
+        <span>{field.label}</span>
+        <input
+          ref={inputRef}
+          value={shown}
+          onChange={(e) => onDraft({ key, text: e.target.value })}
+          onBlur={() => {
+            if (draft?.key === key) {
+              const parsed = parseRadixValue(draft.text, radix, bits);
+              if (parsed !== null && parsed !== hex) onCommitAttr(field.key, parsed);
+              onDraft(null);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
         />
       </label>
     );

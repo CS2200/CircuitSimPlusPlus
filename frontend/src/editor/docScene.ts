@@ -89,6 +89,25 @@ function tintRoleOf(comp: CsxComponent): TintRole | null {
   return null; // gates keep the classic look; wiring parts stay neutral
 }
 
+/**
+ * A pin's body (UI_OVERHAUL §21/§55): an output pin is a rounded stadium, an
+ * input pin a plain square. Shared by the placed body and the placement ghost
+ * so the preview matches exactly what lands.
+ */
+function pinBodyPath(r: Rect, isOutput: boolean): PathCmd[] {
+  if (!isOutput) return rectPath(r.x, r.y, r.w, r.h);
+  return roundedPath(
+    [
+      { x: r.x, y: r.y },
+      { x: r.x + r.w, y: r.y },
+      { x: r.x + r.w, y: r.y + r.h },
+      { x: r.x, y: r.y + r.h },
+      { x: r.x, y: r.y },
+    ],
+    r.h / 2,
+  );
+}
+
 /** Theme colour behind a tint role / pin kind. */
 function tintColor(theme: Theme, role: TintRole): string {
   switch (role) {
@@ -970,18 +989,7 @@ export class DocScene {
             ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
             : comp.type === "mem.ram" || comp.type === "mem.rom"
               ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-              : outPin
-                ? roundedPath(
-                    [
-                      { x: layout.rect.x, y: layout.rect.y },
-                      { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
-                      { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
-                      { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
-                      { x: layout.rect.x, y: layout.rect.y },
-                    ],
-                    layout.rect.h / 2,
-                  )
-                : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+              : pinBodyPath(layout.rect, outPin);
         renderer.drawPath(bodyPath, { fill: bodyFill });
         renderer.drawPath(bodyPath, strokeStyle);
         const spec = compSpec(comp.type);
@@ -1089,18 +1097,6 @@ export class DocScene {
               align: "center",
             });
           }
-        }
-        // A constant tags its display radix in the corner (UI_OVERHAUL §53).
-        if (comp.type === "wiring.constant") {
-          const radix =
-            comp.attrs?.radix === "bin" ? "bin" : comp.attrs?.radix === "dec" ? "dec" : "hex";
-          renderer.drawText(
-            layout.rect.x + layout.rect.w - 0.2,
-            layout.rect.y + layout.rect.h - 0.3,
-            radix,
-            { color: theme.textDim, size: 0.45, align: "right" },
-          );
-          renderer.flush();
         }
         // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
         // stacked and centred in the same light style as the rest.
@@ -1411,12 +1407,15 @@ export class DocScene {
           renderer.drawPath(rail, { ...stroke, lineWidth: 0.22 });
           renderer.drawPath(taps, { ...stroke, lineWidth: 0.14 });
         } else {
+          // Match the placed body exactly — an output pin's stadium included
+          // (UI_OVERHAUL §55).
+          const outPin = ghost.type === "wiring.pin" && ghost.attrs?.isOutput === true;
           const body =
             ghost.type === "wiring.probe"
               ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
               : ghost.type === "mem.ram" || ghost.type === "mem.rom"
                 ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-                : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+                : pinBodyPath(layout.rect, outPin);
           renderer.drawPath(body, {
             ...stroke,
             fill: "rgba(91,141,239,0.10)",

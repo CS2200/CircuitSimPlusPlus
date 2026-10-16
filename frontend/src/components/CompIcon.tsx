@@ -89,6 +89,10 @@ export default function CompIcon({
   const shape = gateShape(type, 0, 0, w, h);
   const glyph = GLYPHS[type];
   const caption = compSpec(type).caption(attrs);
+  // An output pin is a rounded stadium whose terminal faces left (it seeds
+  // rotation W); it must look like the placed part, not like the input pin
+  // (UI_OVERHAUL §55).
+  const outPin = type === "wiring.pin" && attrs.isOutput === true;
 
   return (
     <svg
@@ -106,6 +110,7 @@ export default function CompIcon({
         strokeWidth={0.14}
         strokeLinejoin="round"
         strokeLinecap="round"
+        transform={outPin ? `translate(${w} 0) scale(-1 1)` : undefined}
       >
         {/* body */}
         {shape !== null ? (
@@ -163,7 +168,7 @@ export default function CompIcon({
               y={0}
               width={w}
               height={h}
-              rx={BOX_RX}
+              rx={outPin ? h / 2 : BOX_RX}
               fill="currentColor"
               fillOpacity={0.08}
             />

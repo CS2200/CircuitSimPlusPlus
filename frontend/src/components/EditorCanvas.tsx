@@ -411,6 +411,7 @@ export default forwardRef<
         tool.hover(w);
         report();
       }}
+      cursor={tool.cursor}
       onShiftPress={(w) => tool.tickClockAt(w)}
       onDropWorld={(w, e) => {
         const type = e.dataTransfer.getData("text/x-csx-type");

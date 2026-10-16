@@ -1357,10 +1357,92 @@ body {
   gap: 0.5rem;
 }
 
+/* The fill is an explicit gradient sized to --fill, so at the maximum the bar
+   reaches the very end (a native accent track stops at the thumb, §55). */
 .inspector-slider input[type="range"] {
   flex: 1;
   min-width: 0;
-  accent-color: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
+  height: 14px;
+  /* Reset the shared `.inspector-row input` padding/border, which inset the
+     track and left a visible gap at the maximum (§55). */
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.inspector-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--fill, 0%),
+    var(--panel-border) var(--fill, 0%)
+  );
+}
+
+.inspector-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+}
+
+.inspector-slider input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--panel-border);
+}
+
+.inspector-slider input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.inspector-slider input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Segmented base chooser for a constant (UI_OVERHAUL §55). */
+.radix-buttons {
+  display: inline-flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: var(--panel);
+}
+
+.radix-button {
+  flex: 1;
+  min-width: 2.6rem;
+  padding: 0.22rem 0.5rem;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.radix-button:hover {
+  color: var(--text);
+}
+
+.radix-button.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .inspector-slider-value {

@@ -60,6 +60,11 @@ export interface CanvasHostProps {
   /** Pointer moved with no buttons pressed (ghost tracking, cursor readout). */
   onHover?: (world: Vec2) => void;
   /**
+   * CSS cursor to show over the canvas (UI_OVERHAUL §55) — e.g. `crosshair`
+   * over a pin, `move` over a wire handle. Undefined keeps the pan cursor.
+   */
+  cursor?: string;
+  /**
    * Shift+left press, before the pan gesture claims it: return true to consume
    * it (used by the clock's tick-on-shift-click, UI_OVERHAUL §50).
    */
@@ -124,6 +129,7 @@ export default function CanvasHost({
   onPointerUp,
   onDoubleClick,
   onHover,
+  cursor,
   onShiftPress,
   onDropWorld,
   overlayExtra,
@@ -422,6 +428,7 @@ export default function CanvasHost({
       <canvas
         ref={canvasRef}
         className="circuit-canvas"
+        style={cursor !== undefined ? { cursor } : undefined}
         onContextMenu={(e) => e.preventDefault()}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);

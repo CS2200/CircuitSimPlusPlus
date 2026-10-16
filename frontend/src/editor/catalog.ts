@@ -432,10 +432,12 @@ const REGISTRY: Record<string, CompSpec> = {
     ],
     caption: () => "PIN",
   },
+  // The constant is roomy enough to read its value (UI_OVERHAUL §55): 3x2,
+  // its `out` on the right edge.
   "wiring.constant": boxSpec(
+    3,
     2,
-    1,
-    [{ name: "out", dx: 2, dy: 0.5, kind: "out", bitsize: BUS_WIDTH }],
+    [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: BUS_WIDTH }],
     "CONST",
   ),
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
@@ -740,6 +742,24 @@ export type AttrField =
       group?: string;
       hint?: string;
     }
+  /** A value typed/read in the component's selected radix (constant, §55). */
+  | {
+      key: string;
+      label: string;
+      kind: "radix-value";
+      placeholder?: string;
+      group?: string;
+      hint?: string;
+    }
+  /** A segmented base chooser (constant `radix`, §55). */
+  | {
+      key: string;
+      label: string;
+      kind: "radix";
+      options: { value: string; label: string }[];
+      group?: string;
+      hint?: string;
+    }
   | { key: string; label: string; kind: "boolean"; group?: string; hint?: string }
   | { key: string; label: string; kind: "color"; group?: string; hint?: string }
   | {
@@ -879,27 +899,28 @@ function baseFields(type: string): AttrField[] {
         { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
       ];
     case "wiring.constant":
-      // Value + a display radix (UI_OVERHAUL §53); double-click jumps into the
-      // value input.
+      // The value is edited in whichever radix is selected, so you never have
+      // to think in hex unless you pick hex (UI_OVERHAUL §55); double-click
+      // jumps straight into the value input.
       return [
         BITSIZE_FIELD,
         {
           key: "value",
-          label: "Value (hex)",
-          kind: "text",
+          label: "Value",
+          kind: "radix-value",
           placeholder: "0",
           group: "Options",
-          hint: "Hex string; must fit the bit size.",
+          hint: "Typed in the selected base; must fit the bit size.",
         },
         {
           key: "radix",
           label: "Show as",
-          kind: "select",
+          kind: "radix",
           group: "Options",
           options: [
-            { value: "hex", label: "Hex (0x…)" },
-            { value: "bin", label: "Binary (0b…)" },
-            { value: "dec", label: "Decimal" },
+            { value: "hex", label: "Hex" },
+            { value: "bin", label: "Bin" },
+            { value: "dec", label: "Dec" },
           ],
         },
       ];
@@ -1005,9 +1026,9 @@ function baseFields(type: string): AttrField[] {
     case "io.button":
       return [BITSIZE_FIELD];
     case "io.led":
-      // LED look + glow (UI_OVERHAUL §49).
+      // LED look + glow (UI_OVERHAUL §49). The LED is a 1-bit indicator — it
+      // has no bit-size field (UI_OVERHAUL §55).
       return [
-        BITSIZE_FIELD,
         { key: "color", label: "Color", kind: "color", group: "Options" },
         {
           key: "intensity",
