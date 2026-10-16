@@ -1424,3 +1424,21 @@ benchmark p95 gate is environmental — it also fails with these changes stashed
 
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
 benchmark p95 gate is environmental).
+
+## 52. Follow-up batch AQ (2026-10-16): a quieter clock, an honest address, pin words
+
+- **Clock restyled.** The green `--wire-high` wave and the wide green halo are
+  gone: the waveform is neutral (`--text-dim`) and the segment holding the
+  **current level** is drawn in the theme accent, with the accent edge marker
+  (▲/▼) at half opacity while low. "Driving 1" is now a quiet accent ring around
+  the body instead of a glow — same information, none of the colour noise.
+- **A RAM's address never shows a stale Z.** The §51 constant-over-Z rule was
+  applied to the generic value readout but **not** to `addrText` (which is
+  computed separately), so a RAM wired to a constant still read `Z`. The address
+  readout now applies the same rule.
+- **Pin words in the hover preview.** `PIN_DISPLAY` gained `we` → **write
+  enable** (plus en/rst/addr/din/dout), so the memory control pins read as words
+  when you hover them. The `.csx` format keeps the registry names — renaming
+  `we` for real would invalidate every existing wire endpoint that references it.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e.

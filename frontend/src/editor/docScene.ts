@@ -157,27 +157,36 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
     y = ny;
   }
   wave.push({ t: "L", x: x1, y });
-  // Bright while the clock drives 1 ("glowing"), dull while it drives 0 (§47).
-  const ink = high === true ? theme.wire.high : theme.textDim;
-  renderer.drawPath(wave, { stroke: ink, lineWidth: high === true ? 0.16 : 0.12 });
+  // The waveform itself is neutral; the segment holding the CURRENT level is the
+  // one that lights up (UI_OVERHAUL §52) — no green, no heavy halo.
+  renderer.drawPath(wave, { stroke: theme.textDim, lineWidth: 0.12 });
   renderer.flush();
   if (high === null) return;
+
+  const lastY = high ? yHi : yLo;
+  renderer.drawPath(
+    [
+      { t: "M", x: x0 + 2 * t, y: lastY },
+      { t: "L", x: x1, y: lastY },
+    ],
+    { stroke: theme.accent, lineWidth: high ? 0.2 : 0.12, alpha: high ? 1 : 0.5 },
+  );
 
   // ▲ on the rising edge / ▼ on the falling one, at the last transition.
   const edgeX = high ? x0 + t : x0 + 2 * t;
   const midY = (yHi + yLo) / 2;
-  const tipY = high ? midY - 0.34 : midY + 0.34;
-  const back = high ? 0.2 : -0.2;
+  const tipY = high ? midY - 0.32 : midY + 0.32;
+  const back = high ? 0.18 : -0.18;
   renderer.drawPath(
     [
       { t: "M", x: edgeX, y: midY },
       { t: "L", x: edgeX, y: tipY },
-      { t: "M", x: edgeX - 0.18, y: tipY + back },
+      { t: "M", x: edgeX - 0.16, y: tipY + back },
       { t: "L", x: edgeX, y: tipY },
-      { t: "M", x: edgeX + 0.18, y: tipY + back },
+      { t: "M", x: edgeX + 0.16, y: tipY + back },
       { t: "L", x: edgeX, y: tipY },
     ],
-    { stroke: high ? theme.accent : theme.textDim, lineWidth: 0.1 },
+    { stroke: theme.accent, lineWidth: 0.1, alpha: high ? 1 : 0.5 },
   );
   renderer.flush();
 }
@@ -245,6 +254,14 @@ const PIN_DISPLAY: Readonly<Record<string, string>> = {
   lt: "less than",
   eq: "equal to",
   gt: "greater than",
+  // Memory control pins read as words in the hover preview (UI_OVERHAUL §52);
+  // the format keeps the short registry name (`we`).
+  we: "write enable",
+  en: "enable",
+  rst: "reset",
+  addr: "address",
+  din: "data in",
+  dout: "data out",
 };
 
 /** Display name for a pin in the hover preview (falls back to the raw name). */
@@ -1012,6 +1029,12 @@ export class DocScene {
               val,
               bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
             );
+            const st = wireValueState(val);
+            if (st === "z" || st === "x") {
+              // A constant drives the address for real — never show a stale Z
+              // because the sim session predates the wiring (UI_OVERHAUL §51).
+              addrText = this.staticPinText(comp, "addr") ?? addrText;
+            }
           }
         }
         if (valueText !== null && !isMemory) caption = valueText;
@@ -1101,15 +1124,15 @@ export class DocScene {
             this.clockLevel.set(comp.id, high);
           }
           if (high === true) {
-            // Soft halo around the body — the "it is driving 1" glow.
+            // A quiet accent ring says "driving 1" without shouting (§52).
             renderer.drawPath(
               rectPath(
-                layout.rect.x - 0.3,
-                layout.rect.y - 0.3,
-                layout.rect.w + 0.6,
-                layout.rect.h + 0.6,
+                layout.rect.x - 0.18,
+                layout.rect.y - 0.18,
+                layout.rect.w + 0.36,
+                layout.rect.h + 0.36,
               ),
-              { stroke: theme.wire.high, lineWidth: 0.55, alpha: 0.28 },
+              { stroke: theme.accent, lineWidth: 0.3, alpha: 0.22 },
             );
             renderer.flush();
           }
