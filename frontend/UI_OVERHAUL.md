@@ -1366,3 +1366,20 @@ fails with these changes stashed, so it is load, not a regression.
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
 benchmark p95 gate is failing on this loaded machine — it also fails with the
 changes stashed).
+
+## 49. Follow-up batch AN (2026-10-16): the LED lights up
+
+- **`io.led` gets `color` + `intensity`.** The engine validates `color` ("" =
+  theme accent, else `#rrggbb`) and `intensity` (0..=100, default 80); the
+  Inspector offers a swatch + a Brightness field (`docs/format-v2.md` §4).
+- **It looks like an LED and it glows.** The body is a dome (circle) with a base
+  and two legs — shared by the canvas, the placement ghost and the palette icon.
+  While the net it reads drives a 1 it fills with its colour and **throws soft
+  concentric glow rings** whose alpha scales with `intensity`; while the net is 0
+  (or unconnected) it is a dark, unlit dome.
+- **It lights without a run.** The ON test uses the live sim value when present,
+  else the same static read as the probe/RAM — a connected constant — so a
+  constant wired to an LED lights it immediately (UI_OVERHAUL §48).
+
+**Acceptance:** frontend lint / 303 unit / build green; Rust 171 core + 8 golden,
+clippy/fmt clean; 52-of-53 e2e (the stress benchmark p95 gate is environmental).

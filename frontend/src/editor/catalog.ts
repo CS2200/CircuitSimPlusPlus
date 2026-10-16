@@ -923,8 +923,23 @@ function baseFields(type: string): AttrField[] {
     case "io.hexdisplay":
       return [HEX_BITSIZE_FIELD];
     case "io.button":
-    case "io.led":
       return [BITSIZE_FIELD];
+    case "io.led":
+      // LED look + glow (UI_OVERHAUL §49).
+      return [
+        BITSIZE_FIELD,
+        { key: "color", label: "Color", kind: "color", group: "Options" },
+        {
+          key: "intensity",
+          label: "Brightness",
+          kind: "number",
+          min: 0,
+          max: 100,
+          placeholder: "80",
+          group: "Options",
+          hint: "Glow strength, 0–100 (default 80).",
+        },
+      ];
     default:
       return [];
   }

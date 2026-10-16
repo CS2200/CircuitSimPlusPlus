@@ -808,6 +808,60 @@ export class DocScene {
         renderer.flush();
         continue;
       }
+      // An LED (UI_OVERHAUL §49): a dome that lights in its own colour and
+      // throws a glow when the net it reads drives a 1 — live from the sim, or
+      // static from a connected constant, so it lights without a run.
+      if (comp.type === "io.led") {
+        const attrs = comp.attrs ?? {};
+        const color =
+          typeof attrs.color === "string" && /^#[0-9a-f]{6}$/i.test(attrs.color)
+            ? attrs.color
+            : theme.accent;
+        const intensity =
+          typeof attrs.intensity === "number" ? Math.max(0, Math.min(100, attrs.intensity)) : 80;
+        const netId = this.netOfPin(comp.id, "in");
+        const wireIdx = netId === undefined ? undefined : this.nets.nets[netId]?.wires[0];
+        const live = wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
+        const stat = live === undefined ? this.staticPinText(comp, "in") : null;
+        const on =
+          live !== undefined
+            ? wireValueState(live) === "high"
+            : stat !== null && stat !== "" && Number.parseInt(stat, 16) !== 0;
+        const r = Math.min(layout.rect.w, layout.rect.h) * 0.34;
+        const lx = layout.rect.x + layout.rect.w / 2;
+        const ly = layout.rect.y + layout.rect.h / 2;
+        if (on && intensity > 0) {
+          // Illuminate the space around it: soft rings in the LED's colour.
+          const a = 0.06 + 0.26 * (intensity / 100);
+          for (let i = 3; i >= 1; i--) {
+            renderer.drawPath(circlePath(lx, ly, r * (1 + 0.5 * i)), { fill: color, alpha: a / i });
+          }
+          renderer.flush();
+        }
+        renderer.drawPath(circlePath(lx, ly, r), { fill: on ? color : theme.panel });
+        renderer.drawPath(circlePath(lx, ly, r), { stroke: theme.textDim, lineWidth: 0.12 });
+        // base + two legs
+        const baseY = ly + r * 0.85;
+        renderer.drawPath(
+          [
+            { t: "M", x: lx - r * 0.8, y: baseY },
+            { t: "L", x: lx + r * 0.8, y: baseY },
+            { t: "M", x: lx - r * 0.45, y: baseY },
+            { t: "L", x: lx - r * 0.45, y: layout.rect.y + layout.rect.h },
+            { t: "M", x: lx + r * 0.45, y: baseY },
+            { t: "L", x: lx + r * 0.45, y: layout.rect.y + layout.rect.h },
+          ],
+          { stroke: theme.textDim, lineWidth: 0.12 },
+        );
+        if (selected) {
+          renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+            stroke: theme.accent,
+            lineWidth: 0.06,
+          });
+        }
+        renderer.flush();
+        continue;
+      }
       // Family tint (UI_OVERHAUL §21): a hint of the part's family on its body
       // and a stronger hint on its outline, so pins/memory/arithmetic read
       // apart at a glance without shouting.

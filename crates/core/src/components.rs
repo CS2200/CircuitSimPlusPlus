@@ -979,8 +979,18 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (vec![PinSig::o("out", 1)], c, CompKind::Button)
         }
         "io.led" => {
-            let mut c = AttrCheck::new(attrs, GATE_ATTRS);
+            // UI_OVERHAUL §49: the LED carries its own look — `color` (#rrggbb,
+            // "" = theme accent) and `intensity` (0..100, the glow strength).
+            let mut c = AttrCheck::new(attrs, &["bitsize", "color", "intensity"]);
             let b = c.bitsize(1);
+            let color = c.string("color", "");
+            if !color.is_empty() && !is_hex_color(&color) {
+                c_issue(
+                    &mut c,
+                    format!("attr 'color' must be a #rrggbb string, got '{color}'"),
+                );
+            }
+            let _ = c.uint("intensity", 80, 0, 100);
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Led { bitsize: b })
         }

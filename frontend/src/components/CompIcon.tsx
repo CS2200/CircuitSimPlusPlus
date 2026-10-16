@@ -121,7 +121,21 @@ export default function CompIcon({
           // square-wave source — no box, the waveform is the icon
           <path d="M0.15 1.25 L0.5 1.25 L0.5 0.75 L1.0 0.75 L1.0 1.25 L1.5 1.25 L1.5 0.75 L1.85 0.75" />
         ) : type === "io.led" ? (
-          <circle cx={w / 2} cy={h / 2} r={0.38} fill="currentColor" fillOpacity={0.2} />
+          // LED dome + legs (UI_OVERHAUL §49) — same look as on canvas
+          <>
+            <circle
+              cx={w / 2}
+              cy={h / 2}
+              r={Math.min(w, h) * 0.34}
+              fill="currentColor"
+              fillOpacity={0.3}
+            />
+            <path
+              d={`M${w / 2 - 0.15} ${h / 2 + 0.26} L${w / 2 - 0.15} ${h} M${w / 2 + 0.15} ${
+                h / 2 + 0.26
+              } L${w / 2 + 0.15} ${h}`}
+            />
+          </>
         ) : type === "wiring.probe" ? (
           // the probe's pointed hexagon (UI_OVERHAUL §40) — same as on canvas
           <path d={d(probePath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
