@@ -1350,6 +1350,28 @@ body {
   cursor: pointer;
 }
 
+/* A drag bar + its numeric readout (UI_OVERHAUL §50). */
+.inspector-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.inspector-slider input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.inspector-slider-value {
+  flex: none;
+  min-width: 1.8rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
 .inspector-note {
   margin: 0.7rem 0 0;
   font-size: 0.75rem;

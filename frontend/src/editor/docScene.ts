@@ -750,6 +750,15 @@ export class DocScene {
       const layout = this.layouts.get(comp.id)!;
       if (!rectIntersects(layout.rect, visible)) continue;
       const selected = selection.hasComponent(comp.id);
+      // Pin terminals are collected up front so every part — including the ones
+      // drawn by a special case below (text/splitter/LED) — gets its markers
+      // (UI_OVERHAUL §50).
+      for (const p of layout.pins) {
+        const dot = { x: p.x, y: p.y };
+        if (p.kind === "out") outDots.push(dot);
+        else if (p.kind === "in") inDots.push(dot);
+        else otherDots.push(dot);
+      }
       // A text annotation: no body box and no pins — just the label, sitting at
       // the rect's left, vertically centred (UI_OVERHAUL §37). A selection
       // outlines the (invisible) hit box so the annotation can be grabbed.
@@ -831,19 +840,26 @@ export class DocScene {
         const lx = layout.rect.x + layout.rect.w / 2;
         const ly = layout.rect.y + layout.rect.h / 2;
         if (on && intensity > 0) {
-          // Illuminate the space around it: soft rings in the LED's colour.
-          const a = 0.06 + 0.26 * (intensity / 100);
-          for (let i = 3; i >= 1; i--) {
-            renderer.drawPath(circlePath(lx, ly, r * (1 + 0.5 * i)), { fill: color, alpha: a / i });
+          // Illuminate the space around it: soft rings in the LED's colour that
+          // really bloom at 100% (UI_OVERHAUL §50).
+          const k = intensity / 100;
+          for (let i = 4; i >= 1; i--) {
+            renderer.drawPath(circlePath(lx, ly, r * (1 + 0.55 * i * (0.6 + k))), {
+              fill: color,
+              alpha: (0.05 + 0.4 * k) / i,
+            });
           }
           renderer.flush();
         }
         renderer.drawPath(circlePath(lx, ly, r), { fill: on ? color : theme.panel });
         renderer.drawPath(circlePath(lx, ly, r), { stroke: theme.textDim, lineWidth: 0.12 });
-        // base + two legs
+        // Input lead from the pin into the dome (so the connection point is
+        // unmistakable), plus the base and two legs (UI_OVERHAUL §50).
         const baseY = ly + r * 0.85;
         renderer.drawPath(
           [
+            { t: "M", x: layout.rect.x, y: ly },
+            { t: "L", x: lx - r, y: ly },
             { t: "M", x: lx - r * 0.8, y: baseY },
             { t: "L", x: lx + r * 0.8, y: baseY },
             { t: "M", x: lx - r * 0.45, y: baseY },
@@ -851,7 +867,7 @@ export class DocScene {
             { t: "M", x: lx + r * 0.45, y: baseY },
             { t: "L", x: lx + r * 0.45, y: layout.rect.y + layout.rect.h },
           ],
-          { stroke: theme.textDim, lineWidth: 0.12 },
+          { stroke: theme.textDim, lineWidth: 0.14 },
         );
         if (selected) {
           renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
@@ -1017,26 +1033,18 @@ export class DocScene {
             });
           }
         }
-        // Memory readouts (UI_OVERHAUL §46): the address beside the `addr` pin
-        // and the data value beside the output pin.
+        // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
+        // stacked and centred in the same light style as the rest.
         if (isMemory) {
-          const addrPin = layout.pins.find((p) => p.name === "addr");
-          const dataPin =
-            valuePin !== null ? layout.pins.find((p) => p.name === valuePin) : undefined;
-          if (addrText !== null && addrPin !== undefined) {
-            renderer.drawText(layout.rect.x + 0.6, addrPin.y, addrText, {
-              color: theme.text,
+          const mc = layout.rect.x + layout.rect.w / 2;
+          const mid = layout.rect.y + layout.rect.h / 2;
+          [caption, `Addr: ${addrText ?? "—"}`, `Data: ${valueText ?? "—"}`].forEach((line, i) => {
+            renderer.drawText(mc, mid + (i - 1) * 1.2, line, {
+              color: theme.textDim,
               size: 0.9,
-              align: "left",
+              align: "center",
             });
-          }
-          if (valueText !== null && dataPin !== undefined) {
-            renderer.drawText(layout.rect.x + layout.rect.w - 0.6, dataPin.y, valueText, {
-              color: theme.text,
-              size: 0.9,
-              align: "right",
-            });
-          }
+          });
         }
         // The comparator's three outputs each get their own relation symbol
         // next to the pin (<, =, >) instead of one centered mark
@@ -1098,7 +1106,10 @@ export class DocScene {
           }
           drawClockWave(renderer, theme, layout.rect, high);
         } else if (comp.type === "wiring.probe" && valueText === null) {
-          // no type word — the pointed shape already says "probe"
+          // The probe shows only its value; with nothing to read it stays bare
+          // (the pointed shape already says "probe", UI_OVERHAUL §36).
+        } else if (isMemory) {
+          // RAM/ROM drew its stacked Addr/Data lines above.
         } else {
           renderer.drawText(
             cx,
@@ -1107,7 +1118,9 @@ export class DocScene {
             // Values (and symbols, §18) are sized to fit the body, so a 32-bit
             // readout on a small part stays inside it.
             {
-              color: valueText !== null && !isMemory ? theme.text : theme.textDim,
+              // Values read in the light caption style everywhere — constants
+              // included (UI_OVERHAUL §50).
+              color: theme.textDim,
               size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
               align: "center",
             },
@@ -1126,12 +1139,6 @@ export class DocScene {
             );
           }
         }
-      }
-      for (const p of layout.pins) {
-        const dot = { x: p.x, y: p.y };
-        if (p.kind === "out") outDots.push(dot);
-        else if (p.kind === "in") inDots.push(dot);
-        else otherDots.push(dot);
       }
     }
     renderer.flush();

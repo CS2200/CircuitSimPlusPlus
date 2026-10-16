@@ -1383,3 +1383,25 @@ changes stashed).
 
 **Acceptance:** frontend lint / 303 unit / build green; Rust 171 core + 8 golden,
 clippy/fmt clean; 52-of-53 e2e (the stress benchmark p95 gate is environmental).
+
+## 50. Follow-up batch AO (2026-10-16): terminals, memory text, LED punch
+
+- **Every part gets its pin markers.** The text/splitter/LED special cases
+  `continue`d past the pin collection, so those parts drew **no terminals at all**
+  — the LED's and splitter's connection points were invisible. Pins are now
+  collected at the top of the component loop, before any special case.
+- **RAM/ROM read as text, centred.** Instead of a value beside each pin, the body
+  now stacks **`RAM` / `Addr:` / `Data:`** on three centred lines in the light
+  caption style (unread values show `—`); **constants read their value in that
+  same light style** too.
+- **The LED's connection is obvious and its glow has punch.** A lead runs from
+  the `in` pin into the dome, and the glow is a 4-ring bloom whose radius and
+  alpha scale hard with `intensity` — 100% lights the space around it properly.
+- **Brightness is a bar.** New `slider` field kind (drag bar + numeric readout);
+  the LED's Brightness uses it.
+- **Shift+click a clock now always ticks.** The tick fires on the **press**
+  (`CanvasHost.onShiftPress` → `ToolMachine.tickClockAt`) before the Shift+left
+  PAN gesture can claim it, so a click that drifts a few pixels still ticks.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is environmental — it also fails with these changes stashed).

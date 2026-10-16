@@ -334,6 +334,21 @@ export class ToolMachine {
     this.changed();
   }
 
+  /**
+   * Shift+press on a clock ticks the sim immediately (UI_OVERHAUL §50): doing it
+   * on the PRESS means the Shift+left PAN gesture never swallows it. Returns
+   * true when the press was consumed.
+   */
+  tickClockAt(world: Vec2): boolean {
+    if (this.placing !== null || this.wiring !== null) return false;
+    const hit = this.scene.pickComponent(world);
+    if (hit === null) return false;
+    const comp = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === hit.compId);
+    if (comp?.type !== "wiring.clock") return false;
+    this.onTick?.();
+    return true;
+  }
+
   move(world: Vec2): void {
     this.hover(world);
     // Drag-vs-click: remember whether this press has travelled far enough to

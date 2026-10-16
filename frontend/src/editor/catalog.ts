@@ -679,6 +679,18 @@ export type AttrField =
       hint?: string;
     }
   | {
+      /** A drag bar (UI_OVERHAUL §50), e.g. the LED's brightness. */
+      key: string;
+      label: string;
+      kind: "slider";
+      min: number;
+      max: number;
+      /** Shown when the attr is absent. */
+      dflt: number;
+      group?: string;
+      hint?: string;
+    }
+  | {
       key: string;
       label: string;
       kind: "text";
@@ -932,12 +944,12 @@ function baseFields(type: string): AttrField[] {
         {
           key: "intensity",
           label: "Brightness",
-          kind: "number",
+          kind: "slider",
           min: 0,
           max: 100,
-          placeholder: "80",
+          dflt: 80,
           group: "Options",
-          hint: "Glow strength, 0–100 (default 80).",
+          hint: "Glow strength, 0–100.",
         },
       ];
     default:

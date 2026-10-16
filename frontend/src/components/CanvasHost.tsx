@@ -59,6 +59,11 @@ export interface CanvasHostProps {
   onDoubleClick?: (world: Vec2, info: PointerInfo) => void;
   /** Pointer moved with no buttons pressed (ghost tracking, cursor readout). */
   onHover?: (world: Vec2) => void;
+  /**
+   * Shift+left press, before the pan gesture claims it: return true to consume
+   * it (used by the clock's tick-on-shift-click, UI_OVERHAUL §50).
+   */
+  onShiftPress?: (world: Vec2) => boolean;
   /** HTML5 drop (palette drag-in), translated to world coords. */
   onDropWorld?: (world: Vec2, e: React.DragEvent) => void;
   /** Extra content in the perf overlay. */
@@ -119,6 +124,7 @@ export default function CanvasHost({
   onPointerUp,
   onDoubleClick,
   onHover,
+  onShiftPress,
   onDropWorld,
   overlayExtra,
 }: CanvasHostProps) {
@@ -421,6 +427,16 @@ export default function CanvasHost({
           e.currentTarget.setPointerCapture(e.pointerId);
           if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
             panRef.current = { x: e.clientX, y: e.clientY };
+            return;
+          }
+          // Shift+press consumed by a part (a clock tick, §50): no pan starts.
+          if (
+            e.button === 0 &&
+            e.shiftKey &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            onShiftPress?.(worldOf(e)) === true
+          ) {
             return;
           }
           // Right-drag and Shift+left-drag PAN (UI_OVERHAUL §1): hold the

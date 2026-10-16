@@ -570,6 +570,26 @@ function FieldRow({
   const key = `${comp.id}:attr:${field.key}`;
   const value = (comp.attrs ?? {})[field.key];
 
+  if (field.kind === "slider") {
+    const n = typeof value === "number" ? value : field.dflt;
+    return (
+      <div className="inspector-row">
+        <span>{field.label}</span>
+        <div className="inspector-slider">
+          <input
+            type="range"
+            min={field.min}
+            max={field.max}
+            value={n}
+            aria-label={field.label}
+            onChange={(e) => onCommitAttr(field.key, Number(e.target.value))}
+          />
+          <span className="inspector-slider-value">{n}</span>
+        </div>
+      </div>
+    );
+  }
+
   if (field.kind === "number") {
     const n = typeof value === "number" ? value : undefined;
     const text = draft?.key === key ? draft.text : n === undefined ? "" : String(n);
