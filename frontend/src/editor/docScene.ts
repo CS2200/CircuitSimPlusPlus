@@ -191,6 +191,18 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
   renderer.flush();
 }
 
+/** The value a constant shows on its body, in its chosen display radix (§53). */
+function constantText(hex: string, radix: unknown, bits: number): string {
+  const n = Number.parseInt(hex, 16);
+  if (!Number.isFinite(n)) return hex;
+  if (radix === "bin") {
+    const w = Math.min(32, Math.max(1, bits));
+    return `0b${n.toString(2).padStart(w, "0")}`;
+  }
+  if (radix === "dec") return String(n);
+  return `0x${hex.toUpperCase()}`;
+}
+
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
 function fitTextSize(text: string, w: number, h: number, base = 1): number {
   const byWidth = (w * 0.92) / Math.max(1, text.length * 0.62);
@@ -985,7 +997,12 @@ export class DocScene {
         let valueText: string | null = null;
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
-          valueText = String(comp.attrs.value);
+          const outPin = layout.pins.find((p) => p.name === "out");
+          valueText = constantText(
+            String(comp.attrs.value),
+            comp.attrs.radix,
+            outPin?.bitsize ?? 1,
+          );
         } else if (sim !== undefined && showValues) {
           const pinName = VALUE_PIN[comp.type];
           if (pinName !== undefined) {
@@ -1072,6 +1089,18 @@ export class DocScene {
               align: "center",
             });
           }
+        }
+        // A constant tags its display radix in the corner (UI_OVERHAUL §53).
+        if (comp.type === "wiring.constant") {
+          const radix =
+            comp.attrs?.radix === "bin" ? "bin" : comp.attrs?.radix === "dec" ? "dec" : "hex";
+          renderer.drawText(
+            layout.rect.x + layout.rect.w - 0.2,
+            layout.rect.y + layout.rect.h - 0.3,
+            radix,
+            { color: theme.textDim, size: 0.45, align: "right" },
+          );
+          renderer.flush();
         }
         // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
         // stacked and centred in the same light style as the rest.

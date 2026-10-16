@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
 import { editableAttrs, compPins, type AttrField } from "../editor/catalog";
@@ -56,6 +56,8 @@ export default function InspectorPanel({
   filePath = null,
   onEdit,
   onNotify,
+  focusField = null,
+  onFocusHandled,
 }: {
   doc: CircuitDocument;
   /** The single selected component, or null when there is no single selection. */
@@ -76,6 +78,9 @@ export default function InspectorPanel({
   onEdit: () => void;
   /** User-facing messages (toasts). */
   onNotify?: (message: string) => void;
+  /** Attr key to focus on the next render (double-click a constant, §53). */
+  focusField?: string | null;
+  onFocusHandled?: () => void;
 }) {
   const circuit = doc.circuits[circuitIdx];
   const comp =
@@ -355,6 +360,8 @@ export default function InspectorPanel({
             draft={draft}
             onDraft={setDraft}
             onCommitAttr={commitAttr}
+            focusKey={focusField}
+            onFocusHandled={onFocusHandled}
           />
           {f.hint !== undefined && <p className="settings-hint inspector-hint">{f.hint}</p>}
         </Fragment>
@@ -560,15 +567,29 @@ function FieldRow({
   draft,
   onDraft,
   onCommitAttr,
+  focusKey = null,
+  onFocusHandled,
 }: {
   field: AttrField;
   comp: CsxComponent;
   draft: { key: string; text: string } | null;
   onDraft: (d: { key: string; text: string } | null) => void;
   onCommitAttr: (key: string, value: unknown) => void;
+  /** Focus this row's input when it matches (UI_OVERHAUL §53). */
+  focusKey?: string | null;
+  onFocusHandled?: () => void;
 }) {
   const key = `${comp.id}:attr:${field.key}`;
   const value = (comp.attrs ?? {})[field.key];
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Double-clicking a constant lands here: jump straight into its value input.
+  useEffect(() => {
+    if (focusKey !== field.key) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    onFocusHandled?.();
+  }, [focusKey, field.key, onFocusHandled]);
 
   if (field.kind === "slider") {
     const n = typeof value === "number" ? value : field.dflt;
@@ -696,6 +717,7 @@ function FieldRow({
     <label className="inspector-row">
       <span>{field.label}</span>
       <input
+        ref={inputRef}
         value={text}
         onChange={(e) => onDraft({ key, text: e.target.value })}
         onBlur={() => {

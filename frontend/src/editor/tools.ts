@@ -144,7 +144,7 @@ export class ToolMachine {
   private pressSwept = false;
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
   /** Fired when a component is double-clicked (opens the right-dock Inspector). */
-  onEditComponent?: (compId: string) => void;
+  onEditComponent?: (compId: string, focusField?: string) => void;
   /** Fired by Shift+click on a clock: step the simulation one tick (§47). */
   onTick?: () => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
@@ -531,7 +531,10 @@ export class ToolMachine {
     const comp = this.scene.pickComponent(world);
     if (comp !== null) {
       this.selection.set([comp.compId], []);
-      this.onEditComponent?.(comp.compId);
+      // Double-clicking a constant should put you straight into its value input
+      // (UI_OVERHAUL §53).
+      const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
+      this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
       this.changed();
     }
   }

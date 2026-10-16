@@ -223,6 +223,8 @@ export default function App() {
   const railRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  /** Field the Inspector should focus next (a constant's value on double-click). */
+  const [inspectorFocus, setInspectorFocus] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
@@ -1556,6 +1558,7 @@ export default function App() {
                   themeName={`${theme}|${accent}`}
                   sheetIdx={sheet}
                   onStatus={onStatus}
+                  onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
                   sim={sim}
                   pathIds={pathIds}
@@ -1596,6 +1599,8 @@ export default function App() {
                 filePath={filePath}
                 onEdit={() => editorRef.current?.refresh()}
                 onNotify={toast}
+                focusField={inspectorFocus}
+                onFocusHandled={() => setInspectorFocus(null)}
               />
             </aside>
           </>

@@ -75,7 +75,7 @@ export default forwardRef<
     /** Index of the sheet being edited (subcircuits are separate sheets). */
     sheetIdx?: number;
     onStatus?: (s: EditorStatus) => void;
-    onEditComponent?: (compId: string) => void;
+    onEditComponent?: (compId: string, focusField?: string) => void;
     /** Right-click a subcircuit instance: jump to its definition tab. */
     onOpenSubcircuit?: (circuit: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */

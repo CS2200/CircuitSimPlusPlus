@@ -837,6 +837,8 @@ function baseFields(type: string): AttrField[] {
         { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
       ];
     case "wiring.constant":
+      // Value + a display radix (UI_OVERHAUL §53); double-click jumps into the
+      // value input.
       return [
         BITSIZE_FIELD,
         {
@@ -846,6 +848,17 @@ function baseFields(type: string): AttrField[] {
           placeholder: "0",
           group: "Options",
           hint: "Hex string; must fit the bit size.",
+        },
+        {
+          key: "radix",
+          label: "Show as",
+          kind: "select",
+          group: "Options",
+          options: [
+            { value: "hex", label: "Hex (0x…)" },
+            { value: "bin", label: "Binary (0b…)" },
+            { value: "dec", label: "Decimal" },
+          ],
         },
       ];
     case "wiring.clock":

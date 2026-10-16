@@ -241,3 +241,25 @@ test("clock: Shift+click ticks the sim in place", async ({ page }) => {
   await page.keyboard.up("Shift");
   await expect(page.locator(".app-statusbar")).toContainText("1 selected");
 });
+
+test("constant: radix display + double-click jumps into the value", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "CONST", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  // Double-clicking the constant puts the caret in its value input (UI_OVERHAUL §53).
+  const bodyCentre = await world(page, 0, 0.5); // the 2x1 body sits at [-1,0]
+  await page.mouse.dblclick(bodyCentre.x, bodyCentre.y);
+  await expect(page.getByLabel("Value (hex)")).toBeFocused();
+
+  // The display radix is a plain attr.
+  await page.getByLabel("Show as").click();
+  await page.getByRole("option", { name: "Binary (0b…)", exact: true }).click();
+  const d = await doc(page);
+  const c = d.circuits[0].components.find((x) => x.type === "wiring.constant");
+  expect(c?.attrs?.radix).toBe("bin");
+});

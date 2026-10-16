@@ -1442,3 +1442,22 @@ benchmark p95 gate is environmental).
   `we` for real would invalidate every existing wire endpoint that references it.
 
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e.
+
+## 53. Follow-up batch AR (2026-10-16): constant radix, double-click to edit
+
+- **A constant can show hex, binary, or decimal.** New display-only `radix` attr on
+  `wiring.constant` (`"hex" | "bin" | "dec"`, default `"hex"`). The stored `value`
+  stays a hex string in the `.csx` file; the editor renders it per the chosen
+  radix — `0x…` for hex, `0b…` (zero-padded to the bit width) for binary, and the
+  plain unsigned decimal. The `out` pin's bit width drives the padding.
+- **The radix is tagged in the body's corner.** A small dim `hex` / `bin` / `dec`
+  label sits in the constant's bottom-right corner, so its display style is never
+  ambiguous.
+- **Double-click a constant to edit its value.** Double-clicking a constant now
+  selects it *and* drops the caret straight into its **Value** input in the
+  Inspector (`onEditComponent(compId, "value")` → `focusField` prop → the field
+  focuses and selects on the next render).
+
+**Acceptance:** frontend lint / build green; 6 editor e2e pass (constant radix +
+double-click focus covered); core tests green (`cargo test -p csim-core`, 171 +
+8 golden).

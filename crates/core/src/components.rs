@@ -558,9 +558,12 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "wiring.constant" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "value"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "value", "radix"]);
             let b = c.bitsize(1);
             let value = c.string("value", "0");
+            // `radix` is DISPLAY-only — the stored `value` is always a hex string;
+            // the editor uses it for the on-body readout (UI_OVERHAUL §53).
+            let _ = c.enumeration("radix", &["hex", "bin", "dec"], "hex");
             c.finish();
             let parsed = match Value::from_hex_masks(b, &value, "", "") {
                 Ok(v) => v,
