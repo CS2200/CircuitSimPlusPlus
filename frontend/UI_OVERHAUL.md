@@ -1345,3 +1345,24 @@ month-old one to one a day).
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e green — the
 stress-scene _benchmark_ p95 gate fails on this machine (rAF ~40 fps); it also
 fails with these changes stashed, so it is load, not a regression.
+
+## 48. Follow-up batch AM (2026-10-16): reads before a run, a clock that glows, a real button
+
+- **Parts read their driver before a run.** `staticProbeValue` became
+  `staticPinText(comp, pin)` (a `wiring.constant` on the pin's net): the probe
+  uses it for `in`, and a **RAM/ROM's `addr`** now uses it too — so wiring `addr`
+  to a constant shows the address on the chip immediately, no tick needed.
+- **The clock glows high / dulls low.** It draws its square wave **bright
+  (`--wire-high`) while it drives 1** with a soft halo around the body, and dull
+  (`--text-dim`) while it drives 0, so the rising/falling edge is legible at a
+  glance; the accent flash on a flip is kept. Shift+click still ticks in place.
+- **`io.button` looks like a button.** A round cap with a plunger + a lead to the
+  pin (`shapes.ts`), shared by the placed body, the ghost and the palette icon —
+  no more box.
+- **Outline-only parts are visible.** The splitter's rail/taps moved from
+  `--panel-border` to `--text-dim` and got a touch thicker — on a dark canvas the
+  rail was invisible before.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is failing on this loaded machine — it also fails with the
+changes stashed).

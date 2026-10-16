@@ -252,6 +252,32 @@ export function gateShape(
       };
     case "gate.buffer":
       return { body: triPath(x, y, w, h), extra: [], outBubble: null };
+    case "io.button": {
+      // A push button (UI_OVERHAUL §48): a round cap with a plunger + a lead out
+      // to its pin, not a box.
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const r = Math.min(w, h) * 0.3;
+      return {
+        body: circlePath(cx, cy, r),
+        extra: [
+          // plunger stem, cap bar, and the lead to the output pin
+          [
+            { t: "M", x: cx, y: cy - r },
+            { t: "L", x: cx, y: y + h * 0.1 },
+          ],
+          [
+            { t: "M", x: cx - w * 0.24, y: y + h * 0.1 },
+            { t: "L", x: cx + w * 0.24, y: y + h * 0.1 },
+          ],
+          [
+            { t: "M", x: cx + r, y: cy },
+            { t: "L", x: x + w, y: cy },
+          ],
+        ],
+        outBubble: null,
+      };
+    }
     case "wiring.controlled-buffer":
       // A buffer triangle with an enable lead on the bottom edge (UI_OVERHAUL
       // §43): the extra stroke connects the body's lower slanted edge to the

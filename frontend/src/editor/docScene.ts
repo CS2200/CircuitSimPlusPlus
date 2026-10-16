@@ -155,7 +155,9 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
     y = ny;
   }
   wave.push({ t: "L", x: x1, y });
-  renderer.drawPath(wave, { stroke: theme.textDim, lineWidth: 0.12 });
+  // Bright while the clock drives 1 ("glowing"), dull while it drives 0 (§47).
+  const ink = high === true ? theme.wire.high : theme.textDim;
+  renderer.drawPath(wave, { stroke: ink, lineWidth: high === true ? 0.16 : 0.12 });
   renderer.flush();
   if (high === null) return;
 
@@ -173,7 +175,7 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
       { t: "M", x: edgeX + 0.18, y: tipY + back },
       { t: "L", x: edgeX, y: tipY },
     ],
-    { stroke: theme.accent, lineWidth: 0.1 },
+    { stroke: high ? theme.accent : theme.textDim, lineWidth: 0.1 },
   );
   renderer.flush();
 }
@@ -497,12 +499,13 @@ export class DocScene {
   }
 
   /**
-   * Value a probe reads with no live sim value (UI_OVERHAUL §40): the
+   * Text a pin reads with no live sim value (UI_OVERHAUL §40/§48): the
    * configured value of a `wiring.constant` on the same net, else null. Lets a
-   * probe show "the value of the item it is connected to" before/without a run.
+   * probe — and a RAM's address — show "the value of the thing it is wired to"
+   * before/without a run.
    */
-  staticProbeValue(comp: CsxComponent): string | null {
-    const netId = this.netOfPin(comp.id, "in");
+  staticPinText(comp: CsxComponent, pin: string): string | null {
+    const netId = this.netOfPin(comp.id, pin);
     if (netId === undefined) return null;
     const net = this.nets.nets[netId];
     if (net === undefined) return null;
@@ -789,8 +792,8 @@ export class DocScene {
             taps.push({ t: "M", x: railX, y: p.y }, { t: "L", x: p.x, y: p.y });
           }
         }
-        renderer.drawPath(rail, { stroke: theme.panelBorder, lineWidth: 0.2 });
-        renderer.drawPath(taps, { stroke: theme.panelBorder, lineWidth: 0.12 });
+        renderer.drawPath(rail, { stroke: theme.textDim, lineWidth: 0.22 });
+        renderer.drawPath(taps, { stroke: theme.textDim, lineWidth: 0.14 });
         if (selected) {
           renderer.drawPath(
             rectPath(
@@ -928,11 +931,16 @@ export class DocScene {
         // Static fallback (UI_OVERHAUL §40): with no live sim value, a probe
         // still reads what it is wired to (a directly connected constant).
         if (valueText === null && comp.type === "wiring.probe") {
-          const staticVal = this.staticProbeValue(comp);
+          const staticVal = this.staticPinText(comp, "in");
           if (staticVal !== null) {
             valueText = staticVal;
             valuePin = "in";
           }
+        }
+        // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
+        // §48), so wiring `addr` to a constant shows up immediately.
+        if (isMemory && addrText === null) {
+          addrText = this.staticPinText(comp, "addr");
         }
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
@@ -994,8 +1002,9 @@ export class DocScene {
             });
           }
         } else if (comp.type === "wiring.clock") {
-          // A clock shows a square wave + the edge that just happened (§47), and
-          // flashes briefly when its level flips, so a tick is unmissable.
+          // The clock GLOWS while it drives high and sits dull while low (§47),
+          // so its rising/falling edge is readable at a glance; it also flashes
+          // briefly on a flip.
           const high = valueText === null ? null : valueText !== "0";
           if (high !== null) {
             const prev = this.clockLevel.get(comp.id);
@@ -1003,6 +1012,19 @@ export class DocScene {
               this.clockChangedAt.set(comp.id, overlay.now);
             }
             this.clockLevel.set(comp.id, high);
+          }
+          if (high === true) {
+            // Soft halo around the body — the "it is driving 1" glow.
+            renderer.drawPath(
+              rectPath(
+                layout.rect.x - 0.3,
+                layout.rect.y - 0.3,
+                layout.rect.w + 0.6,
+                layout.rect.h + 0.6,
+              ),
+              { stroke: theme.wire.high, lineWidth: 0.55, alpha: 0.28 },
+            );
+            renderer.flush();
           }
           const at = this.clockChangedAt.get(comp.id);
           if (at !== undefined && overlay.now !== undefined) {
