@@ -190,17 +190,7 @@ export default function InspectorPanel({
             label="Width (bits)"
             onPick={(bits) => setWidth(bits)}
           />
-          {driver === null && (
-            <p className="settings-hint">
-              No driving pin on this net — width comes from the source.
-            </p>
-          )}
         </div>
-        {driver !== null && (
-          <p className="settings-hint">
-            width comes from {driver.compId}.{driver.pin}
-          </p>
-        )}
         {wire.info.widths.length > 1 && (
           <p className="inspector-note">
             Width mismatch: this net mixes {wire.info.widths.join(" / ")}-bit pins — the engine
@@ -412,7 +402,16 @@ export default function InspectorPanel({
               {autoload === "" ? "None" : autoload}
             </span>
           </div>
-          <div className="inspector-buttons inspector-buttons-full">
+          <div className="inspector-row">
+            <span>Contents</span>
+            <span className="inspector-file inspector-mem-contents">
+              {contentsWords < 0
+                ? "large image"
+                : `${contentsWords} word${contentsWords === 1 ? "" : "s"}`}
+            </span>
+          </div>
+          {/* One compact action line (UI_OVERHAUL §58). */}
+          <div className="inspector-buttons">
             <button className="secondary" onClick={() => void chooseAutoload()}>
               Choose file…
             </button>
@@ -426,23 +425,10 @@ export default function InspectorPanel({
             >
               Clear
             </button>
-          </div>
-          <div className="inspector-row">
-            <span>Contents</span>
-            <span className="inspector-file inspector-mem-contents">
-              {contentsWords < 0
-                ? "large image"
-                : `${contentsWords} word${contentsWords === 1 ? "" : "s"}`}
-            </span>
-          </div>
-          <div className="inspector-buttons inspector-buttons-full">
             <button className="secondary" onClick={() => setMemOpen(true)}>
               Edit hex…
             </button>
           </div>
-          <p className="settings-hint">
-            Loads a .hex file next to the circuit, or embeds pasted values in the file.
-          </p>
         </>
       )}
 

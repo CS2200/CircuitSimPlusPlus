@@ -1558,3 +1558,25 @@ cursor behavior.
 **Acceptance:** cargo fmt/clippy/`csim-core` 173 + 8 golden green; frontend lint
 / 308 unit / build green; e2e 54-of-55 (the stress benchmark p95 gate is
 environmental).
+
+## 58. Follow-up batch AW (2026-10-16): one-page memory editor, quieter Inspector
+
+- **The memory editor is one scrolling page.** The hex grid no longer paginates
+  (256 words a page): every address renders in a single scroll area that fills
+  the dialog (`.mem-table-wrap { flex: 1; min-height: 0; overflow: auto }`).
+  Paste/arrow navigation still focuses the landed cell, which scrolls it into
+  view.
+- **No more how-to prose.** The dialog's "Click a cell, then paste or type hex
+  values …" paragraph is gone (the "N of M words set · cell 0x…" counter stays).
+  Every component `hint:` is dropped from the Inspector — no "Words — a power of
+  two…", no "One `pin: bit,bit` line…", no "A hex display decodes four bits per
+  digit", etc. — as are the wire-width explanations. Only real warnings (width
+  mismatch, unnamed/not-addressable) remain.
+- **The RAM/ROM panel is compact.** The memory's size field is labelled **Words**
+  (it is the number of words the memory holds — kept, since it is what sizes the
+  memory) with its hint removed; the `Autoload` and `Contents` rows are followed
+  by a **single action line** — `Choose file…` / `Clear` / `Edit hex…` — instead
+  of two full-width button rows plus a trailing explanation.
+
+**Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (memory
+spec passes against the single-page grid).

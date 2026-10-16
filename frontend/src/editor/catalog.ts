@@ -854,7 +854,6 @@ const HEX_BITSIZE_FIELD: AttrField = {
   kind: "picker",
   dflt: 4,
   group: "Width",
-  hint: "A hex display decodes four bits per digit.",
 };
 
 /** The base chooser shared by every readout: constants, pins, probes,
@@ -928,7 +927,6 @@ function baseFields(type: string): AttrField[] {
             kind: "picker",
             dflt: 16,
             group: "Width",
-            hint: "Wider than the input width (format-v2 §4).",
           },
           {
             key: "mode",
@@ -998,7 +996,6 @@ function baseFields(type: string): AttrField[] {
           kind: "splits",
           placeholder: "b0: 0",
           group: "Options",
-          hint: "One `pin: bit,bit` line per pin; every bus bit is used once. Bus width = highest bit + 1.",
         },
       ];
     case "wiring.probe":
@@ -1039,7 +1036,6 @@ function baseFields(type: string): AttrField[] {
           max: 8,
           placeholder: "4",
           group: "Width",
-          hint: "2–8 lines; in0 is the lowest priority.",
         },
       ];
     case "mem.register":
@@ -1053,13 +1049,12 @@ function baseFields(type: string): AttrField[] {
         BITSIZE_FIELD,
         {
           key: "depth",
-          label: "Depth",
+          label: "Words",
           kind: "number",
           min: 1,
           max: 1_048_576,
           placeholder: "256",
           group: "Width",
-          hint: "Words — a power of two, up to 2^20.",
         },
       ];
     case "subcircuit":

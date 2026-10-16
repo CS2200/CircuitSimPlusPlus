@@ -1768,6 +1768,10 @@ body {
 }
 
 .mem-table-wrap {
+  /* One scrolling page for the whole memory (UI_OVERHAUL §58): flex to fill the
+     dialog, then scroll inside it. */
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   margin-top: 0.5rem;
   border: 1px solid var(--panel-border);
