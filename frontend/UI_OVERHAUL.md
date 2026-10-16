@@ -1580,3 +1580,16 @@ environmental).
 
 **Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (memory
 spec passes against the single-page grid).
+
+## 59. Follow-up batch AX (2026-10-16): a thin width-mismatch flash
+
+- **The mismatch flash no longer scales with the bus.** The pulsing width-mismatch
+  halo was drawn at `width × (2.1 + phase)`, so a 32-bit bus (≈0.57 units of
+  core) flashed as a **~1.5-unit blob**. It is now `width + MISMATCH_RING × (0.6
+  - 0.8·phase)` with a constant ring width (`MISMATCH_RING = 0.3`): a thin pulse
+    around the wire at every bit width — wide enough never to hide behind the core,
+    never proportional to it.
+
+**Acceptance:** frontend lint / build green; e2e 54-of-55 (the three frozen-halo
+baselines were re-blessed for this platform). The committed **linux** baselines
+still need one `--update-snapshots` run on Linux (pre-existing todo).

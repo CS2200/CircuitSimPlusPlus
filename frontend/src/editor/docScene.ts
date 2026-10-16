@@ -376,6 +376,12 @@ export interface SceneOverlay {
 const CELL = 8;
 const WIRE_RADIUS = 0.12;
 const WIRE_W = 0.16;
+/**
+ * Width (world units) of a width-mismatch flash RING around a wire. It is a
+ * constant, NOT scaled by the wire's own thickness, so a 32-bit bus's flash
+ * stays a thin pulse instead of a large blob (UI_OVERHAUL §59).
+ */
+const MISMATCH_RING = 0.3;
 const PIN_R = 0.22;
 const PICK_TOL = 0.45;
 const PIN_TOL = 0.55;
@@ -800,9 +806,13 @@ export class DocScene {
       if (this.wireMismatch[i]) {
         const t = overlay.now;
         const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
+        // A thin pulsing ring AROUND the wire: `width` (so the ring is never
+        // hidden by the core) plus a small constant that does not grow with the
+        // bus (UI_OVERHAUL §59). Previously the halo was ~2-3x the wire width, so
+        // a 32-bit bus flashed as a ~1.5-unit blob.
         renderer.drawPath(this.wirePaths[i], {
           stroke,
-          lineWidth: width * (2.1 + 1.0 * phase),
+          lineWidth: width + MISMATCH_RING * (0.6 + 0.8 * phase),
           alpha: 0.3 + 0.7 * phase,
         });
       }
