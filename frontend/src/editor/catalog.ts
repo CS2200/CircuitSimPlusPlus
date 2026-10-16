@@ -949,7 +949,6 @@ function baseFields(type: string): AttrField[] {
           max: 100,
           dflt: 80,
           group: "Options",
-          hint: "Glow strength, 0–100.",
         },
       ];
     default:

@@ -215,6 +215,7 @@ export default forwardRef<
         const activePulses = pulses.active(tMs);
         if (activePulses === null && pulsesLive) setPulsesLive(false);
         simOverlay = {
+          cycle: store.cycle,
           valueForWire: (i) => {
             const net = store.wireToNet?.get(i);
             return net === undefined ? undefined : store.netValues.get(net);

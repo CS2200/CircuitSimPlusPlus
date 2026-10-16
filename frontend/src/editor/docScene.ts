@@ -55,6 +55,8 @@ export interface SimOverlay {
   violations?: readonly ViolationMarker[] | null;
   /** Signal-travel pulses: wire index + phase ∈ [0,1) (U7). */
   pulses?: readonly { wireIdx: number; phase: number }[] | null;
+  /** Engine cycle count (a clock's phase when its own output is unwired, §51). */
+  cycle?: number;
 }
 
 /** Collapse a 4-state value to a render state (X dominates, then Z). */
@@ -831,10 +833,12 @@ export class DocScene {
         const netId = this.netOfPin(comp.id, "in");
         const wireIdx = netId === undefined ? undefined : this.nets.nets[netId]?.wires[0];
         const live = wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
-        const stat = live === undefined ? this.staticPinText(comp, "in") : null;
+        const liveState = live !== undefined ? wireValueState(live) : undefined;
+        const stat = this.staticPinText(comp, "in");
+        // A constant drives the net for real — trust it over a stale Z/X (§51).
         const on =
-          live !== undefined
-            ? wireValueState(live) === "high"
+          liveState !== undefined && liveState !== "z" && liveState !== "x"
+            ? liveState === "high"
             : stat !== null && stat !== "" && Number.parseInt(stat, 16) !== 0;
         const r = Math.min(layout.rect.w, layout.rect.h) * 0.34;
         const lx = layout.rect.x + layout.rect.w / 2;
@@ -980,6 +984,19 @@ export class DocScene {
             }
           }
         }
+        // A constant always drives its net: when the sim reports high-Z/X for it
+        // (the session hasn't seen a recent edit yet), read the constant instead
+        // of showing a stale Z (UI_OVERHAUL §51).
+        if (valueText !== null && valuePin !== null) {
+          const docNet = this.nets.pinToNet.get(`${comp.id}:${valuePin}`);
+          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+          const val = wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
+          const st = val !== undefined ? wireValueState(val) : undefined;
+          if (st === "z" || st === "x") {
+            const stat = this.staticPinText(comp, valuePin);
+            if (stat !== null) valueText = stat;
+          }
+        }
         // Memory parts read out ADDRESS + data on the body instead of the word
         // "RAM"/"ROM" (UI_OVERHAUL §46); everything else shows its value in
         // place of the type mark.
@@ -1008,7 +1025,7 @@ export class DocScene {
           }
         }
         // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
-        // §48), so wiring `addr` to a constant shows up immediately.
+        // §48), and over a stale Z/X (§51).
         if (isMemory && addrText === null) {
           addrText = this.staticPinText(comp, "addr");
         }
@@ -1067,7 +1084,15 @@ export class DocScene {
           // The clock GLOWS while it drives high and sits dull while low (§47),
           // so its rising/falling edge is readable at a glance; it also flashes
           // briefly on a flip.
-          const high = valueText === null ? null : valueText !== "0";
+          // Level: the clock's own live value when it is wired, else the sim's
+          // phase (a clock reads high on even cycles) so an UNWIRED clock still
+          // visibly alternates as you tick (UI_OVERHAUL §51).
+          const high =
+            valueText !== null
+              ? valueText !== "0"
+              : sim?.cycle !== undefined
+                ? sim.cycle % 2 === 0
+                : null;
           if (high !== null) {
             const prev = this.clockLevel.get(comp.id);
             if (prev !== undefined && prev !== high && overlay.now !== undefined) {
@@ -1317,18 +1342,34 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), stroke);
         }
       } else {
-        // Match the placed body: the probe's silhouette is its hexagon and a
-        // memory part is a chip, so the ghost must not draw a plain rectangle.
-        const body =
-          ghost.type === "wiring.probe"
-            ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-            : ghost.type === "mem.ram" || ghost.type === "mem.rom"
-              ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-              : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
-        renderer.drawPath(body, {
-          ...stroke,
-          fill: "rgba(91,141,239,0.10)",
-        });
+        // Match the placed body: the probe's silhouette is its hexagon, a memory
+        // part is a chip, and the splitter is a bus rail (UI_OVERHAUL §50).
+        if (ghost.type === "wiring.splitter") {
+          const railX = layout.rect.x + 0.7;
+          const rail: PathCmd[] = [
+            { t: "M", x: railX, y: layout.rect.y + 0.25 },
+            { t: "L", x: railX, y: layout.rect.y + layout.rect.h - 0.25 },
+          ];
+          const taps: PathCmd[] = [];
+          for (const p of layout.pins) {
+            if (p.name === "bus")
+              rail.push({ t: "M", x: p.x, y: p.y }, { t: "L", x: railX, y: p.y });
+            else taps.push({ t: "M", x: railX, y: p.y }, { t: "L", x: p.x, y: p.y });
+          }
+          renderer.drawPath(rail, { ...stroke, lineWidth: 0.22 });
+          renderer.drawPath(taps, { ...stroke, lineWidth: 0.14 });
+        } else {
+          const body =
+            ghost.type === "wiring.probe"
+              ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+              : ghost.type === "mem.ram" || ghost.type === "mem.rom"
+                ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+                : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+          renderer.drawPath(body, {
+            ...stroke,
+            fill: "rgba(91,141,239,0.10)",
+          });
+        }
       }
       renderer.flush();
       renderer.drawDots(

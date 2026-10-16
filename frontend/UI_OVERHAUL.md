@@ -1405,3 +1405,22 @@ clippy/fmt clean; 52-of-53 e2e (the stress benchmark p95 gate is environmental).
 
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
 benchmark p95 gate is environmental — it also fails with these changes stashed).
+
+## 51. Follow-up batch AP (2026-10-16): splitter ghost, no stray Z, a ticking clock
+
+- **The splitter's placement ghost matches the part.** The ghost's box fallback
+  still drew a rectangle for `wiring.splitter`; it now draws the same bus rail +
+  taps as the placed body (and the palette icon).
+- **No stale Z on a constant-driven net.** A constant always drives its net, so
+  when the sim reports high-Z/X for one (its session predates a recent edit) the
+  readouts now fall back to the **constant's value** instead of showing `Z` —
+  applied to every value readout and to the LED's on/off test.
+- **An unwired clock still visibly ticks.** A clock whose output isn't wired has
+  no net to report, so its drawn level never changed. It now falls back to the
+  sim's **phase** (`SimOverlay.cycle`: high on even cycles), so Shift+click
+  ticking animates it either way.
+- **LED panel tidied.** The Brightness field's hint line is gone (the bar and its
+  numeric readout say enough).
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is environmental).
