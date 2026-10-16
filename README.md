@@ -26,6 +26,7 @@ crates/
 frontend/   React 18 + TypeScript + Vite UI (canvas editor, sim controls)
 tests/      .csx fixtures (ALU, FSM, multicycle & 5-stage CPUs, negatives)
 gradescope/ Dockerfile for the autograder image
+scripts/    build runner — `node scripts/build.mjs` (thin wrapper, see below)
 docs/       Specs and task lists (above)
 ```
 
@@ -41,7 +42,39 @@ docs/       Specs and task lists (above)
 The backend (`csim-core` + `csim`) has **no system dependencies** — it builds
 anywhere Rust does, and statically links for the autograder.
 
+## Build runner
+
+`scripts/build.mjs` is a thin, cross-platform wrapper over the exact commands
+below — the same ones CI runs. It adds no dependency (Node ≥ 22 is already
+required) and is not a second source of truth: keep it in sync with
+`.github/workflows/`.
+
+```bash
+node scripts/build.mjs            # default: the full commit gate (backend + frontend)
+node scripts/build.mjs --list     # every target
+node scripts/build.mjs musl ui    # run targets in order, stop on first failure
+```
+
+| Target | What it runs |
+|---|---|
+| `build` | `cargo build` (default members: core + cli) |
+| `lint` | format check + clippy `-D warnings` (core + cli) |
+| `test` | backend tests |
+| `check:backend` | `lint` + `test` — mirrors `backend.yml` |
+| `ui` | frontend production build → `frontend/dist` |
+| `check:frontend` | `lint` + `test` + `build` — mirrors `frontend.yml` |
+| `check` | `check:backend` + `check:frontend` (default) |
+| `e2e` | Playwright (needs browsers, see prerequisites) |
+| `musl` | static musl release of the CLI |
+| `desktop` | packaged Tauri bundles (needs Linux webview deps) |
+| `image` | the Gradescope Docker image |
+
+The raw commands remain authoritative; the runner just saves retyping them.
+
 ## Backend: build, test, run
+
+Prefer the runner for the common cases (`node scripts/build.mjs build lint test
+musl`); the raw invocations below are what it and CI execute.
 
 ```bash
 # Build + test the workspace default members (core + cli; not the Tauri shell)
@@ -74,6 +107,9 @@ intentional engine change alters traces, re-bless with
 commit message.
 
 ## Frontend: develop, test, build
+
+Prefer `node scripts/build.mjs ui` / `check:frontend` for the build and gate;
+`npm run dev` stays a direct command since it is long-running.
 
 ```bash
 cd frontend
@@ -171,9 +207,12 @@ codes, assertions, test-spec files): `docs/autograder.md`.
 - **Ownership boundaries** (from the parallel build): backend owns
   `crates/core`, `crates/cli`, `tests`; frontend owns `frontend/`, `crates/app`;
   `DESIGN.md`/`docs/tasks/` are maintainer-owned. See `docs/tasks/README.md`.
-- Gates before committing: `cargo fmt --all && cargo clippy --workspace
-  --all-targets -- -D warnings && cargo test --workspace` and, if you touched
-  `frontend/`, `npm run lint && npm run test && npm run build` (+ `test:e2e`).
+- Gates before committing: the runner does exactly the documented gate —
+  `node scripts/build.mjs check` (backend fmt/clippy/test, then frontend
+  lint/test/build). Equivalently by hand: `cargo fmt --all && cargo clippy
+  --workspace --all-targets -- -D warnings && cargo test --workspace` and, if
+  you touched `frontend/`, `npm run lint && npm run test && npm run build`
+  (+ `test:e2e`).
 - Docs-as-code: semantic decisions get written into the `docs/` specs in the
   same commit as the behavior, not left in comments.
 
