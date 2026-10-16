@@ -1611,3 +1611,16 @@ still need one `--update-snapshots` run on Linux (pre-existing todo).
 
 **Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (`fileops`
 covers create-inline, double-click rename and the middle-click Rename… box).
+
+## 61. Follow-up batch AZ (2026-10-16): a register always reads a value
+
+- **A register shows its value even with nothing connected.** It only had a
+  readout when its `q` net carried a live value, so an unwired (or not-yet-run)
+  register fell back to the bare **"REG"** mark. A register powers on at 0, so
+  when no live value is available the body now reads zero padded to its word
+  width in the chosen base (e.g. `0x00000000` for a 32-bit register, `0` for a
+  1-bit one). The `Show values` preference still governs it, and a live value
+  overrides it as before.
+
+**Acceptance:** frontend lint / build green; e2e 54-of-55 (visual baselines
+unchanged within tolerance).

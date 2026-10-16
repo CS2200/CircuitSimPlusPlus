@@ -1112,6 +1112,19 @@ export class DocScene {
             valuePin = "in";
           }
         }
+        // A register ALWAYS reads a value (UI_OVERHAUL §61): its stored value,
+        // and zero when there is nothing live yet — an unwired `q`, or no run.
+        // A register powers on at 0, so a lone register reads `0x00000000`
+        // instead of the bare "REG" mark.
+        if (valueText === null && showValues && comp.type === "mem.register") {
+          const q = layout.pins.find((p) => p.name === "q");
+          const bits = q?.bitsize ?? 1;
+          const zeros = "0".repeat(Math.max(1, Math.ceil(bits / 4)));
+          valueText = formatValue(
+            { v: zeros, x: "", z: "" },
+            bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+          );
+        }
         if (valueText !== null && !isMemory) caption = valueText;
         // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
         // §48), and over a stale Z/X (§51).
