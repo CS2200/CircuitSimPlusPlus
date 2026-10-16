@@ -27,7 +27,7 @@ import { DiffPump } from "./diffPump";
 import { SimStore } from "./simStore";
 
 /** Watch panel display modes (DESIGN.md §7.1). */
-export type ValueMode = "unsigned" | "signed" | "hex";
+export type ValueMode = "unsigned" | "signed" | "hex" | "bin";
 
 /** Pin carrying a named component's watchable value. */
 const VALUE_PIN: Record<NamedComponent["kind"], string> = {
@@ -274,6 +274,8 @@ export function formatValue(val: WireValue | undefined, mode: ValueMode): string
   switch (mode) {
     case "hex":
       return `0x${val.v === "" ? "0" : val.v}`;
+    case "bin":
+      return `0b${v.toString(2)}`;
     case "unsigned":
       return v.toString(10);
     case "signed": {

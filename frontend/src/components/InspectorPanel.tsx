@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
-import { editableAttrs, compPins, type AttrField } from "../editor/catalog";
+import { editableAttrs, compPins, typeDisplayName, type AttrField } from "../editor/catalog";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
@@ -180,7 +180,7 @@ export default function InspectorPanel({
     return (
       <div className="inspector">
         <div className="inspector-head">
-          <span className="inspector-id">wire {wire.idx}</span>
+          <span className="inspector-id">Wire</span>
           <span className="inspector-type">{wire.info.bitsize}-bit bus</span>
         </div>
         <div className="inspector-field">
@@ -322,8 +322,10 @@ export default function InspectorPanel({
   return (
     <div className="inspector">
       <div className="inspector-head">
-        <span className="inspector-id">{comp.id}</span>
-        <span className="inspector-type">{comp.type}</span>
+        {/* The plain, full component name — "Multiplexer", not `plexers.mux`
+         * (UI_OVERHAUL §57); the id stays as quiet metadata. */}
+        <span className="inspector-id">{typeDisplayName(comp.type)}</span>
+        <span className="inspector-type">{comp.id}</span>
       </div>
 
       {/* A text annotation is just its text: no Name / Rotation / Label-side

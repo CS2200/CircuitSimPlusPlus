@@ -1536,3 +1536,25 @@ cursor behavior.
 
 **Acceptance:** frontend lint / 307 unit / build green; e2e 54-of-55; new
 `docScene.test.ts` pins `fitValueLine` (short values stay whole, wide ones fit).
+
+## 57. Follow-up batch AV (2026-10-16): plain names, one base chooser everywhere
+
+- **The Inspector header reads in plain words.** It showed the raw id + type
+  (`c3` / `plexers.mux`); it now headlines the component's full name —
+  **Multiplexer**, **Demultiplexer**, **Priority Decoder**, **Tri-state
+  Buffer**, … (`catalog.typeDisplayName`) — with the raw id as quiet metadata.
+  Selecting a wire headlines **Wire** (`N-bit bus` stays beside it).
+- **Every readout shares one base chooser.** The constant, pin, probe and now
+  the **register** all use the same 3-button **Show as** chooser — **Hex / Bin /
+  Dec** — replacing the old "Radix" dropdowns (and dropping the separate
+  Unsigned/Signed labels, which read as the same thing to the user). A new
+  `bin` display mode renders `0b…` (`formatValue`).
+- **The register's stored value reads on its body** in the chosen base, like the
+  other readouts (its `radix` is display-only; `docs/format-v2.md` notes it).
+  The engine accepts `radix` on `wiring.pin` / `wiring.probe` / `mem.register`
+  as `unsigned | signed | hex | bin | dec` (the extra names stay valid so older
+  files keep loading).
+
+**Acceptance:** cargo fmt/clippy/`csim-core` 173 + 8 golden green; frontend lint
+/ 308 unit / build green; e2e 54-of-55 (the stress benchmark p95 gate is
+environmental).

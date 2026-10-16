@@ -62,7 +62,7 @@ async function selectImem(page: Page): Promise<void> {
   await ready(page);
   const p = await world(page, 7, 17);
   await page.mouse.click(p.x, p.y);
-  await expect(page.locator(".inspector-type")).toHaveText("mem.ram");
+  await expect(page.locator(".inspector-id")).toHaveText("RAM");
 }
 
 function imemAttrs(d: CsxDoc): Record<string, unknown> | undefined {

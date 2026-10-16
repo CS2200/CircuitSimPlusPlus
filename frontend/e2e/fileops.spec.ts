@@ -176,7 +176,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.keyboard.press("Escape");
   const pin1Body = await world(page, -3, 0.5);
   await page.mouse.click(pin1Body.x, pin1Body.y);
-  await expect(page.locator(".inspector-id")).toHaveText("c1");
+  await expect(page.locator(".inspector-type")).toHaveText("c1");
   await page.getByPlaceholder("(unnamed)").fill("a");
   await page.getByPlaceholder("(unnamed)").press("Enter");
 
@@ -188,7 +188,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.keyboard.press("Escape");
   const pin2Body = await world(page, 6, 0.5);
   await page.mouse.click(pin2Body.x, pin2Body.y);
-  await expect(page.locator(".inspector-id")).toHaveText("c2"); // panel switched before typing
+  await expect(page.locator(".inspector-type")).toHaveText("c2"); // panel switched before typing
   await page.getByPlaceholder("(unnamed)").fill("y");
   await page.getByPlaceholder("(unnamed)").press("Enter");
 

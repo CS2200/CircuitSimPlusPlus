@@ -74,7 +74,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   // ---- click the AND → Inspector (right dock) → rename + bitsize ----
   const body = await world(page, 2.5, 1.5);
   await page.mouse.click(body.x, body.y);
-  await expect(page.locator(".inspector-id")).toHaveText("c1");
+  await expect(page.locator(".inspector-id")).toHaveText("AND Gate");
+  await expect(page.locator(".inspector-type")).toHaveText("c1");
   await page.getByLabel("Name").fill("my-and");
   await page.getByLabel("Name").press("Enter");
   // Bit width is a 1..32 picker grid (UI_OVERHAUL §28).

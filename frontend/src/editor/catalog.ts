@@ -627,6 +627,52 @@ export function compSpec(type: string): CompSpec {
   return REGISTRY[type] ?? FALLBACK;
 }
 
+/**
+ * Plain, full human name per component type (UI_OVERHAUL §57) — the Inspector
+ * header reads "Multiplexer", not `plexers.mux`.
+ */
+const TYPE_NAMES: Readonly<Record<string, string>> = {
+  "gate.and": "AND Gate",
+  "gate.or": "OR Gate",
+  "gate.xor": "XOR Gate",
+  "gate.nand": "NAND Gate",
+  "gate.nor": "NOR Gate",
+  "gate.xnor": "XNOR Gate",
+  "gate.not": "NOT Gate",
+  "gate.buffer": "Buffer",
+  "wiring.controlled-buffer": "Tri-state Buffer",
+  "wiring.pin": "Pin",
+  "wiring.constant": "Constant",
+  "wiring.clock": "Clock",
+  "wiring.probe": "Probe",
+  "wiring.splitter": "Splitter",
+  "plexers.mux": "Multiplexer",
+  "plexers.demux": "Demultiplexer",
+  "plexers.decoder": "Decoder",
+  "plexers.priority-decoder": "Priority Decoder",
+  "arith.adder": "Adder",
+  "arith.subtractor": "Subtractor",
+  "arith.multiplier": "Multiplier",
+  "arith.divider": "Divider",
+  "arith.comparator": "Comparator",
+  "arith.negator": "Negator",
+  "arith.shifter": "Shifter",
+  "arith.bit-extender": "Bit Extender",
+  "mem.register": "Register",
+  "mem.ram": "RAM",
+  "mem.rom": "ROM",
+  "io.button": "Button",
+  "io.led": "LED",
+  "io.hexdisplay": "Hex Display",
+  subcircuit: "Subcircuit",
+  "misc.text": "Text",
+};
+
+/** Full human name for a component type (falls back to the raw type string). */
+export function typeDisplayName(type: string): string {
+  return TYPE_NAMES[type] ?? type;
+}
+
 /** Palette entries grouped for the UI, in registry order. */
 /** A palette tile: the type it places plus an optional placement seed. */
 export interface PaletteItem {
@@ -811,23 +857,18 @@ const HEX_BITSIZE_FIELD: AttrField = {
   hint: "A hex display decodes four bits per digit.",
 };
 
-const RADIX_OPTIONS = [
-  { value: "unsigned", label: "Unsigned" },
-  { value: "signed", label: "Signed" },
-  { value: "hex", label: "Hex" },
-];
-
-/**
- * A readout's display base as the same segmented buttons the constant uses
- * (UI_OVERHAUL §56) — pins and probes show a bus value, so their `radix` is a
- * display mode rather than a stored base.
- */
+/** The base chooser shared by every readout: constants, pins, probes,
+ * registers, memory and I/O (UI_OVERHAUL §56/§57). */
 const RADIX_FIELD: AttrField = {
   key: "radix",
   label: "Show as",
   kind: "radix",
   group: "Options",
-  options: RADIX_OPTIONS,
+  options: [
+    { value: "hex", label: "Hex" },
+    { value: "bin", label: "Bin" },
+    { value: "dec", label: "Dec" },
+  ],
 };
 
 /**
@@ -1002,7 +1043,8 @@ function baseFields(type: string): AttrField[] {
         },
       ];
     case "mem.register":
-      return [BITSIZE_FIELD];
+      // The register shows its stored value on the body, in the chosen base.
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "mem.ram":
     case "mem.rom":
       // `autoload` and `contents` are edited by the Inspector's Memory

@@ -34,6 +34,12 @@ pub const MAX_MEM_DEPTH: u32 = 1 << 20;
 /// Max split pins on a splitter.
 pub const MAX_SPLIT_PINS: u32 = 64;
 
+/// Allowed values for a readout's display `radix` (`wiring.pin`, `wiring.probe`,
+/// `mem.register`). `dec` and `unsigned` name the same readout, and `bin` was
+/// added for the UI's base chooser; the extra names stay accepted so older
+/// files keep loading (UI_OVERHAUL §57).
+const READOUT_RADIX: &[&str] = &["unsigned", "signed", "hex", "bin", "dec"];
+
 /// Bits needed to name one of `n` input lines (⌈log₂ n⌉; at least 1).
 /// Drives a priority decoder's `out` pin width.
 pub fn index_bits(n: u32) -> u32 {
@@ -557,7 +563,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let mut c = AttrCheck::new(attrs, &["bitsize", "isOutput", "radix"]);
             let b = c.bitsize(1);
             let is_output = c.boolean("isOutput", false);
-            c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             let dir = if is_output { PinDir::In } else { PinDir::Out };
             (
@@ -688,7 +694,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "wiring.probe" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
             let b = c.bitsize(1);
-            c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Probe { bitsize: b })
         }
@@ -885,8 +891,11 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.register" => {
-            let mut c = AttrCheck::new(attrs, GATE_ATTRS);
+            // `radix` is display-only: how the stored value reads on the body
+            // (and in the Inspector's base chooser, UI_OVERHAUL §57).
+            let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
             let b = c.bitsize(1);
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             (
                 vec![

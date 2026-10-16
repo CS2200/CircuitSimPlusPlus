@@ -1283,10 +1283,14 @@ body {
   border-bottom: 1px solid var(--panel-border);
 }
 
+/* The header's headline: the component's plain full name (UI_OVERHAUL §57). */
 .inspector-id {
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
-  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inspector-type {

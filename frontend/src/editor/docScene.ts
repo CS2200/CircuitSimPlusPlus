@@ -70,9 +70,14 @@ function maskNonzero(hex: string): boolean {
   return hex !== "" && BigInt(`0x${hex}`) !== 0n;
 }
 
-/** Probe `radix` attr (format-v2 §4) → value display mode (default hex). */
+/**
+ * Readout `radix` attr (format-v2 §4) → value display mode (default hex).
+ * `dec` and `unsigned` are the same readout; unknown/absent → hex
+ * (UI_OVERHAUL §57).
+ */
 function probeDisplayMode(attr: unknown): ValueMode {
-  return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
+  if (attr === "dec" || attr === "unsigned") return "unsigned";
+  return attr === "signed" || attr === "hex" || attr === "bin" ? attr : "hex";
 }
 
 // ---- family tints, pin markers and live values (UI_OVERHAUL §21) ----
