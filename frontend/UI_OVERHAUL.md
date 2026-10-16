@@ -1309,3 +1309,20 @@ month-old one to one a day).
   viewport, that all six sections render, and that Escape dismisses.
 
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-52 e2e green.
+
+## 46. Follow-up batch AK (2026-10-16): splitter + RAM get real shapes
+
+- **The splitter is a bus rail, not a box.** `wiring.splitter` no longer draws a
+  rectangle (which read as a mux): `docScene` draws a straight vertical rail with
+  one horizontal tap per split pin and a stub from the `bus` pin into the rail,
+  and `CompIcon` mirrors it. Selection still outlines the hit box.
+- **A RAM/ROM looks like a chip and reads out its address + data.** The body is
+  `shapes.chipPath` — a rounded rectangle with an orientation notch pip on its
+  bottom edge — used by the placed body, the placement **ghost** and the palette
+  icon. Instead of the word "RAM", the body now shows the **address** beside the
+  `addr` pin and the **data value** beside the output pin (`dout`/`out`), taken
+  from the live sim (formatted by the part's `radix`). The type word is kept as a
+  small dim centred label; memory parts left `VALUE_REPEAT` so the value is no
+  longer duplicated outside the body.
+
+**Acceptance:** frontend lint / 303 unit / build green; e2e unchanged.

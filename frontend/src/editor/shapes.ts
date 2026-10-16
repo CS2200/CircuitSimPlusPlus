@@ -149,6 +149,32 @@ export interface GateShape {
 }
 
 /**
+ * IC-style chip body for RAM/ROM (UI_OVERHAUL §46): a rounded rectangle with a
+ * small notch pip on its bottom edge, so a memory part reads as a chip. Shared
+ * by the placed body and the placement ghost.
+ */
+export function chipPath(x: number, y: number, w: number, h: number): PathCmd[] {
+  const inset = 0.3;
+  const cx = x + w / 2;
+  const nr = 0.6;
+  return [
+    { t: "M", x: x + inset, y },
+    { t: "L", x: x + w - inset, y },
+    { t: "Q", cx: x + w, cy: y, x: x + w, y: y + inset },
+    { t: "L", x: x + w, y: y + h - inset },
+    { t: "Q", cx: x + w, cy: y + h, x: x + w - inset, y: y + h },
+    { t: "L", x: x + inset, y: y + h },
+    { t: "Q", cx: x, cy: y + h, x, y: y + h - inset },
+    { t: "L", x, y: y + inset },
+    { t: "Q", cx: x, cy: y, x: x + inset, y },
+    { t: "Z" },
+    // orientation notch (a pip bulging up into the bottom edge)
+    { t: "M", x: cx - nr, y: y + h },
+    { t: "Q", cx, cy: y + h - nr * 1.4, x: cx + nr, y: y + h },
+  ];
+}
+
+/**
  * Pointed-hexagon body for the probe (UI_OVERHAUL §40): a shape that reads as
  * "probe" without a type word. Shared by the placed body, the placement ghost
  * and the palette icon, so the preview matches the part you get.

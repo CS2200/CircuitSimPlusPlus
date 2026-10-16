@@ -20,7 +20,7 @@ import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
-import { BUBBLE_R, circlePath, gateShape, probePath, rotatePath } from "./shapes";
+import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
 
 /**
  * DocScene (FRONTEND.md U3): draws a CircuitDocument circuit and answers
@@ -180,9 +180,10 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "io.hexdisplay": "in",
 };
 
-/** Parts that also repeat their value next to the source pin (§21). The probe
- * is NOT here: its value belongs inside its body (UI_OVERHAUL §41). */
-const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register", "mem.ram", "mem.rom"]);
+/** Parts that also repeat their value next to the source pin (§21). Memory parts
+ * are NOT here: their address and data readouts sit on the body itself (§46), as
+ * does the probe's (§36). */
+const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register"]);
 
 /** CSS font stacks for the text annotation's `font` attr (UI_OVERHAUL §40). */
 const TEXT_FONTS: Readonly<Record<string, string>> = {
@@ -750,6 +751,38 @@ export class DocScene {
         renderer.flush();
         continue;
       }
+      // A splitter is a bus rail with a tap per split pin (UI_OVERHAUL §46):
+      // there is no box body — the old rectangle read as a mux.
+      if (comp.type === "wiring.splitter") {
+        const railX = layout.rect.x + 0.7;
+        const rail: PathCmd[] = [
+          { t: "M", x: railX, y: layout.rect.y + 0.25 },
+          { t: "L", x: railX, y: layout.rect.y + layout.rect.h - 0.25 },
+        ];
+        const taps: PathCmd[] = [];
+        for (const p of layout.pins) {
+          if (p.name === "bus") {
+            rail.push({ t: "M", x: p.x, y: p.y }, { t: "L", x: railX, y: p.y });
+          } else {
+            taps.push({ t: "M", x: railX, y: p.y }, { t: "L", x: p.x, y: p.y });
+          }
+        }
+        renderer.drawPath(rail, { stroke: theme.panelBorder, lineWidth: 0.2 });
+        renderer.drawPath(taps, { stroke: theme.panelBorder, lineWidth: 0.12 });
+        if (selected) {
+          renderer.drawPath(
+            rectPath(
+              layout.rect.x - 0.25,
+              layout.rect.y - 0.25,
+              layout.rect.w + 0.5,
+              layout.rect.h + 0.5,
+            ),
+            { stroke: theme.accent, lineWidth: 0.06 },
+          );
+        }
+        renderer.flush();
+        continue;
+      }
       // Family tint (UI_OVERHAUL §21): a hint of the part's family on its body
       // and a stronger hint on its outline, so pins/memory/arithmetic read
       // apart at a glance without shouting.
@@ -807,18 +840,20 @@ export class DocScene {
         const bodyPath =
           comp.type === "wiring.probe"
             ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-            : outPin
-              ? roundedPath(
-                  [
-                    { x: layout.rect.x, y: layout.rect.y },
-                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
-                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
-                    { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
-                    { x: layout.rect.x, y: layout.rect.y },
-                  ],
-                  layout.rect.h / 2,
-                )
-              : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+            : comp.type === "mem.ram" || comp.type === "mem.rom"
+              ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+              : outPin
+                ? roundedPath(
+                    [
+                      { x: layout.rect.x, y: layout.rect.y },
+                      { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
+                      { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
+                      { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
+                      { x: layout.rect.x, y: layout.rect.y },
+                    ],
+                    layout.rect.h / 2,
+                  )
+                : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
         renderer.drawPath(bodyPath, { fill: bodyFill });
         renderer.drawPath(bodyPath, strokeStyle);
         const spec = compSpec(comp.type);
@@ -850,7 +885,24 @@ export class DocScene {
             }
           }
         }
-        if (valueText !== null) caption = valueText;
+        // Memory parts read out ADDRESS + data on the body instead of the word
+        // "RAM"/"ROM" (UI_OVERHAUL §46); everything else shows its value in
+        // place of the type mark.
+        const isMemory = comp.type === "mem.ram" || comp.type === "mem.rom";
+        let addrText: string | null = null;
+        if (isMemory && sim !== undefined && showValues) {
+          const docNet = this.nets.pinToNet.get(`${comp.id}:addr`);
+          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+          const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
+          if (val !== undefined) {
+            const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? 1) : 1;
+            addrText = formatValue(
+              val,
+              bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+            );
+          }
+        }
+        if (valueText !== null && !isMemory) caption = valueText;
         // Static fallback (UI_OVERHAUL §40): with no live sim value, a probe
         // still reads what it is wired to (a directly connected constant).
         if (valueText === null && comp.type === "wiring.probe") {
@@ -878,6 +930,27 @@ export class DocScene {
               color: theme.text,
               size: 0.7,
               align: "center",
+            });
+          }
+        }
+        // Memory readouts (UI_OVERHAUL §46): the address beside the `addr` pin
+        // and the data value beside the output pin.
+        if (isMemory) {
+          const addrPin = layout.pins.find((p) => p.name === "addr");
+          const dataPin =
+            valuePin !== null ? layout.pins.find((p) => p.name === valuePin) : undefined;
+          if (addrText !== null && addrPin !== undefined) {
+            renderer.drawText(layout.rect.x + 0.6, addrPin.y, addrText, {
+              color: theme.text,
+              size: 0.9,
+              align: "left",
+            });
+          }
+          if (valueText !== null && dataPin !== undefined) {
+            renderer.drawText(layout.rect.x + layout.rect.w - 0.6, dataPin.y, valueText, {
+              color: theme.text,
+              size: 0.9,
+              align: "right",
             });
           }
         }
@@ -910,7 +983,7 @@ export class DocScene {
             // Values (and symbols, §18) are sized to fit the body, so a 32-bit
             // readout on a small part stays inside it.
             {
-              color: valueText !== null ? theme.text : theme.textDim,
+              color: valueText !== null && !isMemory ? theme.text : theme.textDim,
               size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
               align: "center",
             },
@@ -1113,12 +1186,14 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), stroke);
         }
       } else {
-        // Match the placed body: the probe's silhouette is its hexagon, so the
-        // ghost must not draw a plain rectangle (UI_OVERHAUL §40).
+        // Match the placed body: the probe's silhouette is its hexagon and a
+        // memory part is a chip, so the ghost must not draw a plain rectangle.
         const body =
           ghost.type === "wiring.probe"
             ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-            : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+            : ghost.type === "mem.ram" || ghost.type === "mem.rom"
+              ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+              : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
         renderer.drawPath(body, {
           ...stroke,
           fill: "rgba(91,141,239,0.10)",

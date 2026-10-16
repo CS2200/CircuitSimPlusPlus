@@ -1,5 +1,5 @@
 import { compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
-import { probePath, bubblePaths, gateShape } from "../editor/shapes";
+import { probePath, chipPath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
 
 /**
@@ -125,6 +125,22 @@ export default function CompIcon({
         ) : type === "wiring.probe" ? (
           // the probe's pointed hexagon (UI_OVERHAUL §40) — same as on canvas
           <path d={d(probePath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
+        ) : type === "mem.ram" || type === "mem.rom" ? (
+          // chip body (UI_OVERHAUL §46) — same as on canvas
+          <path d={d(chipPath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
+        ) : type === "wiring.splitter" ? (
+          // A bus rail with a tap per split pin (UI_OVERHAUL §46) — no box, so it
+          // doesn't read as a mux.
+          <>
+            <path d={`M0.7 0.25 L0.7 ${h - 0.25}`} />
+            {pins.map((p, i) =>
+              p.name === "bus" ? (
+                <path key={i} d={`M${p.dx} ${p.dy} L0.7 ${p.dy}`} />
+              ) : (
+                <path key={i} d={`M0.7 ${p.dy} L${p.dx} ${p.dy}`} />
+              ),
+            )}
+          </>
         ) : (
           <>
             <rect
