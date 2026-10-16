@@ -104,6 +104,14 @@ const VERSION_COALESCE_MS = 60_000;
  */
 const HISTORY_DRAWER_W = 320;
 
+/**
+ * Debounce for the live re-sync on edit (UI_OVERHAUL §23): a structural edit
+ * reloads the engine once edits settle, so level-triggered values appear
+ * without waiting for a clock tick. Short enough to feel immediate, long
+ * enough that a burst of changes (drag, multi-step edit) coalesces into one.
+ */
+const LIVE_RESYNC_MS = 140;
+
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
   d.pinResolver = (comp) => compPins(comp, d.circuits).map((p) => p.name);
@@ -472,8 +480,8 @@ export default function App() {
           c.attrs.autoload !== "",
       );
     try {
-      if (!sim.store.loaded) {
-        const ok = await sim.load(doc);
+      if (!sim.store.loaded || sim.isStale(doc)) {
+        const ok = await sim.resync(doc);
         if (ok) toast("Loaded — fresh power-on state");
         return; // load errors already surface in the sim banner
       }
@@ -1038,12 +1046,28 @@ export default function App() {
   // Live readouts from the start (UI_OVERHAUL §23): load the document into the
   // engine whenever it changes identity (mount, New, Open) so clocks, pins,
   // registers, memory and I/O show values immediately instead of type marks.
-  // Edits afterwards keep the last known values until the next command.
   // NOTE: depends on the document IDENTITY only — depending on the store
   // version would re-enter while `loaded` is still false and loop.
   useEffect(() => {
     if (!sim.store.loaded) void sim.load(doc);
   }, [doc, sim]);
+
+  // Live re-sync on edit (UI_OVERHAUL §23): a structural change — placed part,
+  // new wire, attribute edit — reloads the document once edits settle, so
+  // level-triggered values (a constant driving a net, a gate's output) appear
+  // on the canvas immediately instead of waiting for the next clock tick. The
+  // reload re-settles the whole circuit (fresh power-on: clocked state clears,
+  // as on any topology change), so it is skipped while the sim is running — a
+  // run keeps its state until the next command, which re-syncs on its own.
+  // `revision` bumps only on real mutations, not on selection/tool changes.
+  const docRevision = status?.revision;
+  useEffect(() => {
+    if (docRevision === undefined) return;
+    if (!sim.store.loaded || !sim.isStale(doc)) return;
+    if (sim.store.status?.running ?? false) return;
+    const timer = setTimeout(() => void sim.resync(doc), LIVE_RESYNC_MS);
+    return () => clearTimeout(timer);
+  }, [docRevision, doc, sim]);
 
   /** Right-click a subcircuit instance → jump to its definition tab. */
   const onOpenSubcircuit = useCallback(

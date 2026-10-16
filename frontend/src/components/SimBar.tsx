@@ -15,9 +15,9 @@ const DECADE_EXPS = new Set([0, 10, 20, 30]);
  * run-to-cycle-N, speed slider (log scale), plus cycle/eff-Hz telemetry.
  * Load errors and halts surface as banners.
  *
- * First command auto-loads the current document into the core; editing
- * afterwards makes the loaded sim stale until the next command reloads
- * (auto-reload-on-edit is a U6 refinement).
+ * Commands auto-load the current document into the core, and reload it when
+ * the editor changed since the last load (the engine holds its own snapshot,
+ * so edits are invisible to it until a command re-syncs).
  */
 export default function SimBar({
   ctl,
@@ -51,10 +51,10 @@ export default function SimBar({
 
   const withLoadedDoc = async (cmd: () => Promise<void>) => {
     setCmdError(null);
-    if (!ctl.store.loaded) {
-      const ok = await ctl.load(doc);
-      if (!ok) return;
-    }
+    // Reloads when nothing is loaded *or* the editor changed since the last
+    // load, so edits are never simulated against a stale snapshot.
+    const ok = await ctl.resync(doc);
+    if (!ok) return;
     await guard(cmd());
   };
 

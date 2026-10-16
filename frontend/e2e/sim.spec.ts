@@ -25,6 +25,21 @@ function simState(page: Page): Promise<SimState> {
   );
 }
 
+/** Click a point in world coordinates on the circuit canvas. */
+async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  const cam = await page.evaluate(() =>
+    (
+      window as unknown as { __circuitCamera: () => { x: number; y: number; scale: number } }
+    ).__circuitCamera(),
+  );
+  await page.mouse.click(
+    box.x + (wx - cam.x) * cam.scale + box.width / 2,
+    box.y + (wy - cam.y) * cam.scale + box.height / 2,
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   // Pin the dark palette: these screenshots validate the classic dark
   // rendering (UI_OVERHAUL §4 — theme-picker coverage lives in the
@@ -103,6 +118,36 @@ test("sim shortcuts: Ctrl+J tick, Ctrl+K run/pause, Ctrl+R reset", async ({ page
   await page.keyboard.press("Control+r");
   await expect.poll(() => simState(page)).toMatchObject({ loaded: true, cycle: 0 });
   await expect(page.locator(".toast")).toContainText("Reset");
+});
+
+test("U5: structural edits re-sync the engine live (no tick needed)", async ({ page }) => {
+  // The mount-time pre-load puts the *empty* untitled document in the engine.
+  // A part placed afterwards must appear there on its own — level-triggered
+  // values show immediately, without waiting for a command (the stale-engine
+  // bug made every command inert and shift-click read "no sim loaded").
+  await page.goto("/");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  await expect
+    .poll(() => simState(page), { message: "empty document pre-loaded" })
+    .toMatchObject({ loaded: true, netCount: 0 });
+
+  // Place AND + NOT and wire them — all AFTER the mount pre-load, no command.
+  await page.locator('[data-group="Gates"]').click();
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  await clickWorld(page, 2.5, 1.5);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "NOT", exact: true }).click();
+  await clickWorld(page, 11.5, 1);
+  await page.keyboard.press("Escape");
+  await clickWorld(page, 5, 1.5); // AND.out
+  await clickWorld(page, 10, 1); // NOT.in
+
+  // The debounced live re-sync reloads the *edited* circuit with no command:
+  // the engine paints its nets on its own, at a fresh power-on (cycle 0).
+  await expect
+    .poll(async () => (await simState(page)).netCount, { message: "nets painted on edit" })
+    .toBeGreaterThan(0);
+  expect((await simState(page)).cycle).toBe(0); // settled without a tick
 });
 
 test("U5: wires render in sim state colors (lit-circuit baseline)", async ({ page }, testInfo) => {

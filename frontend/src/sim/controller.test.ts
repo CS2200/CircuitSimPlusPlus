@@ -20,6 +20,33 @@ describe("SimController", () => {
     expect(ctl.store.named.map((n) => n.name)).toEqual(["pc", "next_pc", "imem"]);
   });
 
+  it("resync reloads only after the document is edited (revision)", async () => {
+    const ctl = makeController();
+    const doc = buildMockDemoDoc();
+
+    // Nothing loaded yet → the first command loads the current document.
+    expect(ctl.isStale(doc)).toBe(false);
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(ctl.store.loaded).toBe(true);
+    expect(ctl.isStale(doc)).toBe(false);
+
+    // Unchanged document → no reload, so live sim state is preserved.
+    await ctl.stepTick();
+    await ctl.stepTick();
+    const cycle = ctl.store.cycle;
+    expect(cycle).toBeGreaterThan(0);
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(ctl.store.cycle).toBe(cycle);
+
+    // Edited document → stale; the next command reloads a fresh power-on state.
+    doc.rename("edited");
+    expect(ctl.isStale(doc)).toBe(true);
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(ctl.isStale(doc)).toBe(false);
+    expect(ctl.store.cycle).toBe(0);
+    expect(ctl.store.loaded).toBe(true);
+  });
+
   it("watch values track the simulation (register q, probe in)", async () => {
     const ctl = makeController();
     await ctl.load(buildMockDemoDoc());

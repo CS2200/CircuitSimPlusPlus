@@ -42,6 +42,14 @@ export class SimController {
   private readonly pump: DiffPump;
   private readonly unlisteners: Unlisten[] = [];
   private doc: CircuitDocument | null = null;
+  /**
+   * How the live document was loaded: a file path (reload from disk keeps
+   * memory autoloads relative to it, §11) or null for an in-memory/untitled
+   * document (reload re-encodes the editor's current JSON).
+   */
+  private loadedPath: string | null = null;
+  /** `doc.revision` at the last successful load; null when nothing is loaded. */
+  private loadedRevision: number | null = null;
 
   constructor(
     private readonly core: Core,
@@ -66,7 +74,11 @@ export class SimController {
 
   /** Load the editor document into the core. Returns true on success. */
   async load(doc: CircuitDocument): Promise<boolean> {
-    return this.loadInto(doc, () => this.core.api.loadCircuit({ bytes: encode(doc.toJson()) }));
+    return this.loadInto(
+      doc,
+      () => this.core.api.loadCircuit({ bytes: encode(doc.toJson()) }),
+      null,
+    );
   }
 
   /**
@@ -76,14 +88,17 @@ export class SimController {
    * editor's own copy of the same file (parsed by the frontend).
    */
   async loadFromPath(doc: CircuitDocument, path: string): Promise<boolean> {
-    return this.loadInto(doc, () => this.core.api.loadCircuit({ path }));
+    return this.loadInto(doc, () => this.core.api.loadCircuit({ path }), path);
   }
 
   private async loadInto(
     doc: CircuitDocument,
     invokeLoad: () => Promise<LoadResult>,
+    path: string | null,
   ): Promise<boolean> {
     this.doc = doc;
+    this.loadedPath = path;
+    this.loadedRevision = null;
     this.pump.clear();
     // Reset BEFORE the call: cores emit the initial full-state batch during
     // loadCircuit, and those diffs must land on a clean store (onLoaded
@@ -105,7 +120,33 @@ export class SimController {
       for (const w of entry.wires) wireToNet.set(w, entry.net);
     }
     this.store.onLoaded(wireToNet, result.named);
+    this.loadedRevision = doc.revision;
     return true;
+  }
+
+  /**
+   * True when the live document is older than `doc` — the editor was edited
+   * after the last load. `false` while nothing is loaded (callers check
+   * `store.loaded` separately for that case).
+   */
+  isStale(doc: CircuitDocument): boolean {
+    return this.loadedRevision !== null && this.loadedRevision !== doc.revision;
+  }
+
+  /**
+   * Bring the engine up to date with `doc`, reloading only when needed: a
+   * no-op while the loaded document is current, a fresh load when nothing is
+   * loaded or the editor changed since the last load. A document that came
+   * from disk reloads from its path (memory autoloads stay relative to it,
+   * §11); an in-memory/untitled one re-encodes its current JSON.
+   *
+   * Commands go through here rather than checking `store.loaded` alone: the
+   * mount-time pre-load marks an empty document as loaded, so `loaded` would
+   * otherwise stay true while edits pile up in the editor un-simulated.
+   */
+  async resync(doc: CircuitDocument): Promise<boolean> {
+    if (this.store.loaded && !this.isStale(doc)) return true;
+    return this.loadedPath !== null ? this.loadFromPath(doc, this.loadedPath) : this.load(doc);
   }
 
   /**
@@ -125,6 +166,8 @@ export class SimController {
     this.pump.clear();
     this.store.reset();
     this.doc = null;
+    this.loadedPath = null;
+    this.loadedRevision = null;
   }
 
   /**
