@@ -997,62 +997,36 @@ body {
   font-weight: bold;
 }
 
-/* ---- name dialog (sheet names): compact settings-style card ---- */
-
-.name-dialog {
-  width: min(22rem, calc(100vw - 2rem));
-  max-height: none;
+/* A freshly created tab slides/grows in (UI_OVERHAUL §60). */
+.sheet-tab-wrap.enter {
+  animation: sheet-tab-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.name-dialog form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
+@keyframes sheet-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scaleX(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.name-dialog input {
+/* Inline tab rename (UI_OVERHAUL §60): the label becomes a small input. */
+.sheet-tab-input {
+  font: inherit;
+  font-size: 0.8rem;
+  width: 7rem;
+  min-width: 4rem;
+  max-width: 12rem;
+  margin: 0.15rem;
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.9rem;
-}
-
-.name-dialog input:focus {
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 0.1rem 0.45rem;
   outline: none;
-  border-color: var(--accent);
-}
-
-.name-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.name-actions button {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.name-actions button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.name-actions button[type="submit"] {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.name-actions button:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .app-statusbar {

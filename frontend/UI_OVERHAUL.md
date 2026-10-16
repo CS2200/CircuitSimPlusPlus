@@ -1593,3 +1593,21 @@ spec passes against the single-page grid).
 **Acceptance:** frontend lint / build green; e2e 54-of-55 (the three frozen-halo
 baselines were re-blessed for this platform). The committed **linux** baselines
 still need one `--update-snapshots` run on Linux (pre-existing todo).
+
+## 60. Follow-up batch AY (2026-10-16): tabs name themselves, no popups
+
+- **Creating a tab is inline, with a slide-in.** The strip's "+" adds the
+  subcircuit straight away with a unique default name (`subN`), the tab **slides
+  in** (`.sheet-tab-wrap.enter` → `sheet-tab-in`), and its label becomes a small
+  **input right in the tab** — type the name there. Enter (or blur) commits,
+  Escape abandons and keeps the default.
+- **Double-click re-opens the same inline box.** The tab's double-click (and the
+  middle-click menu's **Rename…**) now start in-place editing rather than a
+  modal, so the sheet-name popup is gone entirely — `components/NameDialog.tsx`
+  and its `.name-dialog`/`.name-actions` styles are deleted.
+- The inline input stops its own key events, and the app's global shortcuts
+  already ignore events from a focused `INPUT`, so typing a name never rotates
+  the selection or cancels wiring.
+
+**Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (`fileops`
+covers create-inline, double-click rename and the middle-click Rename… box).

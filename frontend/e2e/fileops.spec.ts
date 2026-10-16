@@ -60,6 +60,15 @@ async function openPaletteGroup(page: Page, group: string): Promise<void> {
   await page.locator(`[data-group="${group}"]`).click();
 }
 
+/** Create a subcircuit via the strip's "+" and name it in place (§60). */
+async function newSubcircuit(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "New subcircuit" }).click();
+  const input = page.getByRole("textbox", { name: "Circuit name" });
+  await expect(input).toBeFocused();
+  await input.fill(name);
+  await input.press("Enter");
+}
+
 /** Place one AND gate at the canvas center (dirty-ifies the document). */
 async function placeAndGate(page: Page): Promise<void> {
   await openPaletteGroup(page, "Gates");
@@ -127,12 +136,8 @@ test("Subcircuits: tabs create, switch, rename", async ({ page }) => {
   await page.goto("/");
   await placeAndGate(page);
 
-  // ---- new subcircuit via the tab strip's "+" ----
-  await page.getByRole("button", { name: "New subcircuit" }).click();
-  const dialog = page.locator(".name-dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("textbox").fill("alu");
-  await dialog.getByRole("button", { name: "Create" }).click();
+  // ---- new subcircuit via the tab strip's "+" (named inline in the tab) ----
+  await newSubcircuit(page, "alu");
 
   // switched to the new (empty) tab; the AND gate is back on "main"
   let d = await doc(page);
@@ -145,8 +150,9 @@ test("Subcircuits: tabs create, switch, rename", async ({ page }) => {
 
   // ---- rename the main circuit (double-click ANYWHERE on its tab) ----
   await page.locator(".sheet-tab-wrap", { hasText: "main" }).dblclick({ position: { x: 4, y: 4 } });
-  await dialog.getByRole("textbox").fill("toplevel");
-  await dialog.getByRole("button", { name: "Rename" }).click();
+  const renameInput = page.getByRole("textbox", { name: "Circuit name" });
+  await renameInput.fill("toplevel");
+  await renameInput.press("Enter");
   d = await doc(page);
   expect(d.circuits.map((c) => c.name)).toEqual(["toplevel", "alu"]);
   expect(d.circuits[0].components).toHaveLength(1); // the gate survived
@@ -156,10 +162,7 @@ test("Subcircuits: define an interface with pins, place an instance", async ({ p
   await page.goto("/");
 
   // ---- new subcircuit "alu" with an input pin a and an output pin y ----
-  await page.getByRole("button", { name: "New subcircuit" }).click();
-  const dialog = page.locator(".name-dialog");
-  await dialog.getByRole("textbox").fill("alu");
-  await dialog.getByRole("button", { name: "Create" }).click();
+  await newSubcircuit(page, "alu");
 
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
@@ -261,10 +264,7 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
 
 test("Subcircuits: right-click an instance jumps to its definition tab", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "New subcircuit" }).click();
-  const dialog = page.locator(".name-dialog");
-  await dialog.getByRole("textbox").fill("alu");
-  await dialog.getByRole("button", { name: "Create" }).click();
+  await newSubcircuit(page, "alu");
   await expect(page.getByRole("tab", { name: "alu" })).toHaveAttribute("aria-selected", "true");
 
   // place an instance on main, then right-click it
@@ -375,16 +375,25 @@ test("Sheet tabs: middle-click offers Rename and Delete", async ({ page }) => {
   await page.goto("/");
 
   // Create a subcircuit through the strip's "+".
-  await page.getByRole("button", { name: "New subcircuit" }).click();
-  const dialog = page.locator(".name-dialog");
-  await dialog.getByRole("textbox").fill("sub1");
-  await dialog.getByRole("button", { name: "Create" }).click();
+  await newSubcircuit(page, "sub1");
 
   // Middle-click the subcircuit tab → our menu, not the browser default.
   await page.getByRole("tab", { name: "sub1" }).click({ button: "middle" });
   const menu = page.getByRole("menu", { name: "sub1 actions" });
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Rename…" })).toBeVisible();
-  await menu.getByRole("menuitem", { name: "Delete" }).click();
+
+  // Rename… edits the label in place — no popup (UI_OVERHAUL §60).
+  await menu.getByRole("menuitem", { name: "Rename…" }).click();
+  const input = page.getByRole("textbox", { name: "Circuit name" });
+  await expect(input).toBeFocused();
+  await input.press("Escape");
+  await expect(page.getByRole("tab", { name: "sub1" })).toBeVisible();
+
+  // Delete removes the sheet.
+  await page.getByRole("tab", { name: "sub1" }).click({ button: "middle" });
+  await page
+    .getByRole("menu", { name: "sub1 actions" })
+    .getByRole("menuitem", { name: "Delete" })
+    .click();
   await expect(page.getByRole("tab", { name: "sub1" })).toHaveCount(0);
 });
