@@ -151,7 +151,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr") |
 | `arith.bit-extender` | `in`, `out` | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign") |
 | `mem.register` | `d`, `clk`, `en`, `rst`, `q` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
-| `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
+| `mem.ram` | `addr`, `din`, `dout`, `we`, `clk`, `rst` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
 | `mem.rom` | `addr`, `out` | same as `mem.ram` |
 | `subcircuit` | from target circuit's named pins | `circuit` (required) |
 | `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength) |
@@ -264,7 +264,7 @@ simulation-halting error naming the component and pin. What counts as *consuming
 | demux / decoder | all inputs |
 | arithmetic | all inputs |
 | register (rising edge only) | `en`, `rst` always; `d` only when `en ≠ 0` and `rst ≠ 1` |
-| RAM | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
+| RAM | `addr` continuously (async read); `rst` at the edge (synchronous reset — clears to 0, wins over a write); `we` at the edge; `din` at the edge when `we ≠ 0` |
 | ROM | `addr` continuously |
 | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal |
 | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |

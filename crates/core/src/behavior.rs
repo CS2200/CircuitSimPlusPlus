@@ -31,7 +31,7 @@
 //! | demux / decoder / priority decoder | all inputs |
 //! | arithmetic | all inputs |
 //! | register (rising edge only) | `en`, `rst` always; `d` only when `en ≠ 0` and `rst ≠ 1` |
-//! | RAM | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
+//! | RAM | `addr` continuously (async read); `rst`/`we` at the edge (`din` only when `we ≠ 0` and `rst ≠ 1`; reset clears to 0) |
 //! | ROM | `addr` continuously |
 //! | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal (§4.1) |
 //! | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
@@ -641,28 +641,48 @@ impl Behavior {
                 Ok(())
             }
             BehaviorKind::Ram { bitsize, words, .. } => {
-                let (addr, din, we) = (ins[0], ins[1], ins[2]);
+                // Pin signature (input order): addr, din, we, clk, rst. An
+                // UNWIRED rst reads Z, treated as deasserted (0) — a RAM that
+                // drives only we/clk keeps working. A synchronous reset wins
+                // over a write (mirrors the register).
+                let (addr, din, we, rst) = (ins[0], ins[1], ins[2], ins[4]);
                 consume(we, "we")?;
-                match ctl(we) {
-                    Bit::Zero => Ok(()),
-                    we_bit => {
-                        consume(din, "din")?;
-                        // addr is already consumed continuously by eval
-                        // (async read); a floating address halts there.
-                        match addr.to_u64() {
-                            Some(a) if (a as usize) < words.len() => {
-                                words[a as usize] = match we_bit {
-                                    Bit::One => din.clone(),
-                                    // we = X: the write may have happened.
-                                    _ => Value::x(*bitsize),
-                                };
-                            }
-                            // X address or past-end: write dropped
-                            // (documented, module header).
-                            _ => {}
+                let rst_bit = if rst.has_z() { Bit::Zero } else { ctl(rst) };
+                match rst_bit {
+                    Bit::One => {
+                        for w in words.iter_mut() {
+                            *w = Value::zero(*bitsize);
                         }
                         Ok(())
                     }
+                    Bit::X => {
+                        for w in words.iter_mut() {
+                            *w = Value::x(*bitsize);
+                        }
+                        Ok(())
+                    }
+                    // Bit::Zero (and any residual Z, impossible here) → normal.
+                    _ => match ctl(we) {
+                        Bit::Zero => Ok(()),
+                        we_bit => {
+                            consume(din, "din")?;
+                            // addr is already consumed continuously by eval
+                            // (async read); a floating address halts there.
+                            match addr.to_u64() {
+                                Some(a) if (a as usize) < words.len() => {
+                                    words[a as usize] = match we_bit {
+                                        Bit::One => din.clone(),
+                                        // we = X: the write may have happened.
+                                        _ => Value::x(*bitsize),
+                                    };
+                                }
+                                // X address or past-end: write dropped
+                                // (documented, module header).
+                                _ => {}
+                            }
+                            Ok(())
+                        }
+                    },
                 }
             }
             _ => Ok(()),
@@ -782,6 +802,17 @@ impl Behavior {
     pub fn set_pressed(&mut self, p: bool) {
         if let BehaviorKind::Button { pressed } = &mut self.kind {
             *pressed = p;
+        }
+    }
+
+    /// Set a register's stored value (live poke, UI decision). Temporary: the
+    /// next clock edge latches `d`/`rst` as usual. Returns false for non-registers.
+    pub fn set_register(&mut self, v: Value) -> bool {
+        if let BehaviorKind::Register { state } = &mut self.kind {
+            *state = v;
+            true
+        } else {
+            false
         }
     }
 
@@ -1538,8 +1569,8 @@ mod tests {
                 .unwrap(),
             vec![k(8, 0)]
         );
-        // Write 77 @ 5 on the edge (ins order: addr, din, we, clk).
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1), k(1, 1)]))
+        // Write 77 @ 5 on the edge (ins order: addr, din, we, clk, rst).
+        ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1), k(1, 1), k(1, 0)]))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1547,7 +1578,7 @@ mod tests {
             vec![k(8, 77)]
         );
         // we=0: no write.
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 99), k(1, 0), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(4, 5), k(8, 99), k(1, 0), k(1, 1), k(1, 0)]))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1556,10 +1587,10 @@ mod tests {
         );
         // din floats during a write → halt; din floats with we=0 → fine.
         assert_eq!(
-            ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 1), k(1, 1)])),
+            ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 1), k(1, 1), k(1, 0)])),
             Err(FloatingRead::at("din"))
         );
-        ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 0), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 0), k(1, 1), k(1, 0)]))
             .unwrap();
         // addr floats during read → halt (async read is always accessing).
         assert_eq!(
@@ -1572,7 +1603,7 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)]
         );
-        ram.rising_edge(&refs(&[k(4, 6), k(8, 42), Value::x(1), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(4, 6), k(8, 42), Value::x(1), k(1, 1), k(1, 0)]))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 6), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1581,8 +1612,29 @@ mod tests {
         );
         // we floats at the edge → halt.
         assert_eq!(
-            ram.rising_edge(&refs(&[k(4, 5), k(8, 1), Value::z(1), k(1, 1)])),
+            ram.rising_edge(&refs(&[k(4, 5), k(8, 1), Value::z(1), k(1, 1), k(1, 0)])),
             Err(FloatingRead::at("we"))
+        );
+    }
+
+    #[test]
+    fn ram_reset_clears_memory() {
+        let mut ram = mk("mem.ram", json!({"bitsize": 8, "depth": 4}));
+        // Write 0x2a @ 1.
+        ram.rising_edge(&refs(&[k(2, 1), k(8, 0x2a), k(1, 1), k(1, 1), k(1, 0)]))
+            .unwrap();
+        assert_eq!(
+            ram.eval(&refs(&[k(2, 1), k(8, 0), k(1, 0), k(1, 0), k(1, 0)]))
+                .unwrap(),
+            vec![k(8, 0x2a)]
+        );
+        // rst=1 clears every word — even with we=1 (reset wins over a write).
+        ram.rising_edge(&refs(&[k(2, 1), k(8, 0xff), k(1, 1), k(1, 1), k(1, 1)]))
+            .unwrap();
+        assert_eq!(
+            ram.eval(&refs(&[k(2, 1), k(8, 0), k(1, 0), k(1, 0), k(1, 0)]))
+                .unwrap(),
+            vec![k(8, 0)]
         );
     }
 
@@ -1597,7 +1649,7 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)] // read past end → X
         );
-        ram.rising_edge(&refs(&[k(2, 3), k(8, 9), k(1, 1), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(2, 3), k(8, 9), k(1, 1), k(1, 1), k(1, 0)]))
             .unwrap(); // write dropped
         assert_eq!(
             ram.eval(&refs(&[k(2, 3), k(8, 0), k(1, 0), k(1, 0)]))

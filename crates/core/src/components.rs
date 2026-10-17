@@ -945,6 +945,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("dout", b),
                     PinSig::i("we", 1),
                     PinSig::i("clk", 1),
+                    // Synchronous reset (UI decision): clears memory on a rising
+                    // edge with rst=1; wins over a write (see behavior.rs).
+                    PinSig::i("rst", 1),
                 ],
                 c,
                 CompKind::Ram {

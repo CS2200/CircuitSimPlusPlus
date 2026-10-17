@@ -140,8 +140,12 @@ impl Engine {
         Ok(self.0.poke_input_pin(name, v))
     }
 
-    fn poke_button(&mut self, name: &str, pressed: bool) -> Result<bool, Halt> {
-        Ok(self.0.poke_button(name, pressed))
+    fn poke_button_at(&mut self, id: usize, pressed: bool) -> Result<bool, Halt> {
+        Ok(self.0.poke_button_at(id, pressed))
+    }
+
+    fn poke_register_at(&mut self, id: usize, v: Value) -> Result<bool, Halt> {
+        Ok(self.0.poke_register_at(id, v))
     }
 
     fn memory_word(&self, name: &str, addr: u64) -> Option<Value> {
@@ -662,8 +666,16 @@ impl Sim for Session {
                     .and_then(|v| v.to_u64().ok_or(crate::value::ValueError::OverlappingMasks))
                     .map(|n| n == 1)
                     .unwrap_or(false);
-                st.engine.poke_button(&name, pressed)
+                // Poke by flat id, so an UNNAMED button is still pressable.
+                st.engine.poke_button_at(flat.idx(), pressed)
             }
+            "mem.register" => match Value::from_wire_value(&value, width) {
+                Ok(v) => st.engine.poke_register_at(flat.idx(), v),
+                Err(e) => {
+                    st.emit_error(&mut **sink, format!("poke: {e}"));
+                    return;
+                }
+            },
             _ => return, // unsupported poke target: no-op
         };
         match result {

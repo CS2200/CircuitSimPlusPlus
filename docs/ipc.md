@@ -35,7 +35,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `sim_step_cycles` | `{ n: number }` | — |
 | `sim_run_until` | `{ cycle: number }` | — |
 | `sim_reset` | `{}` | — fresh power-on state; every memory's autoload image re-applies (DESIGN.md §5.2 / G6); answered with a `full: true` `net_diffs` batch |
-| `poke` | `{ comp_id: CompId, pin: string, value: WireValue }` | — |
+| `poke` | `{ comp_id: CompId, pin: string, value: WireValue }` | — (a `mem.register` sets its stored value, a `wiring.pin` drives an input, an `io.button` presses/releases; anything else is a no-op) |
 | `mem_read` | `{ name: string, addr: number, len: number }` | `WireValue[]` |
 | `mem_write` | `{ name: string, addr: number, values: WireValue[] }` | — |
 | `snapshot` | `{ path: string }` | — |

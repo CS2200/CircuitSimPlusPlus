@@ -60,7 +60,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x103f_6356_5369_ddee,
+        trace_hash: 0x16fe_94f6_7c7c_7ee8,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -68,7 +68,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x2a4f_92c3_69c9_12f3,
+        trace_hash: 0xbb3f_2b80_604d_4814,
     },
 ];
 

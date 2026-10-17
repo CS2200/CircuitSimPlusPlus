@@ -1015,6 +1015,30 @@ impl DelayEngine {
         true
     }
 
+    /// Press/release a button by flat id (works for unnamed buttons too).
+    pub fn poke_button_at(&mut self, id: usize, pressed: bool) -> bool {
+        let Some(c) = self.comps.get_mut(id) else {
+            return false;
+        };
+        c.set_pressed(pressed);
+        let _ = self.eval_and_schedule(id as u32, self.now, None);
+        true
+    }
+
+    /// Set a register's stored value by flat id (live poke, UI decision); the
+    /// register then re-evaluates, driving its new value onto `q`.
+    pub fn poke_register_at(&mut self, id: usize, v: Value) -> bool {
+        let Some(c) = self.comps.get_mut(id) else {
+            return false;
+        };
+        if !c.set_register(v) {
+            return false;
+        }
+        // A register's evaluation cannot halt (it just reads its state).
+        let _ = self.eval_and_schedule(id as u32, self.now, None);
+        true
+    }
+
     /// Drive a root input pin at an absolute simulation time (testbench
     /// stimulus). Times in the past are clamped to `now`.
     pub fn poke_at(&mut self, name: &str, v: Value, at: u64) -> bool {
