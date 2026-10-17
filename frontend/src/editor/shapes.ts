@@ -253,25 +253,28 @@ export function gateShape(
     case "gate.buffer":
       return { body: triPath(x, y, w, h), extra: [], outBubble: null };
     case "io.button": {
-      // A push button (UI_OVERHAUL §48): a round cap with a plunger + a lead out
-      // to its pin, not a box.
-      const cx = x + w / 2;
+      // A push button (UI_OVERHAUL §48), oriented so the plunger/cap point RIGHT
+      // along the lead to the output pin (UI decision: rotated 90° clockwise).
       const cy = y + h / 2;
+      const cx = x + h * 0.42; // contact circle sits left of centre
       const r = Math.min(w, h) * 0.3;
+      const capX = x + w - h * 0.42; // cap bar sits right of centre
       return {
         body: circlePath(cx, cy, r),
         extra: [
-          // plunger stem, cap bar, and the lead to the output pin
-          [
-            { t: "M", x: cx, y: cy - r },
-            { t: "L", x: cx, y: y + h * 0.1 },
-          ],
-          [
-            { t: "M", x: cx - w * 0.24, y: y + h * 0.1 },
-            { t: "L", x: cx + w * 0.24, y: y + h * 0.1 },
-          ],
+          // plunger stem (contact → cap)
           [
             { t: "M", x: cx + r, y: cy },
+            { t: "L", x: capX, y: cy },
+          ],
+          // cap bar (vertical, since the button is rotated)
+          [
+            { t: "M", x: capX, y: cy - h * 0.33 },
+            { t: "L", x: capX, y: cy + h * 0.33 },
+          ],
+          // lead from the cap to the output pin
+          [
+            { t: "M", x: capX, y: cy },
             { t: "L", x: x + w, y: cy },
           ],
         ],

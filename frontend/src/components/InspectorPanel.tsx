@@ -87,6 +87,7 @@ export default function InspectorPanel({
   onEdit,
   onNotify,
   focusField = null,
+  valueSeed = null,
   onFocusHandled,
   onPoke,
 }: {
@@ -111,6 +112,8 @@ export default function InspectorPanel({
   onNotify?: (message: string) => void;
   /** Attr key to focus on the next render (double-click a constant, §53). */
   focusField?: string | null;
+  /** Seed for the focused register value field (the first typed character, #1). */
+  valueSeed?: string | null;
   onFocusHandled?: () => void;
   /** Poke a component pin to a live value (registers accept a typed value). */
   onPoke?: (compId: string, pin: string, hex: string) => void;
@@ -157,10 +160,18 @@ export default function InspectorPanel({
   const regValueRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (focusField === "value" && comp?.type === "mem.register") {
+      if (valueSeed !== null && regValueRef.current !== null) {
+        regValueRef.current.value = valueSeed;
+      }
       regValueRef.current?.focus();
       onFocusHandled?.();
     }
-  }, [focusField, comp?.type, onFocusHandled]);
+  }, [focusField, valueSeed, comp?.type, onFocusHandled]);
+
+  // The register's configured base: shown on the Value field and used to parse
+  // the typed input (#1/#2). "unsigned"/"signed"/"dec" parse as decimal.
+  const regRadix = typeof comp?.attrs?.radix === "string" ? comp.attrs.radix : "unsigned";
+  const regParse = regRadix === "bin" ? "bin" : regRadix === "hex" ? "hex" : "dec";
 
   const wire =
     comp === undefined && wireIdx !== null && circuit !== undefined
@@ -382,15 +393,21 @@ export default function InspectorPanel({
 
       {comp.type === "mem.register" && onPoke !== undefined && (
         <label className="inspector-row">
-          <span>Value</span>
+          <span>
+            Value <span className="inspector-field-label">{regRadix}</span>
+          </span>
           <input
             ref={regValueRef}
             className="inspector-value-input"
-            placeholder="hex · Enter to poke"
+            placeholder={`${regRadix} · Enter to poke`}
             defaultValue=""
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
-              const hex = parseRadixValue((e.target as HTMLInputElement).value, "hex", 32);
+              const hex = parseRadixValue(
+                (e.target as HTMLInputElement).value,
+                regParse,
+                compPins(comp, sheetCircuits).find((p) => p.name === "q")?.bitsize ?? 32,
+              );
               if (hex === null) return;
               onPoke(comp.id, "q", hex);
               (e.target as HTMLInputElement).blur();

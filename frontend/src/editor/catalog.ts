@@ -603,14 +603,14 @@ const REGISTRY: Record<string, CompSpec> = {
   },
 
   // I/O (UI-only parts)
-  "io.button": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "BTN"),
+  // Wider than tall so the plunger/cap can point right, along the lead to the
+  // output pin (UI decision: the button image is rotated 90° clockwise).
+  "io.button": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out" }], "BTN"),
   "io.led": boxSpec(1, 1, [{ name: "in", dx: 0.5, dy: 1, kind: "in" }], "LED"),
-  "io.hexdisplay": boxSpec(
-    3,
-    3,
-    [{ name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH }],
-    "HEX",
-  ),
+  // One 7-segment digit: the input is a single hex nibble (4 bits), so a
+  // 4-bit constant drives it without a width mismatch. Taller than wide so the
+  // digit has a display-like aspect (UI decisions).
+  "io.hexdisplay": boxSpec(3, 4, [{ name: "in", dx: 0, dy: 2, kind: "in", bitsize: 4 }], "HEX"),
 
   // Misc (UI_OVERHAUL §37): a free-form text annotation. No pins, no body box
   // on the canvas; width tracks the text so selection/marquee match it.

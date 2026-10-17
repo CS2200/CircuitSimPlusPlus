@@ -233,6 +233,8 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   /** Field the Inspector should focus next (a constant's value on double-click). */
   const [inspectorFocus, setInspectorFocus] = useState<string | null>(null);
+  /** First keystroke typed while a register is selected (seeds its Value field, #1). */
+  const [valueSeed, setValueSeed] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
@@ -1364,6 +1366,21 @@ export default function App() {
       const target = e.target as HTMLElement | null;
       if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       const mod = e.ctrlKey || e.metaKey;
+      // Typing a digit while a register is selected opens its Value field seeded
+      // with that character (#1) — "click the register, then type".
+      if (!mod && inspectorCompId !== null && e.key.length === 1) {
+        const sel = doc.circuit(sheet).components.find((c) => c.id === inspectorCompId);
+        if (sel?.type === "mem.register") {
+          const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
+          const parses = radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
+          if (parses.test(e.key)) {
+            e.preventDefault();
+            setValueSeed(e.key);
+            setInspectorFocus("value");
+            return;
+          }
+        }
+      }
       if (mod && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void onOpen();
@@ -1385,7 +1402,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onOpen, onSave, onSaveAs, openHistory]);
+  }, [onOpen, onSave, onSaveAs, openHistory, inspectorCompId, doc, sheet]);
 
   /** The bar shows the file name; the app name lives on the logo's tooltip. */
   const docTitle = filePath === null ? "(unsaved)" : baseName(filePath);
@@ -1643,7 +1660,11 @@ export default function App() {
                 onEdit={() => editorRef.current?.refresh()}
                 onNotify={toast}
                 focusField={inspectorFocus}
-                onFocusHandled={() => setInspectorFocus(null)}
+                valueSeed={valueSeed}
+                onFocusHandled={() => {
+                  setInspectorFocus(null);
+                  setValueSeed(null);
+                }}
                 onPoke={onPoke}
               />
             </aside>

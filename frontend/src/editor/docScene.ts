@@ -247,25 +247,41 @@ function drawSevenSeg(
   on: string,
   off: string,
 ): void {
-  const m = 0.4;
-  const t = 0.28;
+  const m = 0.42;
+  const t = 0.32;
   const x0 = rect.x + m;
   const x1 = rect.x + rect.w - m;
   const y0 = rect.y + m;
   const y1 = rect.y + rect.h - m;
   const ym = (y0 + y1) / 2;
+  const hw = x1 - x0;
   const lit = digit !== null ? (SEGMENTS[digit] ?? "") : "";
   const bars: Record<string, Rect> = {
-    a: { x: x0 + t, y: y0, w: x1 - x0 - 2 * t, h: t },
-    b: { x: x1 - t, y: y0 + t, w: t, h: ym - t / 2 - (y0 + t) },
-    c: { x: x1 - t, y: ym + t / 2, w: t, h: y1 - t - (ym + t / 2) },
-    d: { x: x0 + t, y: y1 - t, w: x1 - x0 - 2 * t, h: t },
-    e: { x: x0, y: ym + t / 2, w: t, h: y1 - t - (ym + t / 2) },
-    f: { x: x0, y: y0 + t, w: t, h: ym - t / 2 - (y0 + t) },
-    g: { x: x0 + t, y: ym - t / 2, w: x1 - x0 - 2 * t, h: t },
+    a: { x: x0 + t, y: y0, w: hw - 2 * t, h: t },
+    b: { x: x1 - t, y: y0 + t, w: t, h: ym - y0 - 1.5 * t },
+    c: { x: x1 - t, y: ym + t / 2, w: t, h: y1 - ym - 1.5 * t },
+    d: { x: x0 + t, y: y1 - t, w: hw - 2 * t, h: t },
+    e: { x: x0, y: ym + t / 2, w: t, h: y1 - ym - 1.5 * t },
+    f: { x: x0, y: y0 + t, w: t, h: ym - y0 - 1.5 * t },
+    g: { x: x0 + t, y: ym - t / 2, w: hw - 2 * t, h: t },
   };
   for (const [name, r] of Object.entries(bars)) {
-    renderer.drawPath(rectPath(r.x, r.y, r.w, r.h), { fill: lit.includes(name) ? on : off });
+    // Pill-shaped bars (rounded ends) read as a real 7-segment display; the
+    // old sharp rectangles looked mis-scaled and blocky (UI decision).
+    const radius = Math.min(r.w, r.h) / 2;
+    renderer.drawPath(
+      roundedPath(
+        [
+          { x: r.x, y: r.y },
+          { x: r.x + r.w, y: r.y },
+          { x: r.x + r.w, y: r.y + r.h },
+          { x: r.x, y: r.y + r.h },
+          { x: r.x, y: r.y },
+        ],
+        radius,
+      ),
+      { fill: lit.includes(name) ? on : off },
+    );
   }
   renderer.flush();
 }
@@ -863,7 +879,7 @@ export class DocScene {
         // so it reads as an error rather than an animation (UI decision). The
         // ring is a small constant, never scaled by the bus width (§59).
         const t = overlay.now;
-        const on = t === undefined ? true : Math.floor(t / 320) % 2 === 0;
+        const on = t === undefined ? true : Math.floor(t / 120) % 2 === 0;
         renderer.drawPath(this.wirePaths[i], {
           stroke,
           lineWidth: width + MISMATCH_RING * (on ? 1.35 : 0.7),
