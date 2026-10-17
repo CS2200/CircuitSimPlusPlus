@@ -72,12 +72,12 @@ test("drag-wiring: releasing on the target pin commits the wire", async ({ page 
 
   // Clicking the wire selects it (no re-route, no stray wire)…
   await clickWorld(page, 7.5, 1.5);
-  await expect(page.locator(".inspector-id")).toHaveText(/wire/);
+  await expect(page.locator(".inspector-id")).toHaveText("Wire");
 
   // …and clicking a component afterwards selects THAT component instead of
   // bending the wire (the "even if I click something else it reroutes it" bug).
   await clickWorld(page, 2.5, 1.5);
-  await expect(page.locator(".inspector-type")).toHaveText("gate.and");
+  await expect(page.locator(".inspector-id")).toHaveText("AND Gate");
   await clickWorld(page, 20, 4);
   d = await doc(page);
   expect(d.circuits[0].wires).toHaveLength(1);
@@ -91,7 +91,7 @@ test("wire section: color swatch and width (driver bitsize)", async ({ page }) =
   await clickWorld(page, 5, 1.5);
   await clickWorld(page, 10, 1);
   await clickWorld(page, 7.5, 1.5);
-  await expect(page.locator(".inspector-id")).toHaveText(/wire/);
+  await expect(page.locator(".inspector-id")).toHaveText("Wire");
   await expect(page.locator(".inspector-type")).toContainText("1-bit");
 
   // Color: a swatch sets the wire's own color (format-v2 §2 `color`).

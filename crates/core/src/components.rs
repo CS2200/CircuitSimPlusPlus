@@ -34,6 +34,18 @@ pub const MAX_MEM_DEPTH: u32 = 1 << 20;
 /// Max split pins on a splitter.
 pub const MAX_SPLIT_PINS: u32 = 64;
 
+/// Allowed values for a readout's display `radix` (`wiring.pin`, `wiring.probe`,
+/// `mem.register`). `dec` and `unsigned` name the same readout, and `bin` was
+/// added for the UI's base chooser; the extra names stay accepted so older
+/// files keep loading (UI_OVERHAUL §57).
+const READOUT_RADIX: &[&str] = &["unsigned", "signed", "hex", "bin", "dec"];
+
+/// Bits needed to name one of `n` input lines (⌈log₂ n⌉; at least 1).
+/// Drives a priority decoder's `out` pin width.
+pub fn index_bits(n: u32) -> u32 {
+    addr_width(n)
+}
+
 /// Every component type string the registry knows (sorted). Delay-table
 /// validation (task B7) rejects table keys outside this list.
 pub const KNOWN_TYPES: &[&str] = &[
@@ -62,6 +74,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "plexers.decoder",
     "plexers.demux",
     "plexers.mux",
+    "plexers.priority-decoder",
     "subcircuit",
     "wiring.clock",
     "wiring.constant",
@@ -222,6 +235,15 @@ pub enum CompKind {
     /// Decoder (`plexers.decoder`).
     Decoder {
         /// Input width in bits (`inputBits` attr); 2^n one-hot outputs.
+        input_bits: u32,
+    },
+    /// Priority decoder (`plexers.priority-decoder`). Named for the
+    /// palette tile the course asked for; behaviorally it is the standard
+    /// **priority encoder** — the highest-numbered asserted input line
+    /// becomes its binary index on `out`, and `valid` marks "any input
+    /// asserted".
+    PriorityDecoder {
+        /// Number of input lines (`inputBits` attr).
         input_bits: u32,
     },
     /// Adder (`arith.adder`); `a` + `b` + `cin` → `out`, `cout`.
@@ -541,7 +563,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let mut c = AttrCheck::new(attrs, &["bitsize", "isOutput", "radix"]);
             let b = c.bitsize(1);
             let is_output = c.boolean("isOutput", false);
-            c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             let dir = if is_output { PinDir::In } else { PinDir::Out };
             (
@@ -558,9 +580,12 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "wiring.constant" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "value"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "value", "radix"]);
             let b = c.bitsize(1);
             let value = c.string("value", "0");
+            // `radix` is DISPLAY-only — the stored `value` is always a hex string;
+            // the editor uses it for the on-body readout (UI_OVERHAUL §53).
+            let _ = c.enumeration("radix", &["hex", "bin", "dec"], "hex");
             c.finish();
             let parsed = match Value::from_hex_masks(b, &value, "", "") {
                 Ok(v) => v,
@@ -669,7 +694,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "wiring.probe" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
             let b = c.bitsize(1);
-            c.enumeration("radix", &["unsigned", "signed", "hex"], "unsigned");
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Probe { bitsize: b })
         }
@@ -715,6 +740,20 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let mut pins = vec![PinSig::i("in", bits)];
             pins.extend((0..(1u32 << bits)).map(|i| PinSig::o(format!("out{i}"), 1)));
             (pins, c, CompKind::Decoder { input_bits: bits })
+        }
+        "plexers.priority-decoder" => {
+            // N single-bit input lines (in0 = lowest priority) → the binary
+            // index of the highest-numbered asserted line, plus `valid`.
+            // Named `priority-decoder` per the course's palette wording
+            // (UI_OVERHAUL §54) — behaviorally the standard priority encoder.
+            let mut c = AttrCheck::new(attrs, &["inputBits"]);
+            let lines = c.uint("inputBits", 4, 2, MAX_SELECT_BITS);
+            c.finish();
+            let mut pins: Vec<PinSig> =
+                (0..lines).map(|i| PinSig::i(format!("in{i}"), 1)).collect();
+            pins.push(PinSig::o("out", index_bits(lines)));
+            pins.push(PinSig::o("valid", 1));
+            (pins, c, CompKind::PriorityDecoder { input_bits: lines })
         }
         "arith.adder" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
@@ -852,8 +891,11 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.register" => {
-            let mut c = AttrCheck::new(attrs, GATE_ATTRS);
+            // `radix` is display-only: how the stored value reads on the body
+            // (and in the Inspector's base chooser, UI_OVERHAUL §57).
+            let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
             let b = c.bitsize(1);
+            c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             (
                 vec![
@@ -979,8 +1021,18 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (vec![PinSig::o("out", 1)], c, CompKind::Button)
         }
         "io.led" => {
-            let mut c = AttrCheck::new(attrs, GATE_ATTRS);
+            // UI_OVERHAUL §49: the LED carries its own look — `color` (#rrggbb,
+            // "" = theme accent) and `intensity` (0..100, the glow strength).
+            let mut c = AttrCheck::new(attrs, &["bitsize", "color", "intensity"]);
             let b = c.bitsize(1);
+            let color = c.string("color", "");
+            if !color.is_empty() && !is_hex_color(&color) {
+                c_issue(
+                    &mut c,
+                    format!("attr 'color' must be a #rrggbb string, got '{color}'"),
+                );
+            }
+            let _ = c.uint("intensity", 80, 0, 100);
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Led { bitsize: b })
         }
@@ -1240,6 +1292,25 @@ mod tests {
         assert_eq!(p.unwrap(), vec!["in", "sel", "out0", "out1"]);
         let (p, _) = pins("plexers.decoder", json!({"inputBits": 3}));
         assert_eq!(p.unwrap().len(), 1 + 8);
+    }
+
+    #[test]
+    fn priority_decoder_pins() {
+        let (p, e) = pins("plexers.priority-decoder", json!({"inputBits": 4}));
+        assert!(e.is_empty());
+        assert_eq!(p.unwrap(), vec!["in0", "in1", "in2", "in3", "out", "valid"]);
+        // Index width = ceil(log2 n): 3 lines need 2 bits.
+        let sigs = pin_sigs(
+            "plexers.priority-decoder",
+            json!({"inputBits": 3}).as_object().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(get(&sigs, "out").width, 2);
+        assert_eq!(get(&sigs, "valid").width, 1);
+        assert_eq!(get(&sigs, "in0").width, 1);
+        // The 2-line floor rejects a 1-line request.
+        let (_, e) = pins("plexers.priority-decoder", json!({"inputBits": 1}));
+        assert!(!e.is_empty());
     }
 
     fn get<'a>(sigs: &'a [PinSig], n: &str) -> &'a PinSig {

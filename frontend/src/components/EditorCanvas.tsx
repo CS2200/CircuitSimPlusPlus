@@ -75,7 +75,7 @@ export default forwardRef<
     /** Index of the sheet being edited (subcircuits are separate sheets). */
     sheetIdx?: number;
     onStatus?: (s: EditorStatus) => void;
-    onEditComponent?: (compId: string) => void;
+    onEditComponent?: (compId: string, focusField?: string) => void;
     /** Right-click a subcircuit instance: jump to its definition tab. */
     onOpenSubcircuit?: (circuit: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
@@ -147,6 +147,21 @@ export default forwardRef<
     };
   }, [tool, onEditComponent, onOpenSubcircuit]);
 
+  // Shift+click a clock ticks the sim once (UI_OVERHAUL §47): load on demand
+  // like the transport's Ctrl+J, then step.
+  useEffect(() => {
+    tool.onTick = () => {
+      if (sim === undefined) return;
+      void (async () => {
+        if (!sim.store.loaded && !(await sim.load(doc))) return;
+        await sim.stepTick();
+      })();
+    };
+    return () => {
+      tool.onTick = undefined;
+    };
+  }, [tool, sim, doc]);
+
   // Center the camera once per document (never re-center on edits).
   const initialBounds = useMemo(() => {
     scene.sync(doc, 0);
@@ -200,6 +215,7 @@ export default forwardRef<
         const activePulses = pulses.active(tMs);
         if (activePulses === null && pulsesLive) setPulsesLive(false);
         simOverlay = {
+          cycle: store.cycle,
           valueForWire: (i) => {
             const net = store.wireToNet?.get(i);
             return net === undefined ? undefined : store.netValues.get(net);
@@ -395,6 +411,8 @@ export default forwardRef<
         tool.hover(w);
         report();
       }}
+      cursor={tool.cursor}
+      onShiftPress={(w) => tool.tickClockAt(w)}
       onDropWorld={(w, e) => {
         const type = e.dataTransfer.getData("text/x-csx-type");
         if (type !== "") {

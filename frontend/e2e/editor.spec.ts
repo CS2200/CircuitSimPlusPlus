@@ -74,7 +74,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   // ---- click the AND → Inspector (right dock) → rename + bitsize ----
   const body = await world(page, 2.5, 1.5);
   await page.mouse.click(body.x, body.y);
-  await expect(page.locator(".inspector-id")).toHaveText("c1");
+  await expect(page.locator(".inspector-id")).toHaveText("AND Gate");
+  await expect(page.locator(".inspector-type")).toHaveText("c1");
   await page.getByLabel("Name").fill("my-and");
   await page.getByLabel("Name").press("Enter");
   // Bit width is a 1..32 picker grid (UI_OVERHAUL §28).
@@ -221,4 +222,71 @@ test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ 
   expect(buf).toBeTruthy();
   // It carries the bit-width field (the `in`/`out` bus).
   await expect(page.locator(".inspector-id")).toBeVisible();
+});
+
+test("clock: Shift+click ticks the sim in place", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "CLK", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+  await expect(page.locator(".app-statusbar")).toContainText("1 selected");
+
+  // Shift+click the clock is consumed as a TICK, not a selection toggle
+  // (UI_OVERHAUL §47): the selection must stay put.
+  await page.keyboard.down("Shift");
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.up("Shift");
+  await expect(page.locator(".app-statusbar")).toContainText("1 selected");
+});
+
+test("constant: radix display + double-click jumps into the value", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "CONST", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  const placed = () =>
+    doc(page).then((d) => d.circuits[0].components.find((x) => x.type === "wiring.constant"));
+
+  // Double-clicking the constant puts the caret in its value input (UI_OVERHAUL
+  // §53). The body is 3x2, centred on the placement click.
+  const c0 = await placed();
+  const centre = await world(page, c0!.pos[0] + 1.5, c0!.pos[1] + 1);
+  await page.mouse.dblclick(centre.x, centre.y);
+  await expect(page.getByLabel("Value")).toBeFocused();
+
+  // The base is a 3-button chooser, and the value is typed in that base (§55).
+  await page.getByRole("radio", { name: "Bin", exact: true }).click();
+  await page.getByLabel("Value").fill("1");
+  await page.getByLabel("Value").press("Enter");
+  const c = await placed();
+  expect(c?.attrs?.radix).toBe("bin");
+  expect(c?.attrs?.value).toBe("1");
+});
+
+test("priority decoder: places from Plexers and edits its line count", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Plexers"]').click();
+  await page.getByRole("button", { name: "Priority Decoder", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  const placed = () =>
+    doc(page).then((d) =>
+      d.circuits[0].components.find((c) => c.type === "plexers.priority-decoder"),
+    );
+  expect(await placed()).toBeTruthy();
+
+  // The line count is a 2..8 field (default 4); editing it writes the attr.
+  await page.getByLabel("Input lines").fill("8");
+  expect((await placed())?.attrs?.inputBits).toBe(8);
 });

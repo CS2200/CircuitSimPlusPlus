@@ -126,11 +126,12 @@ describe("SimController", () => {
 });
 
 describe("formatValue", () => {
-  it("hex / unsigned / signed", () => {
+  it("hex / unsigned / signed / bin", () => {
     const v = { v: "fffffffe", x: "00000000", z: "00000000" };
     expect(formatValue(v, "hex")).toBe("0xfffffffe");
     expect(formatValue(v, "unsigned")).toBe("4294967294");
     expect(formatValue(v, "signed")).toBe("-2");
+    expect(formatValue({ v: "a", x: "00", z: "00" }, "bin")).toBe("0b1010");
   });
 
   it("X dominates; all-Z shows Z; unknown shows —", () => {

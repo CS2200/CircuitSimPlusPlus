@@ -3,13 +3,13 @@ import { encodeRleHex, hexWidthFor, maskFor, parseRleHex, wordsFromPasted } from
 
 /**
  * Memory contents editor (UI_OVERHAUL §11/§14): a hex GRID over the whole
- * memory. Click a cell and the values you paste (or type) fill in from that
- * address — no separate paste box — with `count-value` runs accepted. Applying
- * writes the canonical rle-hex image to `attrs.contents` (docs/format-v2.md
- * §7); the dialog edits the circuit's embedded image, not the running engine.
+ * memory, all addresses on one scrolling page (UI_OVERHAUL §58). Click a cell
+ * and the values you paste (or type) fill in from that address — no separate
+ * paste box — with `count-value` runs accepted. Applying writes the canonical
+ * rle-hex image to `attrs.contents` (docs/format-v2.md §7); the dialog edits the
+ * circuit's embedded image, not the running engine.
  */
 
-const PAGE_WORDS = 256; // 16 rows × 16 columns per page
 const COLS = 16;
 
 /** Spreadsheet-style arrow navigation (address offsets). */
@@ -39,7 +39,7 @@ export default function MemContentsDialog({
 }) {
   const width = hexWidthFor(bitsize);
   const mask = maskFor(bitsize);
-  const pageCount = Math.max(1, Math.ceil(depth / PAGE_WORDS));
+  const rows = Math.max(1, Math.ceil(Math.max(depth, 1) / COLS));
 
   const [cells, setCells] = useState<Map<number, number>>(() => {
     if (initial === null) return new Map();
@@ -49,14 +49,14 @@ export default function MemContentsDialog({
       return new Map();
     }
   });
-  const [page, setPage] = useState(0);
   const [sel, setSel] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // Cell 0 starts focused/selected so a paste works without a first click.
   const [focusAddr, setFocusAddr] = useState<number | null>(0);
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // Move the caret to the cell a paste/keyboard jump landed on.
+  // Move the caret to the cell a paste/keyboard jump landed on (its focus also
+  // scrolls the grid to it).
   useEffect(() => {
     if (focusAddr === null) return;
     const input = gridRef.current?.querySelector<HTMLInputElement>(`[data-addr="${focusAddr}"]`);
@@ -108,7 +108,6 @@ export default function MemContentsDialog({
         : null,
     );
     const landed = Math.min(start + take, depth - 1);
-    setPage(Math.floor(landed / PAGE_WORDS));
     setSel(landed);
     setFocusAddr(landed);
   };
@@ -120,7 +119,6 @@ export default function MemContentsDialog({
     e.preventDefault();
     const target = sel + delta;
     if (target < 0 || target >= depth) return;
-    setPage(Math.floor(target / PAGE_WORDS));
     setSel(target);
     setFocusAddr(target);
   };
@@ -140,9 +138,6 @@ export default function MemContentsDialog({
     onClose();
   };
 
-  const pageStart = page * PAGE_WORDS;
-  const count = Math.max(0, Math.min(PAGE_WORDS, depth - pageStart));
-  const rowCount = Math.max(1, Math.ceil(count / COLS));
   const selLabel = `0x${sel.toString(16).toUpperCase().padStart(width, "0")}`;
 
   return (
@@ -161,10 +156,6 @@ export default function MemContentsDialog({
             {depth} × {bitsize}b
           </span>
         </h2>
-        <p className="settings-hint">
-          Click a cell, then paste or type hex values — they fill from there. Runs like{" "}
-          <code>4-00</code> are accepted; values are stored padded to {width} hex digits.
-        </p>
         {error !== null && <p className="mem-error">{error}</p>}
         <p className="settings-hint">
           {cells.size.toLocaleString()} of {depth.toLocaleString()} words set · cell {selLabel}
@@ -173,14 +164,12 @@ export default function MemContentsDialog({
         <div className="mem-table-wrap" ref={gridRef} onKeyDown={onKeyDown}>
           <table className="mem-grid mem-table">
             <tbody>
-              {Array.from({ length: rowCount }, (_, row) => (
+              {Array.from({ length: rows }, (_, row) => (
                 <tr key={row}>
-                  <td className="mem-rowaddr">
-                    {(pageStart + row * COLS).toString(16).padStart(6, "0")}
-                  </td>
+                  <td className="mem-rowaddr">{(row * COLS).toString(16).padStart(6, "0")}</td>
                   {Array.from({ length: COLS }, (_, col) => {
-                    const addr = pageStart + row * COLS + col;
-                    if (addr >= pageStart + count) return <td className="mem-cell" key={col} />;
+                    const addr = row * COLS + col;
+                    if (addr >= depth) return <td className="mem-cell" key={col} />;
                     return (
                       <td className="mem-cell" key={col}>
                         <input
@@ -206,25 +195,6 @@ export default function MemContentsDialog({
         </div>
 
         <div className="mem-dialog-foot">
-          <button
-            className="secondary"
-            disabled={page <= 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            aria-label="Previous page"
-          >
-            ‹
-          </button>
-          <span className="settings-hint">
-            page {page + 1} / {pageCount}
-          </span>
-          <button
-            className="secondary"
-            disabled={page >= pageCount - 1}
-            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
-            aria-label="Next page"
-          >
-            ›
-          </button>
           <button
             className="secondary"
             onClick={() => {

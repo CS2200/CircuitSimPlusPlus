@@ -20,7 +20,7 @@ import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
-import { BUBBLE_R, circlePath, gateShape, probePath, rotatePath } from "./shapes";
+import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
 
 /**
  * DocScene (FRONTEND.md U3): draws a CircuitDocument circuit and answers
@@ -55,6 +55,8 @@ export interface SimOverlay {
   violations?: readonly ViolationMarker[] | null;
   /** Signal-travel pulses: wire index + phase ∈ [0,1) (U7). */
   pulses?: readonly { wireIdx: number; phase: number }[] | null;
+  /** Engine cycle count (a clock's phase when its own output is unwired, §51). */
+  cycle?: number;
 }
 
 /** Collapse a 4-state value to a render state (X dominates, then Z). */
@@ -68,9 +70,14 @@ function maskNonzero(hex: string): boolean {
   return hex !== "" && BigInt(`0x${hex}`) !== 0n;
 }
 
-/** Probe `radix` attr (format-v2 §4) → value display mode (default hex). */
+/**
+ * Readout `radix` attr (format-v2 §4) → value display mode (default hex).
+ * `dec` and `unsigned` are the same readout; unknown/absent → hex
+ * (UI_OVERHAUL §57).
+ */
 function probeDisplayMode(attr: unknown): ValueMode {
-  return attr === "unsigned" || attr === "signed" || attr === "hex" ? attr : "hex";
+  if (attr === "dec" || attr === "unsigned") return "unsigned";
+  return attr === "signed" || attr === "hex" || attr === "bin" ? attr : "hex";
 }
 
 // ---- family tints, pin markers and live values (UI_OVERHAUL §21) ----
@@ -85,6 +92,25 @@ function tintRoleOf(comp: CsxComponent): TintRole | null {
   if (comp.type.startsWith("mem.")) return "memory";
   if (comp.type.startsWith("io.")) return "io";
   return null; // gates keep the classic look; wiring parts stay neutral
+}
+
+/**
+ * A pin's body (UI_OVERHAUL §21/§55): an output pin is a rounded stadium, an
+ * input pin a plain square. Shared by the placed body and the placement ghost
+ * so the preview matches exactly what lands.
+ */
+function pinBodyPath(r: Rect, isOutput: boolean): PathCmd[] {
+  if (!isOutput) return rectPath(r.x, r.y, r.w, r.h);
+  return roundedPath(
+    [
+      { x: r.x, y: r.y },
+      { x: r.x + r.w, y: r.y },
+      { x: r.x + r.w, y: r.y + r.h },
+      { x: r.x, y: r.y + r.h },
+      { x: r.x, y: r.y },
+    ],
+    r.h / 2,
+  );
 }
 
 /** Theme colour behind a tint role / pin kind. */
@@ -131,38 +157,100 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
-/** A clock face (dial + two hands) drawn instead of a type word (§36). */
-function drawClockGlyph(renderer: Renderer, theme: Theme, cx: number, cy: number): void {
-  const r = 0.6;
-  const ink = { stroke: theme.textDim, lineWidth: 0.12 };
-  renderer.drawPath(circlePath(cx, cy, r), ink);
+/**
+ * A clock's square wave (UI_OVERHAUL §47): it shows the level the clock drives
+ * AND the edge that just happened (▲ rising / ▼ falling), so ticking is visible
+ * at a glance. `high === null` (no sim value) draws a neutral wave with no edge
+ * marker.
+ */
+function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boolean | null): void {
+  const x0 = rect.x + 0.3;
+  const x1 = rect.x + rect.w - 0.3;
+  const yHi = rect.y + rect.h * 0.34;
+  const yLo = rect.y + rect.h * 0.66;
+  const t = (x1 - x0) / 3;
+  const levels = [false, true, high ?? false];
+  const wave: PathCmd[] = [];
+  let y = levels[0] === true ? yHi : yLo;
+  wave.push({ t: "M", x: x0, y });
+  for (let i = 1; i < 3; i++) {
+    const nx = x0 + t * i;
+    wave.push({ t: "L", x: nx, y });
+    const ny = levels[i] === true ? yHi : yLo;
+    if (ny !== y) wave.push({ t: "L", x: nx, y: ny });
+    y = ny;
+  }
+  wave.push({ t: "L", x: x1, y });
+  // The waveform itself is neutral; the segment holding the CURRENT level is the
+  // one that lights up (UI_OVERHAUL §52) — no green, no heavy halo.
+  renderer.drawPath(wave, { stroke: theme.textDim, lineWidth: 0.12 });
+  renderer.flush();
+  if (high === null) return;
+
+  const lastY = high ? yHi : yLo;
   renderer.drawPath(
-    roundedPath(
-      [
-        { x: cx, y: cy },
-        { x: cx, y: cy - r * 0.62 },
-      ],
-      0,
-    ),
-    ink,
+    [
+      { t: "M", x: x0 + 2 * t, y: lastY },
+      { t: "L", x: x1, y: lastY },
+    ],
+    { stroke: theme.accent, lineWidth: high ? 0.2 : 0.12, alpha: high ? 1 : 0.5 },
   );
+
+  // ▲ on the rising edge / ▼ on the falling one, at the last transition.
+  const edgeX = high ? x0 + t : x0 + 2 * t;
+  const midY = (yHi + yLo) / 2;
+  const tipY = high ? midY - 0.32 : midY + 0.32;
+  const back = high ? 0.18 : -0.18;
   renderer.drawPath(
-    roundedPath(
-      [
-        { x: cx, y: cy },
-        { x: cx + r * 0.46, y: cy + r * 0.3 },
-      ],
-      0,
-    ),
-    ink,
+    [
+      { t: "M", x: edgeX, y: midY },
+      { t: "L", x: edgeX, y: tipY },
+      { t: "M", x: edgeX - 0.16, y: tipY + back },
+      { t: "L", x: edgeX, y: tipY },
+      { t: "M", x: edgeX + 0.16, y: tipY + back },
+      { t: "L", x: edgeX, y: tipY },
+    ],
+    { stroke: theme.accent, lineWidth: 0.1, alpha: high ? 1 : 0.5 },
   );
   renderer.flush();
+}
+
+/** The value a constant shows on its body, in its chosen display radix (§53). */
+function constantText(hex: string, radix: unknown, bits: number): string {
+  const n = Number.parseInt(hex, 16);
+  if (!Number.isFinite(n)) return hex;
+  if (radix === "bin") {
+    const w = Math.min(32, Math.max(1, bits));
+    return `0b${n.toString(2).padStart(w, "0")}`;
+  }
+  if (radix === "dec") return String(n);
+  return `0x${hex.toUpperCase()}`;
 }
 
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
 function fitTextSize(text: string, w: number, h: number, base = 1): number {
   const byWidth = (w * 0.92) / Math.max(1, text.length * 0.62);
   return Math.max(0.5, Math.min(base, byWidth, h * 0.6));
+}
+
+/**
+ * A live value line sized to fit a body, shortening with an ellipsis when the
+ * value is too long (UI_OVERHAUL §56) — a 32-bit binary readout stays inside
+ * the part, and hovering shows the whole thing. `size` stays readable (≥ 0.6);
+ * the surplus is cut rather than shrunk to an unreadable hairline.
+ */
+export function fitValueLine(
+  text: string,
+  w: number,
+  h: number,
+  base = 1,
+): { text: string; size: number; full: boolean } {
+  const avail = w * 0.86;
+  const maxSize = Math.max(0.5, Math.min(base, h * 0.6));
+  const size = Math.max(0.6, Math.min(maxSize, avail / (Math.max(1, text.length) * 0.62)));
+  const maxChars = Math.max(1, Math.floor(avail / (size * 0.62)));
+  if (text.length <= maxChars) return { text, size, full: true };
+  return { text: `${text.slice(0, Math.max(1, maxChars - 1))}…`, size, full: false };
 }
 
 /**
@@ -180,9 +268,10 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "io.hexdisplay": "in",
 };
 
-/** Parts that also repeat their value next to the source pin (§21). The probe
- * is NOT here: its value belongs inside its body (UI_OVERHAUL §41). */
-const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register", "mem.ram", "mem.rom"]);
+/** Parts that also repeat their value next to the source pin (§21). Memory parts
+ * are NOT here: their address and data readouts sit on the body itself (§46), as
+ * does the probe's (§36). */
+const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register"]);
 
 /** CSS font stacks for the text annotation's `font` attr (UI_OVERHAUL §40). */
 const TEXT_FONTS: Readonly<Record<string, string>> = {
@@ -221,6 +310,14 @@ const PIN_DISPLAY: Readonly<Record<string, string>> = {
   lt: "less than",
   eq: "equal to",
   gt: "greater than",
+  // Memory control pins read as words in the hover preview (UI_OVERHAUL §52);
+  // the format keeps the short registry name (`we`).
+  we: "write enable",
+  en: "enable",
+  rst: "reset",
+  addr: "address",
+  din: "data in",
+  dout: "data out",
 };
 
 /** Display name for a pin in the hover preview (falls back to the raw name). */
@@ -279,6 +376,12 @@ export interface SceneOverlay {
 const CELL = 8;
 const WIRE_RADIUS = 0.12;
 const WIRE_W = 0.16;
+/**
+ * Width (world units) of a width-mismatch flash RING around a wire. It is a
+ * constant, NOT scaled by the wire's own thickness, so a 32-bit bus's flash
+ * stays a thin pulse instead of a large blob (UI_OVERHAUL §59).
+ */
+const MISMATCH_RING = 0.3;
 const PIN_R = 0.22;
 const PICK_TOL = 0.45;
 const PIN_TOL = 0.55;
@@ -321,6 +424,14 @@ export class DocScene {
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
   private wireMismatch: boolean[] = [];
+  /** Last level a clock drove, and when it flipped (UI_OVERHAUL §47). */
+  private clockLevel = new Map<string, boolean>();
+  private clockChangedAt = new Map<string, number>();
+  /**
+   * Full value text per component whose on-body readout had to be shortened
+   * with an ellipsis this frame (UI_OVERHAUL §56); hover reveals it.
+   */
+  private truncated = new Map<string, string>();
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -474,12 +585,13 @@ export class DocScene {
   }
 
   /**
-   * Value a probe reads with no live sim value (UI_OVERHAUL §40): the
+   * Text a pin reads with no live sim value (UI_OVERHAUL §40/§48): the
    * configured value of a `wiring.constant` on the same net, else null. Lets a
-   * probe show "the value of the item it is connected to" before/without a run.
+   * probe — and a RAM's address — show "the value of the thing it is wired to"
+   * before/without a run.
    */
-  staticProbeValue(comp: CsxComponent): string | null {
-    const netId = this.netOfPin(comp.id, "in");
+  staticPinText(comp: CsxComponent, pin: string): string | null {
+    const netId = this.netOfPin(comp.id, pin);
     if (netId === undefined) return null;
     const net = this.nets.nets[netId];
     if (net === undefined) return null;
@@ -630,6 +742,7 @@ export class DocScene {
     showValues = true,
   ): void {
     const visible = inflateRect(camera.visibleWorldRect(view), 2);
+    this.truncated.clear();
 
     // Behind everything (the renderer has already filled the background).
     if (grid) this.drawGrid(renderer, theme, camera, view);
@@ -693,9 +806,13 @@ export class DocScene {
       if (this.wireMismatch[i]) {
         const t = overlay.now;
         const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
+        // A thin pulsing ring AROUND the wire: `width` (so the ring is never
+        // hidden by the core) plus a small constant that does not grow with the
+        // bus (UI_OVERHAUL §59). Previously the halo was ~2-3x the wire width, so
+        // a 32-bit bus flashed as a ~1.5-unit blob.
         renderer.drawPath(this.wirePaths[i], {
           stroke,
-          lineWidth: width * (2.1 + 1.0 * phase),
+          lineWidth: width + MISMATCH_RING * (0.6 + 0.8 * phase),
           alpha: 0.3 + 0.7 * phase,
         });
       }
@@ -724,6 +841,15 @@ export class DocScene {
       const layout = this.layouts.get(comp.id)!;
       if (!rectIntersects(layout.rect, visible)) continue;
       const selected = selection.hasComponent(comp.id);
+      // Pin terminals are collected up front so every part — including the ones
+      // drawn by a special case below (text/splitter/LED) — gets its markers
+      // (UI_OVERHAUL §50).
+      for (const p of layout.pins) {
+        const dot = { x: p.x, y: p.y };
+        if (p.kind === "out") outDots.push(dot);
+        else if (p.kind === "in") inDots.push(dot);
+        else otherDots.push(dot);
+      }
       // A text annotation: no body box and no pins — just the label, sitting at
       // the rect's left, vertically centred (UI_OVERHAUL §37). A selection
       // outlines the (invisible) hit box so the annotation can be grabbed.
@@ -747,6 +873,101 @@ export class DocScene {
           align: "left",
           font,
         });
+        renderer.flush();
+        continue;
+      }
+      // A splitter is a bus rail with a tap per split pin (UI_OVERHAUL §46):
+      // there is no box body — the old rectangle read as a mux.
+      if (comp.type === "wiring.splitter") {
+        const railX = layout.rect.x + 0.7;
+        const rail: PathCmd[] = [
+          { t: "M", x: railX, y: layout.rect.y + 0.25 },
+          { t: "L", x: railX, y: layout.rect.y + layout.rect.h - 0.25 },
+        ];
+        const taps: PathCmd[] = [];
+        for (const p of layout.pins) {
+          if (p.name === "bus") {
+            rail.push({ t: "M", x: p.x, y: p.y }, { t: "L", x: railX, y: p.y });
+          } else {
+            taps.push({ t: "M", x: railX, y: p.y }, { t: "L", x: p.x, y: p.y });
+          }
+        }
+        renderer.drawPath(rail, { stroke: theme.textDim, lineWidth: 0.22 });
+        renderer.drawPath(taps, { stroke: theme.textDim, lineWidth: 0.14 });
+        if (selected) {
+          renderer.drawPath(
+            rectPath(
+              layout.rect.x - 0.25,
+              layout.rect.y - 0.25,
+              layout.rect.w + 0.5,
+              layout.rect.h + 0.5,
+            ),
+            { stroke: theme.accent, lineWidth: 0.06 },
+          );
+        }
+        renderer.flush();
+        continue;
+      }
+      // An LED (UI_OVERHAUL §49): a dome that lights in its own colour and
+      // throws a glow when the net it reads drives a 1 — live from the sim, or
+      // static from a connected constant, so it lights without a run.
+      if (comp.type === "io.led") {
+        const attrs = comp.attrs ?? {};
+        const color =
+          typeof attrs.color === "string" && /^#[0-9a-f]{6}$/i.test(attrs.color)
+            ? attrs.color
+            : theme.accent;
+        const intensity =
+          typeof attrs.intensity === "number" ? Math.max(0, Math.min(100, attrs.intensity)) : 80;
+        const netId = this.netOfPin(comp.id, "in");
+        const wireIdx = netId === undefined ? undefined : this.nets.nets[netId]?.wires[0];
+        const live = wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
+        const liveState = live !== undefined ? wireValueState(live) : undefined;
+        const stat = this.staticPinText(comp, "in");
+        // A constant drives the net for real — trust it over a stale Z/X (§51).
+        const on =
+          liveState !== undefined && liveState !== "z" && liveState !== "x"
+            ? liveState === "high"
+            : stat !== null && stat !== "" && Number.parseInt(stat, 16) !== 0;
+        const r = Math.min(layout.rect.w, layout.rect.h) * 0.34;
+        const lx = layout.rect.x + layout.rect.w / 2;
+        const ly = layout.rect.y + layout.rect.h / 2;
+        if (on && intensity > 0) {
+          // Illuminate the space around it: soft rings in the LED's colour that
+          // really bloom at 100% (UI_OVERHAUL §50).
+          const k = intensity / 100;
+          for (let i = 4; i >= 1; i--) {
+            renderer.drawPath(circlePath(lx, ly, r * (1 + 0.55 * i * (0.6 + k))), {
+              fill: color,
+              alpha: (0.05 + 0.4 * k) / i,
+            });
+          }
+          renderer.flush();
+        }
+        renderer.drawPath(circlePath(lx, ly, r), { fill: on ? color : theme.panel });
+        renderer.drawPath(circlePath(lx, ly, r), { stroke: theme.textDim, lineWidth: 0.12 });
+        // Input lead from the pin into the dome (so the connection point is
+        // unmistakable), plus the base and two legs (UI_OVERHAUL §50).
+        const baseY = ly + r * 0.85;
+        renderer.drawPath(
+          [
+            { t: "M", x: layout.rect.x, y: ly },
+            { t: "L", x: lx - r, y: ly },
+            { t: "M", x: lx - r * 0.8, y: baseY },
+            { t: "L", x: lx + r * 0.8, y: baseY },
+            { t: "M", x: lx - r * 0.45, y: baseY },
+            { t: "L", x: lx - r * 0.45, y: layout.rect.y + layout.rect.h },
+            { t: "M", x: lx + r * 0.45, y: baseY },
+            { t: "L", x: lx + r * 0.45, y: layout.rect.y + layout.rect.h },
+          ],
+          { stroke: theme.textDim, lineWidth: 0.14 },
+        );
+        if (selected) {
+          renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {
+            stroke: theme.accent,
+            lineWidth: 0.06,
+          });
+        }
         renderer.flush();
         continue;
       }
@@ -807,18 +1028,9 @@ export class DocScene {
         const bodyPath =
           comp.type === "wiring.probe"
             ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-            : outPin
-              ? roundedPath(
-                  [
-                    { x: layout.rect.x, y: layout.rect.y },
-                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y },
-                    { x: layout.rect.x + layout.rect.w, y: layout.rect.y + layout.rect.h },
-                    { x: layout.rect.x, y: layout.rect.y + layout.rect.h },
-                    { x: layout.rect.x, y: layout.rect.y },
-                  ],
-                  layout.rect.h / 2,
-                )
-              : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+            : comp.type === "mem.ram" || comp.type === "mem.rom"
+              ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+              : pinBodyPath(layout.rect, outPin);
         renderer.drawPath(bodyPath, { fill: bodyFill });
         renderer.drawPath(bodyPath, strokeStyle);
         const spec = compSpec(comp.type);
@@ -834,7 +1046,12 @@ export class DocScene {
         let valueText: string | null = null;
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
-          valueText = String(comp.attrs.value);
+          const outPin = layout.pins.find((p) => p.name === "out");
+          valueText = constantText(
+            String(comp.attrs.value),
+            comp.attrs.radix,
+            outPin?.bitsize ?? 1,
+          );
         } else if (sim !== undefined && showValues) {
           const pinName = VALUE_PIN[comp.type];
           if (pinName !== undefined) {
@@ -850,15 +1067,69 @@ export class DocScene {
             }
           }
         }
-        if (valueText !== null) caption = valueText;
+        // A constant always drives its net: when the sim reports high-Z/X for it
+        // (the session hasn't seen a recent edit yet), read the constant instead
+        // of showing a stale Z (UI_OVERHAUL §51).
+        if (valueText !== null && valuePin !== null) {
+          const docNet = this.nets.pinToNet.get(`${comp.id}:${valuePin}`);
+          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+          const val = wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
+          const st = val !== undefined ? wireValueState(val) : undefined;
+          if (st === "z" || st === "x") {
+            const stat = this.staticPinText(comp, valuePin);
+            if (stat !== null) valueText = stat;
+          }
+        }
+        // Memory parts read out ADDRESS + data on the body instead of the word
+        // "RAM"/"ROM" (UI_OVERHAUL §46); everything else shows its value in
+        // place of the type mark.
+        const isMemory = comp.type === "mem.ram" || comp.type === "mem.rom";
+        let addrText: string | null = null;
+        if (isMemory && sim !== undefined && showValues) {
+          const docNet = this.nets.pinToNet.get(`${comp.id}:addr`);
+          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
+          const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
+          if (val !== undefined) {
+            const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? 1) : 1;
+            addrText = formatValue(
+              val,
+              bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+            );
+            const st = wireValueState(val);
+            if (st === "z" || st === "x") {
+              // A constant drives the address for real — never show a stale Z
+              // because the sim session predates the wiring (UI_OVERHAUL §51).
+              addrText = this.staticPinText(comp, "addr") ?? addrText;
+            }
+          }
+        }
         // Static fallback (UI_OVERHAUL §40): with no live sim value, a probe
         // still reads what it is wired to (a directly connected constant).
         if (valueText === null && comp.type === "wiring.probe") {
-          const staticVal = this.staticProbeValue(comp);
+          const staticVal = this.staticPinText(comp, "in");
           if (staticVal !== null) {
             valueText = staticVal;
             valuePin = "in";
           }
+        }
+        // A register ALWAYS reads a value (UI_OVERHAUL §61): its stored value,
+        // and zero when there is nothing live yet — an unwired `q`, or no run.
+        // A register powers on at 0, so a lone register reads `0x00000000`
+        // instead of the bare "REG" mark.
+        if (valueText === null && showValues && comp.type === "mem.register") {
+          const q = layout.pins.find((p) => p.name === "q");
+          const bits = q?.bitsize ?? 1;
+          const zeros = "0".repeat(Math.max(1, Math.ceil(bits / 4)));
+          valueText = formatValue(
+            { v: zeros, x: "", z: "" },
+            bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+          );
+        }
+        if (valueText !== null && !isMemory) caption = valueText;
+        // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
+        // §48), and over a stale Z/X (§51).
+        if (isMemory && addrText === null) {
+          addrText = this.staticPinText(comp, "addr");
         }
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
@@ -881,6 +1152,25 @@ export class DocScene {
             });
           }
         }
+        // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
+        // stacked and centred in the same light style as the rest.
+        if (isMemory) {
+          const mc = layout.rect.x + layout.rect.w / 2;
+          const mid = layout.rect.y + layout.rect.h / 2;
+          const lines = [caption, `Addr: ${addrText ?? "—"}`, `Data: ${valueText ?? "—"}`];
+          let cut = false;
+          lines.forEach((line, i) => {
+            const fit = fitValueLine(line, layout.rect.w, layout.rect.h, 0.9);
+            if (!fit.full) cut = true;
+            renderer.drawText(mc, mid + (i - 1) * 1.2, fit.text, {
+              color: theme.textDim,
+              size: fit.size,
+              align: "center",
+            });
+          });
+          // Hover reveals the full Address/Data readouts (§56).
+          if (cut) this.truncated.set(comp.id, lines.slice(1).join("   "));
+        }
         // The comparator's three outputs each get their own relation symbol
         // next to the pin (<, =, >) instead of one centered mark
         // (UI_OVERHAUL §31); a clock/idle probe draws its own glyph instead of a
@@ -898,19 +1188,80 @@ export class DocScene {
               align: "right",
             });
           }
-        } else if (comp.type === "wiring.clock" && valueText === null) {
-          drawClockGlyph(renderer, theme, cx, cy);
+        } else if (comp.type === "wiring.clock") {
+          // The clock GLOWS while it drives high and sits dull while low (§47),
+          // so its rising/falling edge is readable at a glance; it also flashes
+          // briefly on a flip.
+          // Level: the clock's own live value when it is wired, else the sim's
+          // phase (a clock reads high on even cycles) so an UNWIRED clock still
+          // visibly alternates as you tick (UI_OVERHAUL §51).
+          const high =
+            valueText !== null
+              ? valueText !== "0"
+              : sim?.cycle !== undefined
+                ? sim.cycle % 2 === 0
+                : null;
+          if (high !== null) {
+            const prev = this.clockLevel.get(comp.id);
+            if (prev !== undefined && prev !== high && overlay.now !== undefined) {
+              this.clockChangedAt.set(comp.id, overlay.now);
+            }
+            this.clockLevel.set(comp.id, high);
+          }
+          if (high === true) {
+            // A quiet accent ring says "driving 1" without shouting (§52).
+            renderer.drawPath(
+              rectPath(
+                layout.rect.x - 0.18,
+                layout.rect.y - 0.18,
+                layout.rect.w + 0.36,
+                layout.rect.h + 0.36,
+              ),
+              { stroke: theme.accent, lineWidth: 0.3, alpha: 0.22 },
+            );
+            renderer.flush();
+          }
+          const at = this.clockChangedAt.get(comp.id);
+          if (at !== undefined && overlay.now !== undefined) {
+            const k = 1 - (overlay.now - at) / 450;
+            if (k > 0) {
+              renderer.drawPath(
+                rectPath(
+                  layout.rect.x - 0.25,
+                  layout.rect.y - 0.25,
+                  layout.rect.w + 0.5,
+                  layout.rect.h + 0.5,
+                ),
+                { stroke: theme.accent, lineWidth: 0.16, alpha: k },
+              );
+              renderer.flush();
+            }
+          }
+          drawClockWave(renderer, theme, layout.rect, high);
         } else if (comp.type === "wiring.probe" && valueText === null) {
-          // no type word — the pointed shape already says "probe"
+          // The probe shows only its value; with nothing to read it stays bare
+          // (the pointed shape already says "probe", UI_OVERHAUL §36).
+        } else if (isMemory) {
+          // RAM/ROM drew its stacked Addr/Data lines above.
+        } else if (valueText !== null && !isMemory) {
+          // A live (or static) value line: keep it readable and shorten with an
+          // ellipsis when a wide readout (e.g. 32-bit binary) would overrun the
+          // body — hovering then reveals the whole thing (UI_OVERHAUL §56).
+          const line = fitValueLine(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0);
+          if (!line.full) this.truncated.set(comp.id, caption);
+          renderer.drawText(cx, cy, line.text, {
+            color: theme.textDim,
+            size: line.size,
+            align: "center",
+          });
         } else {
           renderer.drawText(
             cx,
             cy,
             caption,
-            // Values (and symbols, §18) are sized to fit the body, so a 32-bit
-            // readout on a small part stays inside it.
+            // Type marks/symbols are sized to fit the body (§18).
             {
-              color: valueText !== null ? theme.text : theme.textDim,
+              color: theme.textDim,
               size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
               align: "center",
             },
@@ -929,12 +1280,6 @@ export class DocScene {
             );
           }
         }
-      }
-      for (const p of layout.pins) {
-        const dot = { x: p.x, y: p.y };
-        if (p.kind === "out") outDots.push(dot);
-        else if (p.kind === "in") inDots.push(dot);
-        else otherDots.push(dot);
       }
     }
     renderer.flush();
@@ -1113,16 +1458,37 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), stroke);
         }
       } else {
-        // Match the placed body: the probe's silhouette is its hexagon, so the
-        // ghost must not draw a plain rectangle (UI_OVERHAUL §40).
-        const body =
-          ghost.type === "wiring.probe"
-            ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
-            : rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
-        renderer.drawPath(body, {
-          ...stroke,
-          fill: "rgba(91,141,239,0.10)",
-        });
+        // Match the placed body: the probe's silhouette is its hexagon, a memory
+        // part is a chip, and the splitter is a bus rail (UI_OVERHAUL §50).
+        if (ghost.type === "wiring.splitter") {
+          const railX = layout.rect.x + 0.7;
+          const rail: PathCmd[] = [
+            { t: "M", x: railX, y: layout.rect.y + 0.25 },
+            { t: "L", x: railX, y: layout.rect.y + layout.rect.h - 0.25 },
+          ];
+          const taps: PathCmd[] = [];
+          for (const p of layout.pins) {
+            if (p.name === "bus")
+              rail.push({ t: "M", x: p.x, y: p.y }, { t: "L", x: railX, y: p.y });
+            else taps.push({ t: "M", x: railX, y: p.y }, { t: "L", x: p.x, y: p.y });
+          }
+          renderer.drawPath(rail, { ...stroke, lineWidth: 0.22 });
+          renderer.drawPath(taps, { ...stroke, lineWidth: 0.14 });
+        } else {
+          // Match the placed body exactly — an output pin's stadium included
+          // (UI_OVERHAUL §55).
+          const outPin = ghost.type === "wiring.pin" && ghost.attrs?.isOutput === true;
+          const body =
+            ghost.type === "wiring.probe"
+              ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+              : ghost.type === "mem.ram" || ghost.type === "mem.rom"
+                ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+                : pinBodyPath(layout.rect, outPin);
+          renderer.drawPath(body, {
+            ...stroke,
+            fill: "rgba(91,141,239,0.10)",
+          });
+        }
       }
       renderer.flush();
       renderer.drawDots(
@@ -1153,6 +1519,14 @@ export class DocScene {
     } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
       // junction-on-drop preview (only while routing a wire)
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
+    } else if (hit?.kind === "component") {
+      // A readout that had to be shortened on the body shows its full value
+      // above the part on hover (UI_OVERHAUL §56).
+      const full = this.truncated.get(hit.compId);
+      const layout = this.layouts.get(hit.compId);
+      if (full !== undefined && layout !== undefined) {
+        drawCard(renderer, theme, { x: layout.rect.x, y: layout.rect.y - 1.5 }, [full]);
+      }
     }
 
     // Wire info card (shift+click): just the value on the wire (UX

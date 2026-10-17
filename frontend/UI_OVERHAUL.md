@@ -1309,3 +1309,318 @@ month-old one to one a day).
   viewport, that all six sections render, and that Escape dismisses.
 
 **Acceptance:** frontend lint / 303 unit / build green; 52-of-52 e2e green.
+
+## 46. Follow-up batch AK (2026-10-16): splitter + RAM get real shapes
+
+- **The splitter is a bus rail, not a box.** `wiring.splitter` no longer draws a
+  rectangle (which read as a mux): `docScene` draws a straight vertical rail with
+  one horizontal tap per split pin and a stub from the `bus` pin into the rail,
+  and `CompIcon` mirrors it. Selection still outlines the hit box.
+- **A RAM/ROM looks like a chip and reads out its address + data.** The body is
+  `shapes.chipPath` — a rounded rectangle with an orientation notch pip on its
+  bottom edge — used by the placed body, the placement **ghost** and the palette
+  icon. Instead of the word "RAM", the body now shows the **address** beside the
+  `addr` pin and the **data value** beside the output pin (`dout`/`out`), taken
+  from the live sim (formatted by the part's `radix`). The type word is kept as a
+  small dim centred label; memory parts left `VALUE_REPEAT` so the value is no
+  longer duplicated outside the body.
+
+**Acceptance:** frontend lint / 303 unit / build green; e2e unchanged.
+
+## 47. Follow-up batch AL (2026-10-16): a clock you can tick and read
+
+- **The clock shows a square wave + its last edge.** `drawClockWave` replaces the
+  idle clock face: a low→high→current square wave whose final segment is the
+  level the clock currently drives, with an **▲ rising / ▼ falling** marker on
+  the transition that just happened. Idle (no sim value) draws a neutral wave.
+- **Shift+click a clock ticks the sim in place.** `ToolMachine.onTick` fires when
+  a Shift+click lands on a `wiring.clock` (instead of toggle-selecting it);
+  `EditorCanvas` loads the session on demand and calls `stepTick` — the same path
+  as the transport's Ctrl+J, but at the part you're looking at.
+- **The tick is visible.** When a clock's level flips, its outline flashes in the
+  accent colour (fading over ~450 ms while the canvas is animating), in addition
+  to the waveform/edge marker. `editor.spec` guards that the Shift+click is
+  consumed as a tick and does not toggle the selection.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e green — the
+stress-scene _benchmark_ p95 gate fails on this machine (rAF ~40 fps); it also
+fails with these changes stashed, so it is load, not a regression.
+
+## 48. Follow-up batch AM (2026-10-16): reads before a run, a clock that glows, a real button
+
+- **Parts read their driver before a run.** `staticProbeValue` became
+  `staticPinText(comp, pin)` (a `wiring.constant` on the pin's net): the probe
+  uses it for `in`, and a **RAM/ROM's `addr`** now uses it too — so wiring `addr`
+  to a constant shows the address on the chip immediately, no tick needed.
+- **The clock glows high / dulls low.** It draws its square wave **bright
+  (`--wire-high`) while it drives 1** with a soft halo around the body, and dull
+  (`--text-dim`) while it drives 0, so the rising/falling edge is legible at a
+  glance; the accent flash on a flip is kept. Shift+click still ticks in place.
+- **`io.button` looks like a button.** A round cap with a plunger + a lead to the
+  pin (`shapes.ts`), shared by the placed body, the ghost and the palette icon —
+  no more box.
+- **Outline-only parts are visible.** The splitter's rail/taps moved from
+  `--panel-border` to `--text-dim` and got a touch thicker — on a dark canvas the
+  rail was invisible before.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is failing on this loaded machine — it also fails with the
+changes stashed).
+
+## 49. Follow-up batch AN (2026-10-16): the LED lights up
+
+- **`io.led` gets `color` + `intensity`.** The engine validates `color` ("" =
+  theme accent, else `#rrggbb`) and `intensity` (0..=100, default 80); the
+  Inspector offers a swatch + a Brightness field (`docs/format-v2.md` §4).
+- **It looks like an LED and it glows.** The body is a dome (circle) with a base
+  and two legs — shared by the canvas, the placement ghost and the palette icon.
+  While the net it reads drives a 1 it fills with its colour and **throws soft
+  concentric glow rings** whose alpha scales with `intensity`; while the net is 0
+  (or unconnected) it is a dark, unlit dome.
+- **It lights without a run.** The ON test uses the live sim value when present,
+  else the same static read as the probe/RAM — a connected constant — so a
+  constant wired to an LED lights it immediately (UI_OVERHAUL §48).
+
+**Acceptance:** frontend lint / 303 unit / build green; Rust 171 core + 8 golden,
+clippy/fmt clean; 52-of-53 e2e (the stress benchmark p95 gate is environmental).
+
+## 50. Follow-up batch AO (2026-10-16): terminals, memory text, LED punch
+
+- **Every part gets its pin markers.** The text/splitter/LED special cases
+  `continue`d past the pin collection, so those parts drew **no terminals at all**
+  — the LED's and splitter's connection points were invisible. Pins are now
+  collected at the top of the component loop, before any special case.
+- **RAM/ROM read as text, centred.** Instead of a value beside each pin, the body
+  now stacks **`RAM` / `Addr:` / `Data:`** on three centred lines in the light
+  caption style (unread values show `—`); **constants read their value in that
+  same light style** too.
+- **The LED's connection is obvious and its glow has punch.** A lead runs from
+  the `in` pin into the dome, and the glow is a 4-ring bloom whose radius and
+  alpha scale hard with `intensity` — 100% lights the space around it properly.
+- **Brightness is a bar.** New `slider` field kind (drag bar + numeric readout);
+  the LED's Brightness uses it.
+- **Shift+click a clock now always ticks.** The tick fires on the **press**
+  (`CanvasHost.onShiftPress` → `ToolMachine.tickClockAt`) before the Shift+left
+  PAN gesture can claim it, so a click that drifts a few pixels still ticks.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is environmental — it also fails with these changes stashed).
+
+## 51. Follow-up batch AP (2026-10-16): splitter ghost, no stray Z, a ticking clock
+
+- **The splitter's placement ghost matches the part.** The ghost's box fallback
+  still drew a rectangle for `wiring.splitter`; it now draws the same bus rail +
+  taps as the placed body (and the palette icon).
+- **No stale Z on a constant-driven net.** A constant always drives its net, so
+  when the sim reports high-Z/X for one (its session predates a recent edit) the
+  readouts now fall back to the **constant's value** instead of showing `Z` —
+  applied to every value readout and to the LED's on/off test.
+- **An unwired clock still visibly ticks.** A clock whose output isn't wired has
+  no net to report, so its drawn level never changed. It now falls back to the
+  sim's **phase** (`SimOverlay.cycle`: high on even cycles), so Shift+click
+  ticking animates it either way.
+- **LED panel tidied.** The Brightness field's hint line is gone (the bar and its
+  numeric readout say enough).
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e (the stress
+benchmark p95 gate is environmental).
+
+## 52. Follow-up batch AQ (2026-10-16): a quieter clock, an honest address, pin words
+
+- **Clock restyled.** The green `--wire-high` wave and the wide green halo are
+  gone: the waveform is neutral (`--text-dim`) and the segment holding the
+  **current level** is drawn in the theme accent, with the accent edge marker
+  (▲/▼) at half opacity while low. "Driving 1" is now a quiet accent ring around
+  the body instead of a glow — same information, none of the colour noise.
+- **A RAM's address never shows a stale Z.** The §51 constant-over-Z rule was
+  applied to the generic value readout but **not** to `addrText` (which is
+  computed separately), so a RAM wired to a constant still read `Z`. The address
+  readout now applies the same rule.
+- **Pin words in the hover preview.** `PIN_DISPLAY` gained `we` → **write
+  enable** (plus en/rst/addr/din/dout), so the memory control pins read as words
+  when you hover them. The `.csx` format keeps the registry names — renaming
+  `we` for real would invalidate every existing wire endpoint that references it.
+
+**Acceptance:** frontend lint / 303 unit / build green; 52-of-53 e2e.
+
+## 53. Follow-up batch AR (2026-10-16): constant radix, double-click to edit
+
+- **A constant can show hex, binary, or decimal.** New display-only `radix` attr on
+  `wiring.constant` (`"hex" | "bin" | "dec"`, default `"hex"`). The stored `value`
+  stays a hex string in the `.csx` file; the editor renders it per the chosen
+  radix — `0x…` for hex, `0b…` (zero-padded to the bit width) for binary, and the
+  plain unsigned decimal. The `out` pin's bit width drives the padding.
+- **The radix is tagged in the body's corner.** A small dim `hex` / `bin` / `dec`
+  label sits in the constant's bottom-right corner, so its display style is never
+  ambiguous.
+- **Double-click a constant to edit its value.** Double-clicking a constant now
+  selects it _and_ drops the caret straight into its **Value** input in the
+  Inspector (`onEditComponent(compId, "value")` → `focusField` prop → the field
+  focuses and selects on the next render).
+
+**Acceptance:** frontend lint / build green; 6 editor e2e pass (constant radix +
+double-click focus covered); core tests green (`cargo test -p csim-core`, 171 +
+8 golden).
+
+## 54. Follow-up batch AS (2026-10-16): the priority decoder
+
+- **New Plexers tile: Priority Decoder** (`plexers.priority-decoder`). The user
+  asked for this by name and confirmed the behavior: the **highest-numbered
+  asserted input line** (`in0` = lowest priority) is encoded as its **binary
+  index** on `out` (⌈log₂N⌉ bits), with a `valid` output that is high iff any
+  input line is asserted. Behaviorally that is the standard _priority encoder_;
+  the type string and the palette tile keep the course's "priority decoder"
+  wording.
+- **Engine-first.** `CompKind::PriorityDecoder` + `BehaviorKind::PriorityDecoder`
+  with `inputBits` (2..=8, default 4); pins `in0..in{N−1}` (1 bit each), `out`
+  (⌈log₂N⌉ bits), `valid` (1 bit). Every input line consumes (format-v2 §4 /
+  behavior module consume table). An `X` on a line above every known `1` leaves
+  the result unknown (`out` and `valid` are `X`); an `X` below a higher `1` is
+  masked. Delay-table entry `plexers.priority-decoder` = 12 ns, matching the
+  other plexers.
+- **Frontend** mirrors it: a 4-wide box, input lines spread down the left edge,
+  `out`/`valid` on the right, body caption `PRIO DEC`; the palette keeps the
+  human name **Priority Decoder**. The Inspector edits **Input lines** (2–8).
+
+**Acceptance:** frontend lint / 303 unit / build green; core `cargo test -p
+csim-core` 173 + 8 golden; e2e covers the tile (`panels.spec`) and placement +
+line-count edit (`editor.spec`).
+
+## 55. Follow-up batch AT (2026-10-16): LED, slider, wire drag, previews, constants
+
+- **The LED has no bit size.** `io.led`'s Inspector drops its `bitsize` picker
+  (it is a 1-bit indicator); new LEDs no longer seed one.
+- **The brightness slider reaches the end.** The shared `.inspector-row input`
+  rule gave the range input 8 px padding + a border, insetting the track so the
+  fill stopped short of the end. The slider now resets padding/border and draws
+  an explicit `--fill` gradient from its value, so 100 lights the whole bar.
+- **A dragged wire lets go.** Releasing a wire drag (a moved bend, or a
+  junction-wire dropped without connecting) now clears the wire's selection
+  instead of leaving it highlighted; press the handle again to highlight and
+  keep dragging (`ToolMachine.deselectWires`).
+- **The canvas cursor says what a press will do.** Hovering a **pin** shows
+  `crosshair` (wiring — the next click moves the wire), a wire **bend** shows
+  `move`, a **wire** shows `pointer`, a component drag shows `move`, and a
+  placement ghost shows `copy` (`ToolMachine.cursor` → `CanvasHost.cursor`).
+  Idle space keeps the pan cursor.
+- **The output pin's preview matches.** The placement ghost and the palette icon
+  drew a plain rectangle for an output pin; both now use the same rounded
+  stadium the placed part uses (terminal facing left, since an output pin seeds
+  rotation W).
+- **Constants read and edit in their own base.** The body grew to 3x2 so the
+  value fits, the corner `hex`/`bin`/`dec` tag is gone, **Show as** is a
+  3-button segmented chooser, and the **Value** input is typed and shown in the
+  selected base (no forced hex string) — it is converted to the stored hex on
+  commit and rejected if it does not fit the bit width.
+
+**Acceptance:** frontend lint / 305 unit / build green; e2e 54-of-55 (the stress
+benchmark p95 gate is environmental); new unit tests cover the wire-deselect and
+cursor behavior.
+
+## 56. Follow-up batch AU (2026-10-16): probe size, readout buttons, value ellipsis
+
+- **The constant's value hint is gone.** The right panel no longer shows "Typed
+  in the selected base…" under **Value**.
+- **The probe is roomier and picks its base with buttons.** `wiring.probe` grew
+  to 3×2 so a multi-bit readout fits, and its **Show as** is now the same
+  segmented-button chooser the constant uses instead of a "Radix" dropdown. The
+  pin's readout gets the same chooser. (Their `radix` is a _display mode_ —
+  unsigned / signed / hex, validated by the engine — so the buttons offer those
+  three rather than the constant's hex / bin / dec.)
+- **Long readouts ellipsize instead of overflowing.** A value that would overrun
+  its body is shortened with a trailing `…` at a readable size (≥ 0.6) rather
+  than shrunk to a hairline or spilling off the part — constants, probes, pins,
+  registers, LEDs and a RAM/ROM's `Addr:`/`Data:` lines all go through
+  `fitValueLine`. **Hovering the part then shows the full value in a card above
+  it** (`DocScene.truncated` → `drawCard`).
+
+**Acceptance:** frontend lint / 307 unit / build green; e2e 54-of-55; new
+`docScene.test.ts` pins `fitValueLine` (short values stay whole, wide ones fit).
+
+## 57. Follow-up batch AV (2026-10-16): plain names, one base chooser everywhere
+
+- **The Inspector header reads in plain words.** It showed the raw id + type
+  (`c3` / `plexers.mux`); it now headlines the component's full name —
+  **Multiplexer**, **Demultiplexer**, **Priority Decoder**, **Tri-state
+  Buffer**, … (`catalog.typeDisplayName`) — with the raw id as quiet metadata.
+  Selecting a wire headlines **Wire** (`N-bit bus` stays beside it).
+- **Every readout shares one base chooser.** The constant, pin, probe and now
+  the **register** all use the same 3-button **Show as** chooser — **Hex / Bin /
+  Dec** — replacing the old "Radix" dropdowns (and dropping the separate
+  Unsigned/Signed labels, which read as the same thing to the user). A new
+  `bin` display mode renders `0b…` (`formatValue`).
+- **The register's stored value reads on its body** in the chosen base, like the
+  other readouts (its `radix` is display-only; `docs/format-v2.md` notes it).
+  The engine accepts `radix` on `wiring.pin` / `wiring.probe` / `mem.register`
+  as `unsigned | signed | hex | bin | dec` (the extra names stay valid so older
+  files keep loading).
+
+**Acceptance:** cargo fmt/clippy/`csim-core` 173 + 8 golden green; frontend lint
+/ 308 unit / build green; e2e 54-of-55 (the stress benchmark p95 gate is
+environmental).
+
+## 58. Follow-up batch AW (2026-10-16): one-page memory editor, quieter Inspector
+
+- **The memory editor is one scrolling page.** The hex grid no longer paginates
+  (256 words a page): every address renders in a single scroll area that fills
+  the dialog (`.mem-table-wrap { flex: 1; min-height: 0; overflow: auto }`).
+  Paste/arrow navigation still focuses the landed cell, which scrolls it into
+  view.
+- **No more how-to prose.** The dialog's "Click a cell, then paste or type hex
+  values …" paragraph is gone (the "N of M words set · cell 0x…" counter stays).
+  Every component `hint:` is dropped from the Inspector — no "Words — a power of
+  two…", no "One `pin: bit,bit` line…", no "A hex display decodes four bits per
+  digit", etc. — as are the wire-width explanations. Only real warnings (width
+  mismatch, unnamed/not-addressable) remain.
+- **The RAM/ROM panel is compact.** The memory's size field is labelled **Words**
+  (it is the number of words the memory holds — kept, since it is what sizes the
+  memory) with its hint removed; the `Autoload` and `Contents` rows are followed
+  by a **single action line** — `Choose file…` / `Clear` / `Edit hex…` — instead
+  of two full-width button rows plus a trailing explanation.
+
+**Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (memory
+spec passes against the single-page grid).
+
+## 59. Follow-up batch AX (2026-10-16): a thin width-mismatch flash
+
+- **The mismatch flash no longer scales with the bus.** The pulsing width-mismatch
+  halo was drawn at `width × (2.1 + phase)`, so a 32-bit bus (≈0.57 units of
+  core) flashed as a **~1.5-unit blob**. It is now `width + MISMATCH_RING × (0.6
+  - 0.8·phase)` with a constant ring width (`MISMATCH_RING = 0.3`): a thin pulse
+    around the wire at every bit width — wide enough never to hide behind the core,
+    never proportional to it.
+
+**Acceptance:** frontend lint / build green; e2e 54-of-55 (the three frozen-halo
+baselines were re-blessed for this platform). The committed **linux** baselines
+still need one `--update-snapshots` run on Linux (pre-existing todo).
+
+## 60. Follow-up batch AY (2026-10-16): tabs name themselves, no popups
+
+- **Creating a tab is inline, with a slide-in.** The strip's "+" adds the
+  subcircuit straight away with a unique default name (`subN`), the tab **slides
+  in** (`.sheet-tab-wrap.enter` → `sheet-tab-in`), and its label becomes a small
+  **input right in the tab** — type the name there. Enter (or blur) commits,
+  Escape abandons and keeps the default.
+- **Double-click re-opens the same inline box.** The tab's double-click (and the
+  middle-click menu's **Rename…**) now start in-place editing rather than a
+  modal, so the sheet-name popup is gone entirely — `components/NameDialog.tsx`
+  and its `.name-dialog`/`.name-actions` styles are deleted.
+- The inline input stops its own key events, and the app's global shortcuts
+  already ignore events from a focused `INPUT`, so typing a name never rotates
+  the selection or cancels wiring.
+
+**Acceptance:** frontend lint / 308 unit / build green; e2e 54-of-55 (`fileops`
+covers create-inline, double-click rename and the middle-click Rename… box).
+
+## 61. Follow-up batch AZ (2026-10-16): a register always reads a value
+
+- **A register shows its value even with nothing connected.** It only had a
+  readout when its `q` net carried a live value, so an unwired (or not-yet-run)
+  register fell back to the bare **"REG"** mark. A register powers on at 0, so
+  when no live value is available the body now reads zero padded to its word
+  width in the chosen base (e.g. `0x00000000` for a 32-bit register, `0` for a
+  1-bit one). The `Show values` preference still governs it, and a live value
+  overrides it as before.
+
+**Acceptance:** frontend lint / build green; e2e 54-of-55 (visual baselines
+unchanged within tolerance).

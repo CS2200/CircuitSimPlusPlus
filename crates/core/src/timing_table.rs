@@ -59,6 +59,7 @@ const REQUIRED_KINDS: &[&str] = &[
     "plexers.decoder",
     "plexers.demux",
     "plexers.mux",
+    "plexers.priority-decoder",
     "wiring.controlled-buffer",
 ];
 

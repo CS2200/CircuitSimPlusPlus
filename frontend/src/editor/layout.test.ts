@@ -123,6 +123,7 @@ describe("compLayout", () => {
       "plexers.mux",
       "plexers.demux",
       "plexers.decoder",
+      "plexers.priority-decoder",
       "arith.adder",
       "arith.shifter",
       "mem.register",

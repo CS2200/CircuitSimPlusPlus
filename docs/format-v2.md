@@ -133,14 +133,15 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1) |
 | `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32), `delay` |
 | `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
-| `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex") |
-| `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize` |
+| `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
+| `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only |
 | `wiring.clock` | `out` | — |
 | `wiring.splitter` | `bus` + one per `splits` key | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1 |
-| `wiring.probe` | `in` | `bitsize` (1), `radix` |
+| `wiring.probe` | `in` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
 | `plexers.mux` | `in0`..`in{2^sel−1}`, `sel`, `out` | `bitsize` (1), `selectBits` (1; 1..=8) |
 | `plexers.demux` | `in`, `sel`, `out0`..`out{2^sel−1}` | `bitsize` (1), `selectBits` (1) |
 | `plexers.decoder` | `in`, `out0`..`out{2^in−1}` | `inputBits` (2; 1..=8) |
+| `plexers.priority-decoder` | `in0`..`in{N−1}`, `out` (⌈log₂N⌉ bits), `valid` | `inputBits` (4; 2..=8). Highest-numbered asserted input line → its binary index on `out`; `valid` high iff any input is asserted |
 | `arith.adder` | `a`, `b`, `cin`, `out`, `cout` | `bitsize` (1) |
 | `arith.subtractor` | `a`, `b`, `bin`, `out`, `bout` | `bitsize` (1) |
 | `arith.multiplier` | `a`, `b`, `out` (out = 2×bitsize) | `bitsize` (1) |
@@ -149,11 +150,11 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `arith.negator` | `in`, `out` | `bitsize` (1) |
 | `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr") |
 | `arith.bit-extender` | `in`, `out` | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign") |
-| `mem.register` | `d`, `clk`, `en`, `rst`, `q` | `bitsize` (1) |
+| `mem.register` | `d`, `clk`, `en`, `rst`, `q` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
 | `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
 | `mem.rom` | `addr`, `out` | same as `mem.ram` |
 | `subcircuit` | from target circuit's named pins | `circuit` (required) |
-| `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless |
+| `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength) |
 | `misc.text` | — (no pins) | `text` ("") — free-form annotation; `color` ("" = theme text, else `#rrggbb`); `font` ("sans" \| "serif" \| "mono") |
 
 ⚠️¹ `wiring.controlled-buffer` is required by BACKEND.md B4 ("controlled buffer (tri-state)")

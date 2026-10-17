@@ -13,7 +13,7 @@ import {
 } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
-import NameDialog from "./components/NameDialog";
+
 import HistoryDrawer from "./components/HistoryDrawer";
 import HistoryPreview from "./components/HistoryPreview";
 import RecoveryDialog from "./components/RecoveryDialog";
@@ -231,6 +231,8 @@ export default function App() {
   const railRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  /** Field the Inspector should focus next (a constant's value on double-click). */
+  const [inspectorFocus, setInspectorFocus] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
@@ -343,12 +345,10 @@ export default function App() {
   );
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
   const [hzExp, setHzExp] = useState(() => loadNumPref(PREF_DEFAULT_HZ, 10)); // hz = 10^(exp/10)
-  const [nameDialog, setNameDialog] = useState<{
-    title: string;
-    initial: string;
-    submitLabel?: string;
-    onSubmit: (value: string) => void;
-  } | null>(null);
+  /** Sheet index being renamed inline in its tab, or null (UI_OVERHAUL §60). */
+  const [renamingSheet, setRenamingSheet] = useState<number | null>(null);
+  /** The sheet that just appeared — drives its slide-in animation (§60). */
+  const [enteringSheet, setEnteringSheet] = useState<number | null>(null);
   const simVersion = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
 
   // Current sheet name (safe while a doc/sheet swap is mid-render).
@@ -1079,44 +1079,47 @@ export default function App() {
     [doc, toast],
   );
 
+  /**
+   * New subcircuit (UI_OVERHAUL §60): the tab is created immediately with a
+   * default name and slides in, then its label becomes an inline input — type
+   * the name right in the tab. No popup.
+   */
   const onNewSheet = useCallback(() => {
-    setNameDialog({
-      title: "New subcircuit",
-      initial: `sub${doc.circuits.length}`,
-      submitLabel: "Create",
-      onSubmit: (name) => {
-        setNameDialog(null);
-        try {
-          const idx = doc.addCircuit(name);
-          setSheet(idx);
-          editorRef.current?.refresh();
-        } catch (err) {
-          toast(String(err instanceof Error ? err.message : err));
-        }
-      },
-    });
+    const taken = new Set(doc.circuits.map((c) => c.name));
+    let n = doc.circuits.length;
+    while (taken.has(`sub${n}`)) n++;
+    try {
+      const idx = doc.addCircuit(`sub${n}`);
+      setSheet(idx);
+      setEnteringSheet(idx);
+      setRenamingSheet(idx);
+      editorRef.current?.refresh();
+      // Drop the slide-in class once the animation has played.
+      window.setTimeout(() => setEnteringSheet((cur) => (cur === idx ? null : cur)), 400);
+    } catch (err) {
+      toast(String(err instanceof Error ? err.message : err));
+    }
   }, [doc, toast]);
 
-  const onRenameSheet = useCallback(
-    (idx: number) => {
-      const current = doc.circuit(idx).name;
-      setNameDialog({
-        title: `Rename "${current}"`,
-        initial: current,
-        submitLabel: "Rename",
-        onSubmit: (name) => {
-          setNameDialog(null);
-          try {
-            doc.renameCircuit(idx, name);
-            editorRef.current?.refresh();
-          } catch (err) {
-            toast(String(err instanceof Error ? err.message : err));
-          }
-        },
-      });
+  /** Double-click (or the middle-click menu's Rename) edits the label in place. */
+  const onRenameSheet = useCallback((idx: number) => {
+    setRenamingSheet(idx);
+  }, []);
+
+  const onCommitSheetName = useCallback(
+    (idx: number, name: string) => {
+      setRenamingSheet(null);
+      try {
+        doc.renameCircuit(idx, name);
+        editorRef.current?.refresh();
+      } catch (err) {
+        toast(String(err instanceof Error ? err.message : err));
+      }
     },
     [doc, toast],
   );
+
+  const onCancelSheetName = useCallback(() => setRenamingSheet(null), []);
 
   /** Delete a circuit sheet (guarded in the document; undoable). */
   const onDeleteSheet = useCallback(
@@ -1572,6 +1575,10 @@ export default function App() {
                 onNew={onNewSheet}
                 onRename={onRenameSheet}
                 onDelete={onDeleteSheet}
+                renaming={renamingSheet}
+                onCommitRename={onCommitSheetName}
+                onCancelRename={onCancelSheetName}
+                enterIdx={enteringSheet}
               />
               <div className="editor-wrap">
                 <EditorCanvas
@@ -1580,6 +1587,7 @@ export default function App() {
                   themeName={`${theme}|${accent}`}
                   sheetIdx={sheet}
                   onStatus={onStatus}
+                  onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
                   sim={sim}
                   pathIds={pathIds}
@@ -1620,6 +1628,8 @@ export default function App() {
                 filePath={filePath}
                 onEdit={() => editorRef.current?.refresh()}
                 onNotify={toast}
+                focusField={inspectorFocus}
+                onFocusHandled={() => setInspectorFocus(null)}
               />
             </aside>
           </>
@@ -1673,15 +1683,6 @@ export default function App() {
         )}
         <span className="statusbar-hint">press ? for shortcuts</span>
       </footer>
-      {nameDialog !== null && (
-        <NameDialog
-          title={nameDialog.title}
-          initial={nameDialog.initial}
-          submitLabel={nameDialog.submitLabel}
-          onSubmit={nameDialog.onSubmit}
-          onCancel={() => setNameDialog(null)}
-        />
-      )}
       <div className="toast-stack">
         {toasts.map((t) => (
           <div className="toast" key={t.id} role="status">

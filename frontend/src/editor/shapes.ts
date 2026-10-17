@@ -149,6 +149,32 @@ export interface GateShape {
 }
 
 /**
+ * IC-style chip body for RAM/ROM (UI_OVERHAUL §46): a rounded rectangle with a
+ * small notch pip on its bottom edge, so a memory part reads as a chip. Shared
+ * by the placed body and the placement ghost.
+ */
+export function chipPath(x: number, y: number, w: number, h: number): PathCmd[] {
+  const inset = 0.3;
+  const cx = x + w / 2;
+  const nr = 0.6;
+  return [
+    { t: "M", x: x + inset, y },
+    { t: "L", x: x + w - inset, y },
+    { t: "Q", cx: x + w, cy: y, x: x + w, y: y + inset },
+    { t: "L", x: x + w, y: y + h - inset },
+    { t: "Q", cx: x + w, cy: y + h, x: x + w - inset, y: y + h },
+    { t: "L", x: x + inset, y: y + h },
+    { t: "Q", cx: x, cy: y + h, x, y: y + h - inset },
+    { t: "L", x, y: y + inset },
+    { t: "Q", cx: x, cy: y, x: x + inset, y },
+    { t: "Z" },
+    // orientation notch (a pip bulging up into the bottom edge)
+    { t: "M", x: cx - nr, y: y + h },
+    { t: "Q", cx, cy: y + h - nr * 1.4, x: cx + nr, y: y + h },
+  ];
+}
+
+/**
  * Pointed-hexagon body for the probe (UI_OVERHAUL §40): a shape that reads as
  * "probe" without a type word. Shared by the placed body, the placement ghost
  * and the palette icon, so the preview matches the part you get.
@@ -226,6 +252,32 @@ export function gateShape(
       };
     case "gate.buffer":
       return { body: triPath(x, y, w, h), extra: [], outBubble: null };
+    case "io.button": {
+      // A push button (UI_OVERHAUL §48): a round cap with a plunger + a lead out
+      // to its pin, not a box.
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+      const r = Math.min(w, h) * 0.3;
+      return {
+        body: circlePath(cx, cy, r),
+        extra: [
+          // plunger stem, cap bar, and the lead to the output pin
+          [
+            { t: "M", x: cx, y: cy - r },
+            { t: "L", x: cx, y: y + h * 0.1 },
+          ],
+          [
+            { t: "M", x: cx - w * 0.24, y: y + h * 0.1 },
+            { t: "L", x: cx + w * 0.24, y: y + h * 0.1 },
+          ],
+          [
+            { t: "M", x: cx + r, y: cy },
+            { t: "L", x: x + w, y: cy },
+          ],
+        ],
+        outBubble: null,
+      };
+    }
     case "wiring.controlled-buffer":
       // A buffer triangle with an enable lead on the bottom edge (UI_OVERHAUL
       // §43): the extra stroke connects the body's lower slanted edge to the

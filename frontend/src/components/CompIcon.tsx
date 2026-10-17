@@ -1,5 +1,5 @@
 import { compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
-import { probePath, bubblePaths, gateShape } from "../editor/shapes";
+import { probePath, chipPath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
 
 /**
@@ -45,6 +45,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   "mem.ram": "RAM",
   "mem.rom": "ROM",
   "plexers.decoder": "DECODER",
+  "plexers.priority-decoder": "PRIO DEC",
   "wiring.constant": "1",
   "io.hexdisplay": "8",
   "misc.text": "T",
@@ -88,6 +89,10 @@ export default function CompIcon({
   const shape = gateShape(type, 0, 0, w, h);
   const glyph = GLYPHS[type];
   const caption = compSpec(type).caption(attrs);
+  // An output pin is a rounded stadium whose terminal faces left (it seeds
+  // rotation W); it must look like the placed part, not like the input pin
+  // (UI_OVERHAUL §55).
+  const outPin = type === "wiring.pin" && attrs.isOutput === true;
 
   return (
     <svg
@@ -105,6 +110,7 @@ export default function CompIcon({
         strokeWidth={0.14}
         strokeLinejoin="round"
         strokeLinecap="round"
+        transform={outPin ? `translate(${w} 0) scale(-1 1)` : undefined}
       >
         {/* body */}
         {shape !== null ? (
@@ -121,10 +127,40 @@ export default function CompIcon({
           // square-wave source — no box, the waveform is the icon
           <path d="M0.15 1.25 L0.5 1.25 L0.5 0.75 L1.0 0.75 L1.0 1.25 L1.5 1.25 L1.5 0.75 L1.85 0.75" />
         ) : type === "io.led" ? (
-          <circle cx={w / 2} cy={h / 2} r={0.38} fill="currentColor" fillOpacity={0.2} />
+          // LED dome + legs (UI_OVERHAUL §49) — same look as on canvas
+          <>
+            <circle
+              cx={w / 2}
+              cy={h / 2}
+              r={Math.min(w, h) * 0.34}
+              fill="currentColor"
+              fillOpacity={0.3}
+            />
+            <path
+              d={`M${w / 2 - 0.15} ${h / 2 + 0.26} L${w / 2 - 0.15} ${h} M${w / 2 + 0.15} ${
+                h / 2 + 0.26
+              } L${w / 2 + 0.15} ${h}`}
+            />
+          </>
         ) : type === "wiring.probe" ? (
           // the probe's pointed hexagon (UI_OVERHAUL §40) — same as on canvas
           <path d={d(probePath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
+        ) : type === "mem.ram" || type === "mem.rom" ? (
+          // chip body (UI_OVERHAUL §46) — same as on canvas
+          <path d={d(chipPath(0, 0, w, h))} fill="currentColor" fillOpacity={0.08} />
+        ) : type === "wiring.splitter" ? (
+          // A bus rail with a tap per split pin (UI_OVERHAUL §46) — no box, so it
+          // doesn't read as a mux.
+          <>
+            <path d={`M0.7 0.25 L0.7 ${h - 0.25}`} />
+            {pins.map((p, i) =>
+              p.name === "bus" ? (
+                <path key={i} d={`M${p.dx} ${p.dy} L0.7 ${p.dy}`} />
+              ) : (
+                <path key={i} d={`M0.7 ${p.dy} L${p.dx} ${p.dy}`} />
+              ),
+            )}
+          </>
         ) : (
           <>
             <rect
@@ -132,7 +168,7 @@ export default function CompIcon({
               y={0}
               width={w}
               height={h}
-              rx={BOX_RX}
+              rx={outPin ? h / 2 : BOX_RX}
               fill="currentColor"
               fillOpacity={0.08}
             />

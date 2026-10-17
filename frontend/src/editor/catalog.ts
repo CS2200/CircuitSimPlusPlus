@@ -182,6 +182,42 @@ function plexerSpec(
   };
 }
 
+/**
+ * Priority decoder (`plexers.priority-decoder`): N single-bit input lines
+ * (in0 = lowest priority) → the binary index of the highest-numbered
+ * asserted line (`out`, ⌈log2 N⌉ bits) plus a `valid` flag, on the right
+ * edge. Named for the palette wording the course uses (UI_OVERHAUL §54);
+ * behaviorally it is the standard priority encoder.
+ */
+function priorityDecoderSpec(): CompSpec {
+  const lines = (attrs: Readonly<Record<string, unknown>>) =>
+    Math.max(2, numAttr(attrs, "inputBits", 4));
+  const height = (attrs: Readonly<Record<string, unknown>>) => Math.max(4, lines(attrs) + 1);
+  return {
+    width: () => 4,
+    height,
+    pins: (attrs) => {
+      const count = lines(attrs);
+      const h = height(attrs);
+      const outBits = Math.max(1, 32 - Math.clz32(count - 1));
+      const pins: PinSpec[] = [];
+      for (let i = 0; i < count; i++) {
+        pins.push({
+          name: `in${i}`,
+          dx: 0,
+          dy: ((i + 1) * h) / (count + 1),
+          kind: "in",
+          bitsize: 1,
+        });
+      }
+      pins.push({ name: "out", dx: 4, dy: h / 3, kind: "out", bitsize: outBits });
+      pins.push({ name: "valid", dx: 4, dy: (2 * h) / 3, kind: "out", bitsize: 1 });
+      return pins;
+    },
+    caption: () => "PRIO DEC",
+  };
+}
+
 const BUS_WIDTH = 32; // sentinel: attr-driven bus pin (boxSpec resolves via bitsOf)
 
 /** Default splitter mapping (format-v2 §4 requires `splits`): b{i} = bus bit i. */
@@ -396,17 +432,20 @@ const REGISTRY: Record<string, CompSpec> = {
     ],
     caption: () => "PIN",
   },
+  // The constant is roomy enough to read its value (UI_OVERHAUL §55): 3x2,
+  // its `out` on the right edge.
   "wiring.constant": boxSpec(
+    3,
     2,
-    1,
-    [{ name: "out", dx: 2, dy: 0.5, kind: "out", bitsize: BUS_WIDTH }],
+    [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: BUS_WIDTH }],
     "CONST",
   ),
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
+  // Roomier than a bare hexagon so a multi-bit readout fits (UI_OVERHAUL §56).
   "wiring.probe": boxSpec(
+    3,
     2,
-    1,
-    [{ name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BUS_WIDTH }],
+    [{ name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH }],
     "PROBE",
   ),
   "wiring.splitter": splitterSpec(),
@@ -415,6 +454,7 @@ const REGISTRY: Record<string, CompSpec> = {
   "plexers.mux": plexerSpec("MUX", "in"),
   "plexers.demux": plexerSpec("DEMUX", "out"),
   "plexers.decoder": plexerSpec("DECODER", "out-no-in", "inputBits", 2),
+  "plexers.priority-decoder": priorityDecoderSpec(),
 
   // Arithmetic
   "arith.adder": boxSpec(
@@ -587,6 +627,52 @@ export function compSpec(type: string): CompSpec {
   return REGISTRY[type] ?? FALLBACK;
 }
 
+/**
+ * Plain, full human name per component type (UI_OVERHAUL §57) — the Inspector
+ * header reads "Multiplexer", not `plexers.mux`.
+ */
+const TYPE_NAMES: Readonly<Record<string, string>> = {
+  "gate.and": "AND Gate",
+  "gate.or": "OR Gate",
+  "gate.xor": "XOR Gate",
+  "gate.nand": "NAND Gate",
+  "gate.nor": "NOR Gate",
+  "gate.xnor": "XNOR Gate",
+  "gate.not": "NOT Gate",
+  "gate.buffer": "Buffer",
+  "wiring.controlled-buffer": "Tri-state Buffer",
+  "wiring.pin": "Pin",
+  "wiring.constant": "Constant",
+  "wiring.clock": "Clock",
+  "wiring.probe": "Probe",
+  "wiring.splitter": "Splitter",
+  "plexers.mux": "Multiplexer",
+  "plexers.demux": "Demultiplexer",
+  "plexers.decoder": "Decoder",
+  "plexers.priority-decoder": "Priority Decoder",
+  "arith.adder": "Adder",
+  "arith.subtractor": "Subtractor",
+  "arith.multiplier": "Multiplier",
+  "arith.divider": "Divider",
+  "arith.comparator": "Comparator",
+  "arith.negator": "Negator",
+  "arith.shifter": "Shifter",
+  "arith.bit-extender": "Bit Extender",
+  "mem.register": "Register",
+  "mem.ram": "RAM",
+  "mem.rom": "ROM",
+  "io.button": "Button",
+  "io.led": "LED",
+  "io.hexdisplay": "Hex Display",
+  subcircuit: "Subcircuit",
+  "misc.text": "Text",
+};
+
+/** Full human name for a component type (falls back to the raw type string). */
+export function typeDisplayName(type: string): string {
+  return TYPE_NAMES[type] ?? type;
+}
+
 /** Palette entries grouped for the UI, in registry order. */
 /** A palette tile: the type it places plus an optional placement seed. */
 export interface PaletteItem {
@@ -632,7 +718,12 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   },
   {
     group: "Plexers",
-    items: [{ type: "plexers.mux" }, { type: "plexers.demux" }, { type: "plexers.decoder" }],
+    items: [
+      { type: "plexers.mux" },
+      { type: "plexers.demux" },
+      { type: "plexers.decoder" },
+      { type: "plexers.priority-decoder", label: "Priority Decoder" },
+    ],
   },
   {
     group: "Arithmetic",
@@ -679,10 +770,40 @@ export type AttrField =
       hint?: string;
     }
   | {
+      /** A drag bar (UI_OVERHAUL §50), e.g. the LED's brightness. */
+      key: string;
+      label: string;
+      kind: "slider";
+      min: number;
+      max: number;
+      /** Shown when the attr is absent. */
+      dflt: number;
+      group?: string;
+      hint?: string;
+    }
+  | {
       key: string;
       label: string;
       kind: "text";
       placeholder?: string;
+      group?: string;
+      hint?: string;
+    }
+  /** A value typed/read in the component's selected radix (constant, §55). */
+  | {
+      key: string;
+      label: string;
+      kind: "radix-value";
+      placeholder?: string;
+      group?: string;
+      hint?: string;
+    }
+  /** A segmented base chooser (constant `radix`, §55). */
+  | {
+      key: string;
+      label: string;
+      kind: "radix";
+      options: { value: string; label: string }[];
       group?: string;
       hint?: string;
     }
@@ -733,14 +854,21 @@ const HEX_BITSIZE_FIELD: AttrField = {
   kind: "picker",
   dflt: 4,
   group: "Width",
-  hint: "A hex display decodes four bits per digit.",
 };
 
-const RADIX_OPTIONS = [
-  { value: "unsigned", label: "Unsigned" },
-  { value: "signed", label: "Signed" },
-  { value: "hex", label: "Hex" },
-];
+/** The base chooser shared by every readout: constants, pins, probes,
+ * registers, memory and I/O (UI_OVERHAUL §56/§57). */
+const RADIX_FIELD: AttrField = {
+  key: "radix",
+  label: "Show as",
+  kind: "radix",
+  group: "Options",
+  options: [
+    { value: "hex", label: "Hex" },
+    { value: "bin", label: "Bin" },
+    { value: "dec", label: "Dec" },
+  ],
+};
 
 /**
  * Every attribute the panel offers for a type, grouped for the Inspector
@@ -799,7 +927,6 @@ function baseFields(type: string): AttrField[] {
             kind: "picker",
             dflt: 16,
             group: "Width",
-            hint: "Wider than the input width (format-v2 §4).",
           },
           {
             key: "mode",
@@ -820,20 +947,24 @@ function baseFields(type: string): AttrField[] {
     case "wiring.pin":
       // Direction (input/output) is chosen by the palette tile, not here
       // (UI_OVERHAUL §36) — so the panel only edits width + radix.
-      return [
-        BITSIZE_FIELD,
-        { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-      ];
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "wiring.constant":
+      // The value is edited in whichever radix is selected, so you never have
+      // to think in hex unless you pick hex (UI_OVERHAUL §55); double-click
+      // jumps straight into the value input.
       return [
         BITSIZE_FIELD,
+        { key: "value", label: "Value", kind: "radix-value", placeholder: "0", group: "Options" },
         {
-          key: "value",
-          label: "Value (hex)",
-          kind: "text",
-          placeholder: "0",
+          key: "radix",
+          label: "Show as",
+          kind: "radix",
           group: "Options",
-          hint: "Hex string; must fit the bit size.",
+          options: [
+            { value: "hex", label: "Hex" },
+            { value: "bin", label: "Bin" },
+            { value: "dec", label: "Dec" },
+          ],
         },
       ];
     case "wiring.clock":
@@ -865,14 +996,10 @@ function baseFields(type: string): AttrField[] {
           kind: "splits",
           placeholder: "b0: 0",
           group: "Options",
-          hint: "One `pin: bit,bit` line per pin; every bus bit is used once. Bus width = highest bit + 1.",
         },
       ];
     case "wiring.probe":
-      return [
-        BITSIZE_FIELD,
-        { key: "radix", label: "Radix", kind: "select", group: "Options", options: RADIX_OPTIONS },
-      ];
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "plexers.mux":
     case "plexers.demux":
       return [
@@ -899,8 +1026,21 @@ function baseFields(type: string): AttrField[] {
           group: "Width",
         },
       ];
+    case "plexers.priority-decoder":
+      return [
+        {
+          key: "inputBits",
+          label: "Input lines",
+          kind: "number",
+          min: 2,
+          max: 8,
+          placeholder: "4",
+          group: "Width",
+        },
+      ];
     case "mem.register":
-      return [BITSIZE_FIELD];
+      // The register shows its stored value on the body, in the chosen base.
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "mem.ram":
     case "mem.rom":
       // `autoload` and `contents` are edited by the Inspector's Memory
@@ -909,13 +1049,12 @@ function baseFields(type: string): AttrField[] {
         BITSIZE_FIELD,
         {
           key: "depth",
-          label: "Depth",
+          label: "Words",
           kind: "number",
           min: 1,
           max: 1_048_576,
           placeholder: "256",
           group: "Width",
-          hint: "Words — a power of two, up to 2^20.",
         },
       ];
     case "subcircuit":
@@ -923,8 +1062,22 @@ function baseFields(type: string): AttrField[] {
     case "io.hexdisplay":
       return [HEX_BITSIZE_FIELD];
     case "io.button":
-    case "io.led":
       return [BITSIZE_FIELD];
+    case "io.led":
+      // LED look + glow (UI_OVERHAUL §49). The LED is a 1-bit indicator — it
+      // has no bit-size field (UI_OVERHAUL §55).
+      return [
+        { key: "color", label: "Color", kind: "color", group: "Options" },
+        {
+          key: "intensity",
+          label: "Brightness",
+          kind: "slider",
+          min: 0,
+          max: 100,
+          dflt: 80,
+          group: "Options",
+        },
+      ];
     default:
       return [];
   }
