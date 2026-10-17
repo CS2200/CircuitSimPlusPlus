@@ -140,6 +140,8 @@ export class ToolMachine {
   private hoverCursor: HoverCursor = "none";
   /** The wire a press started on (a bend drag or a junction wire), if any. */
   private pressWireIdx: number | null = null;
+  /** The momentary io.button currently held, if any. */
+  private pressButton: string | null = null;
   private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
   /**
    * Left-press origin and whether the pointer has swept past
@@ -156,6 +158,11 @@ export class ToolMachine {
   onTick?: () => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
   onOpenSubcircuit?: (circuit: string) => void;
+  /**
+   * A momentary push button held down (`down` true) or released (`down` false):
+   * drives its `out` pin while pressed (UI decision).
+   */
+  onButton?: (compId: string, down: boolean) => void;
   /** Bumped on every state change so the host re-renders. */
   version = 0;
 
@@ -194,6 +201,10 @@ export class ToolMachine {
     this.pressStart = null;
     this.pressSwept = false;
     this.pressWireIdx = null;
+    if (this.pressButton !== null) {
+      this.onButton?.(this.pressButton, false);
+      this.pressButton = null;
+    }
     if (any) this.changed();
   }
 
@@ -317,6 +328,17 @@ export class ToolMachine {
 
     const comp = this.scene.pickComponent(world);
     if (comp !== null) {
+      const hitComp = this.doc
+        .circuit(this.circuitIdx())
+        .components.find((x) => x.id === comp.compId);
+      if (hitComp?.type === "io.button") {
+        // Momentary push button (UI decision): its `out` is 1 only while held.
+        this.selection.set([comp.compId], []);
+        this.pressButton = comp.compId;
+        this.onButton?.(comp.compId, true);
+        this.changed();
+        return;
+      }
       if (info.shiftKey) {
         // Shift+click a clock ticks the sim once, in place (UI_OVERHAUL §47) —
         // an in-place way to advance the waveform you're looking at.
@@ -472,6 +494,16 @@ export class ToolMachine {
 
   up(info: PointerInfo, world?: Vec2): void {
     if (info.button !== 0) return;
+    if (this.pressButton !== null) {
+      // Release the momentary button.
+      this.onButton?.(this.pressButton, false);
+      this.pressButton = null;
+      this.pressStart = null;
+      this.pressSwept = false;
+      this.pressWireIdx = null;
+      this.changed();
+      return;
+    }
     const swept = this.pressSwept;
     const fromWire = this.pressWireIdx;
     this.pressStart = null;
@@ -576,10 +608,11 @@ export class ToolMachine {
     const comp = this.scene.pickComponent(world);
     if (comp !== null) {
       this.selection.set([comp.compId], []);
-      // Double-clicking a constant should put you straight into its value input
-      // (UI_OVERHAUL §53).
+      // Double-clicking a constant or a register puts you straight into its
+      // value input (UI_OVERHAUL §53; registers poke a live value).
       const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
-      this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
+      const valueField = hit?.type === "wiring.constant" || hit?.type === "mem.register";
+      this.onEditComponent?.(comp.compId, valueField ? "value" : undefined);
       this.changed();
     }
   }

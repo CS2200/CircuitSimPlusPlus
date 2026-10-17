@@ -162,6 +162,24 @@ export default forwardRef<
     };
   }, [tool, sim, doc]);
 
+  // A push button is MOMENTARY (UI decision): while held, poke its `out` pin
+  // high; on release, low. The poke targets the sheet's document-order index
+  // (the wire CompId the engine uses).
+  useEffect(() => {
+    tool.onButton = (compId, down) => {
+      if (sim === undefined) return;
+      void (async () => {
+        if (!(await sim.resync(doc))) return;
+        const idx = doc.circuit(sheetRef.current).components.findIndex((c) => c.id === compId);
+        if (idx < 0) return;
+        await sim.poke(idx, "out", { v: down ? "1" : "0", x: "", z: "" });
+      })();
+    };
+    return () => {
+      tool.onButton = undefined;
+    };
+  }, [tool, sim, doc]);
+
   // Center the camera once per document (never re-center on edits).
   const initialBounds = useMemo(() => {
     scene.sync(doc, 0);

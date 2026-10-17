@@ -214,7 +214,7 @@ function priorityDecoderSpec(): CompSpec {
       pins.push({ name: "valid", dx: 4, dy: (2 * h) / 3, kind: "out", bitsize: 1 });
       return pins;
     },
-    caption: () => "PRIO DEC",
+    caption: () => "PRI",
   };
 }
 
@@ -453,7 +453,7 @@ const REGISTRY: Record<string, CompSpec> = {
   // Plexers (pin sets scale with the select width: n = 2^select data lines)
   "plexers.mux": plexerSpec("MUX", "in"),
   "plexers.demux": plexerSpec("DEMUX", "out"),
-  "plexers.decoder": plexerSpec("DECODER", "out-no-in", "inputBits", 2),
+  "plexers.decoder": plexerSpec("DEC", "out-no-in", "inputBits", 2),
   "plexers.priority-decoder": priorityDecoderSpec(),
 
   // Arithmetic
@@ -565,15 +565,19 @@ const REGISTRY: Record<string, CompSpec> = {
     ],
     "REG",
   ),
+  // Clock/reset/write-enable left→right on the bottom edge (clk where we used
+  // to sit, rst where clk used to sit, we spaced under dout), and din spread
+  // further from addr (UI decision).
   "mem.ram": boxSpec(
     10,
     6,
     [
       { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
-      { name: "din", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "din", dx: 0, dy: 4, kind: "in", bitsize: BUS_WIDTH },
       { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
-      { name: "we", dx: 3, dy: 6, kind: "in" },
-      { name: "clk", dx: 7, dy: 6, kind: "in" },
+      { name: "clk", dx: 3, dy: 6, kind: "in" },
+      { name: "rst", dx: 7, dy: 6, kind: "in" },
+      { name: "we", dx: 9, dy: 6, kind: "in" },
     ],
     "RAM",
   ),
@@ -600,7 +604,7 @@ const REGISTRY: Record<string, CompSpec> = {
 
   // I/O (UI-only parts)
   "io.button": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "BTN"),
-  "io.led": boxSpec(1, 1, [{ name: "in", dx: 0, dy: 0.5, kind: "in" }], "LED"),
+  "io.led": boxSpec(1, 1, [{ name: "in", dx: 0.5, dy: 1, kind: "in" }], "LED"),
   "io.hexdisplay": boxSpec(
     3,
     3,
@@ -722,7 +726,7 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
       { type: "plexers.mux" },
       { type: "plexers.demux" },
       { type: "plexers.decoder" },
-      { type: "plexers.priority-decoder", label: "Priority Decoder" },
+      { type: "plexers.priority-decoder" },
     ],
   },
   {

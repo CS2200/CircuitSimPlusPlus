@@ -94,8 +94,8 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
 
   await checkGroup("Wiring", "INPUT");
   await checkGroup("Plexers", "MUX");
-  await checkGroup("Plexers", "DECODER");
-  await checkGroup("Plexers", "Priority Decoder");
+  await checkGroup("Plexers", "DEC");
+  await checkGroup("Plexers", "PRI");
   // Arithmetic tiles keep the human name; the body shows the symbol (§18).
   await checkGroup("Arithmetic", "ADD");
   await checkGroup("Memory", "RAM");

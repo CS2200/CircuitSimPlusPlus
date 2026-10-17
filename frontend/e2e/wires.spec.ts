@@ -84,7 +84,7 @@ test("drag-wiring: releasing on the target pin commits the wire", async ({ page 
   expect(JSON.stringify(d.circuits[0].wires[0].points)).toBe(settled);
 });
 
-test("wire section: color swatch and width (driver bitsize)", async ({ page }) => {
+test("wire section: color swatch (no manual width)", async ({ page }) => {
   await placeParts(page);
 
   // Wire AND.out (5,1.5) → NOT.in (10,1); then select it on a segment interior.
@@ -92,7 +92,8 @@ test("wire section: color swatch and width (driver bitsize)", async ({ page }) =
   await clickWorld(page, 10, 1);
   await clickWorld(page, 7.5, 1.5);
   await expect(page.locator(".inspector-id")).toHaveText("Wire");
-  await expect(page.locator(".inspector-type")).toContainText("1-bit");
+  // A wire has no manual width control — its width is inferred from its parts.
+  await expect(page.locator('.bitsize-grid[aria-label="Width (bits)"]')).toHaveCount(0);
 
   // Color: a swatch sets the wire's own color (format-v2 §2 `color`).
   await page.getByRole("button", { name: "Wire color #40dc82" }).click();
@@ -101,10 +102,4 @@ test("wire section: color swatch and width (driver bitsize)", async ({ page }) =
   await page.getByRole("button", { name: "Default color" }).click();
   expect((await doc(page)).circuits[0].wires[0].color).toBeUndefined();
   await page.getByRole("button", { name: "Wire color #4dd0e1" }).click();
-
-  // Width: the control edits the driving component's bitsize (the AND).
-  await page.locator('.bitsize-grid[aria-label="Width (bits)"] [data-value="8"]').click();
-  const d = await doc(page);
-  expect(d.circuits[0].components.find((c) => c.type === "gate.and")?.attrs?.bitsize).toBe(8);
-  await expect(page.locator(".inspector-type")).toContainText("8-bit");
 });

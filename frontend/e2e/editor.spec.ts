@@ -274,7 +274,7 @@ test("constant: radix display + double-click jumps into the value", async ({ pag
 test("priority decoder: places from Plexers and edits its line count", async ({ page }) => {
   await page.goto("/");
   await page.locator('[data-group="Plexers"]').click();
-  await page.getByRole("button", { name: "Priority Decoder", exact: true }).click();
+  await page.getByRole("button", { name: "PRI", exact: true }).click();
   const spot = await world(page, 0, 0);
   await page.mouse.click(spot.x, spot.y);
   await page.keyboard.press("Escape");

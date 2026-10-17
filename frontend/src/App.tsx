@@ -496,6 +496,20 @@ export default function App() {
     }
   }, [doc, sim, toast]);
 
+  // Poke a component pin to a live value (a register's typed value, §61): the
+  // engine's CompId is the sheet's document-order index.
+  const onPoke = useCallback(
+    (compId: string, pin: string, hex: string) => {
+      const idx = doc.circuit(sheet).components.findIndex((c) => c.id === compId);
+      if (idx < 0) return;
+      void (async () => {
+        if (!(await sim.resync(doc))) return;
+        await sim.poke(idx, pin, { v: hex, x: "", z: "" });
+      })();
+    },
+    [doc, sheet, sim],
+  );
+
   const onStatus = useCallback((s: EditorStatus) => {
     setStatus(s);
     // Rising edge of "dirty": the indicator says so until autosave catches up.
@@ -1630,6 +1644,7 @@ export default function App() {
                 onNotify={toast}
                 focusField={inspectorFocus}
                 onFocusHandled={() => setInspectorFocus(null)}
+                onPoke={onPoke}
               />
             </aside>
           </>

@@ -38,8 +38,8 @@ describe("body marks (UI_OVERHAUL §17)", () => {
     expect(compSpec("mem.register").caption({})).toBe("REG");
     expect(compSpec("mem.ram").caption({})).toBe("RAM");
     expect(compSpec("plexers.mux").caption({})).toBe("MUX");
-    expect(compSpec("plexers.decoder").caption({})).toBe("DECODER");
-    expect(compSpec("plexers.priority-decoder").caption({})).toBe("PRIO DEC");
+    expect(compSpec("plexers.decoder").caption({})).toBe("DEC");
+    expect(compSpec("plexers.priority-decoder").caption({})).toBe("PRI");
   });
 });
 

@@ -88,6 +88,7 @@ export default function InspectorPanel({
   onNotify,
   focusField = null,
   onFocusHandled,
+  onPoke,
 }: {
   doc: CircuitDocument;
   /** The single selected component, or null when there is no single selection. */
@@ -111,6 +112,8 @@ export default function InspectorPanel({
   /** Attr key to focus on the next render (double-click a constant, §53). */
   focusField?: string | null;
   onFocusHandled?: () => void;
+  /** Poke a component pin to a live value (registers accept a typed value). */
+  onPoke?: (compId: string, pin: string, hex: string) => void;
 }) {
   const circuit = doc.circuits[circuitIdx];
   const comp =
@@ -149,6 +152,16 @@ export default function InspectorPanel({
     }
   }, [contentsImage]);
 
+  // A register's value input: focus it when the canvas double-clicked the
+  // register (the same field-name handshake constants use, §53).
+  const regValueRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (focusField === "value" && comp?.type === "mem.register") {
+      regValueRef.current?.focus();
+      onFocusHandled?.();
+    }
+  }, [focusField, comp?.type, onFocusHandled]);
+
   const wire =
     comp === undefined && wireIdx !== null && circuit !== undefined
       ? { idx: wireIdx, info: wireInfo(circuit, wireIdx, (c) => compPins(c, sheetCircuits)) }
@@ -157,44 +170,22 @@ export default function InspectorPanel({
     wire !== null && circuit !== undefined ? (circuit.wires[wire.idx]?.color ?? null) : null;
 
   if (comp === undefined && wire !== null) {
-    const driver = wire.info.driver;
-    const target =
-      driver === null || circuit === undefined
-        ? undefined
-        : circuit.components.find((c) => c.id === driver.compId);
     const setColor = (color: string | null) => {
       doc.setWireColor(circuitIdx, wire.idx, color);
       onEdit();
     };
-    const setWidth = (bits: number) => {
-      if (driver === null || target === undefined) return;
-      const value = Math.max(1, Math.min(32, Math.round(bits) || 1));
-      doc.updateComponent(
-        circuitIdx,
-        driver.compId,
-        { attrs: { ...(target.attrs ?? {}), bitsize: value } },
-        `wirebits:${circuitIdx}:${driver.compId}`,
-      );
-      onEdit();
-    };
+    // A wire has no width of its own: it is inferred from the parts it joins
+    // (its thickness already shows that). We only flag a genuine disagreement.
     return (
       <div className="inspector">
         <div className="inspector-head">
           <span className="inspector-id">Wire</span>
-          <span className="inspector-type">{wire.info.bitsize}-bit bus</span>
-        </div>
-        <div className="inspector-field">
-          <span className="inspector-field-label">Width (bits)</span>
-          <NumberPicker
-            value={wire.info.bitsize}
-            label="Width (bits)"
-            onPick={(bits) => setWidth(bits)}
-          />
         </div>
         {wire.info.widths.length > 1 && (
           <p className="inspector-note">
-            Width mismatch: this net mixes {wire.info.widths.join(" / ")}-bit pins — the engine
-            reports it at load.
+            ⚠ Width mismatch — this wire joins pins of different widths (
+            {wire.info.widths.join(", ")} bits). A wire's width comes from the parts it connects;
+            resize them so their widths agree.
           </p>
         )}
         <div className="inspector-row">
@@ -388,6 +379,25 @@ export default function InspectorPanel({
           {f.hint !== undefined && <p className="settings-hint inspector-hint">{f.hint}</p>}
         </Fragment>
       ))}
+
+      {comp.type === "mem.register" && onPoke !== undefined && (
+        <label className="inspector-row">
+          <span>Value</span>
+          <input
+            ref={regValueRef}
+            className="inspector-value-input"
+            placeholder="hex · Enter to poke"
+            defaultValue=""
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              const hex = parseRadixValue((e.target as HTMLInputElement).value, "hex", 32);
+              if (hex === null) return;
+              onPoke(comp.id, "q", hex);
+              (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
+      )}
 
       {isMemory && (
         <>

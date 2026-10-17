@@ -157,13 +157,18 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
+/** Clock rendering (UI decision): a white waveform on a body that flips green. */
+const CLOCK_WAVE = "#ffffff";
+const CLOCK_HIGH_FILL = "#1f7a3d"; // dark green: clock driving high
+const CLOCK_LOW_FILL = "#b9e6c6"; // light green: clock low
+
 /**
  * A clock's square wave (UI_OVERHAUL §47): it shows the level the clock drives
- * AND the edge that just happened (▲ rising / ▼ falling), so ticking is visible
- * at a glance. `high === null` (no sim value) draws a neutral wave with no edge
- * marker.
+ * AND the edge that just happened (▲ rising / ▼ falling). Drawn WHITE on the
+ * clock's green body (UI decision); `high === null` (no sim value) draws a
+ * neutral wave with no edge marker.
  */
-function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boolean | null): void {
+function drawClockWave(renderer: Renderer, rect: Rect, high: boolean | null): void {
   const x0 = rect.x + 0.3;
   const x1 = rect.x + rect.w - 0.3;
   const yHi = rect.y + rect.h * 0.34;
@@ -181,9 +186,7 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
     y = ny;
   }
   wave.push({ t: "L", x: x1, y });
-  // The waveform itself is neutral; the segment holding the CURRENT level is the
-  // one that lights up (UI_OVERHAUL §52) — no green, no heavy halo.
-  renderer.drawPath(wave, { stroke: theme.textDim, lineWidth: 0.12 });
+  renderer.drawPath(wave, { stroke: CLOCK_WAVE, lineWidth: 0.12 });
   renderer.flush();
   if (high === null) return;
 
@@ -193,7 +196,7 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
       { t: "M", x: x0 + 2 * t, y: lastY },
       { t: "L", x: x1, y: lastY },
     ],
-    { stroke: theme.accent, lineWidth: high ? 0.2 : 0.12, alpha: high ? 1 : 0.5 },
+    { stroke: CLOCK_WAVE, lineWidth: high ? 0.22 : 0.12, alpha: high ? 1 : 0.55 },
   );
 
   // ▲ on the rising edge / ▼ on the falling one, at the last transition.
@@ -210,8 +213,60 @@ function drawClockWave(renderer: Renderer, theme: Theme, rect: Rect, high: boole
       { t: "M", x: edgeX + 0.16, y: tipY + back },
       { t: "L", x: edgeX, y: tipY },
     ],
-    { stroke: theme.accent, lineWidth: 0.1, alpha: high ? 1 : 0.5 },
+    { stroke: CLOCK_WAVE, lineWidth: 0.1, alpha: high ? 1 : 0.55 },
   );
+  renderer.flush();
+}
+
+/** 7-segment hex display (UI decision): which bars light for each digit. */
+const SEGMENTS: Readonly<Record<string, string>> = {
+  "0": "abcdef",
+  "1": "bc",
+  "2": "abdeg",
+  "3": "abcdg",
+  "4": "bcfg",
+  "5": "acdfg",
+  "6": "acdefg",
+  "7": "abc",
+  "8": "abcdefg",
+  "9": "abcdfg",
+  a: "abcefg",
+  b: "cdefg",
+  c: "adef",
+  d: "bcdeg",
+  e: "adefg",
+  f: "aefg",
+};
+const SEG_LIT = "#e5534b";
+
+/** Draw a big 7-segment hex digit filling `rect` (lit bars `on`, dark `off`). */
+function drawSevenSeg(
+  renderer: Renderer,
+  rect: Rect,
+  digit: string | null,
+  on: string,
+  off: string,
+): void {
+  const m = 0.4;
+  const t = 0.28;
+  const x0 = rect.x + m;
+  const x1 = rect.x + rect.w - m;
+  const y0 = rect.y + m;
+  const y1 = rect.y + rect.h - m;
+  const ym = (y0 + y1) / 2;
+  const lit = digit !== null ? (SEGMENTS[digit] ?? "") : "";
+  const bars: Record<string, Rect> = {
+    a: { x: x0 + t, y: y0, w: x1 - x0 - 2 * t, h: t },
+    b: { x: x1 - t, y: y0 + t, w: t, h: ym - t / 2 - (y0 + t) },
+    c: { x: x1 - t, y: ym + t / 2, w: t, h: y1 - t - (ym + t / 2) },
+    d: { x: x0 + t, y: y1 - t, w: x1 - x0 - 2 * t, h: t },
+    e: { x: x0, y: ym + t / 2, w: t, h: y1 - t - (ym + t / 2) },
+    f: { x: x0, y: y0 + t, w: t, h: ym - t / 2 - (y0 + t) },
+    g: { x: x0 + t, y: ym - t / 2, w: x1 - x0 - 2 * t, h: t },
+  };
+  for (const [name, r] of Object.entries(bars)) {
+    renderer.drawPath(rectPath(r.x, r.y, r.w, r.h), { fill: lit.includes(name) ? on : off });
+  }
   renderer.flush();
 }
 
@@ -804,16 +859,15 @@ export class DocScene {
       // is an accent halo under the core so a color you just picked shows
       // immediately (§15).
       if (this.wireMismatch[i]) {
+        // A width mismatch FLASHES — a hard on/off blink, not a smooth pulse —
+        // so it reads as an error rather than an animation (UI decision). The
+        // ring is a small constant, never scaled by the bus width (§59).
         const t = overlay.now;
-        const phase = t === undefined ? 0.75 : 0.5 + 0.5 * Math.sin(t / 170);
-        // A thin pulsing ring AROUND the wire: `width` (so the ring is never
-        // hidden by the core) plus a small constant that does not grow with the
-        // bus (UI_OVERHAUL §59). Previously the halo was ~2-3x the wire width, so
-        // a 32-bit bus flashed as a ~1.5-unit blob.
+        const on = t === undefined ? true : Math.floor(t / 320) % 2 === 0;
         renderer.drawPath(this.wirePaths[i], {
           stroke,
-          lineWidth: width + MISMATCH_RING * (0.6 + 0.8 * phase),
-          alpha: 0.3 + 0.7 * phase,
+          lineWidth: width + MISMATCH_RING * (on ? 1.35 : 0.7),
+          alpha: on ? 1 : 0.35,
         });
       }
       if (selected) {
@@ -880,9 +934,15 @@ export class DocScene {
       // there is no box body — the old rectangle read as a mux.
       if (comp.type === "wiring.splitter") {
         const railX = layout.rect.x + 0.7;
+        // The rail spans only the first→last fanout tap (UI decision) — it must
+        // not overhang past the outermost splits.
+        const fanouts = layout.pins.filter((p) => p.name !== "bus");
+        const firstY = fanouts.length > 0 ? Math.min(...fanouts.map((p) => p.y)) : layout.rect.y;
+        const lastY =
+          fanouts.length > 0 ? Math.max(...fanouts.map((p) => p.y)) : layout.rect.y + layout.rect.h;
         const rail: PathCmd[] = [
-          { t: "M", x: railX, y: layout.rect.y + 0.25 },
-          { t: "L", x: railX, y: layout.rect.y + layout.rect.h - 0.25 },
+          { t: "M", x: railX, y: firstY },
+          { t: "L", x: railX, y: lastY },
         ];
         const taps: PathCmd[] = [];
         for (const p of layout.pins) {
@@ -946,19 +1006,15 @@ export class DocScene {
         }
         renderer.drawPath(circlePath(lx, ly, r), { fill: on ? color : theme.panel });
         renderer.drawPath(circlePath(lx, ly, r), { stroke: theme.textDim, lineWidth: 0.12 });
-        // Input lead from the pin into the dome (so the connection point is
-        // unmistakable), plus the base and two legs (UI_OVERHAUL §50).
+        // The `in` pin sits on the BOTTOM edge (UI decision): a single lead
+        // rises from it into the dome, with the LED's base bar across the body.
         const baseY = ly + r * 0.85;
         renderer.drawPath(
           [
-            { t: "M", x: layout.rect.x, y: ly },
-            { t: "L", x: lx - r, y: ly },
             { t: "M", x: lx - r * 0.8, y: baseY },
             { t: "L", x: lx + r * 0.8, y: baseY },
-            { t: "M", x: lx - r * 0.45, y: baseY },
-            { t: "L", x: lx - r * 0.45, y: layout.rect.y + layout.rect.h },
-            { t: "M", x: lx + r * 0.45, y: baseY },
-            { t: "L", x: lx + r * 0.45, y: layout.rect.y + layout.rect.h },
+            { t: "M", x: lx, y: layout.rect.y + layout.rect.h },
+            { t: "L", x: lx, y: baseY },
           ],
           { stroke: theme.textDim, lineWidth: 0.14 },
         );
@@ -971,12 +1027,52 @@ export class DocScene {
         renderer.flush();
         continue;
       }
+      // A 7-segment hex display (UI decision): its input's low nibble as a big
+      // lit digit on a dark bezel.
+      if (comp.type === "io.hexdisplay") {
+        const netId = this.netOfPin(comp.id, "in");
+        const hxWireIdx = netId === undefined ? undefined : this.nets.nets[netId]?.wires[0];
+        const live = hxWireIdx !== undefined ? sim?.valueForWire(hxWireIdx) : undefined;
+        const stat = this.staticPinText(comp, "in");
+        const hexText = live !== undefined ? live.v : stat !== null && stat !== "" ? stat : null;
+        const digit =
+          hexText === null
+            ? null
+            : (Number.parseInt(hexText === "" ? "0" : hexText, 16) & 0xf).toString(16);
+        const body = rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
+        renderer.drawPath(body, { fill: theme.panel });
+        renderer.drawPath(body, {
+          stroke: selected ? theme.accent : theme.panelBorder,
+          lineWidth: selected ? 0.22 : 0.12,
+        });
+        drawSevenSeg(renderer, layout.rect, digit, SEG_LIT, theme.panelBorder);
+        renderer.flush();
+        continue;
+      }
       // Family tint (UI_OVERHAUL §21): a hint of the part's family on its body
       // and a stronger hint on its outline, so pins/memory/arithmetic read
       // apart at a glance without shouting.
       const role = tintRoleOf(comp);
       const tint = role === null ? null : tintColor(theme, role);
-      const bodyFill = tint === null ? theme.panel : mixHex(theme.panel, tint, 0.1);
+      let bodyFill = tint === null ? theme.panel : mixHex(theme.panel, tint, 0.1);
+      // A clock's WHOLE body flips between two greens — dark while high, light
+      // while low (UI decision) — and its waveform is drawn white on top. Level
+      // is the live `out` value, or the sim's phase so an unwired clock still
+      // alternates as you tick (UI_OVERHAUL §51).
+      let clockHigh: boolean | null = null;
+      if (comp.type === "wiring.clock") {
+        const clkNet = this.nets.pinToNet.get(`${comp.id}:out`);
+        const clkWire = clkNet !== undefined ? this.nets.nets[clkNet]?.wires[0] : undefined;
+        const clkVal = clkWire !== undefined ? sim?.valueForWire(clkWire) : undefined;
+        const clkState = clkVal !== undefined ? wireValueState(clkVal) : undefined;
+        clockHigh =
+          clkState !== undefined && clkState !== "z" && clkState !== "x"
+            ? clkState === "high"
+            : sim?.cycle !== undefined
+              ? sim.cycle % 2 === 0
+              : null;
+        if (clockHigh !== null) bodyFill = clockHigh ? CLOCK_HIGH_FILL : CLOCK_LOW_FILL;
+      }
       const strokeStyle = {
         stroke: selected
           ? theme.accent
@@ -1189,37 +1285,16 @@ export class DocScene {
             });
           }
         } else if (comp.type === "wiring.clock") {
-          // The clock GLOWS while it drives high and sits dull while low (§47),
-          // so its rising/falling edge is readable at a glance; it also flashes
-          // briefly on a flip.
-          // Level: the clock's own live value when it is wired, else the sim's
-          // phase (a clock reads high on even cycles) so an UNWIRED clock still
-          // visibly alternates as you tick (UI_OVERHAUL §51).
-          const high =
-            valueText !== null
-              ? valueText !== "0"
-              : sim?.cycle !== undefined
-                ? sim.cycle % 2 === 0
-                : null;
+          // The body already flips green (dark high / light low, computed
+          // above). Track the level so a flip can flash, then draw the white
+          // waveform on top (UI decision).
+          const high = clockHigh;
           if (high !== null) {
             const prev = this.clockLevel.get(comp.id);
             if (prev !== undefined && prev !== high && overlay.now !== undefined) {
               this.clockChangedAt.set(comp.id, overlay.now);
             }
             this.clockLevel.set(comp.id, high);
-          }
-          if (high === true) {
-            // A quiet accent ring says "driving 1" without shouting (§52).
-            renderer.drawPath(
-              rectPath(
-                layout.rect.x - 0.18,
-                layout.rect.y - 0.18,
-                layout.rect.w + 0.36,
-                layout.rect.h + 0.36,
-              ),
-              { stroke: theme.accent, lineWidth: 0.3, alpha: 0.22 },
-            );
-            renderer.flush();
           }
           const at = this.clockChangedAt.get(comp.id);
           if (at !== undefined && overlay.now !== undefined) {
@@ -1237,7 +1312,7 @@ export class DocScene {
               renderer.flush();
             }
           }
-          drawClockWave(renderer, theme, layout.rect, high);
+          drawClockWave(renderer, layout.rect, high);
         } else if (comp.type === "wiring.probe" && valueText === null) {
           // The probe shows only its value; with nothing to read it stays bare
           // (the pointed shape already says "probe", UI_OVERHAUL §36).
