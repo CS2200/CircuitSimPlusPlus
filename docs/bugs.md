@@ -41,39 +41,27 @@ out-of-scope entries live in the appendices so the active list stays honest.
 
 ---
 
-## P1 — Course-facing correctness
+## P1 — Course-facing correctness — DONE (one decision left)
 
-**Done in this pass:** probe width auto-match on connect *(commit `9ba29da`)* and
-the explicit unnamed-pin warning in the Inspector *(commit `32db2f0`)*.
+All four actionable items landed; the last is a format decision.
 
-### 1. Register readout is dead when `q` is unwired — needs an IPC addition
-Established by test (`632f6e3`): the **engine is correct**. With `q` open a
-register still latches on the clock edge, and `Engine::named_value`
-(`crates/core/src/delay.rs:926`) already returns the stored state (the CLI's
-probe assertions use it). Only the **readout** is wrong: it reads the `q` NET
-(`frontend/src/sim/controller.ts:52`), which does not exist when `q` is
-unwired, so it falls back to the zero placeholder.
-**Fix:** get `named_value` to the UI. Every pin has a net — even an unwired one
-(`netlist.rs:282-301`) — and `emit_diffs` diffs **all** nets
-(`session.rs:200`), so the value is already pushed; the UI just cannot tell
-which net belongs to a named component. Cheapest push-based fix: add
-`value_net: NetId` to `NamedComponent`. **This changes the IPC contract**
-(`docs/ipc.md` + `docs/tasks/README.md` §3). **Size: M.**
+- **Probe width auto-match on connect** *(commit `9ba29da`)*: a wire landing on a
+  probe's `in` sets its `bitsize` from the driver.
+- **Explicit unnamed-pin warning** *(commit `32db2f0`)*: the Inspector says why
+  an unnamed `wiring.pin` stops the file loading.
+- **Register readout with an open `q`** *(commit `471a911`)*: a test settled that
+  the engine was never at fault (`632f6e3`), so the fix was to get the engine's
+  stored state to the UI. IPC **v1.2** adds `NamedComponent.value_net` — the
+  engine nets every pin, so the readout works with the output unwired. That also
+  repaired the Watch panel's RAM/ROM entry (it looked for a `q`, which RAMs do
+  not have) and lets a subcircuit component be watched.
+- **Real short-circuit alerts** *(commit `0b6035c`)*: `HaltReason::Contention` is
+  never emitted and DESIGN.md §4.1 wants `X` plus a shorted-wire highlight, so
+  there was no alert at all. IPC **v1.2** adds `NetChange.contended`, set only
+  when a net's `X` is a genuine driver fight; the sim bar now says
+  *"⚠ Short circuit — N nets driven both high and low…"*.
 
-### 2. A short circuit is silent — needs an engine/contract addition
-`HaltReason::Contention` (`api.rs:198`) exists but the engine **never emits
-it**, so "the banner just says contention" was wrong — there is no alert at all.
-Per `DESIGN.md:156` the intended behaviour is *not* to halt: a driver fight
-resolves to `X` and the wire is "highlighted as shorted". The wire does get
-`theme.wire["x"]`, but there is no message, and `X` is ambiguous — it also
-arises from divide-by-zero and an `X` mux select (format-v2 §4.1), so a naive
-"short circuit" banner would mislabel those.
-**Fix:** `Value::contention_merge` already computes the genuine-conflict bits
-(`disagree`, `value.rs:619`) — expose a per-net `contended` flag (a net-diff
-field) so the UI can highlight *shorts* accurately and say so plainly.
-**This changes the IPC contract.** **Size: M.**
-
-### 3. Capitalize pin names — needs a decision
+### Open: capitalize pin names — needs a decision
 The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Ordinary
 pins are **not labelled on the canvas** (they are dots), so this is almost
 entirely a *format* change: pin names are wire-endpoint keys in `.csx`, and the
