@@ -246,6 +246,18 @@ test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ 
   await expect(page.locator(".inspector-id")).toBeVisible();
 });
 
+test("palette tooltips name the part, with no gesture boilerplate", async ({ page }) => {
+  await page.goto("/");
+  // Gates is the default group; BUFFER is the tri-state buffer's tile. The
+  // tooltip used to carry "click… Shift-click… R rotates, Esc cancels".
+  const tile = page.getByRole("button", { name: "BUFFER", exact: true });
+  await expect(tile).toHaveAttribute("title", "Tri-state Buffer");
+  await expect(page.getByRole("button", { name: "AND", exact: true })).toHaveAttribute(
+    "title",
+    "AND Gate",
+  );
+});
+
 test("clock: Shift+click ticks the sim in place", async ({ page }) => {
   await page.goto("/");
   await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);

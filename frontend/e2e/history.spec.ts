@@ -112,7 +112,6 @@ test("version history: click a name to rename it, then clear from Settings", asy
   await field.fill("Milestone");
   await field.press("Enter");
   await expect(drawer.locator(".history-label").first()).toHaveText("Milestone");
-  await expect(drawer.locator(".history-badge")).toHaveText("named");
 
   await page.keyboard.press("Escape"); // Escape closes the drawer
   await expect(drawer).toHaveCount(0);

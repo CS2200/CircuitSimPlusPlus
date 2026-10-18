@@ -298,9 +298,27 @@ test("sim transport bar: log slider with notches, run-to", async ({ page }) => {
   await expect(page.locator(".sim-speed-value")).toHaveText("100 Hz");
 
   // Run to cycle N from the transport bar.
+  await expect(page.locator(".sim-runto input")).toHaveAttribute("placeholder", "cycle #");
   await page.locator(".sim-runto input").fill("5");
   await page.getByRole("button", { name: "run to" }).click();
   await expect(status).toContainText("cycle 5");
+});
+
+test("right-click a sheet tab to rename it", async ({ page }) => {
+  await page.goto("/");
+  // Rename/Delete used to be middle-click only, which nobody discovers.
+  await page.getByRole("tab", { name: "main" }).click({ button: "right" });
+
+  const menu = page.getByRole("menu", { name: "main actions" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "Rename…" }).click();
+
+  // The inline field opens pre-filled with the sheet's name.
+  const field = page.getByLabel("Circuit name");
+  await expect(field).toHaveValue("main");
+  await field.fill("core");
+  await field.press("Enter");
+  await expect(page.getByRole("tab", { name: "core" })).toBeVisible();
 });
 
 test("the header title edits in place, and Ctrl+S then writes without asking again", async ({
