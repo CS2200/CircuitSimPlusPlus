@@ -26,6 +26,8 @@ import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
+import type { CsxComponent } from "./model/csx";
+import { parseRadixValue } from "./lib/radix";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { diffDocuments } from "./model/versionDiff";
@@ -233,8 +235,8 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   /** Field the Inspector should focus next (a constant's value on double-click). */
   const [inspectorFocus, setInspectorFocus] = useState<string | null>(null);
-  /** First keystroke typed while a register is selected (seeds its Value field, #1). */
-  const [valueSeed, setValueSeed] = useState<string | null>(null);
+  /** Inline register value edit: the register and the text typed so far (#1/#2). */
+  const [regEdit, setRegEdit] = useState<{ compId: string; text: string } | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
@@ -514,6 +516,27 @@ export default function App() {
       })();
     },
     [doc, sheet, sim],
+  );
+
+  /** Commit an inline register edit (Enter): parse in its base, then poke it. */
+  const commitRegEdit = useCallback(
+    (comp: CsxComponent) => {
+      if (regEdit === null || regEdit.compId !== comp.id) return;
+      const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "unsigned";
+      const parse = radix === "bin" ? "bin" : radix === "hex" ? "hex" : "dec";
+      const bits = compPins(comp, doc.circuits).find((p) => p.name === "q")?.bitsize ?? 1;
+      const text = regEdit.text;
+      setRegEdit(null);
+      const hex = parseRadixValue(text, parse, bits);
+      if (hex === null) {
+        // Never fail silently: a value that does not fit the register's width
+        // (or is not valid in its base) says so.
+        toast(`Value must be a ${radix} number that fits in ${bits} bit${bits === 1 ? "" : "s"}`);
+        return;
+      }
+      onPoke(comp.id, "q", hex);
+    },
+    [regEdit, doc, onPoke, toast],
   );
 
   const onStatus = useCallback((s: EditorStatus) => {
@@ -1370,18 +1393,38 @@ export default function App() {
       const target = e.target as HTMLElement | null;
       if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       const mod = e.ctrlKey || e.metaKey;
-      // Typing a digit while a register is selected opens its Value field seeded
-      // with that character (#1) — "click the register, then type".
-      if (!mod && inspectorCompId !== null && e.key.length === 1) {
+      // Inline register value editing (#1/#2): with a register selected, typing
+      // edits its value in place on the canvas (no Inspector field). Enter
+      // pokes it, Esc cancels, Backspace deletes.
+      if (!mod && inspectorCompId !== null) {
         const sel = doc.circuit(sheet).components.find((c) => c.id === inspectorCompId);
         if (sel?.type === "mem.register") {
-          const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
-          const parses = radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
-          if (parses.test(e.key)) {
+          const editing = regEdit?.compId === sel.id ? regEdit.text : null;
+          if (e.key === "Escape" && editing !== null) {
             e.preventDefault();
-            setValueSeed(e.key);
-            setInspectorFocus("value");
+            setRegEdit(null);
             return;
+          }
+          if (e.key === "Backspace" && editing !== null) {
+            e.preventDefault();
+            const next = editing.slice(0, -1);
+            setRegEdit(next === "" ? null : { compId: sel.id, text: next });
+            return;
+          }
+          if (e.key === "Enter" && editing !== null) {
+            e.preventDefault();
+            commitRegEdit(sel);
+            return;
+          }
+          if (e.key.length === 1) {
+            const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
+            const accepts =
+              radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
+            if (accepts.test(e.key)) {
+              e.preventDefault();
+              setRegEdit({ compId: sel.id, text: (editing ?? "") + e.key });
+              return;
+            }
           }
         }
       }
@@ -1406,7 +1449,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onOpen, onSave, onSaveAs, openHistory, inspectorCompId, doc, sheet]);
+  }, [onOpen, onSave, onSaveAs, openHistory, inspectorCompId, doc, sheet, regEdit, commitRegEdit]);
 
   /** The bar shows the file name; the app name lives on the logo's tooltip. */
   const docTitle = filePath === null ? "(unsaved)" : baseName(filePath);
@@ -1625,6 +1668,7 @@ export default function App() {
                   onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
                   sim={sim}
+                  editingValue={regEdit}
                   pathIds={pathIds}
                   violations={violationMarkers}
                   pulsesOn={pulsesOn}
@@ -1664,12 +1708,7 @@ export default function App() {
                 onEdit={() => editorRef.current?.refresh()}
                 onNotify={toast}
                 focusField={inspectorFocus}
-                valueSeed={valueSeed}
-                onFocusHandled={() => {
-                  setInspectorFocus(null);
-                  setValueSeed(null);
-                }}
-                onPoke={onPoke}
+                onFocusHandled={() => setInspectorFocus(null)}
               />
             </aside>
           </>

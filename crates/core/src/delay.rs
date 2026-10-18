@@ -1111,6 +1111,26 @@ impl DelayEngine {
         Ok(())
     }
 
+    /// Settle everything queued BEFORE the next clock edge — i.e. let an
+    /// interactive poke (a forced register/button value) propagate through the
+    /// circuit within the CURRENT cycle, without firing a clock edge. Stops at
+    /// the first queued `Clock` event, so no half-cycle is consumed.
+    pub fn settle_cycle(&mut self) -> Result<(), Halt> {
+        if let Some(h) = &self.halted {
+            return Err(h.clone());
+        }
+        while let Some(ev) = self.queue.peek() {
+            if matches!(ev.kind, EvKind::Clock { .. }) {
+                break;
+            }
+            let ev = self.queue.pop().expect("peeked");
+            self.apply(ev).inspect_err(|h| {
+                self.halted = Some(h.clone());
+            })?;
+        }
+        Ok(())
+    }
+
     /// Process events up to (not including) simulation time `t`
     /// (testbench sampling; clock edges keep the queue non-empty).
     pub fn run_until_time(&mut self, t: u64) -> Result<(), Halt> {

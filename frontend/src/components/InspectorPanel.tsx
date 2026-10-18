@@ -8,36 +8,7 @@ import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
 import NumberPicker from "./NumberPicker";
 import Select from "./Select";
-
-/**
- * Render a constant's stored hex value in the chosen base for its value input
- * (UI_OVERHAUL §55). No `0x`/`0b` prefix — you type digits, not source.
- */
-function formatRadixValue(hex: string, radix: string, bits: number): string {
-  const n = Number.parseInt(hex === "" ? "0" : hex, 16);
-  if (!Number.isFinite(n)) return hex;
-  if (radix === "bin") return n.toString(2).padStart(Math.min(32, Math.max(1, bits)), "0");
-  if (radix === "dec") return String(n);
-  return hex.toUpperCase();
-}
-
-/**
- * Parse a constant value typed in `radix` back to a normalized hex string, or
- * null when it is not a valid/representable value for the bit width.
- */
-function parseRadixValue(text: string, radix: string, bits: number): string | null {
-  const t = text
-    .trim()
-    .replace(/^0[xX]/, "")
-    .replace(/^0[bB]/, "");
-  if (t === "") return "0";
-  const ok = radix === "bin" ? /^[01]+$/ : radix === "dec" ? /^[0-9]+$/ : /^[0-9a-fA-F]+$/;
-  if (!ok.test(t)) return null;
-  const n = Number.parseInt(t, radix === "bin" ? 2 : radix === "dec" ? 10 : 16);
-  if (!Number.isFinite(n)) return null;
-  if (n >= 2 ** Math.min(32, Math.max(1, bits))) return null; // doesn't fit
-  return n.toString(16);
-}
+import { formatRadixValue, parseRadixValue } from "../lib/radix";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -87,9 +58,7 @@ export default function InspectorPanel({
   onEdit,
   onNotify,
   focusField = null,
-  valueSeed = null,
   onFocusHandled,
-  onPoke,
 }: {
   doc: CircuitDocument;
   /** The single selected component, or null when there is no single selection. */
@@ -112,11 +81,7 @@ export default function InspectorPanel({
   onNotify?: (message: string) => void;
   /** Attr key to focus on the next render (double-click a constant, §53). */
   focusField?: string | null;
-  /** Seed for the focused register value field (the first typed character, #1). */
-  valueSeed?: string | null;
   onFocusHandled?: () => void;
-  /** Poke a component pin to a live value (registers accept a typed value). */
-  onPoke?: (compId: string, pin: string, hex: string) => void;
 }) {
   const circuit = doc.circuits[circuitIdx];
   const comp =
@@ -154,24 +119,6 @@ export default function InspectorPanel({
       return -1;
     }
   }, [contentsImage]);
-
-  // A register's value input: focus it when the canvas double-clicked the
-  // register (the same field-name handshake constants use, §53).
-  const regValueRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => {
-    if (focusField === "value" && comp?.type === "mem.register") {
-      if (valueSeed !== null && regValueRef.current !== null) {
-        regValueRef.current.value = valueSeed;
-      }
-      regValueRef.current?.focus();
-      onFocusHandled?.();
-    }
-  }, [focusField, valueSeed, comp?.type, onFocusHandled]);
-
-  // The register's configured base: shown on the Value field and used to parse
-  // the typed input (#1/#2). "unsigned"/"signed"/"dec" parse as decimal.
-  const regRadix = typeof comp?.attrs?.radix === "string" ? comp.attrs.radix : "unsigned";
-  const regParse = regRadix === "bin" ? "bin" : regRadix === "hex" ? "hex" : "dec";
 
   const wire =
     comp === undefined && wireIdx !== null && circuit !== undefined
@@ -390,36 +337,6 @@ export default function InspectorPanel({
           {f.hint !== undefined && <p className="settings-hint inspector-hint">{f.hint}</p>}
         </Fragment>
       ))}
-
-      {comp.type === "mem.register" && onPoke !== undefined && (
-        <label className="inspector-row">
-          <span>
-            Value <span className="inspector-field-label">{regRadix}</span>
-          </span>
-          <input
-            ref={regValueRef}
-            className="inspector-value-input"
-            placeholder={`${regRadix} · Enter to poke`}
-            defaultValue=""
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              const bits = compPins(comp, sheetCircuits).find((p) => p.name === "q")?.bitsize ?? 1;
-              const hex = parseRadixValue((e.target as HTMLInputElement).value, regParse, bits);
-              if (hex === null) {
-                // Never fail silently: a value that does not fit the register's
-                // width (or is not valid in its base) says so.
-                onNotify?.(
-                  `Value must be a ${regRadix} number that fits in ${bits} bit${bits === 1 ? "" : "s"}`,
-                );
-                (e.target as HTMLInputElement).select();
-                return;
-              }
-              onPoke(comp.id, "q", hex);
-              (e.target as HTMLInputElement).blur();
-            }}
-          />
-        </label>
-      )}
 
       {isMemory && (
         <>

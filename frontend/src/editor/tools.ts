@@ -608,11 +608,10 @@ export class ToolMachine {
     const comp = this.scene.pickComponent(world);
     if (comp !== null) {
       this.selection.set([comp.compId], []);
-      // Double-clicking a constant or a register puts you straight into its
-      // value input (UI_OVERHAUL §53; registers poke a live value).
+      // Double-clicking a constant puts you straight into its value input
+      // (UI_OVERHAUL §53); a register is edited inline by typing (App handles it).
       const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
-      const valueField = hit?.type === "wiring.constant" || hit?.type === "mem.register";
-      this.onEditComponent?.(comp.compId, valueField ? "value" : undefined);
+      this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
       this.changed();
     }
   }

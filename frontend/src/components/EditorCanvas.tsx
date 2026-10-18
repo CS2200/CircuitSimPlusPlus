@@ -80,6 +80,8 @@ export default forwardRef<
     onOpenSubcircuit?: (circuit: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
     sim?: SimController;
+    /** Inline register value edit in progress (App owns the text, #2). */
+    editingValue?: { compId: string; text: string } | null;
     /** Observed critical path to highlight (U7), as document comp ids. */
     pathIds?: readonly string[] | null;
     /** Setup/hold violation markers for the current sheet (U7). */
@@ -102,6 +104,7 @@ export default forwardRef<
     onEditComponent,
     onOpenSubcircuit,
     sim,
+    editingValue,
     pathIds,
     violations,
     pulsesOn = true,
@@ -239,6 +242,7 @@ export default forwardRef<
             return net === undefined ? undefined : store.netValues.get(net);
           },
           pokedRegister: (id) => sim?.pokedRegister(id),
+          editingValue: editingValue ?? null,
           haltCompId:
             highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
           path: pathIds ?? null,

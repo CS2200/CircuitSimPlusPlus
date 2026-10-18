@@ -49,6 +49,8 @@ export interface SimOverlay {
   valueForWire(wireIdx: number): WireValue | undefined;
   /** A locally poked register value (hex), shown until the next command. */
   pokedRegister?: (compId: string) => string | undefined;
+  /** Inline register value edit in progress (register id + the text typed). */
+  editingValue?: { compId: string; text: string } | null;
   /** Document component id to ring in the error color (halt marker). */
   haltCompId?: string | null;
   /** Ordered component ids of the observed critical path (U7 highlight). */
@@ -1224,6 +1226,15 @@ export class DocScene {
           if (staticVal !== null) {
             valueText = staticVal;
             valuePin = "in";
+          }
+        }
+        // An in-progress inline edit (#2) shows the text typed so far — already
+        // in the register's configured base — with a caret, overriding both the
+        // net and the poked value.
+        if (showValues && comp.type === "mem.register") {
+          const ed = sim?.editingValue;
+          if (ed !== undefined && ed !== null && ed.compId === comp.id) {
+            valueText = `${ed.text}▏`;
           }
         }
         // A locally poked register value wins over the net (and the §61

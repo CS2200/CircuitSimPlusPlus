@@ -140,6 +140,10 @@ impl Engine {
         Ok(self.0.poke_input_pin(name, v))
     }
 
+    fn settle_cycle(&mut self) -> Result<(), Halt> {
+        self.0.settle_cycle()
+    }
+
     fn poke_button_at(&mut self, id: usize, pressed: bool) -> Result<bool, Halt> {
         Ok(self.0.poke_button_at(id, pressed))
     }
@@ -679,7 +683,19 @@ impl Sim for Session {
             _ => return, // unsupported poke target: no-op
         };
         match result {
-            Ok(_) => st.emit_diffs(&mut **sink),
+            Ok(_) => {
+                // An interactive poke must take effect THIS cycle: settle the
+                // queued propagation (without firing a clock edge) before
+                // reporting diffs, so the new value and its downstream cone
+                // show immediately at the current cycle.
+                if let Err(h) = st.engine.settle_cycle() {
+                    st.emit_diffs(&mut **sink);
+                    st.emit_halted(&mut **sink, &h);
+                    st.emit_status(&mut **sink);
+                    return;
+                }
+                st.emit_diffs(&mut **sink);
+            }
             Err(h) => {
                 st.emit_diffs(&mut **sink);
                 st.emit_halted(&mut **sink, &h);
