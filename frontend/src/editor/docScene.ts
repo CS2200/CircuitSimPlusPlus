@@ -1192,7 +1192,9 @@ export class DocScene {
         let caption = spec.caption(comp.attrs ?? {});
         // Live values (UI_OVERHAUL §21): constants always show their configured
         // value; clocks, pins, probes, registers, RAM/ROM and I/O show the value
-        // on their VALUE_PIN net in place of the mark, with a repeat by the pin.
+        // on their VALUE_PIN net in place of the mark — on the BODY only, never
+        // repeated beside the pin (that read as noise; RAM/ROM put Addr/Data on
+        // the chip instead, below).
         let valueText: string | null = null;
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
