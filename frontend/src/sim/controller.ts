@@ -57,6 +57,12 @@ export class SimController {
    * shown optimistically here until the next command supersedes it.
    */
   private readonly pokedRegs = new Map<string, string>();
+  /**
+   * In-progress inline register edit (component id + the text typed so far).
+   * Each keystroke appends a digit and pokes immediately (no Enter); a command
+   * or Escape ends the edit.
+   */
+  private regEdit: { compId: string; text: string } | null = null;
 
   constructor(
     private readonly core: Core,
@@ -231,9 +237,25 @@ export class SimController {
     return this.pokedRegs.get(compId);
   }
 
+  /** Begin/continue an inline register edit (App drives the keystrokes). */
+  setRegisterEdit(compId: string, text: string): void {
+    this.regEdit = { compId, text };
+  }
+
+  /** End the inline register edit (Escape/Enter or a command). */
+  clearRegisterEdit(): void {
+    this.regEdit = null;
+  }
+
+  /** The in-progress inline register edit, if any. */
+  registerEdit(): { compId: string; text: string } | null {
+    return this.regEdit;
+  }
+
   /** Any command supersedes an optimistic poke (the readout comes from nets). */
   private clearPoked(): void {
     if (this.pokedRegs.size > 0) this.pokedRegs.clear();
+    this.regEdit = null;
   }
 
   memRead(name: string, addr: number, len: number): Promise<WireValue[]> {

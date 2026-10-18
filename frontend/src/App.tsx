@@ -237,8 +237,6 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   /** Field the Inspector should focus next (a constant's value on double-click). */
   const [inspectorFocus, setInspectorFocus] = useState<string | null>(null);
-  /** Inline register value edit: the register and the text typed so far (#1/#2). */
-  const [regEdit, setRegEdit] = useState<{ compId: string; text: string } | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Autosave (autosave, phase 1; every change since §44): a crash-recovery copy
@@ -520,15 +518,16 @@ export default function App() {
     [doc, sheet, sim],
   );
 
-  /** Commit an inline register edit (Enter): parse in its base, then poke it. */
-  const commitRegEdit = useCallback(
-    (comp: CsxComponent) => {
-      if (regEdit === null || regEdit.compId !== comp.id) return;
-      const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "unsigned";
+  /**
+   * Apply one inline-register edit step: parse `text` in the register's base and
+   * poke it immediately (no Enter). A value that would not fit is rejected with
+   * a toast, and the caller keeps the previous text.
+   */
+  const applyRegInput = useCallback(
+    (comp: CsxComponent, text: string) => {
+      const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "hex";
       const parse = radix === "bin" ? "bin" : radix === "hex" ? "hex" : "dec";
       const bits = compPins(comp, doc.circuits).find((p) => p.name === "q")?.bitsize ?? 1;
-      const text = regEdit.text;
-      setRegEdit(null);
       const hex = parseRadixValue(text, parse, bits);
       if (hex === null) {
         // Never fail silently: a value that does not fit the register's width
@@ -536,9 +535,10 @@ export default function App() {
         toast(`Value must be a ${radix} number that fits in ${bits} bit${bits === 1 ? "" : "s"}`);
         return;
       }
+      sim.setRegisterEdit(comp.id, text);
       onPoke(comp.id, "q", hex);
     },
-    [regEdit, doc, onPoke, toast],
+    [doc, onPoke, sim, toast],
   );
 
   const onStatus = useCallback((s: EditorStatus) => {
@@ -1401,14 +1401,15 @@ export default function App() {
       if (!mod && inspectorCompId !== null) {
         const sel = doc.circuit(sheet).components.find((c) => c.id === inspectorCompId);
         if (sel?.type === "mem.register") {
-          const editing = regEdit?.compId === sel.id ? regEdit.text : null;
+          const edit = sim.registerEdit();
+          const editing = edit?.compId === sel.id ? edit.text : null;
           // A poke is only meaningful while the clock is paused: the play loop
           // steps whole cycles, so a pause lands on a cycle boundary and the
           // forced value takes effect for exactly that cycle. While running we
           // block the edit and hint once per burst.
           if (sim.store.status?.running ?? false) {
             if (editing === null && e.key.length === 1) {
-              const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
+              const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "hex";
               const accepts =
                 radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
               if (accepts.test(e.key)) {
@@ -1422,29 +1423,27 @@ export default function App() {
             }
             return;
           }
-          if (e.key === "Escape" && editing !== null) {
+          if ((e.key === "Escape" || e.key === "Enter") && editing !== null) {
             e.preventDefault();
-            setRegEdit(null);
+            sim.clearRegisterEdit();
             return;
           }
           if (e.key === "Backspace" && editing !== null) {
             e.preventDefault();
             const next = editing.slice(0, -1);
-            setRegEdit(next === "" ? null : { compId: sel.id, text: next });
-            return;
-          }
-          if (e.key === "Enter" && editing !== null) {
-            e.preventDefault();
-            commitRegEdit(sel);
+            if (next === "") sim.clearRegisterEdit();
+            else applyRegInput(sel, next);
             return;
           }
           if (e.key.length === 1) {
-            const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
+            const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "hex";
             const accepts =
               radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
             if (accepts.test(e.key)) {
               e.preventDefault();
-              setRegEdit({ compId: sel.id, text: (editing ?? "") + e.key });
+              // Append at the least-significant digit and poke IMMEDIATELY —
+              // no Enter needed (each keystroke is one new digit).
+              applyRegInput(sel, (editing ?? "") + e.key);
               return;
             }
           }
@@ -1479,8 +1478,7 @@ export default function App() {
     inspectorCompId,
     doc,
     sheet,
-    regEdit,
-    commitRegEdit,
+    applyRegInput,
     sim,
     toast,
   ]);
@@ -1703,7 +1701,6 @@ export default function App() {
                   onOpenSubcircuit={onOpenSubcircuit}
                   onNotify={toast}
                   sim={sim}
-                  editingValue={regEdit}
                   pathIds={pathIds}
                   violations={violationMarkers}
                   pulsesOn={pulsesOn}
