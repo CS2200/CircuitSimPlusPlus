@@ -1,112 +1,79 @@
 # CircuitSim++ — Bug & Task Backlog
 
-*Triaged 2026-10-18 against `master` @ `5deed81`.* The trial tester's raw list was
-verified item-by-item against the code. Already-fixed, by-design, and
-out-of-scope entries were moved to the **appendices** so the active list stays
-honest; the rest is ordered by priority.
+*Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
+`0462adf`** — see "Phase 1 — done" below.* The trial tester's raw list was
+verified item-by-item against the code; already-fixed, by-design, and
+out-of-scope entries live in the appendices so the active list stays honest.
 
-**Priority:** **P0** correctness/blocker · **P1** course-facing · **P2** UX polish
-(small) · **P3** feature (sizeable) · **?** needs info.
+**Priority:** **P1** course-facing · **P2** UX polish (small) · **P3** feature
+(sizeable) · **?** needs info.
 
 ---
 
-## P0 — Correctness (fix first)
+## Phase 1 — done (P0 correctness)
 
-### 1. Pin names disagree between the editor and the engine
-The editor's catalog names pins differently from the core, and
-`format/validate.rs:230` rejects wires to unknown pins — so wires drawn on these
-pins **fail to load** (verified: an adder with `c_in` wired → *"component
-'adder0' has no pin 'c_in'"*):
-
-| component | editor (`frontend/src/editor/catalog.ts`) | engine (`crates/core/src/components.rs`) |
-|---|---|---|
-| Adder | `c_in`, `c_out` | `cin`, `cout` |
-| Subtractor | *(no borrow pins at all)* | `bin`, `bout` |
-| Divider | `out` | `quot`, `rem` |
-| Decoder | `sel` (1 bit) | `in` (`inputBits` wide) |
-| Shifter | `amt` | `amt` *(matches)* |
-
-Already logged as a "known gap" in `frontend/UI_OVERHAUL.md:604`.
-**Fix:** one coordinated pass taking the **engine names as the source of truth**
-(files, fixtures and the autograder already use them): rename the editor specs,
-add the missing subtractor borrow + divider `quot`/`rem` pins, then re-bless the
-demo/visual baselines and fixtures. **Size: M.**
-
-### 2. Decoder can't be wired
-Follows from #1 but is user-visible on its own: the tile draws `out*` + a
-**1-bit `sel`** and no data input, while the engine expects a bus input named
-`in` (`inputBits` wide). Any decode circuit either fails validation or floats.
-**Fix:** rename `sel` → `in`, widen it to `inputBits`, keep the outputs.
-**Size: S** (once #1 lands).
-
-### 3. Any edit resets the simulation (clock lights up, cycle → 0)
-The live re-sync (`frontend/src/App.tsx:1116`) full-reloads the engine on every
-settled structural edit. A reload boots fresh state, so `cycle` returns to `0`
-and the clock body paints green via the `cycle % 2` fallback
-(`frontend/src/editor/docScene.ts:1083-1089`) — the reported "clock lights up on
-arbitrary circuit modifications", and "cycle counting" is discontinuous because
-of it.
-**Fix:** (a) stop painting a clock from `cycle` parity unless it is genuinely
-running/driven — paint "unknown" after a reload; (b) carry the cycle counter (and
-paused clock phase) across a resync instead of zeroing it.
-**Size: M.**
-
-### 4. `Ctrl+J` (step) while running doesn't stop the clock
-`frontend/src/components/SimBar.tsx:70` calls `stepTick()` unconditionally and
-the engine's `step_tick` never stops playback.
-**Fix:** in the `Ctrl+J` handler, pause first when running, then step.
-**Size: S.**
-
-### 5. Intermittent execution bug — likely a reload race
-`SimController.loadInto` (`frontend/src/sim/controller.ts:107`) mutates
-`this.doc` / `loadedRevision` and calls `store.reset()` *before* awaiting the
-load, and is invoked from three independent places (mount effect, debounced live
-re-sync, command `resync`) with **no sequencing**. Two overlapping loads can
-interleave diffs from the older snapshot — a plausible source of "sometimes the
-circuit runs wrong".
-**Fix:** add a monotonic load token (or serialize loads) and drop stale results;
-add a test that fires two loads back-to-back and asserts the newer one wins.
-**Size: M.** *(If we can't provoke it, ask the tester for a repro.)*
-
-### 6. Probe points the wrong way when rotated N/S
-`frontend/src/editor/docScene.ts:1140` draws `probePath` **unrotated**, so a
-north/south probe keeps an east-facing point.
-**Fix:** rotate the path about the body centre like the gate shapes
-(`rotatePath`). **Size: S.**
+- **#1/#2 Pin names now match the engine.** The editor's adder carry was
+  `c_in`/`c_out` (the core knows `cin`/`cout`) and the decoder's select was a
+  1-bit `sel` (the core knows a bus `in`); wires on those pins were *rejected at
+  load*, so carries and decoders could not be wired at all. Editor now mirrors
+  the engine registry (format-v2 §4): `cin`/`cout`, subtractor `bin`/`bout`,
+  divider `quot`/`rem`, decoder `in` (`inputBits` wide), and `sel`/`amt` carry
+  their real widths. Guarded by unit tests. *(commit `da11b5b`)*
+- **#3 Editing no longer reboots the sim.** The live re-sync compared the
+  document revision, so dragging a part or bending a wire reloaded a fresh
+  power-on — clocked state cleared and the cycle counter jumped to 0. `isStale`
+  now compares a **netlist fingerprint**, so only an edit the core cares about
+  reloads. *(commit `bf41341`)*
+- **#3(b) The clock no longer "lights up" on an edit.** An unwired clock fell
+  back to `cycle % 2` for its body fill; a reload put the cycle at 0 → painted
+  HIGH (dark green). The fallback now only fires after a rising edge, so an idle
+  clock draws its neutral wave. *(commit `bf41341`)*
+- **#5 Intermittent execution (reload race) fixed.** Overlapping loads could
+  both apply their initial diff batches; loads are now serialized so the newest
+  resets and loads last. *(commit `bf41341`)*
+- **#4 `Ctrl+J` force-stops the clock** before stepping (a step while playing
+  was a no-op), matching the transport's "tick" button. *(commit `0462adf`)*
+- **#6 Probe rotates.** A N/S probe was drawn with an east-facing body offset
+  from its swapped rect; it now rotates like the gate shapes. *(commit
+  `0462adf`)*
+- **#11 Long pin names ellipsize** (subcircuit instance labels) so they cannot
+  spill across the box. *(commit `0462adf`)*
 
 ---
 
 ## P1 — Course-facing correctness
 
-### 7. Register readout is dead when `q` is unwired
+### 1. Register readout is dead when `q` is unwired
 The readout resolves through the `q` net (`frontend/src/sim/controller.ts:52`),
 so an unconnected `q` shows the §61 zero placeholder instead of the stored value
 (poked values are already shown optimistically).
 **Fix:** read the register's internal state directly (report it like a named
 component) rather than only through the `q` net. **Size: M.**
 
-### 8. Probe doesn't match the wire's bit width on connect
+### 2. Probe doesn't match the wire's bit width on connect
 `addWire` (`frontend/src/model/document.ts:596`) never adjusts the probe's
 `bitsize`.
 **Fix:** on connect, set the probe's width from the net/driver. **Size: S.**
 
-### 9. Short-circuit alert just says "contention"
+### 3. Short-circuit alert just says "contention"
 The engine emits `HaltReason::Contention` (`crates/core/src/api.rs:191`) and the
 banner prints the bare word.
 **Fix:** a human message — e.g. *"short circuit: net N is driven both high and
 low"* — kept in the prominent banner. **Size: S.**
 
-### 10. "Name pins" is only a generic load failure
+### 4. "Name pins" is only a generic load failure
 `format/validate.rs:152` has a clear engine message, but the UI surfaces it as a
 plain load error.
 **Fix:** a dedicated, prominent frontend warning for unnamed/unreachable pins.
 **Size: S.**
 
-### 11. Pin capitalization + long-name truncation
-Capitalize labels (`AMOUNT`, `CARRY_IN`…) and ellipsize long pin names —
-`docScene.ts:1374` draws them raw at a fixed size. **Fix:** fold the rename into
-#1's naming pass (note: engine/fixtures use `amt`, so it is a format change too)
-and add width-based ellipsis to the pin-label draw. **Size: S.**
+### 5. Capitalize pin names — needs a decision
+The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Note that
+ordinary pins are **not labelled on the canvas** (they are dots), so this is
+almost entirely a *format* change: pin names are wire-endpoint keys in `.csx`,
+and the fixtures and autograder use them (`amt`, `cin`, …). Recommendation: keep
+the engine names. If we do rename, it needs a format-version bump plus
+fixture/demo/golden regeneration. **Size: M** *(decision first).*
 
 ---
 
@@ -160,7 +127,11 @@ and add width-based ellipsis to the pin-label draw. **Size: S.**
   readout enough?
 - **"Reposition 'Restore Version' tab to the far right"** — that control isn't a
   tab today.
-- **"Intermittent general circuit execution bug"** — see #5; ask for a repro.
+- **"Make cycle counting continuous"** — geometry-only edits no longer reset the
+  counter (Phase 1); a *topology* change still reboots the engine, by design. If
+  the counter must survive even that, the load contract needs a `startCycle`.
+- **"Intermittent general circuit execution bug"** — a reload race is fixed
+  (`bf41341`); ask the tester for a repro if it recurs.
 
 ## Appendix B — Removed from the list (fixed / by design / out of scope)
 
