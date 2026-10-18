@@ -205,7 +205,10 @@ export default function SimBar({
           </button>
         )}
       </div>
-      {(s.halted !== null || s.loadErrors.length > 0 || cmdError !== null) && (
+      {(s.halted !== null ||
+        s.loadErrors.length > 0 ||
+        cmdError !== null ||
+        s.contendedNets.size > 0) && (
         <div className="sim-banner" role="alert">
           {s.halted !== null && (
             <span>
@@ -219,6 +222,13 @@ export default function SimBar({
             </span>
           )}
           {cmdError !== null && <span>⛔ {cmdError}</span>}
+          {s.contendedNets.size > 0 && (
+            <span className="sim-short" data-short-nets={s.contendedNets.size}>
+              ⚠ Short circuit — {s.contendedNets.size} net
+              {s.contendedNets.size === 1 ? "" : "s"} driven both high and low, so the value there
+              is unknown (X). Two enabled drivers are fighting: the wire is highlighted in red.
+            </span>
+          )}
         </div>
       )}
     </>

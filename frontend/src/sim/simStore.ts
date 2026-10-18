@@ -44,6 +44,14 @@ export class SimStore {
   /** Nets changed by the latest flushed frame (U7 pulse animations). */
   lastChanged: readonly NetChangeEvent[] = [];
 
+  /**
+   * Nets whose `X` is a genuine **short circuit** — two enabled drivers
+   * fighting, per the engine's `contended` flag (contract v1.2). Empty unless
+   * the engine flagged one, so the warning cannot misfire on an `X` that merely
+   * flowed in (a divide-by-zero, an `X` mux select).
+   */
+  private readonly _contended = new Set<NetId>();
+
   private _loaded = false;
   private _version = 0;
   private _cycle = 0;
@@ -56,6 +64,11 @@ export class SimStore {
 
   get loaded(): boolean {
     return this._loaded;
+  }
+
+  /** Nets currently shorted (see `_contended`). */
+  get contendedNets(): ReadonlySet<NetId> {
+    return this._contended;
   }
 
   getVersion(): number {
@@ -110,7 +123,13 @@ export class SimStore {
    * NO pulses (nothing "changed" — everything simply is).
    */
   applyDiffs(changes: ReadonlyMap<NetId, StampedChange>, cycle: number, full = false): void {
-    for (const [net, change] of changes) this.netValues.set(net, change.val);
+    for (const [net, change] of changes) {
+      this.netValues.set(net, change.val);
+      // The engine sends `contended` only when true (contract v1.2), so an
+      // absent flag is a definite "not shorted" — clear it, don't keep a stale.
+      if (change.contended === true) this._contended.add(net);
+      else this._contended.delete(net);
+    }
     this.lastChanged = full ? [] : [...changes].map(([net, change]) => ({ net, at: change.at }));
     this._cycle = cycle;
     this.bump();
@@ -144,6 +163,7 @@ export class SimStore {
    */
   resetRunState(): void {
     this.netValues.clear();
+    this._contended.clear();
     this.lastChanged = [];
     this.status = null;
     this.halted = null;
@@ -155,6 +175,7 @@ export class SimStore {
   /** Unload: everything back to the pre-load state. */
   reset(): void {
     this.netValues.clear();
+    this._contended.clear();
     this.lastChanged = [];
     this.wireToNet = null;
     this.netToWires = null;

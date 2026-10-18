@@ -137,4 +137,23 @@ describe("SimStore", () => {
     expect(store.halted).toBeNull();
     expect(store.netValues.size).toBe(0);
   });
+
+  it("tracks shorted nets from the diffs (contract v1.2)", () => {
+    const store = new SimStore();
+    store.onLoaded(new Map([[0, 7]]), []);
+
+    // The engine flags `contended` only when a net's X is a genuine short —
+    // an X that merely flowed in stays unflagged, so the warning cannot misfire.
+    store.applyDiffs(new Map([[7, { ...stamped("0", 10), contended: true }]]), 3);
+    expect([...store.contendedNets]).toEqual([7]);
+
+    // A later batch without the flag means the fight is over.
+    store.applyDiffs(new Map([[7, stamped("1", 20)]]), 4);
+    expect(store.contendedNets.size).toBe(0);
+
+    // A run-state reset clears it too.
+    store.applyDiffs(new Map([[7, { ...stamped("0", 30), contended: true }]]), 5);
+    store.resetRunState();
+    expect(store.contendedNets.size).toBe(0);
+  });
 });

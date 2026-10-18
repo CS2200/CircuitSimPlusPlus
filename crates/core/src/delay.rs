@@ -921,6 +921,23 @@ impl DelayEngine {
         self.net_values[net.idx()].clone()
     }
 
+    /// True when `net`'s drivers genuinely disagree — two enabled drivers
+    /// fighting, i.e. a short circuit — rather than the net merely carrying an
+    /// `X` that flowed in (DESIGN.md §4.1; contract v1.2). Single-driver and
+    /// undriven nets are never shorted.
+    pub fn net_contended(&self, net: NetId) -> bool {
+        let drivers = &self.net_drivers[net.idx()];
+        if drivers.len() < 2 {
+            return false;
+        }
+        let n = &self.netlist.nets[net.idx()];
+        let vals: Vec<Value> = drivers
+            .iter()
+            .map(|&(c, s)| self.drives[c as usize][s].clone())
+            .collect();
+        Value::contention_merge_detail(n.width, &vals).1
+    }
+
     /// Value of a named probe (its input pin's view) or register (stored
     /// state).
     pub fn named_value(&self, name: &str) -> Option<Value> {
@@ -2236,6 +2253,56 @@ mod tests {
             .value_net
             .expect("value_net present");
         assert_eq!(eng.net_value(net), k(1, 1));
+    }
+    /// A driver fight resolves its net to `X` **and** is flagged as a short
+    /// (`net_contended`), while an `X` that merely flows into another part is
+    /// not — so the UI can say "short circuit" only when there is one
+    /// (DESIGN.md §4.1; contract v1.2).
+    #[test]
+    fn net_contended_distinguishes_a_short_from_a_flowed_in_x() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"b1","type":"wiring.controlled-buffer","pos":[0,0]}},
+                {{"id":"b2","type":"wiring.controlled-buffer","pos":[0,0]}},
+                {{"id":"b3","type":"wiring.controlled-buffer","pos":[0,0]}},
+                {{"id":"bus","type":"wiring.probe","pos":[0,0],"name":"bus"}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"b1","pin":"in"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"b1","pin":"en"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"b2","pin":"in"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"b2","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"b3","pin":"en"}}}},
+                {{"a":{{"comp":"b1","pin":"out"}},"b":{{"comp":"bus","pin":"in"}}}},
+                {{"a":{{"comp":"b2","pin":"out"}},"b":{{"comp":"bus","pin":"in"}}}},
+                {{"a":{{"comp":"b1","pin":"out"}},"b":{{"comp":"b3","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let eng = engine(&json, 500);
+        let count = eng.netlist().nets.len();
+
+        let shorted = (0..count)
+            .find(|&i| eng.netlist().nets[i].drivers.len() == 2)
+            .expect("the shorted net has two drivers");
+        let short = NetId(shorted as u32);
+        assert!(eng.net_value(short).has_x(), "a driver fight resolves to X");
+        assert!(eng.net_contended(short), "…and is flagged as a short");
+
+        // b3 reads the shorted net, so its own output carries the X onward —
+        // but nothing disagrees on THAT net, so it is not a short.
+        let carried = (0..count)
+            .filter(|&i| i != shorted)
+            .find(|&i| eng.net_value(NetId(i as u32)).has_x())
+            .expect("the X propagates downstream");
+        assert_eq!(eng.netlist().nets[carried].drivers.len(), 1);
+        assert!(
+            !eng.net_contended(NetId(carried as u32)),
+            "an X that flowed in is not a short"
+        );
     }
 }
 

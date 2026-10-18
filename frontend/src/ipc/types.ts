@@ -97,6 +97,12 @@ export interface NetChange {
    * pulses; presentation only, never the evaluation path.
    */
   at?: number;
+  /**
+   * Present and `true` when this net's `X` is a genuine **short circuit** — two
+   * enabled drivers disagreeing — rather than an `X` that flowed in (contract
+   * v1.2; omitted when false). Powers the short-circuit warning.
+   */
+  contended?: boolean;
 }
 
 /**

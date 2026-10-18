@@ -585,11 +585,21 @@ impl Value {
     }
 
     /// Net resolution (DESIGN.md §4.1): combine every driver of one net.
+    pub fn contention_merge(width: u32, drivers: &[Value]) -> Value {
+        Self::contention_merge_detail(width, drivers).0
+    }
+
+    /// As [`Self::contention_merge`], and also reports whether any bit's `X`
+    /// came from a genuine **driver disagreement** — two enabled drivers
+    /// fighting, i.e. a short circuit — rather than from a driver that was
+    /// *already* `X`. The UI says "short circuit" for the former and stays
+    /// quiet for the latter (an `X` from a divide-by-zero or an `X` mux select
+    /// simply flows in).
     ///
     /// Per bit, over all drivers: no driving driver → Z; one state
     /// unanimously → that state; any disagreement (or any driven X) → X.
     /// A driver bit that is Z is *not driving* that bit.
-    pub fn contention_merge(width: u32, drivers: &[Value]) -> Value {
+    pub fn contention_merge_detail(width: u32, drivers: &[Value]) -> (Value, bool) {
         for d in drivers {
             assert_eq!(
                 d.width, width,
@@ -598,12 +608,13 @@ impl Value {
             );
         }
         if drivers.is_empty() {
-            return Value::z(width);
+            return (Value::z(width), false);
         }
         let n = n_limbs(width);
         let mut ones = vec![0u64; n];
         let mut xs = vec![0u64; n];
         let mut zs = vec![0u64; n];
+        let mut shorted = false;
         for i in 0..n {
             let mask = limb_mask(width, i);
             let mut any_driven = 0u64; // some driver drives this bit (0/1/X)
@@ -617,17 +628,23 @@ impl Value {
                 all_one_or_z &= d.ones[i] | d.zs[i];
             }
             let disagree = any_one & !all_one_or_z;
+            if disagree & mask != 0 {
+                shorted = true;
+            }
             let x = (any_x | disagree) & mask;
             ones[i] = all_one_or_z & any_driven & !x & mask;
             xs[i] = x;
             zs[i] = !any_driven & mask;
         }
-        Value {
-            width,
-            ones: Limbs::from_vec(ones),
-            xs: Limbs::from_vec(xs),
-            zs: Limbs::from_vec(zs),
-        }
+        (
+            Value {
+                width,
+                ones: Limbs::from_vec(ones),
+                xs: Limbs::from_vec(xs),
+                zs: Limbs::from_vec(zs),
+            },
+            shorted,
+        )
     }
 
     // ---- Width operations

@@ -359,7 +359,9 @@ Sim runs on a dedicated Rust thread. The UI never receives full per-tick state:
 - Nets are engine-internal and reach the UI only as identifiers: `LoadResult.net_map` (net ↔ wires)
   and, since contract **v1.2**, `NamedComponent.value_net`. The engine gives **every pin** a net —
   even an unwired one — so a named part's readout keeps working with its value output left open
-  (a register with `q` unconnected still shows its stored value).
+  (a register with `q` unconnected still shows its stored value). The same version flags a net whose
+  `X` is a real driver fight (`NetChange.contended`), so the UI can call a short circuit a short
+  circuit — an `X` that merely flowed in (divide-by-zero, an `X` mux select) stays unflagged.
 
 ---
 

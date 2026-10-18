@@ -158,6 +158,11 @@ pub struct NetChange {
     /// Simulation time (ns since run start) of the change (contract v1.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at: Option<u64>,
+    /// Present and `true` when this net's `X` is a genuine **short circuit** —
+    /// two enabled drivers disagreeing — rather than an `X` that flowed in
+    /// (contract v1.2; omitted when false). The UI flags shorts with it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contended: Option<bool>,
 }
 
 /// Event: values of nets that changed. Diffs only, never full state
@@ -425,6 +430,7 @@ mod tests {
                     z: String::new(),
                 },
                 at: None,
+                contended: None,
             }],
             full: false,
         };
@@ -436,6 +442,27 @@ mod tests {
         let back: NetDiffs = serde_json::from_str(&json).unwrap();
         assert_eq!(diffs, back);
 
+        // A short circuit rides along as `contended` (contract v1.2); absent
+        // otherwise, as the assertion above shows.
+        let shorted = NetDiffs {
+            cycle: 42,
+            changes: vec![NetChange {
+                net: NetId(7),
+                val: WireValue {
+                    v: String::new(),
+                    x: "1".into(),
+                    z: String::new(),
+                },
+                at: None,
+                contended: Some(true),
+            }],
+            full: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&shorted).unwrap(),
+            r#"{"cycle":42,"changes":[{"net":7,"val":{"v":"","x":"1","z":""},"contended":true}],"full":false}"#
+        );
+
         // `at` present (delay mode) and a full (initial) batch.
         let initial = NetDiffs {
             cycle: 0,
@@ -443,6 +470,7 @@ mod tests {
                 net: NetId(0),
                 val: WireValue::default(),
                 at: Some(20),
+                contended: None,
             }],
             full: true,
         };

@@ -2705,6 +2705,12 @@ body {
   font-size: 0.85rem;
 }
 
+/* A short circuit is a circuit-level FAULT rather than a halt, so it rides in
+ * the banner as its own, bolder line (it clears the moment the fight ends). */
+.sim-short {
+  font-weight: 600;
+}
+
 /* Watch panel (U5/U6) — lives inside the right dock's Watch tab. */
 .watch-panel {
   display: flex;

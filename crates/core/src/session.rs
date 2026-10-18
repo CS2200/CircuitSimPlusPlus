@@ -83,6 +83,9 @@ struct SimState {
     root_flat: BTreeMap<u32, CompId>,
     /// Last emitted net values (diff baseline).
     last_values: Vec<Value>,
+    /// Per-net "this net's X is a genuine short circuit" baseline (contract
+    /// v1.2), parallel to `last_values`.
+    last_contended: Vec<bool>,
     /// Delay mode: the most recent run's report (for `timing_update`).
     last_report: Option<RunReport>,
     running: bool,
@@ -105,6 +108,11 @@ impl Engine {
 
     fn net_value(&self, net: usize) -> Value {
         self.0.net_value(NetId(net as u32))
+    }
+
+    /// True when a net's `X` is a genuine short circuit (contract v1.2).
+    fn net_contended(&self, net: usize) -> bool {
+        self.0.net_contended(NetId(net as u32))
     }
 
     /// Current simulation time in ns.
@@ -173,6 +181,14 @@ impl SimState {
             .collect()
     }
 
+    /// Whether each net's `X` is a genuine short circuit (contract v1.2) —
+    /// `false` for every net that is not currently `X`.
+    fn all_contended(&self) -> Vec<bool> {
+        (0..self.engine.net_count())
+            .map(|i| self.engine.net_value(i).has_x() && self.engine.net_contended(i))
+            .collect()
+    }
+
     /// Emit the one initial full batch (contract v1.1).
     fn emit_full_batch(&mut self, sink: &mut dyn EventSink) {
         let changes = (0..self.engine.net_count())
@@ -182,10 +198,12 @@ impl SimState {
                     net: NetId(i as u32),
                     at: self.engine.now(),
                     val: val.to_wire_value(),
+                    contended: (val.has_x() && self.engine.net_contended(i)).then_some(true),
                 }
             })
             .collect();
         self.last_values = self.all_values();
+        self.last_contended = self.all_contended();
         sink.net_diffs(&NetDiffs {
             cycle: self.engine.cycle(),
             changes,
@@ -199,13 +217,18 @@ impl SimState {
         let mut changes = Vec::new();
         for i in 0..self.engine.net_count() {
             let v = self.engine.net_value(i);
-            if v != self.last_values[i] {
+            // A driver conflict always shows up as X, so only an X net can be
+            // shorted — which keeps the (driver-merging) check off the hot path.
+            let contended = v.has_x() && self.engine.net_contended(i);
+            if v != self.last_values[i] || contended != self.last_contended[i] {
                 changes.push(NetChange {
                     net: NetId(i as u32),
                     val: v.to_wire_value(),
                     at,
+                    contended: contended.then_some(true),
                 });
                 self.last_values[i] = v;
+                self.last_contended[i] = contended;
             }
         }
         if !changes.is_empty() {
@@ -375,6 +398,7 @@ impl Session {
                     half: DEFAULT_HALF_PERIOD,
                     root_flat,
                     last_values: Vec::new(),
+                    last_contended: Vec::new(),
                     last_report: None,
                     running: false,
                     play_hz: 0,
@@ -435,6 +459,7 @@ impl Session {
             half,
             root_flat,
             last_values: Vec::new(),
+            last_contended: Vec::new(),
             last_report: None,
             running: false,
             play_hz: 0,

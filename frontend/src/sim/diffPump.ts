@@ -16,6 +16,8 @@ import type { NetDiffs, NetId, WireValue } from "../ipc/types";
 export interface StampedChange {
   val: WireValue;
   at?: number;
+  /** True when this net's `X` is a genuine short circuit (contract v1.2). */
+  contended?: boolean;
 }
 
 export type FlushHandler = (
@@ -37,7 +39,11 @@ export class DiffPump {
 
   /** Merge one engine batch into the pending frame. */
   push(diffs: NetDiffs): void {
-    for (const c of diffs.changes) this.pending.set(c.net, { val: c.val, at: c.at });
+    for (const c of diffs.changes) {
+      const change: StampedChange = { val: c.val, at: c.at };
+      if (c.contended === true) change.contended = true;
+      this.pending.set(c.net, change);
+    }
     this.pendingFull ||= diffs.full;
     this.latestCycle = diffs.cycle;
     if (!this.scheduled) {
