@@ -42,6 +42,37 @@ describe("catalog", () => {
     const dec8 = compPins({ type: "plexers.decoder", attrs: { inputBits: 3 } });
     expect(dec8.filter((p) => p.name.startsWith("out"))).toHaveLength(8);
   });
+
+  /**
+   * Pin names/widths must match the engine registry (format-v2 §4): the core
+   * rejects a wire to a pin it does not know (`format/validate.rs`), so a
+   * mismatch makes the part unwireable. These are the types that used to drift
+   * (adder carry, subtractor borrow, divider quot/rem, decoder select).
+   */
+  it("pin names track the engine registry (format-v2 §4)", () => {
+    const names = (type: string, attrs?: Record<string, unknown>) =>
+      compPins({ type, ...(attrs !== undefined ? { attrs } : {}) }).map((p) => p.name);
+    expect(names("arith.adder")).toEqual(["a", "b", "cin", "out", "cout"]);
+    expect(names("arith.subtractor")).toEqual(["a", "b", "bin", "out", "bout"]);
+    expect(names("arith.divider")).toEqual(["a", "b", "quot", "rem"]);
+    expect(names("arith.shifter")).toEqual(["in", "amt", "out"]);
+    expect(names("plexers.mux")).toEqual(["in0", "in1", "sel", "out"]);
+    expect(names("plexers.demux")).toEqual(["in", "sel", "out0", "out1"]);
+    // The decoder's select IS its data input — a bus named `in`, not a `sel`.
+    expect(names("plexers.decoder")).toEqual(["in", "out0", "out1", "out2", "out3"]);
+  });
+
+  it("select / amount pins carry the engine's widths", () => {
+    const width = (type: string, name: string, attrs?: Record<string, unknown>) =>
+      compPins({ type, ...(attrs !== undefined ? { attrs } : {}) }).find((p) => p.name === name)
+        ?.bitsize;
+    expect(width("plexers.mux", "sel", { selectBits: 3 })).toBe(3);
+    expect(width("plexers.demux", "sel", { selectBits: 2 })).toBe(2);
+    expect(width("plexers.decoder", "in", { inputBits: 3 })).toBe(3);
+    expect(width("arith.shifter", "amt", { bitsize: 32 })).toBe(5);
+    expect(width("arith.shifter", "amt", { bitsize: 1 })).toBe(1);
+    expect(width("arith.shifter", "in", { bitsize: 8 })).toBe(8);
+  });
 });
 
 describe("compLayout", () => {

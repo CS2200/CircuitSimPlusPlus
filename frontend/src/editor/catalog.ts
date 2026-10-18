@@ -49,6 +49,16 @@ export function bitsOf(attrs: Readonly<Record<string, unknown>>, dflt = 1): numb
   return uintAttr(attrs, "bitsize", dflt);
 }
 
+/**
+ * The shifter's `amt` pin width: how many bits it takes to index `bitsize`
+ * values. Mirrors the engine's `addr_width(bitsize)` (min 1), so a 32-bit
+ * shifter's amount input is 5 bits wide on both sides.
+ */
+function shiftAmountBits(attrs: Readonly<Record<string, unknown>>): number {
+  const b = bitsOf(attrs);
+  return Math.max(1, 32 - Math.clz32(b - 1));
+}
+
 /** Integer attr clamped to 1..32 (format-v2's bit-width range). */
 function uintAttr(
   attrs: Readonly<Record<string, unknown>>,
@@ -130,12 +140,19 @@ function withExtras(
 
 /**
  * mux/demux/decoder with select-width-driven pin sets (n = 2^select data
- * lines). Attr names and defaults follow format-v2 §4: `selectBits`
- * (mux/demux, default 1) and `inputBits` (decoder, default 2).
+ * lines). Pin names AND widths mirror the engine registry (format-v2 §4), so
+ * every pin here has a counterpart the core will resolve:
+ *
+ *   mux      in0..in{n-1}, sel (selectBits wide), out
+ *   demux    in, sel (selectBits wide), out0..out{n-1}
+ *   decoder  in (inputBits wide), out0..out{n-1}   — the select IS the input
+ *
+ * `selectKey`/`selectDefault` give the select width: `selectBits` (mux/demux,
+ * default 1) or `inputBits` (decoder, default 2).
  */
 function plexerSpec(
   caption: string,
-  flavor: "in" | "out" | "out-no-in",
+  flavor: "mux" | "demux" | "decoder",
   selectKey = "selectBits",
   selectDefault = 1,
 ): CompSpec {
@@ -149,8 +166,20 @@ function plexerSpec(
       const count = n(attrs);
       const height = h(attrs);
       const width = bitsOf(attrs);
+      const selWidth = numAttr(attrs, selectKey, selectDefault);
       const pins: PinSpec[] = [];
-      if (flavor === "in") {
+      const outputs = (bitsize: number) => {
+        for (let i = 0; i < count; i++) {
+          pins.push({
+            name: `out${i}`,
+            dx: 4,
+            dy: ((i + 1) * height) / (count + 1),
+            kind: "out",
+            bitsize,
+          });
+        }
+      };
+      if (flavor === "mux") {
         for (let i = 0; i < count; i++) {
           pins.push({
             name: `in${i}`,
@@ -160,22 +189,18 @@ function plexerSpec(
             bitsize: width,
           });
         }
+        pins.push({ name: "sel", dx: 2, dy: height, kind: "in", bitsize: selWidth });
         pins.push({ name: "out", dx: 4, dy: height / 2, kind: "out", bitsize: width });
+      } else if (flavor === "demux") {
+        pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: width });
+        pins.push({ name: "sel", dx: 2, dy: height, kind: "in", bitsize: selWidth });
+        outputs(width);
       } else {
-        if (flavor === "out") {
-          pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: width });
-        }
-        for (let i = 0; i < count; i++) {
-          pins.push({
-            name: `out${i}`,
-            dx: 4,
-            dy: ((i + 1) * height) / (count + 1),
-            kind: "out",
-            bitsize: flavor === "out" ? width : 1,
-          });
-        }
+        // The decoder's select bits are its DATA input (engine `in`), not a
+        // separate `sel` — one bus pin on the left.
+        pins.push({ name: "in", dx: 0, dy: height / 2, kind: "in", bitsize: selWidth });
+        outputs(1);
       }
-      pins.push({ name: "sel", dx: 2, dy: height, kind: "in" });
       return pins;
     },
     caption: () => caption,
@@ -451,21 +476,23 @@ const REGISTRY: Record<string, CompSpec> = {
   "wiring.splitter": splitterSpec(),
 
   // Plexers (pin sets scale with the select width: n = 2^select data lines)
-  "plexers.mux": plexerSpec("MUX", "in"),
-  "plexers.demux": plexerSpec("DEMUX", "out"),
-  "plexers.decoder": plexerSpec("DEC", "out-no-in", "inputBits", 2),
+  "plexers.mux": plexerSpec("MUX", "mux"),
+  "plexers.demux": plexerSpec("DEMUX", "demux"),
+  "plexers.decoder": plexerSpec("DEC", "decoder", "inputBits", 2),
   "plexers.priority-decoder": priorityDecoderSpec(),
 
-  // Arithmetic
+  // Arithmetic. Pin names mirror the engine registry (format-v2 §4): carry
+  // in/out are `cin`/`cout`, the subtractor's borrow is `bin`/`bout`, and the
+  // divider emits `quot`/`rem` — never `c_in`/`c_out`, which the core rejects.
   "arith.adder": boxSpec(
     6,
     4,
     [
       { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
-      { name: "c_in", dx: 3, dy: 0, kind: "in" },
+      { name: "cin", dx: 3, dy: 0, kind: "in" },
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
-      { name: "c_out", dx: 3, dy: 4, kind: "out" },
+      { name: "cout", dx: 3, dy: 4, kind: "out" },
     ],
     "+",
     { label: "ADD", markSize: 1.7 },
@@ -476,7 +503,9 @@ const REGISTRY: Record<string, CompSpec> = {
     [
       { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
+      { name: "bin", dx: 3, dy: 0, kind: "in" },
       { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
+      { name: "bout", dx: 3, dy: 4, kind: "out" },
     ],
     "\u2212",
     { label: "SUB", markSize: 1.7 },
@@ -498,7 +527,8 @@ const REGISTRY: Record<string, CompSpec> = {
     [
       { name: "a", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "b", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
-      { name: "out", dx: 6, dy: 2, kind: "out", bitsize: BUS_WIDTH },
+      { name: "quot", dx: 6, dy: 1, kind: "out", bitsize: BUS_WIDTH },
+      { name: "rem", dx: 6, dy: 3, kind: "out", bitsize: BUS_WIDTH },
     ],
     "\u00f7",
     { label: "DIV", markSize: 1.7 },
@@ -526,17 +556,21 @@ const REGISTRY: Record<string, CompSpec> = {
     "~",
     { label: "NEG", markSize: 1.7 },
   ),
-  "arith.shifter": boxSpec(
-    6,
-    3,
-    [
-      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH },
-      { name: "amt", dx: 3, dy: 3, kind: "in" },
-      { name: "out", dx: 6, dy: 1.5, kind: "out", bitsize: BUS_WIDTH },
+  // `amt` is `addr_width(bitsize)` wide in the engine, so the shifter needs a
+  // hand-written spec — boxSpec has one BUS_WIDTH sentinel and both `in`/`out`
+  // would take it.
+  "arith.shifter": {
+    width: () => 6,
+    height: () => 3,
+    pins: (attrs) => [
+      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: bitsOf(attrs) },
+      { name: "amt", dx: 3, dy: 3, kind: "in", bitsize: shiftAmountBits(attrs) },
+      { name: "out", dx: 6, dy: 1.5, kind: "out", bitsize: bitsOf(attrs) },
     ],
-    "\u00ab",
-    { label: "SHIFT", markSize: 1.7 },
-  ),
+    caption: () => "\u00ab",
+    label: "SHIFT",
+    markSize: 1.7,
+  },
   // Bit extender: inBits → outBits with zero/sign extension (format-v2 §4).
   "arith.bit-extender": {
     width: () => 4,
