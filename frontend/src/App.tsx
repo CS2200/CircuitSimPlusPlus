@@ -230,6 +230,8 @@ export default function App() {
   // VITE_MOCK_CORE=1 (dev default), else the Tauri adapter.
   const [sim] = useState(() => new SimController(getCore()));
   const editorRef = useRef<EditorHandle>(null);
+  /** Rate-limit for the "pause the clock" hint when editing a running register. */
+  const pokeHintRef = useRef(0);
   const railRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -1400,6 +1402,26 @@ export default function App() {
         const sel = doc.circuit(sheet).components.find((c) => c.id === inspectorCompId);
         if (sel?.type === "mem.register") {
           const editing = regEdit?.compId === sel.id ? regEdit.text : null;
+          // A poke is only meaningful while the clock is paused: the play loop
+          // steps whole cycles, so a pause lands on a cycle boundary and the
+          // forced value takes effect for exactly that cycle. While running we
+          // block the edit and hint once per burst.
+          if (sim.store.status?.running ?? false) {
+            if (editing === null && e.key.length === 1) {
+              const radix = typeof sel.attrs?.radix === "string" ? sel.attrs.radix : "unsigned";
+              const accepts =
+                radix === "bin" ? /^[01]$/ : radix === "hex" ? /^[0-9a-fA-F]$/ : /^[0-9]$/;
+              if (accepts.test(e.key)) {
+                e.preventDefault();
+                if (Date.now() - pokeHintRef.current > 2000) {
+                  pokeHintRef.current = Date.now();
+                  toast("Pause the clock (Ctrl+K) to force a register value");
+                }
+                return;
+              }
+            }
+            return;
+          }
           if (e.key === "Escape" && editing !== null) {
             e.preventDefault();
             setRegEdit(null);
@@ -1449,7 +1471,19 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onOpen, onSave, onSaveAs, openHistory, inspectorCompId, doc, sheet, regEdit, commitRegEdit]);
+  }, [
+    onOpen,
+    onSave,
+    onSaveAs,
+    openHistory,
+    inspectorCompId,
+    doc,
+    sheet,
+    regEdit,
+    commitRegEdit,
+    sim,
+    toast,
+  ]);
 
   /** The bar shows the file name; the app name lives on the logo's tooltip. */
   const docTitle = filePath === null ? "(unsaved)" : baseName(filePath);
@@ -1667,6 +1701,7 @@ export default function App() {
                   onStatus={onStatus}
                   onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
+                  onNotify={toast}
                   sim={sim}
                   editingValue={regEdit}
                   pathIds={pathIds}

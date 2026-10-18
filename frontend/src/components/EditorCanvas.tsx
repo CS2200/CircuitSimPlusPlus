@@ -78,6 +78,8 @@ export default forwardRef<
     onEditComponent?: (compId: string, focusField?: string) => void;
     /** Right-click a subcircuit instance: jump to its definition tab. */
     onOpenSubcircuit?: (circuit: string) => void;
+    /** User-facing messages (toasts). */
+    onNotify?: (message: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
     sim?: SimController;
     /** Inline register value edit in progress (App owns the text, #2). */
@@ -103,6 +105,7 @@ export default forwardRef<
     onStatus,
     onEditComponent,
     onOpenSubcircuit,
+    onNotify,
     sim,
     editingValue,
     pathIds,
@@ -171,6 +174,12 @@ export default forwardRef<
   useEffect(() => {
     tool.onButton = (compId, down) => {
       if (sim === undefined) return;
+      // A poke is only meaningful while the clock is paused (the play loop steps
+      // whole cycles); pressing while running would inject at an arbitrary point.
+      if (sim.store.status?.running ?? false) {
+        onNotify?.("Pause the clock (Ctrl+K) to press a button");
+        return;
+      }
       void (async () => {
         if (!(await sim.resync(doc))) return;
         const idx = doc.circuit(sheetRef.current).components.findIndex((c) => c.id === compId);
@@ -181,7 +190,7 @@ export default forwardRef<
     return () => {
       tool.onButton = undefined;
     };
-  }, [tool, sim, doc]);
+  }, [tool, sim, doc, onNotify]);
 
   // Center the camera once per document (never re-center on edits).
   const initialBounds = useMemo(() => {
