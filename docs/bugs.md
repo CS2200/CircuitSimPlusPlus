@@ -61,36 +61,41 @@ All four actionable items landed; the last is a format decision.
   when a net's `X` is a genuine driver fight; the sim bar now says
   *"⚠ Short circuit — N nets driven both high and low…"*.
 
-### Open: capitalize pin names — needs a decision
-The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Ordinary
-pins are **not labelled on the canvas** (they are dots), so this is almost
-entirely a *format* change: pin names are wire-endpoint keys in `.csx`, and the
-fixtures and autograder use them (`amt`, `cin`, …). Recommendation: keep the
-engine names. If we do rename, it needs a format-version bump plus
-fixture/demo/golden regeneration. **Size: M** *(decision first).*
+### Decided: pin names stay lowercase (no rename)
+The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Decision
+(2026-10-18): **leave them alone.** Ordinary pins are not labelled on the canvas
+(they are dots), so the change is almost entirely a *format* change — pin names
+are wire-endpoint keys in `.csx`, and the fixtures and autograder use them
+(`amt`, `cin`, …). Revisit only if the tester asks again and it turns out to
+matter; it would need a format-version bump plus fixture/demo/golden
+regeneration.
 
 ---
 
-## P2 — UX polish (small; batch these together)
+## P2 — UX polish
 
-- **Cycle input**: hide the native number spinners; placeholder `cycle #`
-  (`SimBar.tsx:117`).
-- **Save**: indicator wording ("Saving…" / "Saved") **and allow saving with
-  validation errors** — the Tauri save currently refuses (`App.tsx:614`).
-- **Tooltips**: component name only — drop the *"click… Shift-click… Esc
-  cancels"* boilerplate (`App.tsx:1673`).
-- **Theme**: remove the standalone light/dark toggle from the header (fold into
-  Settings); reconcile light-mode history colors.
-- **Trim**: remove the `named` history badge (`HistoryDrawer.tsx:83`); simplify
-  the reset label; tidy tab / timing-readout alignment.
-- **Sheet tabs**: right-click → Rename (the menu is on middle-click today,
-  `SheetTabs.tsx:38`).
+**Done:** the cycle input is typed (`cycle #`, no steppers) *(70f6eb4)*; palette
+tooltips name the part *(70f6eb4)*; sheet-tab right-click → Rename *(70f6eb4)*;
+Reload-from-Disk confirms first *(70f6eb4)*; the `named` history pill is gone
+*(70f6eb4)*; the header light/dark toggle is gone — Settings is the single path
+*(e7aaff3)*.
+
+**Left:**
+- **Save**: indicator wording ("Saving…" / "Saved") **and saving with validation
+  errors** — the Tauri save refuses *by design*: a bad in-memory document must
+  not clobber a good file (`format/mod.rs`, guarded by a test). Version history
+  already keeps the last good save, so "write it + warn" is defensible — needs
+  the maintainer's call. (`App.tsx:614`)
 - **Canvas**: bottom zoom slider.
-- **Reload from Disk**: confirm before discarding edits.
 - **Clock**: 12-/24-hour timestamp toggle.
-- **Wires**: stable colors — the hue is keyed to the derived net id, so colors
-  reshuffle when wires are added/removed (`docScene.ts:845`).
 - **Wire editing**: on-screen "press Esc to exit" hint.
+- **Wires**: stable colors — the hue is keyed to the derived net id, so colors
+  reshuffle when wires are added/removed (`docScene.ts:845`). Per-wire colouring
+  would break "one net, one colour"; needs a design choice.
+- **Theme**: reconcile light-mode history colors.
+- **Trim (ambiguous)**: "simplify the reset label" — the transport already reads
+  `reset`, so which control? — and "tidy tab / timing-readout alignment" (no
+  repro).
 
 ---
 
