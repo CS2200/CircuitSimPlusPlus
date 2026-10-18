@@ -1255,6 +1255,37 @@ mod tests {
                 ("out3", 1),
             ])
         );
+        // A MEMORY's `addr` width comes from its DEPTH, never the data width:
+        // 256 words → 8 bits. The editor used to inherit `bitsize` here, which
+        // made a fresh RAM draw a 1-bit address while the core indexed 256
+        // words (so a correct 8-bit address was flagged as a mismatch).
+        assert_eq!(
+            names_widths("mem.ram", json!({ "bitsize": 8, "depth": 256 })),
+            expect(&[
+                ("addr", 8),
+                ("din", 8),
+                ("dout", 8),
+                ("we", 1),
+                ("clk", 1),
+                ("rst", 1),
+            ])
+        );
+        assert_eq!(
+            names_widths("mem.rom", json!({ "bitsize": 8, "depth": 16 })),
+            expect(&[("addr", 4), ("out", 8)])
+        );
+        // Address and data widths are independent.
+        assert_eq!(
+            names_widths("mem.ram", json!({ "bitsize": 32, "depth": 4 })),
+            expect(&[
+                ("addr", 2),
+                ("din", 32),
+                ("dout", 32),
+                ("we", 1),
+                ("clk", 1),
+                ("rst", 1),
+            ])
+        );
     }
 
     #[test]

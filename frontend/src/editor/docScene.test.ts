@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockLevelOf, ellipsize, fitValueLine } from "./docScene";
+import { clockLevelOf, constantText, ellipsize, fitValueLine } from "./docScene";
 
 /**
  * A long subcircuit pin name must not spill across the instance box: it is cut
@@ -36,6 +36,26 @@ describe("clockLevelOf", () => {
   it("alternates as an unwired clock is ticked", () => {
     expect(clockLevelOf(undefined, 1)).toBe(false);
     expect(clockLevelOf(undefined, 2)).toBe(true);
+  });
+});
+
+describe("constantText", () => {
+  it("pads hex to the pin's width, so a wider pin shows more characters", () => {
+    expect(constantText("5", "hex", 4)).toBe("0x5");
+    expect(constantText("5", "hex", 8)).toBe("0x05");
+    expect(constantText("5", "hex", 32)).toBe("0x00000005");
+    // The stored string's own padding is irrelevant — the width rules.
+    expect(constantText("0a", "hex", 4)).toBe("0xA");
+  });
+
+  it("pads binary to the exact bit count", () => {
+    expect(constantText("5", "bin", 8)).toBe("0b00000101");
+    expect(constantText("1", "bin", 2)).toBe("0b01");
+  });
+
+  it("leaves decimal unpadded (a number has no fixed digit count)", () => {
+    expect(constantText("5", "dec", 8)).toBe("5");
+    expect(constantText("ff", "dec", 8)).toBe("255");
   });
 });
 

@@ -59,6 +59,24 @@ function shiftAmountBits(attrs: Readonly<Record<string, unknown>>): number {
   return Math.max(1, 32 - Math.clz32(b - 1));
 }
 
+/** Default `depth` for a memory (format-v2 §4). */
+const DEFAULT_MEM_DEPTH = 256;
+
+/**
+ * A memory's `addr` pin width: `ceil(log2(depth))`, min 1 — the engine's exact
+ * `addr_width` (format-v2 §4). A 256-word RAM therefore takes an **8-bit**
+ * address.
+ *
+ * This used to fall through to `bitsOf` (the DATA width, default 1), so a fresh
+ * RAM drew a 1-bit `addr` while the core used 8 — the editor then flagged a
+ * perfectly correct 8-bit address as a width mismatch, and the pin widths on
+ * screen had nothing to do with the address space.
+ */
+export function memAddrBits(attrs: Readonly<Record<string, unknown>>): number {
+  const depth = Math.max(1, Math.floor(numAttr(attrs, "depth", DEFAULT_MEM_DEPTH)));
+  return Math.max(1, 32 - Math.clz32(depth - 1));
+}
+
 /** Integer attr clamped to 1..32 (format-v2's bit-width range). */
 function uintAttr(
   attrs: Readonly<Record<string, unknown>>,
@@ -602,28 +620,30 @@ const REGISTRY: Record<string, CompSpec> = {
   // Clock/reset/write-enable left→right on the bottom edge (clk where we used
   // to sit, rst where clk used to sit, we spaced under dout), and din spread
   // further from addr (UI decision).
-  "mem.ram": boxSpec(
-    10,
-    6,
-    [
-      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
-      { name: "din", dx: 0, dy: 4, kind: "in", bitsize: BUS_WIDTH },
-      { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: BUS_WIDTH },
+  // The `addr` pin is as wide as the ADDRESS SPACE (`ceil(log2 depth)`), not the
+  // data width — see `memAddrBits`; `din`/`dout` follow `bitsize`.
+  "mem.ram": {
+    width: () => 10,
+    height: () => 6,
+    pins: (attrs) => [
+      { name: "addr", dx: 0, dy: 1, kind: "in", bitsize: memAddrBits(attrs) },
+      { name: "din", dx: 0, dy: 4, kind: "in", bitsize: bitsOf(attrs) },
+      { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: bitsOf(attrs) },
       { name: "clk", dx: 3, dy: 6, kind: "in" },
       { name: "rst", dx: 7, dy: 6, kind: "in" },
       { name: "we", dx: 9, dy: 6, kind: "in" },
     ],
-    "RAM",
-  ),
-  "mem.rom": boxSpec(
-    10,
-    6,
-    [
-      { name: "addr", dx: 0, dy: 3, kind: "in", bitsize: BUS_WIDTH },
-      { name: "out", dx: 10, dy: 3, kind: "out", bitsize: BUS_WIDTH },
+    caption: () => "RAM",
+  },
+  "mem.rom": {
+    width: () => 10,
+    height: () => 6,
+    pins: (attrs) => [
+      { name: "addr", dx: 0, dy: 3, kind: "in", bitsize: memAddrBits(attrs) },
+      { name: "out", dx: 10, dy: 3, kind: "out", bitsize: bitsOf(attrs) },
     ],
-    "ROM",
-  ),
+    caption: () => "ROM",
+  },
 
   // Hierarchy (pins come from the referenced circuit's wiring.pin
   // components — see subcircuitPins below; compPins/compSize special-case

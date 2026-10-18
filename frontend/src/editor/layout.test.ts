@@ -73,6 +73,30 @@ describe("catalog", () => {
     expect(width("arith.shifter", "amt", { bitsize: 1 })).toBe(1);
     expect(width("arith.shifter", "in", { bitsize: 8 })).toBe(8);
   });
+
+  it("a memory's addr pin follows its DEPTH, not its data width", () => {
+    // The editor used to give `addr` the data width (default 1 bit!), so a
+    // fresh RAM drew a 1-bit address while the core indexed 256 words — and a
+    // correct 8-bit address was reported as a width mismatch.
+    const width = (type: string, name: string, attrs: Record<string, unknown>) =>
+      compPins({ type, attrs }).find((p) => p.name === name)?.bitsize;
+    // 256 words → 8 address bits; the data side is untouched by depth.
+    expect(width("mem.ram", "addr", { depth: 256, bitsize: 8 })).toBe(8);
+    expect(width("mem.ram", "din", { depth: 256, bitsize: 8 })).toBe(8);
+    expect(width("mem.ram", "dout", { depth: 256, bitsize: 8 })).toBe(8);
+    expect(width("mem.rom", "addr", { depth: 256, bitsize: 8 })).toBe(8);
+    expect(width("mem.rom", "out", { depth: 256, bitsize: 8 })).toBe(8);
+    // The address space drives it: 16 words → 4 bits, 1 word → 1 bit.
+    expect(width("mem.ram", "addr", { depth: 16, bitsize: 8 })).toBe(4);
+    expect(width("mem.ram", "addr", { depth: 1, bitsize: 8 })).toBe(1);
+    expect(width("mem.ram", "addr", { depth: 1024, bitsize: 8 })).toBe(10);
+    // A fresh RAM (no attrs) is the 256-word default → 8 bits, 1-bit data.
+    expect(width("mem.ram", "addr", {})).toBe(8);
+    expect(width("mem.ram", "din", {})).toBe(1);
+    // Address and data widths are independent.
+    expect(width("mem.ram", "addr", { depth: 4, bitsize: 32 })).toBe(2);
+    expect(width("mem.ram", "dout", { depth: 4, bitsize: 32 })).toBe(32);
+  });
 });
 
 describe("compLayout", () => {

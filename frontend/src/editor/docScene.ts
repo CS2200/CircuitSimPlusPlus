@@ -18,6 +18,7 @@ import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
+import { hexWidthFor } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec } from "./catalog";
 import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
@@ -311,16 +312,19 @@ function drawSevenSeg(
   renderer.flush();
 }
 
-/** The value a constant shows on its body, in its chosen display radix (§53). */
-function constantText(hex: string, radix: unknown, bits: number): string {
+/**
+ * A constant's readout: its stored value in the configured radix, PADDED to the
+ * pin's width — so widening a pin to 8 bits shows two hex digits where 4 bits
+ * showed one. It used to echo the stored string verbatim, so a wider pin looked
+ * identical (the tester expected the text to grow with the bit size).
+ */
+export function constantText(hex: string, radix: unknown, bits: number): string {
   const n = Number.parseInt(hex, 16);
   if (!Number.isFinite(n)) return hex;
-  if (radix === "bin") {
-    const w = Math.min(32, Math.max(1, bits));
-    return `0b${n.toString(2).padStart(w, "0")}`;
-  }
+  const w = Math.min(32, Math.max(1, bits));
+  if (radix === "bin") return `0b${n.toString(2).padStart(w, "0")}`;
   if (radix === "dec") return String(n);
-  return `0x${hex.toUpperCase()}`;
+  return `0x${n.toString(16).toUpperCase().padStart(hexWidthFor(w), "0")}`;
 }
 
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
