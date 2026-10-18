@@ -3,14 +3,16 @@ import { saveStateText } from "./SaveIndicator";
 
 describe("saveStateText (status-bar autosave indicator)", () => {
   it("reports clean / dirty / writing", () => {
-    expect(saveStateText({ kind: "clean" }, true)).toBe("All changes saved");
-    expect(saveStateText({ kind: "dirty" }, true)).toBe("Unsaved changes");
+    expect(saveStateText({ kind: "clean" }, true)).toBe("Saved");
+    // Autosave is going to write this — the tester read "Unsaved changes" as a
+    // problem to go fix.
+    expect(saveStateText({ kind: "dirty" }, true)).toBe("Saving changes");
     expect(saveStateText({ kind: "saving" }, true)).toBe("Saving…");
   });
 
   it("stamps the time of the last autosave", () => {
     const at = new Date(2026, 0, 2, 9, 5).getTime();
-    expect(saveStateText({ kind: "saved", at }, true)).toBe("All changes saved 09:05");
+    expect(saveStateText({ kind: "saved", at }, true)).toBe("Saved 09:05");
   });
 
   it("distinguishes a recovery-only copy from a saved file", () => {

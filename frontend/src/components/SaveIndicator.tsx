@@ -32,13 +32,15 @@ export function saveStateText(state: SaveState, autosaveOn: boolean): string {
     return state.kind === "dirty" ? "Unsaved changes (autosave off)" : "Autosave off";
   switch (state.kind) {
     case "clean":
-      return "All changes saved";
+      return "Saved";
     case "dirty":
-      return "Unsaved changes";
+      // Autosave WILL write this, so say so rather than sounding an alarm
+      // (the tester read "Unsaved changes" as a problem to go fix).
+      return "Saving changes";
     case "saving":
       return "Saving…";
     case "saved":
-      return `All changes saved ${clockTime(state.at)}`;
+      return `Saved ${clockTime(state.at)}`;
     case "recovered":
       return "Autosaved locally — not saved to the file yet";
     case "error":

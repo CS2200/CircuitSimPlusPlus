@@ -35,13 +35,13 @@ async function placeAndGate(page: Page): Promise<void> {
 
 test("autosave keeps a recovery copy as soon as the edit happens", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(INDICATOR)).toHaveText("All changes saved");
+  await expect(page.locator(INDICATOR)).toHaveText("Saved");
 
   await placeAndGate(page);
   // The change is persisted on the leading edge, so the indicator moves off
   // "saved" immediately; browser mode cannot write a file, so the honest end
-  // state is a recovery copy only (the shell reads "All changes saved <time>").
-  await expect(page.locator(INDICATOR)).not.toHaveText("All changes saved");
+  // state is a recovery copy only (the shell reads "Saved <time>").
+  await expect(page.locator(INDICATOR)).not.toHaveText(/^Saved/);
   await expect(page.locator(INDICATOR)).toContainText("Autosaved locally", { timeout: 15000 });
 });
 
@@ -61,7 +61,7 @@ test("crash recovery: the autosaved copy survives a relaunch and restores", asyn
   // The recovered document is back in the editor — and dirty again, so
   // autosave and the unsaved-changes prompt keep protecting it.
   expect((await doc(page)).circuits[0].components).toHaveLength(1);
-  await expect(page.locator(INDICATOR)).not.toHaveText("All changes saved");
+  await expect(page.locator(INDICATOR)).not.toHaveText(/^Saved/);
 });
 
 test("discarding a recovery copy clears it for good", async ({ page }) => {

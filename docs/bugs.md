@@ -78,20 +78,19 @@ regeneration.
 tooltips name the part *(70f6eb4)*; sheet-tab right-click → Rename *(70f6eb4)*;
 Reload-from-Disk confirms first *(70f6eb4)*; the `named` history pill is gone
 *(70f6eb4)*; the header light/dark toggle is gone — Settings is the single path
-*(e7aaff3)*.
+*(e7aaff3)*; **saving with validation errors** — the engine now writes the draft
+and returns the problems as warnings, and the toast says so and points at
+Version history; only an unparseable document is still refused; the save
+indicator reads **"Saved"** / **"Saving changes"** instead of
+"All changes saved" / "Unsaved changes".
 
 **Left:**
-- **Save**: indicator wording ("Saving…" / "Saved") **and saving with validation
-  errors** — the Tauri save refuses *by design*: a bad in-memory document must
-  not clobber a good file (`format/mod.rs`, guarded by a test). Version history
-  already keeps the last good save, so "write it + warn" is defensible — needs
-  the maintainer's call. (`App.tsx:614`)
 - **Canvas**: bottom zoom slider.
 - **Clock**: 12-/24-hour timestamp toggle.
 - **Wire editing**: on-screen "press Esc to exit" hint.
-- **Wires**: stable colors — the hue is keyed to the derived net id, so colors
-  reshuffle when wires are added/removed (`docScene.ts:845`). Per-wire colouring
-  would break "one net, one colour"; needs a design choice.
+- **Wires**: stable colors — done for the default (one bus colour, no net-id
+  dependency, *(66f46e0)*); a *per-wire* palette is still open if the maintainer
+  wants identity colours back.
 - **Theme**: reconcile light-mode history colors.
 - **Trim (ambiguous)**: "simplify the reset label" — the transport already reads
   `reset`, so which control? — and "tidy tab / timing-readout alignment" (no

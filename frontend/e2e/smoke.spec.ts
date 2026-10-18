@@ -11,7 +11,7 @@ test("header shows the document name, the save chip and the action icons", async
   await page.goto("/");
   // Row 1: identity + actions (§28).
   await expect(page.locator(".app-title")).toHaveText("(unsaved)");
-  await expect(page.locator(".appheader .save-state")).toHaveText("All changes saved");
+  await expect(page.locator(".appheader .save-state")).toHaveText("Saved");
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Version history" })).toBeVisible();
   // Row 2: menus and the sim transport share the bar.
