@@ -120,6 +120,42 @@ test("sim shortcuts: Ctrl+J tick, Ctrl+K run/pause, Ctrl+R reset", async ({ page
   await expect(page.locator(".toast")).toContainText("Reset");
 });
 
+test("Ctrl+J while the clock is running force-stops it", async ({ page }) => {
+  await page.goto("/?simdemo=1");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+
+  // Ctrl+K hands the timeline to the play loop…
+  await page.keyboard.press("Control+k");
+  await expect.poll(() => simState(page)).toMatchObject({ running: true });
+
+  // …so a bare step would be a no-op. Ctrl+J must stop the clock, not leave it
+  // spinning (the reported "Ctrl+J after Ctrl+K did nothing" bug).
+  await page.keyboard.press("Control+j");
+  await expect.poll(() => simState(page)).toMatchObject({ running: false });
+});
+
+test("U5: a geometry-only edit (rotate) does not reboot the simulation", async ({ page }) => {
+  await page.goto("/?simdemo=1");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  const tick = page.getByRole("button", { name: "tick", exact: true });
+  await tick.click();
+  await tick.click();
+  await expect
+    .poll(() => simState(page), { message: "one full cycle stepped" })
+    .toMatchObject({ loaded: true, cycle: 1 });
+  const before = await simState(page);
+
+  // Select the adder and rotate it: the geometry changes, the netlist does not,
+  // so the engine must NOT reload. A reload reboots the sim and drops the cycle
+  // counter to 0 — the old "any edit looks like a reset / the clock lights up"
+  // bug. (This also pins the decision that `rot` is geometry, not netlist.)
+  await clickWorld(page, 24, 3);
+  await page.keyboard.press("ArrowDown");
+  await page.waitForTimeout(500); // well past the 140 ms live-resync debounce
+
+  expect((await simState(page)).cycle).toBe(before.cycle);
+});
+
 test("U5: structural edits re-sync the engine live (no tick needed)", async ({ page }) => {
   // The mount-time pre-load puts the *empty* untitled document in the engine.
   // A part placed afterwards must appear there on its own — level-triggered

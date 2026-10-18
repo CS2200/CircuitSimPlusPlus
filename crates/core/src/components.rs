@@ -1183,6 +1183,80 @@ mod tests {
         assert!(e.is_empty());
     }
 
+    /// `(name, width)` per pin.
+    fn names_widths(type_: &str, attrs: Json) -> Vec<(String, u32)> {
+        let mut errors = Vec::new();
+        let attrs = attrs.as_object().unwrap().clone();
+        let p = validate_component("main", 0, "c0", type_, &attrs, &mut errors);
+        assert!(errors.is_empty(), "{errors:?}");
+        p.unwrap().into_iter().map(|s| (s.name, s.width)).collect()
+    }
+
+    /// The editor must mirror these names AND widths (format-v2 §4): the editor
+    /// used to disagree — `c_in`/`c_out` for the adder's carry, no subtractor
+    /// borrow, a divider `out` instead of `quot`/`rem`, a 1-bit decoder `sel`
+    /// instead of a bus `in`, and 1-bit `sel`/`amt` — and `format/validate.rs`
+    /// then rejected every wire drawn on those pins. This is the engine half of
+    /// the lock; the editor half is
+    /// `frontend/src/editor/layout.test.ts` ("pin names track the engine
+    /// registry" / "select / amount pins carry the engine's widths").
+    #[test]
+    fn pin_names_and_widths_match_the_editor_registry() {
+        let expect = |v: &[(&str, u32)]| -> Vec<(String, u32)> {
+            v.iter().map(|(n, w)| ((*n).to_string(), *w)).collect()
+        };
+        assert_eq!(
+            names_widths("arith.adder", json!({ "bitsize": 8 })),
+            expect(&[("a", 8), ("b", 8), ("cin", 1), ("out", 8), ("cout", 1),])
+        );
+        assert_eq!(
+            names_widths("arith.subtractor", json!({ "bitsize": 8 })),
+            expect(&[("a", 8), ("b", 8), ("bin", 1), ("out", 8), ("bout", 1),])
+        );
+        assert_eq!(
+            names_widths("arith.divider", json!({ "bitsize": 8 })),
+            expect(&[("a", 8), ("b", 8), ("quot", 8), ("rem", 8)])
+        );
+        // `amt` indexes `bitsize` values: addr_width(8) = 3.
+        assert_eq!(
+            names_widths("arith.shifter", json!({ "bitsize": 8 })),
+            expect(&[("in", 8), ("amt", 3), ("out", 8)])
+        );
+        assert_eq!(
+            names_widths("plexers.mux", json!({ "bitsize": 8, "selectBits": 2 })),
+            expect(&[
+                ("in0", 8),
+                ("in1", 8),
+                ("in2", 8),
+                ("in3", 8),
+                ("sel", 2),
+                ("out", 8),
+            ])
+        );
+        assert_eq!(
+            names_widths("plexers.demux", json!({ "bitsize": 8, "selectBits": 2 })),
+            expect(&[
+                ("in", 8),
+                ("sel", 2),
+                ("out0", 8),
+                ("out1", 8),
+                ("out2", 8),
+                ("out3", 8),
+            ])
+        );
+        // The decoder's select IS its data input: a bus `in`, not a `sel`.
+        assert_eq!(
+            names_widths("plexers.decoder", json!({ "inputBits": 2 })),
+            expect(&[
+                ("in", 2),
+                ("out0", 1),
+                ("out1", 1),
+                ("out2", 1),
+                ("out3", 1),
+            ])
+        );
+    }
+
     #[test]
     fn attr_type_and_range_errors() {
         let (_, e) = pins("gate.and", json!({"inputs": "lots"}));
