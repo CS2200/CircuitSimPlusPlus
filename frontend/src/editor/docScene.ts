@@ -521,7 +521,6 @@ export class DocScene {
   /** Junction dot positions per wire (at its own join endpoints). */
   private junctionDots: Vec2[] = [];
   private wireIndex = new UniformGrid(CELL);
-  private wireNetId: (number | undefined)[] = [];
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
   private wireMismatch: boolean[] = [];
@@ -563,7 +562,6 @@ export class DocScene {
       if (!isPinEndpoint(w.a)) this.junctionDots.push(p2v(w.points[0]));
     }
     this.nets = deriveNets(c);
-    this.wireNetId = c.wires.map((_, i) => this.nets.wireToNet.get(i));
     this.wireBits = c.wires.map((_, i) => {
       const netId = this.nets.wireToNet.get(i);
       const net = netId !== undefined ? this.nets.nets[netId] : undefined;
@@ -862,39 +860,38 @@ export class DocScene {
       if (netId !== undefined) highlightWires = new Set(this.wiresInNet(netId));
     }
 
-    // Wires layer: single-bit wires in state colors; buses rainbow-hued
-    // per net + thicker (DLS look, DESIGN.md §7.1 / D8). With a sim loaded,
-    // state colors come from the streamed values (buses keep hues unless
-    // X/Z — hue is identity, state color is value). Idle wires are a DULL
-    // tint of that identity color, not grey (UI_OVERHAUL §35).
+    // Wires layer. With a sim loaded, single-bit wires take their STATE colour
+    // (high/low/X/Z); a bus keeps the theme's bus colour unless it is X/Z, since
+    // one colour cannot express a mixed-width value, and buses are told apart by
+    // WEIGHT and position instead. Idle wires are a dull tint of that colour,
+    // not grey (UI_OVERHAUL §35). A wire's own `color` attr overrides both.
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
       const custom = this.wires[i]?.color ?? null;
       const bits = Math.max(1, this.wireBits[i]);
       const isBus = bits > 1;
-      const hue = this.wireNetId[i] ?? i;
       const simVal = sim?.valueForWire(i);
       const contested = simVal !== undefined && wireValueState(simVal) === "x";
-      // The wire's identity: a user-chosen color (UI_OVERHAUL §12), else the
-      // net's bus hue. This is the "true color" the wire brightens into.
-      const identity = custom ?? theme.bus[hue % theme.bus.length];
+      // The wire's identity: a user-chosen colour (UI_OVERHAUL §12), else the
+      // theme's ONE bus colour. It used to cycle five rainbow hues keyed by the
+      // DERIVED net id, which made a bus-heavy sheet look like confetti — and
+      // the colours reshuffled whenever nets were renumbered (adding a wire).
+      // Identity is opt-in now; buses are told apart by weight and position.
+      const identity = custom ?? theme.bus[0];
       let stroke: string;
       if (simVal === undefined) {
-        // No data yet: a dull version of the identity color, so a drawn wire is
-        // tinted rather than flat grey, and the true color can "light up" when
+        // No data yet: a dull version of the identity colour, so a drawn wire is
+        // tinted rather than flat grey, and the true colour can "light up" when
         // data flows (UI_OVERHAUL §35).
         stroke = dullColor(theme, identity);
       } else if (custom !== null && !contested) {
-        // A user-chosen color wins over state/bus hues — except contention,
+        // A user-chosen colour wins over the state colours — except contention,
         // which stays red because it is an error signal.
         stroke = custom;
       } else {
         const state = wireValueState(simVal);
-        stroke =
-          isBus && state !== "x" && state !== "z"
-            ? theme.bus[hue % theme.bus.length]
-            : theme.wire[state];
+        stroke = isBus && state !== "x" && state !== "z" ? identity : theme.wire[state];
       }
       // Thickness ∝ width (UI_OVERHAUL §12/§15): sqrt-ish growth, so 8/16/32
       // bit buses read as clearly different weights beside a 1-bit wire.
