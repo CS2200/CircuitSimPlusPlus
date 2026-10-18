@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { clockLevelOf, fitValueLine } from "./docScene";
+import { clockLevelOf, ellipsize, fitValueLine } from "./docScene";
+
+/**
+ * A long subcircuit pin name must not spill across the instance box: it is cut
+ * with an ellipsis (same treatment as the value readouts).
+ */
+describe("ellipsize", () => {
+  it("leaves a label that fits untouched", () => {
+    expect(ellipsize("EXACTLY8", 8)).toBe("EXACTLY8");
+    expect(ellipsize("sel", 8)).toBe("sel");
+  });
+
+  it("cuts a long label and marks it with an ellipsis", () => {
+    expect(ellipsize("very_long_pin_name", 6)).toBe("very_…");
+  });
+});
 
 /**
  * A clock must not "light up" when the circuit is merely loaded or edited: an

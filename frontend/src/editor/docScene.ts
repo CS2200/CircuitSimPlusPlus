@@ -344,6 +344,16 @@ export function fitValueLine(
 }
 
 /**
+ * Shorten a label to `maxChars`, ending with an ellipsis when it is cut — a long
+ * subcircuit pin name must not spill across the instance box (same treatment as
+ * the value readouts, UI_OVERHAUL §56).
+ */
+export function ellipsize(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+/**
  * Pin whose net value is shown on the body (UI_OVERHAUL §21): clocks, pins,
  * probes, registers, RAM/ROM and I/O parts are all live readouts.
  */
@@ -1154,9 +1164,17 @@ export class DocScene {
         // Input pins are square, output pins are rounded (UI_OVERHAUL §21); the
         // probe gets its own pointed-hexagon body (§36).
         const outPin = comp.type === "wiring.pin" && comp.attrs?.isOutput === true;
+        // The probe's pointed hexagon points along its pin, so it must rotate
+        // with the part (built in the local EAST frame, centred on the body,
+        // then rotated — same as the gate shapes). RAM/ROM chips are symmetric.
         const bodyPath =
           comp.type === "wiring.probe"
-            ? probePath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
+            ? rotatePath(
+                probePath(cx - local.w / 2, cy - local.h / 2, local.w, local.h),
+                cx,
+                cy,
+                rot,
+              )
             : comp.type === "mem.ram" || comp.type === "mem.rom"
               ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
               : pinBodyPath(layout.rect, outPin);
@@ -1390,13 +1408,17 @@ export class DocScene {
         // Subcircuit instances: label each interface pin just inside the
         // box (inputs at the left edge, outputs at the right).
         if (comp.type === "subcircuit") {
+          // Each side of the box gets half its width; a long pin name is
+          // ellipsized so it cannot spill across the instance (UI §56).
+          const labelSize = 0.7;
+          const maxChars = Math.max(1, Math.floor((layout.rect.w / 2 - 0.9) / (labelSize * 0.62)));
           for (const p of layout.pins) {
             const left = p.kind === "in";
             renderer.drawText(
               left ? layout.rect.x + 0.5 : layout.rect.x + layout.rect.w - 0.5,
               p.y + 0.35,
-              p.name,
-              { color: theme.textDim, size: 0.7, align: left ? "left" : "right" },
+              ellipsize(p.name, maxChars),
+              { color: theme.textDim, size: labelSize, align: left ? "left" : "right" },
             );
           }
         }

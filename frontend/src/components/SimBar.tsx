@@ -58,6 +58,16 @@ export default function SimBar({
     await guard(cmd());
   };
 
+  /**
+   * One tick, force-stopping a running clock first. While playing, the play
+   * thread owns the timeline, so a bare step would be a no-op — Ctrl+J after
+   * Ctrl+K must stop the clock and then take its tick.
+   */
+  const stepOneTick = async () => {
+    if (ctl.store.status?.running ?? false) await guard(ctl.pause());
+    await withLoadedDoc(() => ctl.stepTick());
+  };
+
   // Sim keyboard map (UX decision): Ctrl+J step one tick, Ctrl+R reset,
   // Ctrl+K run (until halt) / pause. Handled here so they work regardless
   // of canvas focus; text fields are left alone.
@@ -69,7 +79,7 @@ export default function SimBar({
       const key = e.key.toLowerCase();
       if (key === "j") {
         e.preventDefault();
-        void withLoadedDoc(() => ctl.stepTick());
+        void stepOneTick();
       } else if (key === "r") {
         e.preventDefault(); // not the browser reload
         void onReset();
@@ -97,8 +107,8 @@ export default function SimBar({
           </button>
           <button
             className="secondary"
-            title="Step one tick (half clock cycle)"
-            onClick={() => withLoadedDoc(() => ctl.stepTick())}
+            title="Step one tick (half clock cycle); stops the clock if running"
+            onClick={() => void stepOneTick()}
           >
             tick
           </button>
