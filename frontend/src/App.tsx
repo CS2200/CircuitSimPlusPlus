@@ -31,7 +31,14 @@ import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { diffDocuments } from "./model/versionDiff";
-import { PALETTE, compPins, compSpec, defaultAttrs, editableAttrs } from "./editor/catalog";
+import {
+  PALETTE,
+  compPins,
+  compSpec,
+  defaultAttrs,
+  editableAttrs,
+  typeDisplayName,
+} from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
@@ -1080,6 +1087,9 @@ export default function App() {
       toast("Reload needs a saved file — use File ▸ Open… instead");
       return;
     }
+    // Reload READS the file over the in-memory document, so it discards edits
+    // exactly like Open does — ask first (the tester found this surprising).
+    if (!confirmDiscard()) return;
     try {
       const text = await readFileText(path);
       const reloaded = initDoc(CircuitDocument.fromJson(text));
@@ -1091,7 +1101,7 @@ export default function App() {
     } catch (err) {
       toast(`Reload failed: ${String(err)}`);
     }
-  }, [adoptDoc, sim, toast, recordWriteStat]);
+  }, [confirmDiscard, adoptDoc, sim, toast, recordWriteStat]);
 
   // ---- sheet (subcircuit) operations (Subcircuits menu) ----
 
@@ -1670,7 +1680,7 @@ export default function App() {
                                   e.dataTransfer.setData("text/x-csx-rot", item.rot);
                                 }
                               }}
-                              title={`${label} — click, then click the canvas to place once (Shift-click to place many; R rotates, Esc cancels)`}
+                              title={typeDisplayName(item.type)}
                             >
                               <CompIcon type={item.type} attrs={item.attrs} />
                               <span className="palette-item-label">{label}</span>

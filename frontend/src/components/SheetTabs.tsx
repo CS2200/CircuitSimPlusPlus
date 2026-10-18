@@ -35,7 +35,8 @@ export default function SheetTabs({
   /** Sheet index that just appeared — plays its slide-in animation. */
   enterIdx?: number | null;
 }) {
-  // Middle-click menu (UI_OVERHAUL §37): Rename / Delete for that sheet.
+  // Right-click / middle-click menu (UI_OVERHAUL §37): Rename / Delete for that
+  // sheet.
   const [menu, setMenu] = useState<{ i: number; x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -72,8 +73,13 @@ export default function SheetTabs({
               onDoubleClick={() => {
                 if (!editing) onRename(i);
               }}
-              // Middle-click (button 1): suppress Chromium's autoscroll/gesture
-              // default and open our Rename/Delete menu instead.
+              // Right-click (or middle-click) opens the Rename / Delete menu.
+              // Right-click is the discoverable one; middle-click is kept for
+              // muscle memory (it used to be the only way in).
+              onContextMenu={(e) => {
+                e.preventDefault(); // ours, not the browser's
+                setMenu({ i, x: e.clientX, y: e.clientY });
+              }}
               onMouseDown={(e) => {
                 if (e.button !== 1) return;
                 e.preventDefault();
@@ -94,8 +100,8 @@ export default function SheetTabs({
                   onClick={() => onSwitch(i)}
                   title={
                     i === 0
-                      ? `${name} — top level (double-click to rename)`
-                      : `${name} — double-click or middle-click to rename/delete`
+                      ? `${name} — top level (double-click or right-click to rename)`
+                      : `${name} — double-click or right-click to rename/delete`
                   }
                 >
                   {name}

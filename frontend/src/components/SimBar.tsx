@@ -124,7 +124,7 @@ export default function SimBar({
           <input
             type="number"
             min={0}
-            placeholder="cycle N"
+            placeholder="cycle #"
             value={runTo}
             onChange={(e) => setRunTo(e.target.value)}
             onKeyDown={(e) => {

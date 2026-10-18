@@ -78,10 +78,7 @@ export default function HistoryDrawer({
               onClick={() => onSelect(v.id)}
             />
             <div className="history-body">
-              <span className="history-when">
-                {relativeAge(v.at_ms)}
-                {v.named && <span className="history-badge">named</span>}
-              </span>
+              <span className="history-when">{relativeAge(v.at_ms)}</span>
               {editingId === v.id ? (
                 <input
                   className="history-rename"

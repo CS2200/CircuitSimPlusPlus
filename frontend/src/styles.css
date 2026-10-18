@@ -2297,17 +2297,6 @@ body {
   font-weight: 600;
 }
 
-.history-badge {
-  padding: 0 0.32rem;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--bg);
-  font-size: 0.62rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .history-label {
   align-self: flex-start;
   max-width: 100%;
@@ -2583,6 +2572,17 @@ body {
   border-radius: 6px;
   padding: 0 0.45rem;
   font-size: 0.82rem;
+}
+
+/* The run-to cycle is TYPED: hide the native stepper arrows (the tester read
+ * them as clutter sitting next to the "run to" button). */
+.sim-runto input[type="number"]::-webkit-outer-spin-button,
+.sim-runto input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.sim-runto input[type="number"] {
+  appearance: textfield;
 }
 
 .sim-speed {
