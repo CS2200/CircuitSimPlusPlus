@@ -118,6 +118,58 @@ describe("wiring", () => {
     ]);
   });
 
+  /** A bare machine with one wire's worth of components (no AND/NOT). */
+  function bareTool() {
+    const doc = CircuitDocument.create("t");
+    const scene = new DocScene();
+    const tool = new ToolMachine(
+      doc,
+      scene,
+      new SelectionModel(),
+      () => 0,
+      () => {},
+    );
+    const sync = () => scene.sync(doc, 0);
+    const attrsOf = (id: string) => doc.circuit(0).components.find((c) => c.id === id)?.attrs;
+    const connect = (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      tool.down(from, PI());
+      tool.up(PI());
+      tool.down(to, PI()); // the wire commits on the second click
+      tool.up(PI());
+    };
+    return { doc, sync, attrsOf, connect };
+  }
+
+  it("a probe adopts the width of what it is connected to", () => {
+    const { doc, sync, attrsOf, connect } = bareTool();
+    const konst = doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [10, 10],
+      attrs: { value: "1", bitsize: 32 },
+    });
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 10] });
+    sync();
+    expect(attrsOf(probe)?.bitsize).toBeUndefined(); // default 1 bit, no attr
+
+    connect({ x: 13, y: 11 }, { x: 20, y: 11 }); // konst.out → probe.in
+
+    expect(doc.circuit(0).wires).toHaveLength(1);
+    expect(attrsOf(konst)?.bitsize).toBe(32); // the driver is untouched
+    expect(attrsOf(probe)?.bitsize).toBe(32); // the probe matched it
+  });
+
+  it("a 1-bit source leaves a probe's default width alone", () => {
+    const { doc, sync, attrsOf, connect } = bareTool();
+    doc.addComponent(0, { type: "wiring.constant", pos: [10, 10], attrs: { value: "1" } });
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 10] });
+    sync();
+
+    connect({ x: 13, y: 11 }, { x: 20, y: 11 });
+
+    // No attr written: the width already matches, so nothing churns.
+    expect(attrsOf(probe)?.bitsize).toBeUndefined();
+  });
+
   it("plants bends with clicks, each segment orthogonally routed", () => {
     const { doc, tool } = setup();
     tool.down({ x: 15, y: 11.5 }, PI());

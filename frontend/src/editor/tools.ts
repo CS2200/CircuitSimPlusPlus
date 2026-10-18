@@ -3,7 +3,7 @@ import type { CsxCircuit, CsxComponent, CsxEndpoint, CsxWire, Rotation } from ".
 import { isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
-import { compSize } from "./catalog";
+import { compPins, compSize } from "./catalog";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
@@ -831,6 +831,7 @@ export class ToolMachine {
     if (pts.length >= 2) {
       try {
         this.doc.addWire(this.circuitIdx(), { a: w.from, b, points: pts });
+        this.matchProbeWidth(w.from, b);
       } catch {
         // invalid wire (e.g. onto itself): abort quietly
       }
@@ -842,6 +843,33 @@ export class ToolMachine {
     // selections are preserved).
     this.selection.set(new Set(this.selection.components), new Set());
     this.changed();
+  }
+
+  /**
+   * A probe only observes, so a wire landing on one makes it adopt the width of
+   * whatever it is attached to — instead of leaving the user to set `bitsize`
+   * by hand and then flagging a width mismatch on a part that has no business
+   * having an opinion. A junction endpoint carries no width, so it is skipped.
+   */
+  private matchProbeWidth(a: CsxEndpoint, b: CsxEndpoint): void {
+    if (!isPinEndpoint(a) || !isPinEndpoint(b)) return;
+    const comps = this.doc.circuit(this.circuitIdx()).components;
+    for (const [probeEnd, otherEnd] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      if (probeEnd.pin !== "in") continue;
+      const probe = comps.find((c) => c.id === probeEnd.comp);
+      const driver = comps.find((c) => c.id === otherEnd.comp);
+      if (probe?.type !== "wiring.probe" || driver === undefined) continue;
+      const width = compPins(driver, this.doc.circuits).find(
+        (p) => p.name === otherEnd.pin,
+      )?.bitsize;
+      if (width === undefined || width === (probe.attrs?.bitsize ?? 1)) continue;
+      this.doc.updateComponent(this.circuitIdx(), probe.id, {
+        attrs: { ...(probe.attrs ?? {}), bitsize: width },
+      });
+    }
   }
 
   /**
