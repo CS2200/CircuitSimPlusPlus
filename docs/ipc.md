@@ -35,7 +35,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | Command | Args | Returns |
 |---|---|---|
 | `load_circuit` | `{ path?: string, bytes?: Uint8Array }` | `LoadResult` |
-| `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` |
+| `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` — **writes even when the document fails validation**, returning those problems as warnings in `errors` (`ok: true`); only a document that cannot be parsed at all is refused (`ok: false`, nothing written). Losing a mid-edit draft is worse than saving one, and the previous clean state remains in version history. |
 | `sim_play` | `{ hz: number }` | — |
 | `sim_pause` | `{}` | — |
 | `sim_step_tick` | `{}` | — one **tick**: a clock half-period (posedge/negedge) |

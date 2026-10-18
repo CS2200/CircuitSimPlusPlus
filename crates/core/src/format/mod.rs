@@ -378,11 +378,17 @@ fn temp_file_name(path: &std::path::Path) -> String {
     )
 }
 
-/// The single save implementation: parse, validate, canonicalize, and write a
-/// document JSON value to `path` atomically. Used by `session::save_circuit`
-/// and the shell's autosave command, so both paths are byte-identical.
-pub fn save_json_atomic(path: &str, document: &Json) -> Result<(), Vec<LoadError>> {
-    let text = canonical_document(document)?;
+/// The single save implementation: parse, canonicalize, and write a document
+/// JSON value to `path` atomically. Used by `session::save_circuit` and the
+/// shell's autosave command, so both paths are byte-identical.
+///
+/// **A document with validation problems is still written**, and those problems
+/// come back as warnings: refusing the write means a student mid-edit loses a
+/// draft, and the last *clean* save is still recoverable from version history.
+/// A document that does not even parse is refused outright, so a broken
+/// in-memory value can never clobber a good file with garbage.
+pub fn save_json_atomic(path: &str, document: &Json) -> Result<Vec<LoadError>, Vec<LoadError>> {
+    let (text, warnings) = canonical_document_lenient(document)?;
     write_atomic(std::path::Path::new(path), &text).map_err(|e| {
         vec![LoadError {
             kind: LoadErrorKind::Io,
@@ -391,25 +397,38 @@ pub fn save_json_atomic(path: &str, document: &Json) -> Result<(), Vec<LoadError
             comp_id: None,
             wire_idx: None,
         }]
-    })
+    })?;
+    Ok(warnings)
 }
 
 /// Parse, validate, and canonicalize a document JSON value into `.csx` text.
 ///
 /// The version store uses this so history snapshots are byte-identical to what
-/// a save would write (and therefore dedupe by content hash).
+/// a save would write (and therefore dedupe by content hash). Unlike a save, a
+/// snapshot *is* refused for an invalid document: history records clean states.
 pub fn canonical_document(document: &Json) -> Result<String, Vec<LoadError>> {
+    let (text, warnings) = canonical_document_lenient(document)?;
+    if warnings.is_empty() {
+        Ok(text)
+    } else {
+        Err(warnings)
+    }
+}
+
+/// As [`canonical_document`], but the validation problems come back as warnings
+/// instead of failing the call. `Err` means the value is not a `.csx` document
+/// at all — there is nothing sane to write.
+pub fn canonical_document_lenient(
+    document: &Json,
+) -> Result<(String, Vec<LoadError>), Vec<LoadError>> {
     let doc: Document = match serde_json::from_value(document.clone()) {
         Ok(d) => d,
         Err(e) => {
             return Err(vec![parse_error(format!("invalid document: {e}"))]);
         }
     };
-    let errors = validate::validate(&doc);
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    Ok(to_canonical_json(&doc))
+    let warnings = validate::validate(&doc);
+    Ok((to_canonical_json(&doc), warnings))
 }
 
 /// Recursively sort object keys; arrays keep their order.
@@ -503,21 +522,41 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// `save_json_atomic` validates *before* touching the target, so a bad
-    /// in-memory document cannot clobber a good file on disk.
+    /// A document with VALIDATION problems is still written — losing a draft is
+    /// worse — and the problems come back as warnings. Only a document that
+    /// does not even parse is refused, so a broken in-memory value cannot
+    /// clobber a good file with garbage.
     #[test]
-    fn save_json_atomic_validates_before_writing() {
+    fn save_json_atomic_writes_with_warnings_but_refuses_garbage() {
         let dir = std::env::temp_dir().join(format!("csim-save-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("c.csx");
         let text = to_canonical_json(&sample_doc());
         write_atomic(&path, &text).unwrap();
 
-        let bad = serde_json::json!({ "format": "not-circuitsim" });
-        let errors = save_json_atomic(path.to_str().unwrap(), &bad).unwrap_err();
+        // Unparseable (a foreign document): refused, target untouched.
+        let garbage = serde_json::json!({ "format": "not-circuitsim" });
+        let errors = save_json_atomic(path.to_str().unwrap(), &garbage).unwrap_err();
         assert!(!errors.is_empty());
-        // The existing file is untouched.
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+        // Parseable but invalid (an unnamed `wiring.pin`): written, reported.
+        let mut draft = serde_json::to_value(sample_doc()).unwrap();
+        draft["circuits"][0]["components"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "id": "pin1", "type": "wiring.pin", "pos": [0, 0] }));
+        let warnings = save_json_atomic(path.to_str().unwrap(), &draft).unwrap();
+        assert!(!warnings.is_empty(), "the unnamed pin is reported");
+        assert!(warnings[0].message.contains("wiring.pin"), "{warnings:?}");
+        // The draft DID reach the file.
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("wiring.pin"));
+
+        // …while a history snapshot of the same draft is still refused (history
+        // records clean states only).
+        assert!(canonical_document(&draft).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 

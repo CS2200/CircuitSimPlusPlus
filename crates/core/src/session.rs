@@ -554,12 +554,14 @@ impl Sim for Session {
     }
 
     fn save_circuit(&mut self, path: &str, document: &serde_json::Value) -> SaveResult {
-        // One shared implementation: parse → validate → canonicalize → atomic
-        // write (autosave uses the same path, so bytes are identical).
+        // One shared implementation: parse → canonicalize → atomic write
+        // (autosave uses the same path, so bytes are identical). Validation
+        // problems do NOT block the write — they ride back as warnings, so a
+        // mid-edit draft is never lost (the last clean save stays in history).
         match format::save_json_atomic(path, document) {
-            Ok(()) => SaveResult {
+            Ok(warnings) => SaveResult {
                 ok: true,
-                errors: Vec::new(),
+                errors: warnings,
             },
             Err(errors) => SaveResult { ok: false, errors },
         }

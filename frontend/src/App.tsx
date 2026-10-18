@@ -21,6 +21,7 @@ import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
 import type { CsxComponent } from "./model/csx";
 import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
+import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { diffDocuments } from "./model/versionDiff";
@@ -611,7 +612,11 @@ export default function App() {
         diskConflictRef.current = false;
         void recordWriteStat(path);
         void takeVersion(0); // an explicit save is always its own version
-        toast(`Saved ${baseName(path)}`);
+        // The engine writes even when the document fails validation — losing a
+        // draft is worse than saving one — and reports the problems as
+        // warnings, so this says "saved" and names them (the previous clean
+        // state is still in Version history).
+        toast(saveToastText(baseName(path), res.errors.length));
       } catch (err) {
         toast(`Save failed: ${String(err)}`);
       }
