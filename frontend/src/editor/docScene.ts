@@ -343,11 +343,6 @@ const VALUE_PIN: Readonly<Record<string, string>> = {
   "io.hexdisplay": "in",
 };
 
-/** Parts that also repeat their value next to the source pin (§21). Memory parts
- * are NOT here: their address and data readouts sit on the body itself (§46), as
- * does the probe's (§36). */
-const VALUE_REPEAT: ReadonlySet<string> = new Set(["mem.register"]);
-
 /** CSS font stacks for the text annotation's `font` attr (UI_OVERHAUL §40). */
 const TEXT_FONTS: Readonly<Record<string, string>> = {
   sans: "system-ui, sans-serif",
@@ -1279,19 +1274,6 @@ export class DocScene {
             size: 0.9,
             align: na.align,
           });
-        }
-        // The value is also repeated next to the pin it comes from, for the
-        // bigger readouts (registers/probes/memory) — a pin part's whole body
-        // already IS that pin, and small I/O parts would just get noisy.
-        if (valueText !== null && valuePin !== null && VALUE_REPEAT.has(comp.type)) {
-          const pin = layout.pins.find((p) => p.name === valuePin);
-          if (pin !== undefined) {
-            renderer.drawText(pin.x, pin.y - 0.7, valueText, {
-              color: theme.text,
-              size: 0.7,
-              align: "center",
-            });
-          }
         }
         // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
         // stacked and centred in the same light style as the rest.
