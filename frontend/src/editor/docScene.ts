@@ -18,7 +18,7 @@ import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
-import { hexWidthFor } from "../lib/rleHex";
+import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
 import { compSize, compSpec, type PinKind } from "./catalog";
 import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
@@ -325,6 +325,35 @@ export function constantText(hex: string, radix: unknown, bits: number): string 
   if (radix === "bin") return `0b${n.toString(2).padStart(w, "0")}`;
   if (radix === "dec") return String(n);
   return `0x${n.toString(16).toUpperCase().padStart(hexWidthFor(w), "0")}`;
+}
+
+/** A hex string (net mask or attr) as a plain number, or null if not one. */
+function hexToNumber(hex: string | null | undefined): number | null {
+  if (hex === null || hex === undefined || hex === "") return null;
+  return /^[0-9a-fA-F]+$/.test(hex) ? Number(BigInt(`0x${hex}`)) : null;
+}
+
+/**
+ * The word a memory's DOCUMENT image (`attrs.contents`, RLE-hex) holds at
+ * `addr` — the chip's DATA preview for when the session has no read to give: an
+ * unwired data output, or nothing loaded yet. Null when the image is not in the
+ * file (a file `autoload`, which only the engine can read) or the address is
+ * past the end.
+ */
+export function memPreviewWord(
+  contents: unknown,
+  addr: number | null,
+  bits: number,
+): number | null {
+  if (addr === null || typeof contents !== "string" || contents.trim() === "") return null;
+  let words: number[];
+  try {
+    words = parseRleHex(contents);
+  } catch {
+    return null; // a malformed image is the Inspector's problem, not the canvas's
+  }
+  const word = words[addr];
+  return word === undefined ? null : word & maskFor(bits);
 }
 
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
@@ -755,6 +784,17 @@ export class DocScene {
       }
     }
     return null;
+  }
+
+  /** The session's live value on one of a component's pins, if it has one. */
+  private livePinValue(
+    comp: CsxComponent,
+    pin: string,
+    sim: SimOverlay | undefined,
+  ): WireValue | undefined {
+    const netId = this.nets.pinToNet.get(`${comp.id}:${pin}`);
+    const wireIdx = netId !== undefined ? this.nets.nets[netId]?.wires[0] : undefined;
+    return wireIdx !== undefined ? sim?.valueForWire(wireIdx) : undefined;
   }
 
   // ---- routing support (editor/route.ts inputs) ----
@@ -1295,21 +1335,50 @@ export class DocScene {
         // place of the type mark.
         const isMemory = comp.type === "mem.ram" || comp.type === "mem.rom";
         let addrText: string | null = null;
-        if (isMemory && sim !== undefined && showValues) {
-          const docNet = this.nets.pinToNet.get(`${comp.id}:addr`);
-          const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
-          const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
-          if (val !== undefined) {
-            const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? 1) : 1;
+        /** The address as a NUMBER, when it is known (for the data preview). */
+        let addrNum: number | null = null;
+        if (isMemory && showValues) {
+          const addrBits = layout.pins.find((p) => p.name === "addr")?.bitsize ?? 1;
+          const val = this.livePinValue(comp, "addr", sim);
+          const st = val !== undefined ? wireValueState(val) : undefined;
+          if (val !== undefined && st !== "z" && st !== "x") {
             addrText = formatValue(
               val,
-              bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+              addrBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
             );
-            const st = wireValueState(val);
-            if (st === "z" || st === "x") {
-              // A constant drives the address for real — never show a stale Z
-              // because the sim session predates the wiring (UI_OVERHAUL §51).
-              addrText = this.staticPinText(comp, "addr") ?? addrText;
+            addrNum = hexToNumber(val.v);
+          } else {
+            // A constant drives the address for real — show it immediately, even
+            // before a run or over a stale Z/X (UI_OVERHAUL §51).
+            const stat = this.staticPinText(comp, "addr");
+            if (stat !== null) {
+              addrText = stat;
+              addrNum = hexToNumber(stat);
+            }
+          }
+        }
+        // The DATA field is what the chip READS at that address. The engine's own
+        // `dout`/`out` IS that async read, so it wins whenever the session has
+        // one; with no read to show — the data output left open, or nothing
+        // loaded yet — this falls back to the word the DOCUMENT's own image holds
+        // there, so the chip still says something useful while editing. A RAM
+        // that is WRITING (`we` high) shows the value going in instead.
+        if (isMemory && showValues) {
+          const dataPin = VALUE_PIN[comp.type];
+          const dataBits = layout.pins.find((p) => p.name === dataPin)?.bitsize ?? 1;
+          const weVal = comp.type === "mem.ram" ? this.livePinValue(comp, "we", sim) : undefined;
+          if (weVal !== undefined && wireValueState(weVal) === "high") {
+            const dinVal = this.livePinValue(comp, "din", sim);
+            if (dinVal !== undefined) {
+              valueText = formatValue(dinVal, probeDisplayMode(comp.attrs?.radix));
+            }
+          } else if (valueText === null) {
+            const word = memPreviewWord(comp.attrs?.contents, addrNum, dataBits);
+            if (word !== null) {
+              valueText = `0x${word
+                .toString(16)
+                .toUpperCase()
+                .padStart(hexWidthFor(dataBits), "0")}`;
             }
           }
         }

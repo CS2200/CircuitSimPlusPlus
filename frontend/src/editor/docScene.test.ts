@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { clockLevelOf, constantText, danglingPins, ellipsize, fitValueLine } from "./docScene";
+import {
+  clockLevelOf,
+  constantText,
+  danglingPins,
+  ellipsize,
+  fitValueLine,
+  memPreviewWord,
+} from "./docScene";
 
 /**
  * A long subcircuit pin name must not spill across the instance box: it is cut
@@ -83,6 +90,30 @@ describe("danglingPins", () => {
       { name: "dout", kind: "out" as const },
     ];
     expect(danglingPins("mem.ram", ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
+  });
+});
+
+describe("memPreviewWord", () => {
+  it("reads the word the DOCUMENT's image holds at that address", () => {
+    // rle-hex-v1: bare words in address order, `n-vv` = n repeats of vv.
+    const contents = "0a 0b 2-ff";
+    expect(memPreviewWord(contents, 0, 8)).toBe(0x0a);
+    expect(memPreviewWord(contents, 1, 8)).toBe(0x0b);
+    expect(memPreviewWord(contents, 2, 8)).toBe(0xff);
+    expect(memPreviewWord(contents, 3, 8)).toBe(0xff);
+  });
+
+  it("is null when there is no image, no address, or the address is past the end", () => {
+    // A file `autoload` is engine-only: the editor holds no image for it.
+    expect(memPreviewWord(undefined, 0, 8)).toBeNull();
+    expect(memPreviewWord("0a", null, 8)).toBeNull();
+    expect(memPreviewWord("0a", 4, 8)).toBeNull();
+    // A malformed image is the Inspector's problem, not the canvas's.
+    expect(memPreviewWord("zz", 0, 8)).toBeNull();
+  });
+
+  it("masks the word to the memory's data width", () => {
+    expect(memPreviewWord("1ff", 0, 4)).toBe(0x0f);
   });
 });
 
