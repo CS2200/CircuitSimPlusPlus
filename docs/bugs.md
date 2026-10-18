@@ -43,36 +43,42 @@ out-of-scope entries live in the appendices so the active list stays honest.
 
 ## P1 — Course-facing correctness
 
-### 1. Register readout is dead when `q` is unwired
-The readout resolves through the `q` net (`frontend/src/sim/controller.ts:52`),
-so an unconnected `q` shows the §61 zero placeholder instead of the stored value
-(poked values are already shown optimistically).
-**Fix:** read the register's internal state directly (report it like a named
-component) rather than only through the `q` net. **Size: M.**
+**Done in this pass:** probe width auto-match on connect *(commit `9ba29da`)* and
+the explicit unnamed-pin warning in the Inspector *(commit `32db2f0`)*.
 
-### 2. Probe doesn't match the wire's bit width on connect
-`addWire` (`frontend/src/model/document.ts:596`) never adjusts the probe's
-`bitsize`.
-**Fix:** on connect, set the probe's width from the net/driver. **Size: S.**
+### 1. Register readout is dead when `q` is unwired — needs an IPC addition
+Established by test (`632f6e3`): the **engine is correct**. With `q` open a
+register still latches on the clock edge, and `Engine::named_value`
+(`crates/core/src/delay.rs:926`) already returns the stored state (the CLI's
+probe assertions use it). Only the **readout** is wrong: it reads the `q` NET
+(`frontend/src/sim/controller.ts:52`), which does not exist when `q` is
+unwired, so it falls back to the zero placeholder.
+**Fix:** get `named_value` to the UI. Every pin has a net — even an unwired one
+(`netlist.rs:282-301`) — and `emit_diffs` diffs **all** nets
+(`session.rs:200`), so the value is already pushed; the UI just cannot tell
+which net belongs to a named component. Cheapest push-based fix: add
+`value_net: NetId` to `NamedComponent`. **This changes the IPC contract**
+(`docs/ipc.md` + `docs/tasks/README.md` §3). **Size: M.**
 
-### 3. Short-circuit alert just says "contention"
-The engine emits `HaltReason::Contention` (`crates/core/src/api.rs:191`) and the
-banner prints the bare word.
-**Fix:** a human message — e.g. *"short circuit: net N is driven both high and
-low"* — kept in the prominent banner. **Size: S.**
+### 2. A short circuit is silent — needs an engine/contract addition
+`HaltReason::Contention` (`api.rs:198`) exists but the engine **never emits
+it**, so "the banner just says contention" was wrong — there is no alert at all.
+Per `DESIGN.md:156` the intended behaviour is *not* to halt: a driver fight
+resolves to `X` and the wire is "highlighted as shorted". The wire does get
+`theme.wire["x"]`, but there is no message, and `X` is ambiguous — it also
+arises from divide-by-zero and an `X` mux select (format-v2 §4.1), so a naive
+"short circuit" banner would mislabel those.
+**Fix:** `Value::contention_merge` already computes the genuine-conflict bits
+(`disagree`, `value.rs:619`) — expose a per-net `contended` flag (a net-diff
+field) so the UI can highlight *shorts* accurately and say so plainly.
+**This changes the IPC contract.** **Size: M.**
 
-### 4. "Name pins" is only a generic load failure
-`format/validate.rs:152` has a clear engine message, but the UI surfaces it as a
-plain load error.
-**Fix:** a dedicated, prominent frontend warning for unnamed/unreachable pins.
-**Size: S.**
-
-### 5. Capitalize pin names — needs a decision
-The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Note that
-ordinary pins are **not labelled on the canvas** (they are dots), so this is
-almost entirely a *format* change: pin names are wire-endpoint keys in `.csx`,
-and the fixtures and autograder use them (`amt`, `cin`, …). Recommendation: keep
-the engine names. If we do rename, it needs a format-version bump plus
+### 3. Capitalize pin names — needs a decision
+The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Ordinary
+pins are **not labelled on the canvas** (they are dots), so this is almost
+entirely a *format* change: pin names are wire-endpoint keys in `.csx`, and the
+fixtures and autograder use them (`amt`, `cin`, …). Recommendation: keep the
+engine names. If we do rename, it needs a format-version bump plus
 fixture/demo/golden regeneration. **Size: M** *(decision first).*
 
 ---
