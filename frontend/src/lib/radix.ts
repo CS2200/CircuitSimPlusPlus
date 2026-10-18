@@ -30,3 +30,24 @@ export function parseRadixValue(text: string, radix: string, bits: number): stri
   if (n >= 2 ** Math.min(32, Math.max(1, bits))) return null; // doesn't fit
   return n.toString(16);
 }
+
+/**
+ * Like {@link parseRadixValue} but MASKING to the width instead of rejecting
+ * overflow: extra high bits/digits are dropped at the most-significant end, so
+ * continued typing behaves like a fixed-width shift (1 then 0 on a 1-bit
+ * register → 0). Returns null only for invalid characters.
+ */
+export function parseRadixValueMasked(text: string, radix: string, bits: number): string | null {
+  const t = text
+    .trim()
+    .replace(/^0[xX]/, "")
+    .replace(/^0[bB]/, "");
+  if (t === "") return null;
+  const ok = radix === "bin" ? /^[01]+$/ : radix === "dec" ? /^[0-9]+$/ : /^[0-9a-fA-F]+$/;
+  if (!ok.test(t)) return null;
+  const n = Number.parseInt(t, radix === "bin" ? 2 : radix === "dec" ? 10 : 16);
+  if (!Number.isFinite(n)) return null;
+  const w = Math.min(32, Math.max(1, bits));
+  const mask = w >= 32 ? 0xffffffff : 2 ** w - 1;
+  return ((n & mask) >>> 0).toString(16);
+}

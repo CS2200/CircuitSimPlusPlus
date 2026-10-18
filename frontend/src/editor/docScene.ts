@@ -1234,7 +1234,7 @@ export class DocScene {
         if (showValues && comp.type === "mem.register") {
           const ed = sim?.editingValue;
           if (ed !== undefined && ed !== null && ed.compId === comp.id) {
-            valueText = `${ed.text}▏`;
+            valueText = ed.text;
           }
         }
         // A locally poked register value wins over the net (and the §61

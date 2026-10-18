@@ -27,7 +27,7 @@ import { StressScene } from "./render/stressScene";
 import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
 import type { CsxComponent } from "./model/csx";
-import { parseRadixValue } from "./lib/radix";
+import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
 import { diffDocuments } from "./model/versionDiff";
@@ -274,7 +274,7 @@ export default function App() {
     [resizePanel],
   );
   const [animate, setAnimate] = useState(true);
-  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
+  const [toasts, setToasts] = useState<{ id: number; text: string; closing?: boolean }[]>([]);
   const [pathOn, setPathOn] = useState(false);
   // File state: real path in the Tauri shell; a bare file name after a
   // browser-mode open/download (browsers never expose real paths).
@@ -463,9 +463,14 @@ export default function App() {
   const toast = useCallback((text: string) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
   }, []);
+  /** Click a toast to dismiss: bulge briefly, then remove it. */
+  const dismissToast = useCallback((id: number) => {
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 160);
+  }, []);
   useEffect(() => {
     if (toasts.length === 0) return;
-    const timer = setTimeout(() => setToasts((t) => t.slice(1)), 4500);
+    const timer = setTimeout(() => setToasts((t) => t.slice(1)), 2600);
     return () => clearTimeout(timer);
   }, [toasts]);
 
@@ -528,14 +533,16 @@ export default function App() {
       const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "hex";
       const parse = radix === "bin" ? "bin" : radix === "hex" ? "hex" : "dec";
       const bits = compPins(comp, doc.circuits).find((p) => p.name === "q")?.bitsize ?? 1;
-      const hex = parseRadixValue(text, parse, bits);
+      // Mask rather than reject overflow: extra digits are dropped at the
+      // most-significant end (fixed-width shift), so you can keep typing.
+      const hex = parseRadixValueMasked(text, parse, bits);
       if (hex === null) {
-        // Never fail silently: a value that does not fit the register's width
-        // (or is not valid in its base) says so.
-        toast(`Value must be a ${radix} number that fits in ${bits} bit${bits === 1 ? "" : "s"}`);
+        toast(`Enter a ${radix} number`);
         return;
       }
-      sim.setRegisterEdit(comp.id, text);
+      // Keep the edit buffer as the *resulting* value in the register's base, so
+      // the next keystroke appends to what is actually stored.
+      sim.setRegisterEdit(comp.id, formatRadixValue(hex, radix, bits));
       onPoke(comp.id, "q", hex);
     },
     [doc, onPoke, sim, toast],
@@ -1796,9 +1803,15 @@ export default function App() {
       </footer>
       <div className="toast-stack">
         {toasts.map((t) => (
-          <div className="toast" key={t.id} role="status">
+          <button
+            type="button"
+            className={`toast${t.closing ? " closing" : ""}`}
+            key={t.id}
+            title="Dismiss"
+            onClick={() => dismissToast(t.id)}
+          >
             {t.text}
-          </div>
+          </button>
         ))}
       </div>
       {showAbout && <AboutCard onClose={() => setShowAbout(false)} />}

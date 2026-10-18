@@ -2868,13 +2868,35 @@ body {
 }
 
 .toast {
+  appearance: none;
   background: var(--panel);
   border: 1px solid var(--accent);
   border-radius: 8px;
   padding: 0.5rem 0.9rem;
+  font: inherit;
   font-size: 0.85rem;
   color: var(--text);
+  text-align: left;
+  cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.1s ease,
+    opacity 0.14s ease,
+    box-shadow 0.12s ease;
+}
+
+/* Clickable: highlight on hover, bulge on press, then it goes away. */
+.toast:hover {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.45),
+    0 0 0 1px var(--accent);
+}
+.toast:active {
+  transform: scale(1.06);
+}
+.toast.closing {
+  transform: scale(1.1);
+  opacity: 0;
 }
 
 /* T_obs / critical-path button (U7) */
