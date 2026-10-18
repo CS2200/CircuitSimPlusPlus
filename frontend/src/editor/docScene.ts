@@ -20,7 +20,7 @@ import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { hexWidthFor } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
-import { compSize, compSpec } from "./catalog";
+import { compSize, compSpec, type PinKind } from "./catalog";
 import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
 
 /**
@@ -493,6 +493,34 @@ const PIN_TOL = 0.55;
 const CORNER_TOL = 0.4;
 
 /**
+ * Inputs a memory may legitimately leave open: the core reads an unwired `rst`
+ * as deasserted (a synchronous reset that nobody asserted).
+ */
+const DANGLE_EXEMPT_PINS: ReadonlySet<string> = new Set(["mem.ram:rst"]);
+
+/**
+ * Which pins to flag on ONE component: its unconnected **inputs**, but only once
+ * the part is otherwise wired up. So a gate with its output wired and no inputs
+ * is flagged (the classic "forgot to connect it"), while a part nobody has
+ * touched yet is left alone. Unused outputs and inouts (a splitter's taps) are
+ * never mistakes, and a memory's `rst` may float.
+ *
+ * Pure, so the rule is unit-tested rather than buried in the draw loop.
+ */
+export function danglingPins<T extends { name: string; kind: PinKind }>(
+  type: string,
+  pins: readonly T[],
+  wired: (pin: string) => boolean,
+): T[] {
+  let wiredCount = 0;
+  for (const p of pins) if (wired(p.name)) wiredCount++;
+  if (wiredCount === 0 || wiredCount === pins.length) return [];
+  return pins.filter(
+    (p) => p.kind === "in" && !wired(p.name) && !DANGLE_EXEMPT_PINS.has(`${type}:${p.name}`),
+  );
+}
+
+/**
  * Rendered wire thickness for a bit width (UI_OVERHAUL §15): 1-bit wires keep
  * the base width, buses grow with the SQUARE ROOT of the bit count so 8, 16
  * and 32-bit are each clearly heavier (32-bit ≈ 3.5× a 1-bit wire) without a
@@ -528,6 +556,8 @@ export class DocScene {
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
   private wireMismatch: boolean[] = [];
+  /** Pin positions left dangling on a wired-up part (computed in `sync`). */
+  private danglingPins: Vec2[] = [];
   /** Last level a clock drove, and when it flipped (UI_OVERHAUL §47). */
   private clockLevel = new Map<string, boolean>();
   private clockChangedAt = new Map<string, number>();
@@ -583,6 +613,20 @@ export class DocScene {
       const net = netId !== undefined ? this.nets.nets[netId] : undefined;
       return inferNetBits(net, this.layouts).conflict.length > 0;
     });
+    // Pins left dangling on a part that IS wired up (see `danglingPins`).
+    // Computed HERE, before the draw, so `hasWarning()` can already tell the
+    // host to keep animating — computing it during the draw left the blink
+    // frozen on one frame.
+    this.danglingPins = [];
+    for (const comp of this.components) {
+      const layout = this.layouts.get(comp.id);
+      if (layout === undefined) continue;
+      for (const p of danglingPins(comp.type, layout.pins, (pin) =>
+        this.nets.pinToNet.has(`${comp.id}:${pin}`),
+      )) {
+        this.danglingPins.push({ x: p.x, y: p.y });
+      }
+    }
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
       c.wires,
@@ -674,9 +718,13 @@ export class DocScene {
     return this.nets.wireToNet.get(wireIdx);
   }
 
-  /** True when any wire on this sheet has a declared-width mismatch (§19). */
-  hasMismatch(): boolean {
-    return this.wireMismatch.some(Boolean);
+  /**
+   * True when the scene wants the canvas to keep ANIMATING: some wire on this
+   * sheet has a declared-width mismatch (§19), or a wired-up part has a pin
+   * left dangling — without this the blink would freeze on one frame.
+   */
+  hasWarning(): boolean {
+    return this.wireMismatch.some(Boolean) || this.danglingPins.length > 0;
   }
 
   netOfPin(compId: string, pin: string): number | undefined {
@@ -1451,6 +1499,16 @@ export class DocScene {
         renderer.drawPath(circlePath(d.x, d.y, PIN_R), { fill: outMark });
       }
       renderer.flush();
+    }
+
+    // Dangling pins (computed in `sync`): a fast HARD blink in the danger
+    // colour, so a forgotten input is unmissable. Steady red while the canvas is
+    // not animating, so it is never invisible.
+    if (this.danglingPins.length > 0) {
+      const t = overlay.now;
+      if (t === undefined || Math.floor(t / 260) % 2 === 0) {
+        renderer.drawDots(this.danglingPins, PIN_R * 1.35, theme.wire.x);
+      }
     }
 
     // Junction dots.

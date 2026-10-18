@@ -120,10 +120,11 @@ export default forwardRef<
   const pulses = useMemo(() => new PulseTracker(), [doc]);
   const [pulsesLive, setPulsesLive] = useState(false);
   const lastPulseChanges = useRef<readonly unknown[] | null>(null);
-  // Width-mismatch warnings pulse, so the canvas keeps animating while any
-  // net disagrees (gated by the same animation pref as signal pulses, §19).
-  const [mismatchLive, setMismatchLive] = useState(false);
-  const mismatchRef = useRef(false);
+  // Blinking warnings (width mismatch, dangling pins) keep the canvas
+  // animating while any is present (gated by the same animation pref as
+  // signal pulses, §19).
+  const [warningLive, setWarningLive] = useState(false);
+  const warningRef = useRef(false);
   // Tools/scene read the CURRENT sheet through a ref so a sheet switch does
   // not rebuild the whole tool machine (doc identity still does).
   const sheetRef = useRef(sheetIdx);
@@ -215,10 +216,10 @@ export default forwardRef<
   const draw = useCallback<CanvasHostProps["draw"]>(
     (renderer, camera, view, theme, tMs) => {
       scene.sync(doc, sheetRef.current);
-      const hasMismatch = scene.hasMismatch();
-      if (hasMismatch !== mismatchRef.current) {
-        mismatchRef.current = hasMismatch;
-        setMismatchLive(hasMismatch);
+      const hasWarning = scene.hasWarning();
+      if (hasWarning !== warningRef.current) {
+        warningRef.current = hasWarning;
+        setWarningLive(hasWarning);
       }
       let simOverlay: SimOverlay | undefined;
       // net_map is root-sheet-only (contract v1.1): no sim overlay on
@@ -440,7 +441,7 @@ export default forwardRef<
     <CanvasHost
       draw={draw}
       revision={tick + simVersion}
-      animate={pulsesLive || (pulsesOn && mismatchLive)}
+      animate={pulsesLive || (pulsesOn && warningLive)}
       showPerf={showPerf}
       themeName={themeName}
       sceneBounds={initialBounds}

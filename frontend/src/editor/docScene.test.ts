@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockLevelOf, constantText, ellipsize, fitValueLine } from "./docScene";
+import { clockLevelOf, constantText, danglingPins, ellipsize, fitValueLine } from "./docScene";
 
 /**
  * A long subcircuit pin name must not spill across the instance box: it is cut
@@ -39,6 +39,57 @@ describe("clockLevelOf", () => {
   });
 });
 
+describe("danglingPins", () => {
+  const gate = [
+    { name: "in0", kind: "in" as const },
+    { name: "in1", kind: "in" as const },
+    { name: "out", kind: "out" as const },
+  ];
+
+  it("flags the unconnected inputs of a part that is otherwise wired up", () => {
+    // Output wired, no inputs: the classic "forgot to connect it".
+    expect(danglingPins("gate.and", gate, (p) => p === "out").map((p) => p.name)).toEqual([
+      "in0",
+      "in1",
+    ]);
+    // One input wired: only the open one is flagged.
+    expect(danglingPins("gate.and", gate, (p) => p === "in0").map((p) => p.name)).toEqual(["in1"]);
+  });
+
+  it("stays quiet for an untouched part and for a fully wired one", () => {
+    expect(danglingPins("gate.and", gate, () => false)).toEqual([]);
+    expect(danglingPins("gate.and", gate, () => true)).toEqual([]);
+  });
+
+  it("never flags outputs, inouts, or a memory's optional rst", () => {
+    // A decoder's unused outputs are not mistakes.
+    const dec = [
+      { name: "in", kind: "in" as const },
+      { name: "out0", kind: "out" as const },
+      { name: "out1", kind: "out" as const },
+    ];
+    expect(danglingPins("plexers.decoder", dec, (p) => p === "in")).toEqual([]);
+    // A splitter's taps are plumbing, not inputs the user owes.
+    const split = [
+      { name: "bus", kind: "inout" as const },
+      { name: "b0", kind: "inout" as const },
+    ];
+    expect(danglingPins("wiring.splitter", split, (p) => p === "bus")).toEqual([]);
+    // A RAM's `rst` may float (the core reads it as deasserted); `din` may not.
+    const ram = [
+      { name: "addr", kind: "in" as const },
+      { name: "din", kind: "in" as const },
+      { name: "rst", kind: "in" as const },
+      { name: "dout", kind: "out" as const },
+    ];
+    expect(danglingPins("mem.ram", ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
+  });
+});
+
+/**
+ * A constant's readout grows with its pin's width (`0x5` → `0x05`), so changing
+ * the bit size is visible on the canvas.
+ */
 describe("constantText", () => {
   it("pads hex to the pin's width, so a wider pin shows more characters", () => {
     expect(constantText("5", "hex", 4)).toBe("0x5");
