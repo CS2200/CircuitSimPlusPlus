@@ -2197,6 +2197,34 @@ mod tests {
             "stub must not inflate the sink's arrival"
         );
     }
+    /// A register's stored state must not depend on `q` being wired: the readout
+    /// falls back to `named_value` when `q` is open, so the latch must still
+    /// happen. (Bug report: "register non-update when the output is
+    /// disconnected".)
+    #[test]
+    fn unwired_q_does_not_stop_a_register_latching() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        assert_eq!(eng.named_value("r"), Some(k(1, 0)), "powers on at 0");
+        // One full cycle latches d=1 even though nothing observes `q`.
+        eng.run(1).unwrap();
+        assert_eq!(eng.named_value("r"), Some(k(1, 1)), "latched with q open");
+    }
 }
 
 #[cfg(test)]
