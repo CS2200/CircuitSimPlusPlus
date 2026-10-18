@@ -504,6 +504,10 @@ export default function App() {
     (compId: string, pin: string, hex: string) => {
       const idx = doc.circuit(sheet).components.findIndex((c) => c.id === compId);
       if (idx < 0) return;
+      // Show the poked value on the register immediately: the engine's readout
+      // is delay-gated (and absent when q is unwired), so the canvas would
+      // otherwise keep showing the old value until the next tick.
+      sim.rememberPokedRegister(compId, hex);
       void (async () => {
         if (!(await sim.resync(doc))) return;
         await sim.poke(idx, pin, { v: hex, x: "", z: "" });

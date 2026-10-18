@@ -47,6 +47,8 @@ export interface ViolationMarker {
 export interface SimOverlay {
   /** Latest value of the engine net containing this wire, if any. */
   valueForWire(wireIdx: number): WireValue | undefined;
+  /** A locally poked register value (hex), shown until the next command. */
+  pokedRegister?: (compId: string) => string | undefined;
   /** Document component id to ring in the error color (halt marker). */
   haltCompId?: string | null;
   /** Ordered component ids of the observed critical path (U7 highlight). */
@@ -1222,6 +1224,22 @@ export class DocScene {
           if (staticVal !== null) {
             valueText = staticVal;
             valuePin = "in";
+          }
+        }
+        // A locally poked register value wins over the net (and the §61
+        // placeholder below), so the readout updates the instant you type: the
+        // engine's stored value is only visible through the delay-gated `q` net
+        // (and not at all when `q` is unwired). See SimController.pokedRegister.
+        if (showValues && comp.type === "mem.register" && sim !== undefined) {
+          const poked = sim.pokedRegister?.(comp.id);
+          if (poked !== undefined) {
+            const q = layout.pins.find((p) => p.name === "q");
+            const bits = q?.bitsize ?? 1;
+            const nibbles = Math.max(1, Math.ceil(bits / 4));
+            valueText = formatValue(
+              { v: poked.padStart(nibbles, "0").slice(-nibbles), x: "", z: "" },
+              bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+            );
           }
         }
         // A register ALWAYS reads a value (UI_OVERHAUL §61): its stored value,

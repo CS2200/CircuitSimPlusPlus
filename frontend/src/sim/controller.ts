@@ -50,6 +50,13 @@ export class SimController {
   private loadedPath: string | null = null;
   /** `doc.revision` at the last successful load; null when nothing is loaded. */
   private loadedRevision: number | null = null;
+  /**
+   * Locally poked register values (component id → hex). The register readout
+   * comes from its `q` net, which is delay-gated (updates only when the engine's
+   * time advances) and absent entirely when `q` is unwired — so a live poke is
+   * shown optimistically here until the next command supersedes it.
+   */
+  private readonly pokedRegs = new Map<string, string>();
 
   constructor(
     private readonly core: Core,
@@ -99,6 +106,7 @@ export class SimController {
     this.doc = doc;
     this.loadedPath = path;
     this.loadedRevision = null;
+    this.clearPoked();
     this.pump.clear();
     // Reset BEFORE the call: cores emit the initial full-state batch during
     // loadCircuit, and those diffs must land on a clean store (onLoaded
@@ -164,6 +172,7 @@ export class SimController {
 
   unload(): void {
     this.pump.clear();
+    this.clearPoked();
     this.store.reset();
     this.doc = null;
     this.loadedPath = null;
@@ -177,6 +186,7 @@ export class SimController {
    */
   async reset(): Promise<void> {
     this.pump.clear();
+    this.clearPoked();
     this.store.resetRunState();
     return this.core.api.reset();
   }
@@ -184,6 +194,7 @@ export class SimController {
   // ---- commands (delegate; errors propagate to the caller's UI) ----
 
   play(hz: number): Promise<void> {
+    this.clearPoked();
     return this.core.api.play(hz);
   }
 
@@ -192,19 +203,37 @@ export class SimController {
   }
 
   stepTick(): Promise<void> {
+    this.clearPoked();
     return this.core.api.stepTick();
   }
 
   stepCycle(): Promise<void> {
+    this.clearPoked();
     return this.core.api.stepCycles(1);
   }
 
   runUntil(cycle: number): Promise<void> {
+    this.clearPoked();
     return this.core.api.runUntil(cycle);
   }
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void> {
     return this.core.api.poke(compId, pin, value);
+  }
+
+  /** Record a poked register value so the canvas shows it immediately. */
+  rememberPokedRegister(compId: string, hex: string): void {
+    this.pokedRegs.set(compId, hex);
+  }
+
+  /** The optimistic value poked into a register, if any (see `pokedRegs`). */
+  pokedRegister(compId: string): string | undefined {
+    return this.pokedRegs.get(compId);
+  }
+
+  /** Any command supersedes an optimistic poke (the readout comes from nets). */
+  private clearPoked(): void {
+    if (this.pokedRegs.size > 0) this.pokedRegs.clear();
   }
 
   memRead(name: string, addr: number, len: number): Promise<WireValue[]> {

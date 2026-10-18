@@ -403,12 +403,17 @@ export default function InspectorPanel({
             defaultValue=""
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
-              const hex = parseRadixValue(
-                (e.target as HTMLInputElement).value,
-                regParse,
-                compPins(comp, sheetCircuits).find((p) => p.name === "q")?.bitsize ?? 32,
-              );
-              if (hex === null) return;
+              const bits = compPins(comp, sheetCircuits).find((p) => p.name === "q")?.bitsize ?? 1;
+              const hex = parseRadixValue((e.target as HTMLInputElement).value, regParse, bits);
+              if (hex === null) {
+                // Never fail silently: a value that does not fit the register's
+                // width (or is not valid in its base) says so.
+                onNotify?.(
+                  `Value must be a ${regRadix} number that fits in ${bits} bit${bits === 1 ? "" : "s"}`,
+                );
+                (e.target as HTMLInputElement).select();
+                return;
+              }
               onPoke(comp.id, "q", hex);
               (e.target as HTMLInputElement).blur();
             }}

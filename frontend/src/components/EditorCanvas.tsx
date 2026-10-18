@@ -238,6 +238,7 @@ export default forwardRef<
             const net = store.wireToNet?.get(i);
             return net === undefined ? undefined : store.netValues.get(net);
           },
+          pokedRegister: (id) => sim?.pokedRegister(id),
           haltCompId:
             highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
           path: pathIds ?? null,
