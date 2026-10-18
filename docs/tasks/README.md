@@ -49,7 +49,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 
 | Command | Args | Returns |
 |---|---|---|
-| `load_circuit` | `{ path }` or `{ bytes }` | `{ ok, errors: [LoadError], net_map: [{ net: u32, wires: [u32] }], named: [{ name, kind, comp_id }] }` |
+| `load_circuit` | `{ path }` or `{ bytes }` | `{ ok, errors: [LoadError], net_map: [{ net: u32, wires: [u32] }], named: [{ name, kind, comp_id, value_net? }] }` |
 | `save_circuit` | `{ path, document }` | `{ ok, errors }` |
 | `sim_play` / `sim_pause` | `{ hz }` / `{}` | — |
 | `sim_step_tick` / `sim_step_cycles` | `{}` / `{ n }` | — |

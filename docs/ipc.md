@@ -1,8 +1,13 @@
 # IPC Contract — `csim-core` ↔ Tauri shell ↔ React frontend
 
-**Status:** Pinned (U0/B0), **v1.1** (human-ratified 2026-10-06). Normative. Mirrors
-`docs/tasks/README.md` §3; implemented in Rust by `crates/core/src/api.rs` and in TypeScript by
-`frontend/src/ipc/types.ts`. Changes require human sign-off and a DESIGN.md note.
+**Status:** Pinned (U0/B0), **v1.2** (v1.1 human-ratified 2026-10-06; v1.2 signed off 2026-10-18).
+Normative. Mirrors `docs/tasks/README.md` §3; implemented in Rust by `crates/core/src/api.rs`
+and in TypeScript by `frontend/src/ipc/types.ts`. Changes require human sign-off and a
+DESIGN.md note.
+
+**Changelog v1.1 → v1.2:** `NamedComponent.value_net?` — the engine net carrying a named
+component's watchable value, so a UI readout works even when that pin is unwired (the engine
+nets every pin; `net_map` only covers wires).
 
 **Changelog v1.0 → v1.1:** `NetChange.at?` (engine event timestamps); `NetDiffs.full`
 (initial full-state batch exception); structured `TimingViolation[]`/`TimingPath[]` in
@@ -42,6 +47,11 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `resume` | `{ path: string }` | — |
 
 `LoadResult` = `{ ok, errors: LoadError[], net_map: NetMapEntry[], named: NamedComponent[] }`.
+`NamedComponent` = `{ name, kind: ram|rom|register|probe, circuit, comp_id, value_net? }` —
+**v1.2:** `value_net` is the engine net carrying the component's watchable value (register `q`,
+RAM `dout`, ROM `out`, probe `in`). The engine nets **every pin**, so it is present even when
+that pin is unwired — a register with `q` open still reads its stored value. Omitted only by a
+core that cannot resolve it (the mock derives nets from wires).
 `LoadError` = `{ kind, message, circuit, comp_id?, wire_idx? }` — load collects **all** errors;
 the engine never panics and never partially loads (DESIGN.md §5.2).
 
@@ -57,8 +67,10 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 ## 4. Net identifiers
 
 `NetId`s are assigned by the engine at load and are valid for one loaded session. The frontend
-learns the net ↔ wire mapping exclusively from `LoadResult.net_map`. Nets are **never** exposed
-in files (DESIGN.md §5.1: nets are derived, wires are the stored truth).
+learns net ids two ways: the net ↔ wire mapping from `LoadResult.net_map`, and each named
+component's `value_net` (v1.2) for its value pin — which exists even when that pin is unwired.
+Nets are **never** exposed in files (DESIGN.md §5.1: nets are derived, wires are the stored
+truth).
 
 ## 5. Conventions
 

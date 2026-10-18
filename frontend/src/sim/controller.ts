@@ -29,11 +29,11 @@ import { SimStore } from "./simStore";
 /** Watch panel display modes (DESIGN.md §7.1). */
 export type ValueMode = "unsigned" | "signed" | "hex" | "bin";
 
-/** Pin carrying a named component's watchable value. */
+/** Pin carrying a named component's watchable value (mirrors the engine). */
 const VALUE_PIN: Record<NamedComponent["kind"], string> = {
   register: "q",
-  ram: "q",
-  rom: "q",
+  ram: "dout",
+  rom: "out",
   probe: "in",
 };
 
@@ -329,8 +329,16 @@ export class SimController {
 
   // ---- document-side resolution ----
 
-  /** Current value of a watch-addressable component, if its net is known. */
+  /**
+   * Current value of a watch-addressable component, if its net is known.
+   *
+   * `value_net` (contract v1.2) is authoritative: the engine nets every pin, so
+   * it covers an unwired value pin and a component inside a subcircuit. Older
+   * cores — and the mock, which derives its nets from wires — fall back to
+   * resolving the value pin's wire, which only reaches the root sheet.
+   */
   watchValue(named: NamedComponent): WireValue | undefined {
+    if (named.value_net !== undefined) return this.store.netValues.get(named.value_net);
     if (this.doc === null || this.store.wireToNet === null) return undefined;
     const root = this.doc.circuit(0);
     // net_map is root-circuit-only (contract v1.1): subcircuit internals
@@ -339,13 +347,11 @@ export class SimController {
     const comp = root.components[named.comp_id];
     if (comp === undefined) return undefined;
     const pin = VALUE_PIN[named.kind];
-    const wireIdx = this.doc
-      .circuit(0)
-      .wires.findIndex(
-        (w) =>
-          (isPinEndpoint(w.a) && w.a.comp === comp.id && w.a.pin === pin) ||
-          (isPinEndpoint(w.b) && w.b.comp === comp.id && w.b.pin === pin),
-      );
+    const wireIdx = root.wires.findIndex(
+      (w) =>
+        (isPinEndpoint(w.a) && w.a.comp === comp.id && w.a.pin === pin) ||
+        (isPinEndpoint(w.b) && w.b.comp === comp.id && w.b.pin === pin),
+    );
     if (wireIdx < 0) return undefined;
     const net = this.store.wireToNet.get(wireIdx);
     return net === undefined ? undefined : this.store.netValues.get(net);

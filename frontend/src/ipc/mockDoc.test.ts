@@ -44,7 +44,15 @@ describe("mock core: demo document mode (U5)", () => {
 
   it("reports named components by component-array index (CompId convention)", async () => {
     const { res } = await loadDemo();
-    expect(res.named).toEqual([
+    // `value_net` (contract v1.2) rides along on each entry; assert the
+    // kind/id contract on the bare fields so it stays readable.
+    const bare = res.named.map((n) => ({
+      name: n.name,
+      kind: n.kind,
+      comp_id: n.comp_id,
+      circuit: n.circuit,
+    }));
+    expect(bare).toEqual([
       { name: "pc", kind: "register", comp_id: MOCK_DEMO_COMPS.pc, circuit: MOCK_DEMO_CIRCUIT },
       {
         name: "next_pc",
@@ -54,6 +62,15 @@ describe("mock core: demo document mode (U5)", () => {
       },
       { name: "imem", kind: "ram", comp_id: MOCK_DEMO_COMPS.imem, circuit: MOCK_DEMO_CIRCUIT },
     ]);
+
+    // The value net is present for a WIRED value pin (pc.q, next_pc.in) and
+    // omitted for an unwired one (imem's dout has no wire). The mock derives
+    // nets from wires; the real engine nets every pin, so there it is always
+    // present — see the core's `unwired_q_does_not_stop_a_register_latching`.
+    const named = new Map(res.named.map((n) => [n.name, n]));
+    expect(typeof named.get("pc")?.value_net).toBe("number");
+    expect(typeof named.get("next_pc")?.value_net).toBe("number");
+    expect(named.get("imem")?.value_net).toBeUndefined();
   });
 
   it("timing messages name the document's own circuit (v1.1)", async () => {

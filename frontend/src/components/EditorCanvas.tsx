@@ -241,10 +241,23 @@ export default forwardRef<
         }
         const activePulses = pulses.active(tMs);
         if (activePulses === null && pulsesLive) setPulsesLive(false);
+        // Named components' value nets (contract v1.2), keyed by document id.
+        // The engine nets every pin, so this answers even for a value pin with
+        // nothing wired to it — a register with `q` open, say.
+        const namedValueNets = new Map<string, number>();
+        for (const n of store.named) {
+          if (n.circuit !== doc.circuit(0).name || n.value_net === undefined) continue;
+          const comp = doc.circuit(0).components[n.comp_id];
+          if (comp !== undefined) namedValueNets.set(comp.id, n.value_net);
+        }
         simOverlay = {
           cycle: store.cycle,
           valueForWire: (i) => {
             const net = store.wireToNet?.get(i);
+            return net === undefined ? undefined : store.netValues.get(net);
+          },
+          valueForNamed: (id) => {
+            const net = namedValueNets.get(id);
             return net === undefined ? undefined : store.netValues.get(net);
           },
           pokedRegister: (id) => sim?.pokedRegister(id),

@@ -401,11 +401,26 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
             } else {
                 format!("{}/{name}", inst.inst_path)
             };
+            // The pin whose net carries this component's value for the UI. It
+            // has a net even when nothing is wired to it (every pin does), so a
+            // readout survives an open output (contract v1.2).
+            let value_pin = match kind {
+                NamedKind::Register => "q",
+                NamedKind::Ram => "dout",
+                NamedKind::Rom => "out",
+                NamedKind::Probe => "in",
+            };
+            let value_net = comps[inst_idx]
+                .pins
+                .iter()
+                .find(|p| p.pin == value_pin)
+                .map(|p| p.net);
             named.push(NamedComponent {
                 name,
                 kind,
                 circuit: inst.def_circuit.clone(),
                 comp_id: CompId(inst.def_idx as u32),
+                value_net,
             });
             named_flat.push(CompId(inst_idx as u32));
         }

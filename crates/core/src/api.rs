@@ -118,6 +118,12 @@ pub struct NamedComponent {
     pub circuit: CircuitName,
     /// Document-order index within `circuit`'s `components` array.
     pub comp_id: CompId,
+    /// Engine net carrying this component's watchable value — register `q`,
+    /// RAM `dout`, ROM `out`, probe `in` (contract v1.2). Present even when
+    /// nothing is wired to that pin (every pin gets a net), so a UI readout
+    /// still works with the value output left open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_net: Option<NetId>,
 }
 
 /// Result of [`Sim::load_circuit_bytes`] / [`Sim::load_circuit_path`].

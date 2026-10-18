@@ -47,6 +47,12 @@ export interface ViolationMarker {
 export interface SimOverlay {
   /** Latest value of the engine net containing this wire, if any. */
   valueForWire(wireIdx: number): WireValue | undefined;
+  /**
+   * A named component's value by document id, through the engine's `value_net`
+   * (contract v1.2) — the engine nets every pin, so this still answers when the
+   * value pin has nothing wired to it (an open register `q`, say).
+   */
+  valueForNamed?: (compId: string) => WireValue | undefined;
   /** A locally poked register value (hex), shown until the next command. */
   pokedRegister?: (compId: string) => string | undefined;
   /** Inline register value edit in progress (register id + the text typed). */
@@ -1204,10 +1210,16 @@ export class DocScene {
           if (pinName !== undefined) {
             const docNet = this.nets.pinToNet.get(`${comp.id}:${pinName}`);
             const wireIdx = docNet !== undefined ? this.nets.nets[docNet]?.wires[0] : undefined;
-            const val = wireIdx !== undefined ? sim.valueForWire(wireIdx) : undefined;
+            // An unwired value pin has no wire to resolve, but the engine still
+            // nets the pin (contract v1.2), so fall back to the value it pushes
+            // there — a register with `q` open reads its real stored value
+            // instead of the zero placeholder below.
+            const val =
+              wireIdx !== undefined ? sim.valueForWire(wireIdx) : sim.valueForNamed?.(comp.id);
             if (val !== undefined) {
               // A single-bit readout is a plain 0/1 — no hex prefix (§21).
-              const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? 1) : 1;
+              const pinBits = layout.pins.find((p) => p.name === pinName)?.bitsize ?? 1;
+              const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? pinBits) : pinBits;
               const mode = bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
               valueText = formatValue(val, mode);
               valuePin = pinName;

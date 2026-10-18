@@ -67,6 +67,14 @@ export interface NamedComponent {
   comp_id: CompId;
   /** Circuit the component lives in (v1.1); `comp_id` is document-order within it. */
   circuit: string;
+  /**
+   * Engine net carrying this component's watchable value — register `q`,
+   * RAM `dout`, ROM `out`, probe `in` (contract v1.2). The engine nets every
+   * pin, so this is present even when that pin is unwired, which is what lets a
+   * readout work with the output left open. Absent from a core that derives
+   * nets from wires only (the mock), or an older engine.
+   */
+  value_net?: NetId;
 }
 
 export interface LoadResult {

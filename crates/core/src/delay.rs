@@ -2224,6 +2224,18 @@ mod tests {
         // One full cycle latches d=1 even though nothing observes `q`.
         eng.run(1).unwrap();
         assert_eq!(eng.named_value("r"), Some(k(1, 1)), "latched with q open");
+
+        // The UI reads a named register through `value_net`, which exists even
+        // with `q` open — every pin gets a net (contract v1.2).
+        let net = eng
+            .netlist()
+            .named
+            .iter()
+            .find(|n| n.name == "r")
+            .expect("named r")
+            .value_net
+            .expect("value_net present");
+        assert_eq!(eng.net_value(net), k(1, 1));
     }
 }
 

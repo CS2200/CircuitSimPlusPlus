@@ -45,8 +45,8 @@ import type {
   SaveResult,
   WireValue,
 } from "./types";
-import { isPinEndpoint, type CsxDocument } from "../model/csx";
-import { deriveNets } from "../model/nets";
+import { isPinEndpoint, pinKey, type CsxDocument } from "../model/csx";
+import { deriveNets, type NetDerivation } from "../model/nets";
 import { MOCK_DEMO_CIRCUIT, MOCK_DEMO_COMPS, MOCK_DEMO_WIRES } from "./mockDemoSpec";
 
 /** Component IDs of the demo circuit. */
@@ -213,7 +213,7 @@ export class MockCore implements CoreApi {
       this.circuitName = circuit.name;
       const derivation = deriveNets(circuit);
       const net_map = derivation.nets.map((n) => ({ net: n.id, wires: n.wires }));
-      const named = namedComponents(doc);
+      const named = namedComponents(doc, derivation);
       for (const comp of circuit.components) {
         if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
           const depth = Math.min(4096, numAttr(comp.attrs, "depth", IMEM_WORDS));
@@ -651,13 +651,28 @@ function mockRleHexImage(text: string, depth: number): Uint32Array {
 }
 
 /** Watch-addressable components (named, of the four contract kinds). */
-function namedComponents(doc: CsxDocument): NamedComponent[] {
+function namedComponents(doc: CsxDocument, derivation: NetDerivation): NamedComponent[] {
+  const VALUE_PIN: Record<NamedKind, string> = {
+    register: "q",
+    ram: "dout",
+    rom: "out",
+    probe: "in",
+  };
   const named: NamedComponent[] = [];
   doc.circuits[0].components.forEach((comp, index) => {
     const kind = NAMED_KINDS[comp.type];
-    if (comp.name !== undefined && kind !== undefined) {
-      named.push({ name: comp.name, kind, comp_id: index, circuit: doc.circuits[0].name });
-    }
+    if (comp.name === undefined || kind === undefined) return;
+    // The mock derives nets from WIRES only, so a value pin that nothing is
+    // wired to has no net here (the real engine nets every pin) — the field is
+    // simply omitted and the UI falls back.
+    const value_net = derivation.pinToNet.get(pinKey(comp.id, VALUE_PIN[kind]));
+    named.push({
+      name: comp.name,
+      kind,
+      comp_id: index,
+      circuit: doc.circuits[0].name,
+      ...(value_net !== undefined && { value_net }),
+    });
   });
   return named;
 }

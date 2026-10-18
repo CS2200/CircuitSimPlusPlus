@@ -55,6 +55,18 @@ describe("SimController", () => {
     expect(ctl.store.loaded).toBe(true);
   });
 
+  it("reads a named component through its value_net, even with the value pin unwired", () => {
+    const ctl = makeController();
+    // A register whose `q` is unwired has NO wire→net entry at all — only the
+    // engine's value_net (contract v1.2). That is how the readout survives an
+    // open output instead of falling back to a zero placeholder.
+    ctl.store.onLoaded(new Map(), [
+      { name: "r", kind: "register", comp_id: 0, circuit: "main", value_net: 7 },
+    ]);
+    ctl.store.applyDiffs(new Map([[7, { val: { v: "5", x: "", z: "" } }]]), 1, true);
+    expect(ctl.watchValue(ctl.store.named[0])).toMatchObject({ v: "5" });
+  });
+
   it("serializes loads so an in-flight one cannot clobber a newer one", async () => {
     const core = createMockCore();
     let inFlight = 0;

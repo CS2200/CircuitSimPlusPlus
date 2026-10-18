@@ -356,6 +356,10 @@ Sim runs on a dedicated Rust thread. The UI never receives full per-tick state:
 - Core emits **diffs**: `(internal_net_id, new_value)` for changed nets + cycle counter. A few KB per frame at most.
 - UI consumes ≤ 1 batch per animation frame; at high sim speeds intermediate states are dropped — display shows the latest, never a backlog.
 - Controls (load/play/pause/step/poke/speed) via Tauri commands; state via events.
+- Nets are engine-internal and reach the UI only as identifiers: `LoadResult.net_map` (net ↔ wires)
+  and, since contract **v1.2**, `NamedComponent.value_net`. The engine gives **every pin** a net —
+  even an unwired one — so a named part's readout keeps working with its value output left open
+  (a register with `q` unconnected still shows its stored value).
 
 ---
 
