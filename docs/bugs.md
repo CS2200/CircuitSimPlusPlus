@@ -84,9 +84,15 @@ Version history; only an unparseable document is still refused; the save
 indicator reads **"Saved"** / **"Saving changes"** instead of
 "All changes saved" / "Unsaved changes".
 
+**New tester feedback (fixed this round):** a memory's `addr` pin was as wide as
+its DATA (a fresh RAM drew a 1-bit address while the core indexed 256 words, so a
+correct 8-bit address looked like a mismatch) *(028ffc7)*; a constant's readout
+now scales with its bit width (`0x5` → `0x05`) *(028ffc7)*; a wired-up part's
+unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
+address *(8879681)*.
+
 **Left:**
-- **Canvas**: bottom zoom slider.
-- **Clock**: 12-/24-hour timestamp toggle.
+- **Canvas**: bottom zoom slider.- **Clock**: 12-/24-hour timestamp toggle.
 - **Wire editing**: on-screen "press Esc to exit" hint.
 - **Wires**: stable colors — done for the default (one bus colour, no net-id
   dependency, *(66f46e0)*); a *per-wire* palette is still open if the maintainer
