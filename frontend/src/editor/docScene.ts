@@ -167,6 +167,21 @@ const CLOCK_HIGH_FILL = "#1f7a3d"; // dark green: clock driving high
 const CLOCK_LOW_FILL = "#b9e6c6"; // light green: clock low
 
 /**
+ * A clock body's level: the value the engine drives when it is known
+ * (`driven`), else a phase fallback so an UNWIRED clock still alternates as you
+ * tick. Before the first rising edge (cycle 0) the clock is idle → `null` (the
+ * neutral wave), so loading — or editing, which reloads — never paints a clock
+ * "high" and makes the circuit look reset.
+ */
+export function clockLevelOf(
+  driven: boolean | undefined,
+  cycle: number | undefined,
+): boolean | null {
+  if (driven !== undefined) return driven;
+  return cycle !== undefined && cycle > 0 ? cycle % 2 === 0 : null;
+}
+
+/**
  * A clock's square wave (UI_OVERHAUL §47): it shows the level the clock drives
  * AND the edge that just happened (▲ rising / ▼ falling). Drawn WHITE on the
  * clock's green body (UI decision); `high === null` (no sim value) draws a
@@ -1080,12 +1095,15 @@ export class DocScene {
         const clkWire = clkNet !== undefined ? this.nets.nets[clkNet]?.wires[0] : undefined;
         const clkVal = clkWire !== undefined ? sim?.valueForWire(clkWire) : undefined;
         const clkState = clkVal !== undefined ? wireValueState(clkVal) : undefined;
-        clockHigh =
+        // With no driven value (an unwired clock) fall back to the sim's phase
+        // so it still alternates as you tick — but only AFTER a rising edge:
+        // at cycle 0 the clock is idle, and painting it "high" made every edit
+        // (which reloaded and reset the cycle) look like the clock lit up.
+        const driven =
           clkState !== undefined && clkState !== "z" && clkState !== "x"
             ? clkState === "high"
-            : sim?.cycle !== undefined
-              ? sim.cycle % 2 === 0
-              : null;
+            : undefined;
+        clockHigh = clockLevelOf(driven, sim?.cycle);
         if (clockHigh !== null) bodyFill = clockHigh ? CLOCK_HIGH_FILL : CLOCK_LOW_FILL;
       }
       const strokeStyle = {

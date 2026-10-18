@@ -20,7 +20,7 @@ describe("SimController", () => {
     expect(ctl.store.named.map((n) => n.name)).toEqual(["pc", "next_pc", "imem"]);
   });
 
-  it("resync reloads only after the document is edited (revision)", async () => {
+  it("resync reloads on netlist edits, not on geometry-only edits", async () => {
     const ctl = makeController();
     const doc = buildMockDemoDoc();
 
@@ -38,12 +38,40 @@ describe("SimController", () => {
     expect(await ctl.resync(doc)).toBe(true);
     expect(ctl.store.cycle).toBe(cycle);
 
-    // Edited document → stale; the next command reloads a fresh power-on state.
-    doc.rename("edited");
+    // Moving a part changes only geometry → still current, so the loaded sim
+    // (and its cycle counter) survives. An edit must not look like a reset.
+    const id = doc.circuit(0).components[0].id;
+    doc.moveComponent(0, id, { x: 2, y: 2 });
+    expect(ctl.isStale(doc)).toBe(false);
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(ctl.store.cycle).toBe(cycle);
+
+    // A real netlist edit → stale; the next command reloads a fresh power-on.
+    doc.addComponent(0, { type: "wiring.constant", pos: [0, 0], attrs: { value: "1" } });
     expect(ctl.isStale(doc)).toBe(true);
     expect(await ctl.resync(doc)).toBe(true);
     expect(ctl.isStale(doc)).toBe(false);
     expect(ctl.store.cycle).toBe(0);
+    expect(ctl.store.loaded).toBe(true);
+  });
+
+  it("serializes loads so an in-flight one cannot clobber a newer one", async () => {
+    const core = createMockCore();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const real = core.api.loadCircuit.bind(core.api);
+    core.api.loadCircuit = async (src) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight -= 1;
+      return real(src);
+    };
+    const ctl = new SimController(core, (cb) => cb());
+    const doc = buildMockDemoDoc();
+    const [a, b] = await Promise.all([ctl.load(doc), ctl.load(doc)]);
+    expect([a, b]).toEqual([true, true]);
+    expect(maxInFlight).toBe(1); // the two loads never overlapped
     expect(ctl.store.loaded).toBe(true);
   });
 

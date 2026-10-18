@@ -22,7 +22,7 @@ import type {
 import { IpcEvents } from "../ipc/types";
 import type { Unlisten } from "../ipc/events";
 import { CircuitDocument } from "../model/document";
-import { isPinEndpoint } from "../model/csx";
+import { isPinEndpoint, type CsxEndpoint } from "../model/csx";
 import { DiffPump } from "./diffPump";
 import { SimStore } from "./simStore";
 
@@ -37,6 +37,35 @@ const VALUE_PIN: Record<NamedComponent["kind"], string> = {
   probe: "in",
 };
 
+/** Connectivity of one wire endpoint: a pin, or the wire a junction joins. */
+function endpointKey(e: CsxEndpoint): string {
+  return isPinEndpoint(e) ? `${e.comp}.${e.pin}` : `#${e.join.wire}`;
+}
+
+/**
+ * Engine-relevant fingerprint of a document: each circuit's components
+ * (id/type/name/attrs) and each wire's endpoints. Geometry — component
+ * positions, `rot`, wire `points`, colours — is presentational: the core
+ * derives connectivity purely from component ids and pin names
+ * (docs/format-v2.md §5). So dragging a part or bending a wire leaves this
+ * fingerprint unchanged, and the engine must NOT be reloaded: a reload reboots
+ * the sim (clocked state clears, the cycle counter returns to 0), which made
+ * every layout tweak look like the circuit had reset.
+ */
+function netlistSignature(doc: CircuitDocument): string {
+  const parts: string[] = [];
+  for (const c of doc.data.circuits) {
+    parts.push(`circuit ${c.name}`);
+    for (const comp of c.components) {
+      parts.push(` ${comp.id} ${comp.type} ${comp.name ?? ""} ${JSON.stringify(comp.attrs ?? {})}`);
+    }
+    for (const w of c.wires) {
+      parts.push(` ${endpointKey(w.a)} ${endpointKey(w.b)}`);
+    }
+  }
+  return parts.join("\n");
+}
+
 export class SimController {
   readonly store = new SimStore();
   private readonly pump: DiffPump;
@@ -48,8 +77,19 @@ export class SimController {
    * document (reload re-encodes the editor's current JSON).
    */
   private loadedPath: string | null = null;
-  /** `doc.revision` at the last successful load; null when nothing is loaded. */
-  private loadedRevision: number | null = null;
+  /**
+   * Netlist fingerprint at the last successful load (see `netlistSignature`),
+   * or null when nothing is loaded. A geometry-only edit leaves it unchanged,
+   * so it does not force a reload.
+   */
+  private loadedSig: string | null = null;
+  /**
+   * Tail of the load chain — loads are serialized. Two overlapping loads would
+   * interleave their initial full-state diff batches and both mutate the
+   * store, leaving whichever finished last to win; chaining guarantees the
+   * newest load also resets last, so its snapshot is the one that sticks.
+   */
+  private loading: Promise<boolean> = Promise.resolve(true);
   /**
    * Locally poked register values (component id → hex). The register readout
    * comes from its `q` net, which is delay-gated (updates only when the engine's
@@ -104,14 +144,32 @@ export class SimController {
     return this.loadInto(doc, () => this.core.api.loadCircuit({ path }), path);
   }
 
-  private async loadInto(
+  /**
+   * Queue a load behind any in-flight one (see `loading`) and run it. Commands
+   * and the live re-sync can both fire loads, so they must not overlap.
+   */
+  private loadInto(
+    doc: CircuitDocument,
+    invokeLoad: () => Promise<LoadResult>,
+    path: string | null,
+  ): Promise<boolean> {
+    const previous = this.loading;
+    const next = (async () => {
+      await previous.catch(() => false);
+      return this.performLoad(doc, invokeLoad, path);
+    })();
+    this.loading = next.catch(() => false);
+    return next;
+  }
+
+  private async performLoad(
     doc: CircuitDocument,
     invokeLoad: () => Promise<LoadResult>,
     path: string | null,
   ): Promise<boolean> {
     this.doc = doc;
     this.loadedPath = path;
-    this.loadedRevision = null;
+    this.loadedSig = null;
     this.clearPoked();
     this.pump.clear();
     // Reset BEFORE the call: cores emit the initial full-state batch during
@@ -134,17 +192,19 @@ export class SimController {
       for (const w of entry.wires) wireToNet.set(w, entry.net);
     }
     this.store.onLoaded(wireToNet, result.named);
-    this.loadedRevision = doc.revision;
+    this.loadedSig = netlistSignature(doc);
     return true;
   }
 
   /**
-   * True when the live document is older than `doc` — the editor was edited
-   * after the last load. `false` while nothing is loaded (callers check
-   * `store.loaded` separately for that case).
+   * True when the engine's loaded snapshot no longer matches the editor's
+   * netlist — something the core cares about (a part, a wire, an attribute)
+   * changed since the last load. Geometry-only edits (a part dragged, a wire
+   * bent) leave the netlist identical and are NOT stale, so they do not reboot
+   * the simulation. `false` while nothing is loaded.
    */
   isStale(doc: CircuitDocument): boolean {
-    return this.loadedRevision !== null && this.loadedRevision !== doc.revision;
+    return this.loadedSig !== null && this.loadedSig !== netlistSignature(doc);
   }
 
   /**
@@ -182,7 +242,7 @@ export class SimController {
     this.store.reset();
     this.doc = null;
     this.loadedPath = null;
-    this.loadedRevision = null;
+    this.loadedSig = null;
   }
 
   /**
