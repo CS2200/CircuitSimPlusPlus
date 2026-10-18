@@ -3,14 +3,7 @@ import AppHeader from "./components/AppHeader";
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
-import {
-  AppLogoIcon,
-  HistoryIcon,
-  MoonIcon,
-  RedoIcon,
-  SunIcon,
-  UndoIcon,
-} from "./components/icons";
+import { AppLogoIcon, HistoryIcon, RedoIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 
@@ -79,7 +72,6 @@ import {
 import {
   DEFAULT_ACCENT,
   DEFAULT_THEME,
-  isLightTheme,
   loadAccentPref,
   loadThemePref,
   saveAccentPref,
@@ -411,18 +403,6 @@ export default function App() {
     saveBoolPref(PREF_AUTOSAVE_FILE, autosaveFileOn);
   }, [autosaveFileOn]);
 
-  // Light/dark icon toggle: flips to the light side and back to whatever
-  // theme was last used on the dark side (not a hard-coded pair).
-  const lastByMode = useRef<Record<"light" | "dark", ThemeId>>({
-    light: "light",
-    dark: DEFAULT_THEME,
-  });
-  useEffect(() => {
-    lastByMode.current[isLightTheme(theme) ? "light" : "dark"] = theme;
-  }, [theme]);
-  const toggleLightDark = useCallback(() => {
-    setTheme(isLightTheme(theme) ? lastByMode.current.dark : lastByMode.current.light);
-  }, [theme]);
   const resetAppearance = useCallback(() => {
     setTheme(DEFAULT_THEME);
     setAccent(DEFAULT_ACCENT);
@@ -1563,15 +1543,6 @@ export default function App() {
                 </button>
               </>
             )}
-            <span className="topbar-sep" aria-hidden="true" />
-            <button
-              className="icon-btn"
-              aria-label={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
-              title={isLightTheme(theme) ? "Switch to dark theme" : "Switch to light theme"}
-              onClick={toggleLightDark}
-            >
-              {isLightTheme(theme) ? <MoonIcon /> : <SunIcon />}
-            </button>
           </>
         }
       />

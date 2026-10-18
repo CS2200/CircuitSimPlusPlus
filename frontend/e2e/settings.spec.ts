@@ -74,17 +74,22 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
   await expect(page.getByLabel("Animate signal pulses")).toBeChecked();
 });
 
-test("top bar: the light/dark toggle flips themes and restores the dark family", async ({
-  page,
-}) => {
+test("theme: the Settings picker switches themes (the header toggle is gone)", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // dark family default
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // dark-family default
 
-  await page.getByRole("button", { name: "Switch to light theme" }).click();
+  // There is ONE way to change the theme — Settings — so the header no longer
+  // carries a standalone sun/moon button.
+  await expect(page.getByRole("button", { name: /Switch to (light|dark) theme/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Settings…" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.locator('[data-theme-option="light"]').click();
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "light");
   expect(await page.evaluate(() => localStorage.getItem("csx.theme"))).toBe("light");
 
-  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  await settings.locator('[data-theme-option="oled"]').click();
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled");
 });
 
