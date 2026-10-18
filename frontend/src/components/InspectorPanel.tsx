@@ -218,6 +218,12 @@ export default function InspectorPanel({
   );
 
   const unnamed = ADDRESSABLE.has(comp.type) && (comp.name ?? "") === "";
+  /**
+   * A `wiring.pin` MUST be named — a sheet's named pins are its subcircuit
+   * interface, and `format/validate.rs` fails the WHOLE load on a blank one. So
+   * this is a blocker, not the autograder nudge above.
+   */
+  const unnamedPin = comp.type === "wiring.pin" && (comp.name ?? "") === "";
   const nameKey = `${comp.id}:name`;
 
   // ---- memory images (UI_OVERHAUL §11): two loading methods ----
@@ -287,6 +293,13 @@ export default function InspectorPanel({
             }}
           />
         </label>
+      )}
+
+      {unnamedPin && (
+        <p className="inspector-note" data-note="unnamed-pin">
+          ⚠ Name this pin — a sheet&apos;s named pins are its subcircuit interface, and an unnamed
+          pin stops the file from loading (format-v2 §5).
+        </p>
       )}
 
       {comp.type !== "misc.text" && (

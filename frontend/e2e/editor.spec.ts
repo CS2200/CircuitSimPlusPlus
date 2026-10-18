@@ -182,6 +182,28 @@ test("grid edge lines up with the canvas edge (camera aligned to the grid)", asy
     .toBe(true);
 });
 
+test("an unnamed wiring.pin warns that the file will not load", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Wiring"]').click();
+  await page.getByRole("button", { name: "INPUT", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toHaveText("Pin");
+
+  // The engine fails the whole load on a blank pin name, so say so up front —
+  // next to the Name field — instead of waiting for a generic load failure.
+  const note = page.locator('[data-note="unnamed-pin"]');
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("Name this pin");
+
+  // Naming it clears the warning.
+  const name = page.locator(".inspector-row input").first();
+  await name.fill("req");
+  await name.press("Enter");
+  await expect(note).toHaveCount(0);
+});
+
 test("splitter: the Inspector edits split pins structurally (not a text box)", async ({ page }) => {
   await page.goto("/");
   await page.locator('[data-group="Wiring"]').click();

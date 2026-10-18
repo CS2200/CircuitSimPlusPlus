@@ -1439,6 +1439,13 @@ body {
   color: var(--violation);
 }
 
+/* A LOAD-BLOCKING note (an unnamed `wiring.pin` fails the whole load) reads
+ * stronger than the autograder-addressability nudge. */
+.inspector-note[data-note="unnamed-pin"] {
+  margin-top: 0.35rem;
+  font-weight: 600;
+}
+
 /* ---- inspector + bit-width picker (UI_OVERHAUL §18/§19) ---- */
 
 .inspector-hint {
