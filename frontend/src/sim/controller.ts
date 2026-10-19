@@ -178,6 +178,11 @@ export class SimController {
     this.loadedSig = null;
     this.clearPoked();
     this.pump.clear();
+    // A load starts a NEW session: the engine restarts at cycle 0, so the old
+    // trace describes a different run.  Keeping it would put the new cycles
+    // after the old ones and make x non-monotonic — which draws a trace whose
+    // signals overlap (UI_OVERHAUL §89).
+    this.waves.clear();
     // Reset BEFORE the call: cores emit the initial full-state batch during
     // loadCircuit, and those diffs must land on a clean store (onLoaded
     // below must not wipe them).

@@ -2311,3 +2311,24 @@ Follow-ups after using it on a real circuit (§89):
   where a half cycle is sub-pixel, one pixel of "something happened here" beats a flat line. Both
   were visible only once the axis stopped rescaling, which is the lesson: the aliasing and the
   rescaling were hiding each other.
+- **Buses are bars, not levels.** A multi-bit signal drawn as a high/low step is a lie: every bus
+  looked like the same flat line whatever it held. A bus now draws as a bar carrying its value —
+  two horizontal rules with the value between them, a change marker where the value becomes a
+  different one, and a stable hue per net like the canvas uses. A one-bit signal keeps the level
+  and the vertical edges, and per-bit lanes (double-click) are drawn the same way.
+- **The width comes from the document, not from the value's masks.** Hex masks are nibble-aligned,
+  so a 1-bit value's mask is already 4 "bits" wide, and a core may report a wider mask than the
+  signal has — the mock reports 32-bit masks for _everything_, which turned the clock into a bus
+  row. Each row's width is therefore resolved where the document is understood: a named part's
+  `bitsize`, a picked pin's registry spec, 1 for a clock. `isBus` uses that, and it also pads a
+  readout to the declared width (a 16-bit register shows four hex digits, not eight).
+- **A new session clears the trace, twice over.** `performLoad` clears it — a load restarts the
+  engine at cycle 0, so the old samples describe a different run — and the recorder _also_ clears
+  itself when a batch's cycle goes **backwards**, which is what a load or reset through a path that
+  forgot to clear looks like from the inside. Without either, the new cycles land after the old
+  ones, `x` stops being monotonic, and the binary search that reads a value at a cycle returns
+  nonsense: the trace overlaps itself. That is the "left and came back and the wires look wrong"
+  report, and the defensive half is the one that matters, because the call path was missed once.
+- **The cursor is dropped when the app loses focus**, and it is not drawn outside the lane area: a
+  `mouseleave` does not fire when the window goes away, so a stale readout used to sit at a cycle
+  the mouse was nowhere near, drawing a rule through the signal labels.

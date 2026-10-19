@@ -5,6 +5,7 @@ import type { SimController } from "../sim/controller";
 import {
   bitLaneIndices,
   extractBit,
+  isBus,
   projectSamples,
   stepSegments,
   valueAt,
@@ -116,8 +117,16 @@ export default function WaveformView({
         onClose();
       }
     };
+    // Leaving the app must drop the cursor: `mouseleave` on the canvas does not
+    // fire when the window itself goes away, and a frozen readout then claims to
+    // be about a cycle the mouse is nowhere near.
+    const onBlur = () => setCursor(null);
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [onClose]);
 
   /** Rows to draw: an expanded bus contributes one row per bit, MSB first. */
@@ -128,7 +137,10 @@ export default function WaveformView({
       if (expanded.has(row.signal.key)) {
         const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
         const sample = valueAt(placed, placed[placed.length - 1]?.x ?? 0);
-        const bits = Math.min(32, valueBits(sample?.val ?? { v: "0", x: "0", z: "0" }));
+        const bits = Math.min(
+          32,
+          row.signal.bits ?? valueBits(sample?.val ?? { v: "0", x: "0", z: "0" }),
+        );
         for (const bit of bitLaneIndices(bits)) {
           out.push({ signal: row.signal, bit, parent: row.signal.key });
         }
@@ -249,6 +261,16 @@ export default function WaveformView({
       const low = yTop + laneH - 5;
       const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
 
+      const latest = placed[placed.length - 1]?.val;
+      // Width from the document where it is known, so a 1-bit clock whose core
+      // reports a wide mask is not mistaken for a bus, and a 16-bit register pads
+      // to four hex digits rather than to whatever mask arrived.
+      const rowBits =
+        row.bit !== undefined
+          ? 1
+          : (row.signal.bits ?? Math.max(1, bitsOf(latest ?? { v: "0", x: "0", z: "0" })));
+      const busRow = row.bit === undefined && isBus(row.signal, latest);
+
       // Gutter: label + the value under the cursor.
       const atCursor = cursor === null ? null : rowValueAt(row, placed, cursor.cycle);
 
@@ -258,18 +280,24 @@ export default function WaveformView({
       ctx.fillText(clip(label, 17), 6 + indent, mid);
       if (atCursor !== null) {
         ctx.fillStyle = theme.textDim;
-        const text = waveText(
-          atCursor.val,
-          row.bit !== undefined ? 1 : Math.max(1, bitsOf(atCursor.val)),
-        );
+        const text = waveText(atCursor.val, rowBits);
         ctx.fillText(text, GUTTER - 12 - ctx.measureText(text).width, mid);
       }
 
-      // The trace: hold the level, then a VERTICAL edge to the next one.
-      // Without that edge the levels read as disconnected dashes — which is
-      // exactly how a student would misread a clock.
+      // The trace.  A one-bit signal is a LEVEL that holds and then edges to the
+      // next level.  A bus is a VALUE that holds, so it is drawn as a bar
+      // carrying that value: giving a multi-bit signal a high/low level is simply
+      // wrong — every bus would look like the same flat line whatever it held,
+      // which is what "condensed into one line" was.
+      // Buses are told apart by hue, like on the canvas — a stable one per net,
+      // and X/Z always read as X/Z whatever the hue would be.
+      const busHue = theme.bus[Math.abs(row.signal.net) % theme.bus.length] ?? theme.wire.high;
+      const boxUp = mid - 8;
+      const boxDown = mid + 8;
+
       const segs = stepSegments(placed, first, last);
       let prevY: number | null = null;
+      let prevText: string | null = null;
       for (const seg of segs) {
         const x0 = Math.max(GUTTER, x(seg.from));
         let x1 = Math.min(size.w, x(seg.to));
@@ -279,34 +307,64 @@ export default function WaveformView({
         // toggle.  One pixel of "something happened here" is the honest picture.
         if (x1 - x0 < 1) x1 = Math.min(size.w, x0 + 1);
         const state = wireValueState(seg.val);
-        const y = state === "high" ? high : state === "low" || state === "disconnected" ? low : mid;
-        ctx.strokeStyle = row.bit !== undefined ? theme.text : theme.wire[state];
-        ctx.lineWidth = state === "high" || state === "low" ? 1.6 : 1.2;
+        const known = state === "high" || state === "low";
+        const y = busRow
+          ? mid
+          : state === "high"
+            ? high
+            : state === "low" || state === "disconnected"
+              ? low
+              : mid;
+        const text = waveText(seg.val, row.bit !== undefined ? 1 : rowBits);
+        ctx.strokeStyle = busRow
+          ? state === "x"
+            ? theme.wire.x
+            : state === "z"
+              ? theme.wire.z
+              : busHue
+          : theme.wire[state];
+        ctx.lineWidth = busRow || known ? 1.6 : 1.2;
         ctx.beginPath();
-        if (prevY !== null && prevY !== y) {
+        if (busRow) {
+          // The bar (top and bottom), with a change marker where the value
+          // becomes a different one: the reader has to see a new value rather
+          // than a longer bar.
+          if (prevText !== null && prevText !== text) {
+            ctx.moveTo(Math.round(x0) + 0.5, boxUp);
+            ctx.lineTo(Math.round(x0) + 0.5, boxDown);
+          }
+          ctx.moveTo(x0, boxUp);
+          ctx.lineTo(x1, boxUp);
+          ctx.moveTo(x0, boxDown);
+          ctx.lineTo(x1, boxDown);
+        } else if (prevY !== null && prevY !== y) {
           ctx.moveTo(Math.round(x0) + 0.5, prevY);
           ctx.lineTo(Math.round(x0) + 0.5, y);
+          ctx.lineTo(x1, y);
         } else {
           ctx.moveTo(x0, y);
+          ctx.lineTo(x1, y);
         }
-        ctx.lineTo(x1, y);
         ctx.stroke();
         prevY = y;
+        prevText = text;
         if (seg.contended === true) {
           ctx.strokeStyle = theme.violation;
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(x0, y - 3);
-          ctx.lineTo(x1, y - 3);
+          ctx.moveTo(x0, busRow ? boxDown + 3 : y - 3);
+          ctx.lineTo(x1, busRow ? boxDown + 3 : y - 3);
           ctx.stroke();
         }
-        // Bus value as text, when the segment is wide enough to read it.
-        if (row.bit === undefined && x1 - x0 > 24) {
-          const text = waveText(seg.val, Math.max(1, bitsOf(seg.val)));
-          if (x1 - x0 > ctx.measureText(text).width + 8 && text !== "0" && text !== "1") {
-            ctx.fillStyle = theme.textDim;
-            ctx.fillText(text, x0 + 4, mid - 6);
-          }
+        // The value itself: centred when it fits, clipped at the left when the
+        // segment is merely narrow, and left to the gutter readout below that.
+        const need = ctx.measureText(text).width + 8;
+        if (busRow && x1 - x0 >= need) {
+          ctx.fillStyle = theme.text;
+          ctx.fillText(text, (x0 + x1) / 2 - ctx.measureText(text).width / 2, mid);
+        } else if (busRow && x1 - x0 >= 34) {
+          ctx.fillStyle = theme.textDim;
+          ctx.fillText(clip(text, 10), x0 + 4, mid);
         }
       }
       if (placed.length === 0) {
@@ -349,9 +407,12 @@ export default function WaveformView({
       ctx.textAlign = "center";
     }
 
-    // Cursor, over everything.
-    if (cursor !== null) {
-      const cx = Math.round(x(cursor.cycle)) + 0.5;
+    // Cursor, over everything — but only inside the lane area: a cursor left
+    // behind outside it (the app lost focus with the mouse away) would draw a
+    // rule through the signal labels.
+    const cursorX = cursor === null ? null : Math.round(x(cursor.cycle)) + 0.5;
+    if (cursor !== null && cursorX !== null && cursorX >= GUTTER && cursorX <= size.w - 1) {
+      const cx = cursorX;
       ctx.strokeStyle = theme.accent;
       ctx.lineWidth = 1;
       ctx.beginPath();

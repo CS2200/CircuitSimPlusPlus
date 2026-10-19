@@ -58,8 +58,23 @@ export interface WaveSignal {
   label: string;
   net: NetId;
   origin: "named" | "picked";
-  /** `probe` | `register` | `ram` | `rom` for named parts; `wire` | `pin` for picks. */
+  /** `probe` | `register` | `ram` | `rom` for named parts; `wire` | `pin` | `clock` for picks. */
   kind: string;
+  /**
+   * The signal's **declared** width where the document knows it (a part's
+   * `bitsize`, a pin's spec).  Deliberately not the width of a value's hex masks:
+   * masks are nibble-aligned, so a 1-bit signal's mask is already 4 "bits" wide,
+   * and a core may report an even wider mask than the signal has (the mock
+   * reports 32-bit masks for everything).  Deciding "is this a bus?" from that
+   * turns a clock into a bus row.
+   */
+  bits?: number;
+}
+
+/** Whether a row is a bus: its declared width, falling back to the value's masks. */
+export function isBus(signal: WaveSignal, latest?: WireValue): boolean {
+  const bits = signal.bits ?? (latest === undefined ? 0 : valueBits(latest));
+  return bits > 1;
 }
 
 /** Per-net sample cap.  A net that changes every tick for a long run is a lot of trace. */
@@ -137,6 +152,12 @@ export class WaveformRecorder {
    */
   recordBatch(diffs: NetDiffs): void {
     const cycle = diffs.cycle;
+    // Defence in depth for the same session boundary: a cycle that goes
+    // BACKWARDS means the engine restarted through a path that did not clear us
+    // (a load, a reset, a core that re-loads on its own).  The old samples
+    // describe a different run, and keeping them would make x non-monotonic, so
+    // the trace would overlap itself.  Start again instead.
+    if (this._span !== null && cycle < this._span.lastCycle) this.clear();
     for (const change of diffs.changes) {
       const hasAt = typeof change.at === "number" && Number.isFinite(change.at);
       // Without `at` the cycle number is the only clock we have.
@@ -416,16 +437,22 @@ export function bitLaneIndices(bits: number): number[] {
  * and contract v1.2's `value_net` exist for, and it is always meaningful, which a
  * nameless wire is not.
  */
-export function defaultSignals(named: readonly NamedComponent[]): WaveSignal[] {
+export function defaultSignals(
+  named: readonly NamedComponent[],
+  /** Declared width of a named part, from the document (a part's `bitsize`). */
+  bitsOf?: (n: NamedComponent) => number | undefined,
+): WaveSignal[] {
   const out: WaveSignal[] = [];
   for (const n of named) {
     if (n.value_net === undefined) continue;
+    const bits = bitsOf?.(n);
     out.push({
       key: `n:${n.circuit}/${n.name}`,
       label: n.name,
       net: n.value_net,
       origin: "named",
       kind: n.kind,
+      ...(bits !== undefined ? { bits } : {}),
     });
   }
   return out;
@@ -445,18 +472,50 @@ export function pickedSignals(opts: {
   wireToNet: ReadonlyMap<number, NetId>;
   selectedWires?: readonly number[];
   selectedPins?: readonly { comp: string; pin: string }[];
+  /**
+   * Declared width of a pin, from the document.  Worth passing: a value's hex
+   * masks are nibble-aligned, so a 1-bit signal's mask is already 4 "bits" wide
+   * and the masks alone would call every picked 1-bit wire a bus.
+   */
+  bitsOf?: (comp: string, pin: string) => number | undefined;
 }): WaveSignal[] {
   const out: WaveSignal[] = [];
   const seen = new Set<NetId>();
 
-  const add = (key: string, label: string, kind: string, net: NetId | undefined): void => {
+  const add = (
+    key: string,
+    label: string,
+    kind: string,
+    net: NetId | undefined,
+    pin?: { comp: string; pin: string },
+  ): void => {
     if (net === undefined || seen.has(net)) return;
     seen.add(net);
-    out.push({ key, label, net, origin: "picked", kind });
+    const bits = pin === undefined ? undefined : opts.bitsOf?.(pin.comp, pin.pin);
+    out.push({
+      key,
+      label,
+      net,
+      origin: "picked",
+      kind,
+      ...(bits !== undefined && bits > 0 ? { bits } : {}),
+    });
+  };
+
+  /** First pin endpoint of a wire — the width of the net it carries. */
+  const pinOf = (idx: number): { comp: string; pin: string } | undefined => {
+    const w = opts.wires[idx];
+    if (w === undefined) return undefined;
+    for (const ep of [w.a, w.b]) {
+      if (typeof ep === "object" && ep !== null && "comp" in ep && "pin" in ep) {
+        return ep as { comp: string; pin: string };
+      }
+    }
+    return undefined;
   };
 
   for (const idx of opts.selectedWires ?? []) {
-    add(`w:${idx}`, `wire ${idx}`, "wire", opts.wireToNet.get(idx));
+    add(`w:${idx}`, `wire ${idx}`, "wire", opts.wireToNet.get(idx), pinOf(idx));
   }
   for (const want of opts.selectedPins ?? []) {
     const at = opts.wires.findIndex((w) =>
@@ -470,7 +529,13 @@ export function pickedSignals(opts: {
       ),
     );
     if (at < 0) continue;
-    add(`p:${want.comp}.${want.pin}`, `${want.comp}.${want.pin}`, "pin", opts.wireToNet.get(at));
+    add(
+      `p:${want.comp}.${want.pin}`,
+      `${want.comp}.${want.pin}`,
+      "pin",
+      opts.wireToNet.get(at),
+      want,
+    );
   }
   return out;
 }
@@ -497,6 +562,13 @@ export function clockSignals(opts: {
   });
   return resolved.map((sig) => {
     const comp = clocks.find((c) => sig.key === `p:${c.id}.out`);
-    return { ...sig, key: `k:${comp?.id ?? sig.key}`, kind: "clock", label: comp?.name || "clk" };
+    // A clock is one bit, whatever mask a core puts on it.
+    return {
+      ...sig,
+      key: `k:${comp?.id ?? sig.key}`,
+      kind: "clock",
+      label: comp?.name || "clk",
+      bits: 1,
+    };
   });
 }

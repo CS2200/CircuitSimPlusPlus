@@ -14,6 +14,7 @@ import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import CanvasMenu, { type CanvasMenuAction } from "./components/CanvasMenu";
 import type { CanvasMenuState } from "./editor/tools";
+import type { NamedComponent } from "./ipc/types";
 import {
   AppLogoIcon,
   CircuitIcon,
@@ -519,6 +520,33 @@ export default function App() {
   // (UI_OVERHAUL §11), so the dock is Inspector-only.
   const selectedComps = status?.selectedComponents ?? EMPTY_SELECTION;
   const selectedWires = status?.selectedWires ?? EMPTY_SELECTION_NUM;
+
+  /**
+   * A named part's declared width, from the document.  `comp_id` is
+   * document-order within its own circuit (contract v1.2), so this is a lookup,
+   * not a search.
+   */
+  const bitsOfNamed = useCallback(
+    (n: NamedComponent): number | undefined => {
+      const circuit = doc.circuits.find((c) => c.name === n.circuit);
+      const comp = circuit?.components[n.comp_id];
+      const bits = comp?.attrs?.["bitsize"];
+      return typeof bits === "number" && bits > 0 ? bits : undefined;
+    },
+    [doc],
+  );
+
+  /** A pin's declared width, from the registry's per-type pin specs. */
+  const bitsOfPin = useCallback(
+    (compId: string, pin: string): number | undefined => {
+      const comp = doc.circuits[sheet]?.components.find((c) => c.id === compId);
+      if (comp === undefined) return undefined;
+      const spec = compPins(comp, doc.circuits).find((p) => p.name === pin);
+      return spec === undefined ? undefined : (spec.bitsize ?? 1);
+    },
+    [doc, sheet],
+  );
+
   /**
    * Signals the current canvas selection would add to the trace (UI_OVERHAUL
    * §89).  A selected wire is itself; a selected part contributes its OUTPUT
@@ -543,9 +571,10 @@ export default function App() {
       wireToNet,
       selectedWires,
       selectedPins,
+      bitsOf: bitsOfPin,
     });
     // simVersion keeps the net map fresh across a reload.
-  }, [waveOpen, doc, sheet, selectedComps, selectedWires, sim, simVersion]);
+  }, [waveOpen, doc, sheet, selectedComps, selectedWires, sim, simVersion, bitsOfPin]);
 
   const inspectorCompId = selectedComps.length === 1 ? selectedComps[0] : null;
   const inspectorWireIdx =
@@ -586,14 +615,14 @@ export default function App() {
   const waveDefaults = useMemo<WaveSignal[]>(() => {
     const circuit = doc.circuits[sheet];
     const wireToNet = sim.store.wireToNet;
-    const named = defaultSignals(sim.store.named);
+    const named = defaultSignals(sim.store.named, bitsOfNamed);
     if (circuit === undefined || wireToNet === null) return named;
     return [
       ...named,
       ...clockSignals({ wires: circuit.wires, wireToNet, components: circuit.components }),
     ];
     // simVersion keeps the net map fresh across a reload.
-  }, [doc, sheet, sim.store.named, sim.store.wireToNet, simVersion]);
+  }, [doc, sheet, sim.store.named, sim.store.wireToNet, simVersion, bitsOfNamed]);
 
   const openWaveform = useCallback(() => {
     if (!sim.store.loaded) {

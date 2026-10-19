@@ -7,7 +7,7 @@ against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), **205 backend + 413 unit + 79 e2e** tests green. RAM powers
+and RAMs have no `rst` pin), **205 backend + 417 unit + 79 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
 priority decoder gained CircuitSim CE's enable chain (`en_in`/`en_out`, `valid` as CE's
 Group Signal, `out` = `X` when nothing wins) so the class's cascaded encoder — the

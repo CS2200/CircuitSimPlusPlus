@@ -5,6 +5,7 @@ import {
   WAVE_SAMPLE_CAP,
   WaveformRecorder,
   clockSignals,
+  isBus,
   bitLaneIndices,
   defaultSignals,
   extractBit,
@@ -14,6 +15,7 @@ import {
   valueAt,
   valueBits,
   waveText,
+  type WaveSignal,
 } from "./waveform";
 
 const hex = (v: number, bits = 4): WireValue => ({
@@ -217,6 +219,29 @@ describe("WaveformRecorder: every event, not every cycle", () => {
     expect(r.truncated.has(1)).toBe(true);
   });
 
+  it("starts a fresh trace when the engine's cycle goes backwards", () => {
+    // A load or reset that did not clear the recorder: cycles 0..3 are the old
+    // run, and appending the new run's cycle 0 after them would put x out of
+    // order — which is how a trace ends up overlapping itself.
+    const r = new WaveformRecorder();
+    for (let c = 0; c < 4; c++) r.recordBatch(batch(c, [[1, hex(c, 1), c * 100]]));
+    expect(r.lastCycle).toBe(3);
+    r.recordBatch(
+      batch(0, [
+        [1, hex(0, 1), 0],
+        [1, hex(1, 1), 50],
+      ]),
+    );
+    expect(r.lastCycle).toBe(0);
+    expect(r.samples(1).map((s) => [s.cycle, s.t])).toEqual([
+      [0, 0],
+      [0, 50],
+    ]);
+    // …and the axis stays monotonic.
+    const xs = projectSamples(r.samples(1), r.timebase()).map((p) => p.x);
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+  });
+
   it("clears on request", () => {
     const r = new WaveformRecorder();
     r.recordBatch(batch(0, [[1, hex(1), 0]]));
@@ -299,6 +324,41 @@ describe("bit expansion", () => {
     expect(extractBit({ v: "0", x: "0", z: "1" }, 0).z).toBe("1");
   });
 
+  it("decides bus rows from the DECLARED width, not a value's masks", () => {
+    // The mock reports a 32-bit mask for a 1-bit clock; deciding from the mask
+    // would draw the clock as a bus.
+    const clock: WaveSignal = {
+      key: "k",
+      label: "clk",
+      net: 1,
+      origin: "picked",
+      kind: "clock",
+      bits: 1,
+    };
+    const wide: WireValue = { v: "00000001", x: "00000000", z: "00000000" };
+    expect(isBus(clock, wide)).toBe(false);
+    const bus: WaveSignal = {
+      key: "n",
+      label: "pc",
+      net: 2,
+      origin: "named",
+      kind: "register",
+      bits: 32,
+    };
+    expect(isBus(bus, wide)).toBe(true);
+    // With no declared width the masks are all there is to go on — and they are
+    // nibble-aligned, which is exactly why the app resolves a width for every
+    // signal it can rather than leaning on this.
+    const picked: WaveSignal = {
+      key: "w:3",
+      label: "wire 3",
+      net: 3,
+      origin: "picked",
+      kind: "wire",
+    };
+    expect(isBus(picked, wide)).toBe(true);
+  });
+
   it("lists the lanes most significant first", () => {
     expect(bitLaneIndices(4)).toEqual([3, 2, 1, 0]);
   });
@@ -321,6 +381,18 @@ describe("defaultSignals", () => {
   it("skips a part with no value_net rather than inventing one", () => {
     expect(defaultSignals(named).some((s) => s.label === "clk")).toBe(false);
   });
+
+  it("takes each part's declared width from the caller", () => {
+    const bits = new Map([
+      ["pc", 32],
+      ["din", 8],
+    ]);
+    const s = defaultSignals(named, (n) => bits.get(n.name));
+    expect(s.map((x) => [x.label, x.bits])).toEqual([
+      ["pc", 32],
+      ["din", 8],
+    ]);
+  });
 });
 
 describe("pickedSignals (Add selection)", () => {
@@ -341,6 +413,20 @@ describe("pickedSignals (Add selection)", () => {
   it("resolves a selected pin through the wire that reaches it", () => {
     const s = pickedSignals({ wires, wireToNet, selectedPins: [{ comp: "c1", pin: "out" }] });
     expect(s.map((x) => [x.label, x.net])).toEqual([["c1.out", 11]]);
+  });
+
+  it("carries each pick's declared width from the document", () => {
+    const bits = (comp: string, pin: string) =>
+      comp === "c1" && pin === "out" ? 32 : pin === "in" ? 8 : undefined;
+    const byWire = pickedSignals({ wires, wireToNet, selectedWires: [0], bitsOf: bits });
+    expect(byWire.map((x) => [x.label, x.bits])).toEqual([["wire 0", 32]]);
+    const byPin = pickedSignals({
+      wires,
+      wireToNet,
+      selectedPins: [{ comp: "c2", pin: "in" }],
+      bitsOf: bits,
+    });
+    expect(byPin.map((x) => [x.label, x.bits])).toEqual([["c2.in", 8]]);
   });
 
   it("never lists the same net twice, and skips a pin with no net", () => {
