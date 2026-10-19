@@ -250,8 +250,8 @@ format bump. _(this round)_
   Subcircuits group is always on the rail now (it used to appear only once the
   document already had a second circuit — backwards for a feature nobody has used
   yet), with an empty state, a "New subcircuit" button, and a per-tile "used by
-  main" / "not placed yet" note. Double-clicking an instance opens its definition
-  (the right-click jump stays), and inside a definition a scope bar gives the way
+  main" / "not placed yet" note. Double-clicking an instance opens its definition, the Inspector's
+  "Edit definition" button is the same door (the right-click jump stays), and inside a definition a scope bar gives the way
   back — named after a sheet that really instantiates it, since the parent is
   DERIVED via `instantiators()` rather than remembered. UI_OVERHAUL §80.
 

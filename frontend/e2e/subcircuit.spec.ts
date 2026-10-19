@@ -32,6 +32,10 @@ test("an instance offers its own box size in the Inspector", async ({ page }) =>
   const inspector = page.locator(".right-dock");
   await expect(inspector).toContainText("Height");
   await expect(inspector).toContainText("Width");
+
+  // …and the panel is a door into the definition, not just the canvas (§80).
+  await page.getByRole("button", { name: "Edit definition" }).click();
+  await expect(page.locator(".scope-bar")).toContainText("sub1");
 });
 
 test("the panel is there first, and a definition is a place you can enter and leave", async ({

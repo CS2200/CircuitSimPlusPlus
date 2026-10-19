@@ -1993,6 +1993,12 @@ the box" should obviously do; the right-click jump stays as it was, and it is th
 the e2e has pinned all along. Inside a definition a small scope bar sits at the top of
 the canvas, carrying the way back, the sheet's name, and where it is used.
 
+There are three doors into a definition and they all lead to the same place: a
+right-click on the instance (the original), a double-click on it, and the Inspector's
+**Edit definition** button for whoever selects a box and then looks at the panel. The
+button routes through the same `onOpenSubcircuit` as the canvas, so a target missing
+from the file still reports itself rather than doing nothing.
+
 The parent is **derived, not remembered**: `instantiators()` (lib/subcircuit.ts) asks
 the document which sheets place a given circuit, so "back to main" always names a
 sheet that really instantiates the definition — rather than a navigation history that

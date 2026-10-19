@@ -1960,6 +1960,7 @@ export default function App() {
                 wireIdx={inspectorWireIdx}
                 filePath={filePath}
                 onEdit={() => editorRef.current?.refresh()}
+                onOpenCircuit={onOpenSubcircuit}
                 onNotify={toast}
                 focusField={inspectorFocus}
                 onFocusHandled={() => setInspectorFocus(null)}

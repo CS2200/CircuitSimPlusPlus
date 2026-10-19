@@ -73,6 +73,7 @@ export default function InspectorPanel({
   filePath = null,
   onEdit,
   onNotify,
+  onOpenCircuit,
   focusField = null,
   onFocusHandled,
 }: {
@@ -97,6 +98,8 @@ export default function InspectorPanel({
   onEdit: () => void;
   /** User-facing messages (toasts). */
   onNotify?: (message: string) => void;
+  /** Open a subcircuit definition sheet (the panel's way into an instance, §80). */
+  onOpenCircuit?: (name: string) => void;
   /** Attr key to focus on the next render (double-click a constant, §53). */
   focusField?: string | null;
   onFocusHandled?: () => void;
@@ -439,6 +442,24 @@ export default function InspectorPanel({
             </button>
           </div>
         </>
+      )}
+
+      {/* A subcircuit instance is a PLACE (UI_OVERHAUL §80): this is the panel's
+       *  version of double-clicking the box on the sheet — one more door to the
+       *  same definition, for whoever is looking at the panel instead. */}
+      {comp?.type === "subcircuit" && (
+        <div className="inspector-buttons inspector-buttons-full">
+          <button
+            className="secondary"
+            disabled={typeof comp.attrs?.circuit !== "string" || comp.attrs.circuit === ""}
+            onClick={() => {
+              const target = comp.attrs?.circuit;
+              if (typeof target === "string" && target !== "") onOpenCircuit?.(target);
+            }}
+          >
+            Edit definition
+          </button>
+        </div>
       )}
 
       {memOpen && isMemory && (
