@@ -193,10 +193,16 @@ format bump. *(this round)*
 - Right-click context-menu overhaul.
 - Version history: full-viewport view (no overlay), diff highlighting + copy.
 - Subcircuits: always-visible panel, click into an *instance* vs template,
-  scope colors, resizing, dynamic outer pins from inner pin rotation; **delete a
-  sheet tab** (the last item in the root `TODO.md`).
+  scope colors, resizing, dynamic outer pins from inner pin rotation.
+  **Delete a sheet tab** is already there — the tab's right/middle-click menu
+  (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
+  active sheet re-pointed) and its e2e test predate this list.
 - Primitives: transistor / power / ground.
-- Propagation-delay readout + an animation pulse-rate slider.
+- Propagation-delay readout: **done for parts** — the Inspector shows the selected
+  part's own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`,
+  read at build time so the numbers cannot drift), e.g. `prop 20 ns · setup 15 ns
+  · hold 5 ns` for a register. A *wire* readout (path length × 0.1 ns/unit) and the
+  animation **pulse-rate slider** are the remainder.
 
 ---
 

@@ -1745,3 +1745,18 @@ Scope: the **current view** — the export is what is on screen, at the canvas's
 own resolution (device-scaled). Exporting the whole circuit (fit the view to the
 content, render one frame, restore) is a deliberate follow-up: it needs a frame
 handshake with the animation loop, not a screenshot.
+
+## 67. Follow-up batch BF (2026-10-19): the Inspector shows a part's table delay
+
+The Inspector now reports the selected part's own cost, straight from the
+published table (`crates/core/data/cs2200-74ls-v1.json`) read at **build time** —
+a bundler import, not a second copy of the numbers, so the editor can never
+disagree with the engine. A register reads `prop 20 ns · setup 15 ns · hold 5 ns`,
+an adder `prop 15 ns + 4/bit`, an AND `prop 10 ns`; parts with no published cost
+(pins, subcircuits, text) show no row at all.
+
+This is the **design** number — what the part contributes and what STA bounds.
+The transport's `top_paths`/`T_obs` remain the _measured_ (DTA) quantity, and the
+row deliberately does not try to be a simulation result. A wire's own readout
+(path length × the table's per-unit wire delay) and the animation pulse-rate
+slider are the follow-ups.

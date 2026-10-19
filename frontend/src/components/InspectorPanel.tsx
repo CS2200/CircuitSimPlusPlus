@@ -7,6 +7,7 @@ import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/
 import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
 import NumberPicker from "./NumberPicker";
+import { componentDelayText } from "../editor/delayTable";
 import Select from "./Select";
 import { formatRadixValue, parseRadixValue } from "../lib/radix";
 
@@ -283,6 +284,17 @@ export default function InspectorPanel({
         <span className="inspector-id">{typeDisplayName(comp.type)}</span>
         <span className="inspector-type">{comp.id}</span>
       </div>
+
+      {/* The part's own cost from the published delay table (docs/delay-table.md;
+       * the values are read at build time, not copied). This is the DESIGN number
+       * — what the timing report's `top_paths` observed on a run is a different
+       * (measured) quantity, shown by the transport. */}
+      {componentDelayText(comp.type) !== null && (
+        <div className="inspector-row">
+          <span>Delay</span>
+          <span className="inspector-file">{componentDelayText(comp.type)}</span>
+        </div>
+      )}
 
       {/* A text annotation is just its text: no Name / Rotation / Label-side
        * rows — only the Text / Color / Font fields (UI_OVERHAUL §40/§42). */}

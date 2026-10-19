@@ -104,6 +104,10 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   d = await doc(page);
   expect(d.circuits[0].components[0]).not.toHaveProperty("namePos");
 
+  // The Inspector reports the selected part's own cost from the published delay
+  // table (docs/delay-table.md) — an AND is 10 ns.
+  await expect(page.locator(".inspector-row", { hasText: "Delay" })).toContainText("prop 10 ns");
+
   // ---- wire: AND.out (5,1.5) → NOT.in (10,1), routed with an escape
   // stub east + a Z jog, entering the input pin from the west ----
   await clickWorld(page, 5, 1.5);

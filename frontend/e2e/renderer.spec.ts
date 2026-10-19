@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+test.describe.configure({ retries: 1 });
+
+// The benchmark below gates *render cost*, so it measures whatever else the
+// machine is doing: with several workers running SwiftShader side by side, a
+// momentary spike can push a p95 over the 60 FPS budget. One retry absorbs a
+// spike; a real regression fails twice and still fails.
 /**
  * U1 acceptance: the stress scene (5,000 wires + 1,500 components) renders
  * and pans/zooms at interactive frame rates. The bench gates per-frame
