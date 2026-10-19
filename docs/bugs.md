@@ -226,7 +226,10 @@ format bump. *(this round)*
   **Delete a sheet tab** is already there — the tab's right/middle-click menu
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
   active sheet re-pointed) and its e2e test predate this list.
-- Primitives: transistor / power / ground.
+- Primitives: **power and ground done** (`wiring.power` / `wiring.ground` — fixed
+  1-bit sources with no attrs, additive so no format bump; UI_OVERHAUL §71). A
+  **transistor** (a gate-driven switch: `in`/`gate`/`out`) still needs a behaviour
+  kind, and bar/rake glyphs for the two sources are a follow-up.
 - ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
   own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
   at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold

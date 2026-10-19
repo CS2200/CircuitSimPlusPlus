@@ -79,7 +79,9 @@ pub const KNOWN_TYPES: &[&str] = &[
     "wiring.clock",
     "wiring.constant",
     "wiring.controlled-buffer",
+    "wiring.ground",
     "wiring.pin",
+    "wiring.power",
     "wiring.probe",
     "wiring.splitter",
 ];
@@ -600,6 +602,35 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 CompKind::Constant {
                     bitsize: b,
                     value: parsed,
+                },
+            )
+        }
+        // Power / ground (UI_OVERHAUL §71): a constant with nothing to
+        // configure — a fixed 1-bit 1 / 0 source. They accept **no attrs**, so a
+        // stray `value` is an unknown-attr error rather than a silent override of
+        // what the part means. Same behaviour kind as `wiring.constant`, so every
+        // engine path (netlist, DTA/STA, autograder) already handles them.
+        "wiring.power" => {
+            let mut c = AttrCheck::new(attrs, &[] as &[&str]);
+            c.finish();
+            (
+                vec![PinSig::o("out", 1)],
+                c,
+                CompKind::Constant {
+                    bitsize: 1,
+                    value: Value::from_u64(1, 1),
+                },
+            )
+        }
+        "wiring.ground" => {
+            let mut c = AttrCheck::new(attrs, &[] as &[&str]);
+            c.finish();
+            (
+                vec![PinSig::o("out", 1)],
+                c,
+                CompKind::Constant {
+                    bitsize: 1,
+                    value: Value::from_u64(1, 0),
                 },
             )
         }

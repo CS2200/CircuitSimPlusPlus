@@ -1489,6 +1489,19 @@ mod tests {
     }
 
     #[test]
+    fn power_and_ground_drive_a_fixed_bit() {
+        // UI_OVERHAUL §71: fixed 1-bit sources, nothing to configure.
+        assert_eq!(
+            mk("wiring.power", json!({})).eval(&[]).unwrap(),
+            vec![k(1, 1)]
+        );
+        assert_eq!(
+            mk("wiring.ground", json!({})).eval(&[]).unwrap(),
+            vec![k(1, 0)]
+        );
+    }
+
+    #[test]
     fn register_latches_and_holds() {
         let mut r = reg();
         assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 0)]); // powers on at 0

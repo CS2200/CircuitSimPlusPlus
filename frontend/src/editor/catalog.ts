@@ -517,6 +517,10 @@ const REGISTRY: Record<string, CompSpec> = {
   },
   // The constant is roomy enough to read its value (UI_OVERHAUL §55): 3x2,
   // its `out` on the right edge.
+  // Power / ground (UI_OVERHAUL §71): fixed 1-bit sources drawn like a constant —
+  // the caption IS the value, and there is nothing to configure.
+  "wiring.power": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: 1 }], "1"),
+  "wiring.ground": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: 1 }], "0"),
   "wiring.constant": boxSpec(
     3,
     2,
@@ -741,6 +745,8 @@ const TYPE_NAMES: Readonly<Record<string, string>> = {
   "wiring.constant": "Constant",
   "wiring.clock": "Clock",
   "wiring.probe": "Probe",
+  "wiring.power": "Power",
+  "wiring.ground": "Ground",
   "wiring.splitter": "Splitter",
   "plexers.mux": "Multiplexer",
   "plexers.demux": "Demultiplexer",
@@ -810,6 +816,8 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
       { type: "wiring.clock" },
       { type: "wiring.splitter" },
       { type: "wiring.probe" },
+      { type: "wiring.power" },
+      { type: "wiring.ground" },
     ],
   },
   {

@@ -1801,3 +1801,15 @@ per-path cost, and the animation's pace are all visible and adjustable. The last
 piece of the _measured_ story is deliberately not done — see `docs/bugs.md`: a
 per-part **observed** delay needs a new IPC field, which is a contract change
 (`docs/ipc.md`) and therefore wants a sign-off rather than a drive-by.
+
+## 71. Follow-up batch BJ (2026-10-19): power and ground
+
+Two fixed sources, for the schematic habit: **Power** (a 1) and **Ground** (a 0),
+placed from the Wiring group and drawn like a constant whose caption is its value.
+They are `wiring.power` / `wiring.ground` — new _type strings_, which the format
+takes additively (no version bump; nothing existing changes) — and their engine
+behaviour is the `CompKind::Constant` arm, so every path that already handles a
+constant (netlist, DTA/STA, autograder) handles them. They accept **no attrs**: a
+stray `value` is an unknown-attr error rather than a silent override of what the
+part means. Distinct glyphs (the legacy bar / rake) and the **transistor** are the
+rest of the primitives bullet.

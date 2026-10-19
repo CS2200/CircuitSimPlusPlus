@@ -142,6 +142,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32) |
 | `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
 | `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
+| `wiring.power` / `wiring.ground` | `out` | *none* — a fixed 1-bit `1` / `0` source (UI_OVERHAUL §71); the same behaviour kind as `wiring.constant`, so a stray attr is an unknown-attr error |
 | `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only |
 | `wiring.clock` | `out` | — |
 | `wiring.splitter` | `bus` + one per `splits` key | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1 |
