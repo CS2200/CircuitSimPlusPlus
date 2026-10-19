@@ -76,6 +76,30 @@ export class Canvas2DRenderer implements Renderer {
     this.stats.paths++;
   }
 
+  drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void {
+    if (cmds.length === 0) return;
+    const path = this.createPath();
+    appendCmds(path, cmds);
+    this.ctx.globalAlpha = style.alpha ?? 1;
+    if (style.fill !== undefined) {
+      this.ctx.fillStyle = style.fill;
+      this.ctx.fill(path as unknown as Path2D);
+      this.stats.fillBatches++;
+    }
+    if (style.stroke !== undefined) {
+      this.ctx.strokeStyle = style.stroke;
+      this.ctx.lineWidth = style.lineWidth ?? 1;
+      this.ctx.lineCap = "round";
+      this.ctx.lineJoin = "round";
+      this.ctx.setLineDash([...dash]);
+      this.ctx.stroke(path as unknown as Path2D);
+      this.ctx.setLineDash([]);
+      this.stats.strokeBatches++;
+    }
+    this.ctx.globalAlpha = 1;
+    this.stats.paths++;
+  }
+
   drawDots(centers: readonly Vec2[], halfSize: number, color: string): void {
     if (centers.length === 0) return;
     this.ctx.fillStyle = color;

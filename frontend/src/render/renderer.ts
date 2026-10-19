@@ -85,6 +85,13 @@ export interface Renderer {
    * time — call it at the point in the layer order where the dots belong.
    */
   drawDots(centers: readonly Vec2[], halfSize: number, color: string): void;
+  /**
+   * Immediate-mode DASHED path (UI_OVERHAUL §87): the batched `drawPath` groups by
+   * style and cannot carry a dash, and tunnel reveals plus their guides are a handful
+   * of lines. Same world-unit convention as `drawPath` (dash lengths scale with zoom
+   * exactly as line widths do).
+   */
+  drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void;
   /** Queue text (drawn after paths within the current layer). */
   drawText(x: number, y: number, text: string, style: TextStyle): void;
   /** Draw all queued geometry since the last flush (layer boundary). */

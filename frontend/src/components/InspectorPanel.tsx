@@ -145,6 +145,15 @@ export default function InspectorPanel({
     comp === undefined && wireIdx !== null && circuit !== undefined
       ? { idx: wireIdx, info: wireInfo(circuit, wireIdx, (c) => compPins(c, sheetCircuits)) }
       : null;
+  /** Draft key for the wire name field (per wire, so a stale draft is ignored). */
+  const wireNameKey = wire === null ? "" : `${wire.idx}:name`;
+  /** The wire's NAME (a tunnel label, UI_OVERHAUL §86) — read from the document. */
+  const wireName = wire === null ? "" : (doc.circuit(circuitIdx).wires[wire.idx]?.name ?? "");
+  const commitWireName = (text: string) => {
+    const trimmed = text.trim();
+    doc.setWireName(circuitIdx, wire!.idx, trimmed === "" ? null : trimmed);
+    onEdit();
+  };
   const wireColor =
     wire !== null && circuit !== undefined ? (circuit.wires[wire.idx]?.color ?? null) : null;
   /** The wire's drawn path length in grid units — its delay is per-path. */
@@ -163,6 +172,26 @@ export default function InspectorPanel({
         <div className="inspector-head">
           <span className="inspector-id">Wire</span>
         </div>
+        {/* A wire's NAME makes it a tunnel (UI_OVERHAUL §86/§87): its route is hidden
+         * on the canvas and this label is the handle. Committed on Enter/blur, like a
+         * part's name, so typing does not spam the undo stack. */}
+        <label className="inspector-row">
+          <span>Name</span>
+          <input
+            value={draft?.key === wireNameKey ? draft.text : wireName}
+            placeholder="(plain wire)"
+            title="A named wire is a tunnel: its route hides, and the label is how you find it"
+            spellCheck={false}
+            onChange={(e) => setDraft({ key: wireNameKey, text: e.target.value })}
+            onBlur={() => {
+              commitWireName(draft?.key === wireNameKey ? draft.text : wireName);
+              setDraft(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
         {/* Wire delay is per PATH (docs/delay-table.md): the drawn length times
          * the table's per-unit fraction — the design number, like a part's. */}
         {wireLength > 0 && (

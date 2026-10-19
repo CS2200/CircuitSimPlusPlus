@@ -29,6 +29,13 @@ class RecordingRenderer implements Renderer {
     void [x, y, text, style];
     this.texts++;
   }
+  drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void {
+    void dash;
+    if (cmds.length > 0) {
+      this.paths++;
+      this.styleKeys.add(JSON.stringify(style));
+    }
+  }
   drawDots(centers: readonly Vec2[], halfSize: number, color: string): void {
     void [halfSize, color];
     this.dotCount = centers.length;

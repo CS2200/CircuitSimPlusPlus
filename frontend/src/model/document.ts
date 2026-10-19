@@ -708,6 +708,29 @@ export class CircuitDocument {
       this.replaceCircuit(circuitIdx, { ...c, wires }),
     );
   }
+  /**
+   * Set (or clear, with `null`/`""`) a wire's NAME — the label that makes it a tunnel
+   * (UI_OVERHAUL §86). Cleared wires drop the key entirely so canonical files stay
+   * clean. Consecutive edits of one wire coalesce into a single undo step.
+   */
+  setWireName(circuitIdx: number, wireIdx: number, name: string | null): void {
+    const c = this.circuit(circuitIdx);
+    const w = c.wires[wireIdx];
+    if (w === undefined) throw new RangeError(`no wire at index ${wireIdx}`);
+    if ((w.name ?? null) === name) return;
+    const wires = c.wires.map((x, i) => {
+      if (i !== wireIdx) return x;
+      const next: CsxWire = { ...x };
+      if (name === null) delete next.name;
+      else next.name = name;
+      return next;
+    });
+    this.exec(
+      name === null ? "clear wire name" : "name wire",
+      `wirename:${circuitIdx}:${wireIdx}`,
+      this.replaceCircuit(circuitIdx, { ...c, wires }),
+    );
+  }
 
   /** Delete wires; junction dependents cascade (DESIGN.md §5.2 "delete branch"). */
   removeWires(circuitIdx: number, indices: ReadonlySet<number>): void {

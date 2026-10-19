@@ -359,6 +359,15 @@ export class ToolMachine {
       return;
     }
 
+    // A tunnel's LABEL is its handle (UI_OVERHAUL §87): a hidden route has to be
+    // clickable somewhere, and the label is where the old schematic showed the name.
+    const label = this.scene.pickWireLabel(world);
+    if (label !== null) {
+      if (!this.selection.hasWire(label.wireIdx)) this.selection.set([], [label.wireIdx]);
+      this.changed();
+      return;
+    }
+
     const pin = this.scene.pickPin(world);
     if (pin !== null) {
       this.wiring = {

@@ -871,3 +871,36 @@ describe("moving a selection with junctions", () => {
     }
   });
 });
+
+describe("naming a wire (UI_OVERHAUL §86)", () => {
+  const wired = () => {
+    const doc = CircuitDocument.create("t");
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const b = doc.addComponent(0, { type: "gate.not", pos: [10, 0] });
+    const w = doc.addWire(0, {
+      a: { comp: a, pin: "out" },
+      b: { comp: b, pin: "in" },
+      points: [
+        [5, 1.5],
+        [10, 1],
+      ],
+    });
+    return { doc, a, b, w };
+  };
+
+  it("sets, clears and is a no-op when unchanged", () => {
+    const { doc, w } = wired();
+    doc.setWireName(0, w, "ALU_OUT");
+    expect(doc.circuit(0).wires[w].name).toBe("ALU_OUT");
+    doc.setWireName(0, w, "ALU_OUT"); // no-op: one undo step, not two
+    doc.setWireName(0, w, null);
+    expect(doc.circuit(0).wires[w].name).toBeUndefined();
+  });
+
+  it("survives a move and a paste, because a tunnel is a wire", () => {
+    const { doc, a, w } = wired();
+    doc.setWireName(0, w, "T");
+    doc.moveComponent(0, a, { x: 2, y: 3 });
+    expect(doc.circuit(0).wires[w].name).toBe("T");
+  });
+});

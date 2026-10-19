@@ -108,3 +108,37 @@ test("wire section: color swatch (no manual width)", async ({ page }) => {
   expect((await doc(page)).circuits[0].wires[0].color).toBeUndefined();
   await page.getByRole("button", { name: "Wire color #4dd0e1" }).click();
 });
+
+test("a named wire hides its route, and its label brings it back", async ({ page }) => {
+  await page.goto("/");
+  await placeParts(page);
+
+  // Wire AND.out (5, 1.5) → NOT.in (10, 1), then select it.
+  await clickWorld(page, 5, 1.5);
+  await clickWorld(page, 10, 1);
+  await clickWorld(page, 7.5, 1.5);
+  await expect(page.locator(".inspector-id")).toHaveText("Wire");
+
+  const hash = () =>
+    page.evaluate(() =>
+      document.querySelector<HTMLCanvasElement>("canvas.circuit-canvas")!.toDataURL().slice(-4000),
+    );
+  const plain = await hash();
+
+  // Naming it makes it a tunnel: the route is hidden and a label appears instead.
+  const nameField = page.locator(".inspector-row").filter({ hasText: "Name" }).locator("input");
+  await nameField.fill("BUS_A");
+  await nameField.press("Enter");
+  const named = (await doc(page)).circuits[0].wires[0] as unknown as { name?: string };
+  expect(named.name).toBe("BUS_A");
+  await expect.poll(hash).not.toBe(plain);
+
+  // The label is the handle: click one grid unit above the out pin and the wire comes
+  // back — selected again, route revealed — proving a hidden route stays reachable.
+  const hidden = await hash();
+  await clickWorld(page, 5, 1.5 - 0.9);
+  await expect(
+    page.locator(".inspector-row").filter({ hasText: "Name" }).locator("input"),
+  ).toHaveValue("BUS_A");
+  await expect.poll(hash).not.toBe(hidden);
+});

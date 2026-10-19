@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { CsxWire } from "../model/csx";
 import {
   clockLevelOf,
   constantText,
@@ -6,8 +7,10 @@ import {
   ellipsize,
   fitValueLine,
   memPreviewWord,
+  pickWireLabelAt,
   readableOn,
   valueTextAtWidth,
+  wireLabelSpots,
 } from "./docScene";
 
 /**
@@ -197,5 +200,43 @@ describe("fitValueLine", () => {
     expect(r.text.length).toBeLessThan(bits.length);
     // The shortened line really fits: chars × size × 0.62 ≤ usable width.
     expect(r.text.length * r.size * 0.62).toBeLessThanOrEqual(3 * 0.86 + 1e-9);
+  });
+});
+
+describe("tunnel labels (UI_OVERHAUL §87)", () => {
+  const wire = (over: Partial<CsxWire>): CsxWire => ({
+    a: { comp: "c1", pin: "out" },
+    b: { comp: "c2", pin: "in" },
+    points: [
+      [0, 0],
+      [4, 0],
+    ],
+    ...over,
+  });
+
+  it("places a label above each PIN endpoint only, and none at a junction", () => {
+    expect(wireLabelSpots(wire({ name: "T" }))).toEqual([
+      { x: 0, y: -0.9 },
+      { x: 4, y: -0.9 },
+    ]);
+    // A join end is a junction, not a place a tunnel was drawn.
+    expect(wireLabelSpots(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
+      { x: 0, y: -0.9 },
+    ]);
+    // Unnamed: no label at all, and a wire with no points yet has nowhere to put one.
+    expect(wireLabelSpots(wire({}))).toEqual([]);
+    expect(wireLabelSpots(wire({ name: "T", points: [] }))).toEqual([]);
+  });
+
+  it("hits the label, not the route, so a hidden tunnel stays clickable", () => {
+    const wires = [wire({ name: "T" })];
+    // On the label above endpoint a.
+    expect(pickWireLabelAt(wires, { x: 0.1, y: -0.8 })?.wireIdx).toBe(0);
+    // On the label above endpoint b.
+    expect(pickWireLabelAt(wires, { x: 3.9, y: -1.0 })?.wireIdx).toBe(0);
+    // Far from either label.
+    expect(pickWireLabelAt(wires, { x: 2, y: -0.9 })).toBeNull();
+    // A plain wire has no label to hit.
+    expect(pickWireLabelAt([wire({})], { x: 0.1, y: -0.8 })).toBeNull();
   });
 });

@@ -612,6 +612,73 @@ export function gridStepFor(scale: number, minPx = 14): number {
   return step;
 }
 
+/** Dash pattern for a revealed tunnel route and its guides (world units, §87). */
+const TUNNEL_DASH: readonly number[] = [0.55, 0.45];
+
+/**
+ * Where a named wire's labels sit (UI_OVERHAUL §87): one grid unit ABOVE each PIN
+ * endpoint — the sites an imported old-format schematic had its `Tunnel` markers, and
+ * the only visible handle a route that is otherwise hidden can offer. A join endpoint
+ * gets none: a junction is not a place a tunnel was drawn. Pure; endpoints are read
+ * from the drawn polyline, so a wire with no points yet (a legal, hand-authored
+ * straight line) has no label until it is routed.
+ */
+export function wireLabelSpots(w: CsxWire): Vec2[] {
+  const name = w.name ?? "";
+  if (name === "" || w.points.length < 2) return [];
+  const out: Vec2[] = [];
+  if (isPinEndpoint(w.a)) out.push({ x: w.points[0][0], y: w.points[0][1] - 0.9 });
+  if (isPinEndpoint(w.b)) {
+    const last = w.points[w.points.length - 1];
+    out.push({ x: last[0], y: last[1] - 0.9 });
+  }
+  return out;
+}
+
+/** The label hit test (UI_OVERHAUL §87) — the click target for a hidden route. Pure. */
+export function pickWireLabelAt(
+  wires: readonly CsxWire[],
+  world: Vec2,
+  tol = PICK_TOL,
+): WireHit | null {
+  for (let i = 0; i < wires.length; i++) {
+    const w = wires[i];
+    const name = w.name ?? "";
+    if (name === "") continue;
+    // The label is text drawn centred on its spot: approximate its width from the
+    // character count rather than measuring (the size is fixed).
+    const halfW = 0.18 * name.length + tol * 0.5;
+    for (const spot of wireLabelSpots(w)) {
+      if (Math.abs(world.x - spot.x) > halfW) continue;
+      if (Math.abs(world.y - spot.y) > tol) continue;
+      return { kind: "wire", wireIdx: i, segment: 0, point: { x: spot.x, y: spot.y } };
+    }
+  }
+  return null;
+}
+
+/** Nearest point on `target` to the polyline `to` (for the straight tunnel guide). */
+function nearestOnPolyline(
+  target: readonly [number, number][],
+  to: readonly [number, number][],
+): Vec2 {
+  let best: Vec2 | null = null;
+  let bestD = Infinity;
+  for (let t = 0; t + 1 < target.length; t++) {
+    const a = p2v(target[t]);
+    const b = p2v(target[t + 1]);
+    for (let o = 0; o < to.length; o++) {
+      const q = p2v(to[o]);
+      const n = nearestOnSegment(q, a, b);
+      const d = Math.hypot(n.x - q.x, n.y - q.y);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+  }
+  return best ?? { x: target[0][0], y: target[0][1] };
+}
 export class DocScene {
   private circuitIdx = -1;
   private revision = -1;
@@ -750,6 +817,11 @@ export class DocScene {
       }
     }
     return best === null ? null : { kind: "wire", ...best };
+  }
+
+  /** A named wire's label under the point (UI_OVERHAUL §87): the hidden route's handle. */
+  pickWireLabel(world: Vec2, tol = PICK_TOL): WireHit | null {
+    return pickWireLabelAt(this.wires, world, tol);
   }
 
   /** Topmost component body under the point (for dragging/selecting). */
@@ -1002,6 +1074,13 @@ export class DocScene {
     const wireIds = this.wireIndex.queryRect(visible);
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
+      const wire = this.wires[i];
+      const name = wire?.name ?? "";
+      // A tunnel's route is HIDDEN (UI_OVERHAUL §87) unless you are inspecting it: it
+      // is a wire you drew across the plane, so showing it always would undo the reason
+      // tunnels exist. The label below is the visible handle.
+      const revealed = selected || overlay.wireInfo?.wireIdx === i;
+      if (name !== "" && !revealed) continue;
       const custom = this.wires[i]?.color ?? null;
       const bits = Math.max(1, this.wireBits[i]);
       const isBus = bits > 1;
@@ -1047,13 +1126,33 @@ export class DocScene {
           alpha: on ? 1 : 0.35,
         });
       }
-      if (selected) {
+      if (selected && name === "") {
         renderer.drawPath(this.wirePaths[i], { stroke: theme.accent, lineWidth: width * 1.9 });
       }
-      renderer.drawPath(this.wirePaths[i], {
-        stroke,
-        lineWidth: selected ? width * 1.25 : width,
-      });
+      if (name !== "") {
+        // A revealed tunnel: DASHED, so it reads as a hidden connection under
+        // inspection rather than as ordinary wiring (§87).
+        renderer.drawDashedPath(
+          this.wirePaths[i],
+          { stroke, lineWidth: selected ? width * 1.25 : width, alpha: 0.95 },
+          TUNNEL_DASH,
+        );
+      } else {
+        renderer.drawPath(this.wirePaths[i], {
+          stroke,
+          lineWidth: selected ? width * 1.25 : width,
+        });
+      }
+      // Every named wire shows its label, hidden route or not: this is the marker.
+      if (name !== "" && wire !== undefined) {
+        for (const spot of wireLabelSpots(wire)) {
+          renderer.drawText(spot.x, spot.y, name, {
+            color: theme.textDim,
+            size: 0.7,
+            align: "center",
+          });
+        }
+      }
       // The narrowed piece (UI_OVERHAUL §65): the second click picks ONE drawn
       // segment, so show exactly which one Delete would take.
       const piece = selection.segment;
@@ -1068,6 +1167,28 @@ export class DocScene {
             { x: bx, y: by },
           ]),
           { stroke: theme.accent, lineWidth: width * 2.4 },
+        );
+      }
+    }
+    renderer.flush();
+    // Tunnel guides (UI_OVERHAUL §87): for a selected named wire, a faint straight
+    // dashed line to every OTHER wire sharing its name — "where it should go", which
+    // is exactly what a namesake pair that is not electrically joined conspicuously
+    // lacks (the Inspector is where the mismatch gets spelled out).
+    for (const i of selection.wires) {
+      const mine = this.wires[i];
+      const name = mine?.name ?? "";
+      if (name === "" || mine === undefined) continue;
+      for (let j = 0; j < this.wires.length; j++) {
+        const other = this.wires[j];
+        if (j === i || other === undefined || (other.name ?? "") !== name) continue;
+        if (other.points.length < 2 || mine.points.length < 2) continue;
+        const from = nearestOnPolyline(mine.points, other.points);
+        const to = nearestOnPolyline(other.points, mine.points);
+        renderer.drawDashedPath(
+          polylinePath([from, to]),
+          { stroke: theme.accent, lineWidth: 0.14, alpha: 0.5 },
+          TUNNEL_DASH,
         );
       }
     }

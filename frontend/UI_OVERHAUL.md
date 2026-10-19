@@ -2123,3 +2123,36 @@ Two consequences worth stating, because they are the traps: reshaping or deletin
 wire changes or breaks the connection (intended — it is a wire), and copy/paste does **not**
 carry the name, since a pasted duplicate silently joining the original's net would be a
 surprise.
+
+## 87. Tunnels on the canvas (and in the Inspector)
+
+§86 settled the idea; this is how it is built, and it is deliberately small because the
+idea needed no engine work.
+
+- **A named wire's route is not drawn** — polyline, selection halo and all — unless the
+  wire is selected or its value card is up. The halo goes too: it is a solid band, and a
+  solid band under a hidden route is just the route again.
+- **Its label is drawn** one grid unit above each **pin** endpoint, always. That is the
+  marker, and a join endpoint gets none, because a junction is not a place a tunnel was
+  drawn. It is why an imported old schematic _looks_ like the old schematic: every
+  former `Tunnel` site shows its name.
+- **The label is a pick target of its own**, tested before pins and bodies, so a hidden
+  route stays selectable — click the label, then reshape the revealed route with the
+  ordinary bend-drag. No new interaction state.
+- **Selecting reveals the route dashed**, plus a faint straight dashed **guide** to every
+  other wire sharing its name: "where it should go". For a properly joined pair the guide
+  is short and the two coincide; for a namesake pair that is _not_ joined it draws a
+  conspicuous line across the sheet, which is the one trap this design has — and the
+  Inspector is where that gets spelled out.
+- **Inspector**: a Name field in the wire section, using the component name field's draft
+  discipline (commit on Enter/blur, one undo step per wire), next to the per-path delay
+  row that already reports what the tunnel costs.
+
+Renderer: the batched `drawPath` groups by style and cannot carry a dash, so tunnels get
+an immediate-mode `drawDashedPath` beside the existing immediate `drawDots` — no batching
+change, no `styleKey` change, and dash lengths are world units, scaling with zoom exactly
+as line widths do.
+
+Known gap, flagged not hidden: a junction DOT belonging to a hidden route is still drawn,
+so an imported group with three or more partners shows stray dots along its invisible
+trunk. It needs the dot cache to carry its owning wire; that is the next pass.
