@@ -146,6 +146,23 @@ now scales with its bit width (`0x5` → `0x05`) *(028ffc7)*; a wired-up part's
 unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
 address *(8879681)*.
 
+**Reported 2026-10-19 (maintainer, from the canvas):**
+
+- **A MUX/DEMUX carries no mark.** UI_OVERHAUL §17 rule 3 lists `MUX`/`DEMUX`
+  among the abbreviations a body shows, but `docScene` suppresses the caption
+  for *shaped* bodies ("shaped bodies have no caption", §24's pass) — and a
+  trapezoid is far less self-evident than a NAND gate, which is why the note
+  exists. Evidence: the committed demo baseline draws the mux as a bare
+  trapezoid. Fix: keep the suppression for gates and draw the abbreviation on
+  plexer trapezoids (and re-bless the visual baselines).
+- **Body marks read as "off"** (the adder's `+` called out). Note what this is
+  *not*: text is drawn with `textBaseline = "middle"` (`render/canvas2d.ts:115`),
+  so it is not a baseline-versus-centre bug, and the demo baseline's `+` measures
+  centred in its box. Needs a specific part (and zoom) — the suspicion is a
+  glyph's optical centre versus its em box (arithmetic symbols are `+ − × ÷ = ~ «`
+  at `fitTextSize`, which grows with the body), i.e. a per-symbol nudge rather
+  than a global one. A screenshot of the worst offender would pin it.
+
 **Clarified 2026-10-19 (real, being worked):**
 
 - **"Recover unsaved work" was the wrong half of the mechanic** *(maintainer,
