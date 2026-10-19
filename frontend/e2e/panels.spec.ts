@@ -121,3 +121,18 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await page.locator('[data-group="Memory"]').click();
   await expect(page.getByRole("button", { name: "ROM", exact: true })).toBeVisible();
 });
+
+test("the first sheet tab clears the palette/editor boundary", async ({ page }) => {
+  await page.goto("/");
+  const palette = await page.locator(".palette").boundingBox();
+  const tab = await page.locator(".sheet-tab-wrap").first().boundingBox();
+  const canvas = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (palette === null || tab === null || canvas === null) throw new Error("not visible");
+
+  // The tab sits INSIDE the canvas column by a few px: flush, its border lands exactly
+  // on the palette's edge, and — since the active tab takes the canvas colour — the
+  // boundary reads as one line running down through the tab (maintainer report).
+  expect(tab.x).toBeGreaterThan(palette.x + palette.width + 1);
+  // …while the canvas itself still starts at the boundary: no drawing moves.
+  expect(Math.abs(canvas.x - (palette.x + palette.width))).toBeLessThan(1);
+});

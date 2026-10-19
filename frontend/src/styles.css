@@ -891,9 +891,12 @@ body {
   display: flex;
   align-items: stretch;
   gap: 2px;
-  /* No left padding: the first tab's edge lines up with the canvas grid
-   * (UI_OVERHAUL §16). */
-  padding: 2px 0 0;
+  /* A small left inset, not flush (UI_OVERHAUL §84): a flush first tab lands its
+   * border exactly on the palette/editor boundary, and because the ACTIVE tab paints
+   * itself in the canvas colour it joins, the boundary then reads as a line running
+   * down THROUGH the tab. The canvas is still flush with the palette — only the tabs
+   * are clear of the seam. */
+  padding: 2px 0 0 4px;
   background: var(--panel);
   border-bottom: 1px solid var(--panel-border);
   overflow-x: auto;

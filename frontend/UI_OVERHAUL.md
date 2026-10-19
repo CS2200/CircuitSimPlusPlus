@@ -2068,3 +2068,19 @@ catalog — read by both the canvas body pass and the palette icon, which draws 
 caption inside the shape with the same treatment its box glyphs use. The two cannot
 disagree again, and the plexer tiles now follow the convention the DEC/PRI tiles
 already used.
+
+## 84. The first tab clears the panel boundary
+
+§16 removed the strip's left padding so the first tab's edge would line up with the
+canvas grid — and for a tab with a transparent background that is exactly right. But the
+**active** tab's background is the canvas colour (it deliberately joins the content
+below it), so with a flush edge the palette/editor boundary ran _through_ the tab: a
+panel-coloured column to its left, then the tab's own background, at the same x as the
+canvas's edge — one continuous vertical line with the tab straddling it. The maintainer
+reported it as "the tab starts behind the line", with or without a subcircuit; with a
+subcircuit the same seam is there and the tab is simply in a different state along it.
+
+The strip carries a 4px left pad now, so the tab's border is clear of the seam and the
+boundary stops at the strip instead of passing through it. The canvas is untouched — it
+still starts at the palette's edge, so no drawing and no baseline moves — and the tabs
+still line up with the canvas content (§16's intent), just not with the panel's seam.
