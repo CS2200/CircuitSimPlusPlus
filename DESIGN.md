@@ -301,7 +301,7 @@ Wire rules (mirroring the proven DLS model, App. B):
 
 - Every wire has exactly two endpoints; **at least one endpoint is a pin** (the other may be a junction onto another wire's segment). A junction renders as a dot.
 - Fan-out = multiple wires sharing a source pin. Buses have no width of their own — width is a property of the driving pin; validation requires all pins on a derived net to agree on bitsize (mismatch = error, both locations pointed out in the UI).
-- Deleting a wire deletes wires junctioned onto it (no dangling `join` references). Editor may offer "delete segment only" vs "delete branch."
+- Deleting a wire deletes wires junctioned onto it (no dangling `join` references). The editor offers both granularities: Delete on a wire takes it **and** its junction dependents (delete branch), while a second click narrows the selection to one drawn segment — Delete then drops the bend that segment turns at, so the wire takes a shortcut and both endpoints stay attached (delete segment; a wire with no bends is just that segment, so it goes entirely).
 - Wires/junctions are scoped to a single circuit; cross-hierarchy connection happens only through subcircuit pins.
 
 Validation on load (collect **all** errors; never panic; never partially load): every pin reference and junction resolves; bitsize agreement per derived net; `name`s unique per circuit; hierarchy acyclic; IDs unique.

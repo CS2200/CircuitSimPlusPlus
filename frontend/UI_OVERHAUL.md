@@ -1707,3 +1707,26 @@ then.
   `autoload` file reference) is gone; `Clear all` inside `Edit hex…` clears both
   the embedded image and the autoload file, and the dialog says so before Apply.
   See §58's action line, §62 for the pin/theme retirements above.
+
+## 65. Follow-up batch BD (2026-10-19): a second click narrows a wire to the piece you mean
+
+Deleting a wire took _everything_. At a junction the trunk and the branch are
+both under the pointer, so clicking a branch could select its parent — and Delete
+then took the parent _and_ every branch hanging off it (the tester's "remove an
+unnecessary segment removes the entire wire").
+
+- **The selection narrows on a second click.** Clicking a wire selects it (all
+  bends, as before); clicking the same wire again selects the **piece under the
+  cursor** — a branch wire junctioned onto it at that segment, or the segment
+  itself. Delete then takes only that piece.
+- **What a piece means.** A branch goes on its own (its parent survives). A
+  segment delete **shortens** the wire by dropping the bend that segment turns
+  at, so both endpoints stay attached — a wire here _is_ a connection, and its
+  ends cannot dangle (that is why a redundant "end segment" cannot simply be
+  trimmed off; dangling ends are still the deferred feature of DESIGN §5.2). A
+  wire drawn without bends is nothing but that segment, so deleting it deletes
+  the wire. Junction dependents are re-projected onto the new geometry, and the
+  delete is its own undo step (`remove wire segment`) — it never merges into the
+  route edit before it.
+- The narrowed segment is drawn in the accent colour, so what the next Delete
+  would take is never a guess.

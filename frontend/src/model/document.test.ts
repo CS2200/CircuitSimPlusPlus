@@ -532,6 +532,58 @@ describe("wire ops", () => {
     expect(wires[1].b).toEqual({ join: { wire: 0, segment: 0 } }); // renumbered 1→0
   });
 
+  it("removeSegment drops the bend a segment turns at, keeping both endpoints", () => {
+    const { doc, c, w0 } = fixture();
+    // A wire with two bends; the endpoint coordinates are the pins' attachment
+    // points and must survive any segment delete.
+    doc.updateWirePoints(c, w0, [
+      [0, 0],
+      [2, 0],
+      [2, 2],
+      [4, 2],
+    ]);
+    doc.removeSegment(c, w0, 1); // the middle leg
+    expect(doc.circuit(c).wires[w0].points).toEqual([
+      [0, 0],
+      [2, 0],
+      [4, 2],
+    ]);
+    // An end leg drops the bend next to its pin instead (same shortcut).
+    doc.removeSegment(c, w0, 2);
+    expect(doc.circuit(c).wires[w0].points).toEqual([
+      [0, 0],
+      [4, 2],
+    ]);
+  });
+
+  it("removeSegment deletes the wire when the segment IS the whole wire", () => {
+    const { doc, c, w0, w1 } = fixture();
+    // w0 is straight in the fixture; w1 is junctioned onto it, so the usual
+    // cascade applies.
+    expect(doc.circuit(c).wires[w0].points).toHaveLength(2);
+    doc.removeSegment(c, w0, 0);
+    expect(doc.circuit(c).wires.some((_, i) => i === w0 || i === w1)).toBe(false);
+  });
+
+  it("removeSegment is one undo step, labelled for the user", () => {
+    const { doc, c, w0 } = fixture();
+    doc.updateWirePoints(c, w0, [
+      [0, 0],
+      [2, 0],
+      [4, 2],
+    ]);
+    doc.removeSegment(c, w0, 0);
+    expect(doc.circuit(c).wires[w0].points).toHaveLength(2);
+    // ONE undo brings the bend back: a delete is its own step, never merged
+    // into the preceding route edit.
+    doc.undo();
+    expect(doc.circuit(c).wires[w0].points).toEqual([
+      [0, 0],
+      [2, 0],
+      [4, 2],
+    ]);
+  });
+
   it("updateWirePoints replaces the polyline and coalesces", () => {
     const { doc, c, w0 } = fixture();
     const depth = doc.historyDepth;

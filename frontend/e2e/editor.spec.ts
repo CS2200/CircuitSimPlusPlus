@@ -129,6 +129,19 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].wires[1].a).toEqual({ comp: not, pin: "out" });
   expect(d.circuits[0].wires[1].b).toEqual({ join: { wire: 0, segment: 0 } });
 
+  // ---- narrow (§65): at a junction BOTH wires sit under the pointer, so the
+  // first click grabs the parent (the trap: Delete there took everything).
+  // Clicking the same spot again picks the branch under the cursor instead, and
+  // Delete takes only that branch — the trunk survives. ----
+  const junction: [number, number] = [(ax + bx) / 2, (ay + by) / 2];
+  await clickWorld(page, junction[0], junction[1]);
+  await clickWorld(page, junction[0], junction[1]);
+  await page.keyboard.press("Delete");
+  d = await doc(page);
+  expect(d.circuits[0].wires).toHaveLength(1);
+  expect(d.circuits[0].wires[0].a).toEqual({ comp: and, pin: "out" });
+  expect(d.circuits[0].components).toHaveLength(2);
+
   // ---- drag: move the AND +3 units; the glued wire endpoint follows ----
   const from = await world(page, 2.5, 1.5);
   await page.mouse.move(from.x, from.y);
@@ -152,7 +165,7 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].components).toHaveLength(2);
 
   // ---- undo-all: back to an empty circuit ----
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 16; i++) {
     d = await doc(page);
     if (d.circuits[0].components.length === 0 && d.circuits[0].wires.length === 0) break;
     await page.keyboard.press("Control+z");

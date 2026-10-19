@@ -154,11 +154,13 @@ address *(8879681)*.
   resolved decision ends the recovery copy, so the launch dialog means "the last
   session ended without closing" (a crash). *(this round)*
 
-- **Wire segment deletion is all-or-nothing.** Removing an "unnecessary" wire
-  segment currently deletes the *whole wire*. Wanted: graded granularity — press
-  once to select the entire segment (bends and all), press twice to select only
-  that straight part — with segment auto-detection that never removes too much or
-  too little.
+- ~~**Wire segment deletion is all-or-nothing**~~ *(fixed this round)*: a second
+  click narrows the selection to the piece under the cursor — a branch wire
+  hanging off the trunk at that segment, or the segment itself — so Delete takes
+  only that. A branch survives its trunk; a segment delete drops the bend the
+  wire turns at (shortening it), and a wire with no bends is just that segment,
+  so it goes entirely. Junction dependents follow the new geometry. *(this
+  round)*
 - **One Clear, inside the memory editor.** The Inspector's `Clear` (it drops the
   `autoload` file reference) is unnecessary beside the editor's `Clear all`; the
   editor is the single place to clear, and `Clear all` takes the autoload file

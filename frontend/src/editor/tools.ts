@@ -7,8 +7,29 @@ import { compPins, compSize } from "./catalog";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
-import type { DocScene, Hit, SceneOverlay } from "./docScene";
+import type { DocScene, Hit, SceneOverlay, WireHit } from "./docScene";
 import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } from "./route";
+
+/** How close to a branch wire a click counts as "on" it (grid units). */
+const BRANCH_TOL = 0.5;
+
+/** Distance from `p` to a polyline (0 for a wire with no drawn path). */
+function distanceToPolyline(p: Vec2, points: readonly [number, number][]): number {
+  if (points.length < 2) return Number.POSITIVE_INFINITY; // undrawn: no geometry
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[i + 1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y - ay) * dy) / len2));
+    const nx = ax + t * dx;
+    const ny = ay + t * dy;
+    best = Math.min(best, Math.hypot(p.x - nx, p.y - ny));
+  }
+  return best;
+}
 
 /**
  * ToolMachine (FRONTEND.md U3): the editor interaction state machine,
@@ -313,7 +334,9 @@ export class ToolMachine {
         return;
       }
       if (!this.selection.hasWire(wire.wireIdx)) {
-        this.selection.set([], [wire.wireIdx]);
+        this.selection.set([], [wire.wireIdx]); // first click: the whole wire
+      } else {
+        this.narrowSelection(world, wire); // second: just the piece (§65)
       }
       this.pressWireIdx = wire.wireIdx;
       // a DRAG from a wire starts wiring with a junction at the press point
@@ -651,9 +674,47 @@ export class ToolMachine {
     }
   }
 
+  /**
+   * Second click on an already-selected wire (UI_OVERHAUL §65): narrow to the
+   * piece under the cursor. A branch wire hanging off this one at that segment
+   * wins (that is the thing people mean when they click a leg near a junction —
+   * and the pick otherwise grabs the trunk and Delete takes everything); with no
+   * branch there, the segment itself is selected and Delete shortens the wire.
+   */
+  private narrowSelection(world: Vec2, wire: WireHit): void {
+    const branch = this.branchUnder(world, wire.wireIdx, wire.segment);
+    if (branch !== null) {
+      this.selection.set([], [branch]);
+      return;
+    }
+    this.selection.narrowToSegment(wire.wireIdx, wire.segment);
+  }
+
+  /**
+   * A wire junctioned onto `wire` at `segment` whose own path passes under the
+   * cursor, if any (a junction can host several branches of one trunk segment).
+   */
+  private branchUnder(world: Vec2, wire: number, segment: number): number | null {
+    const wires = this.doc.circuit(this.circuitIdx()).wires;
+    for (let i = 0; i < wires.length; i++) {
+      if (i === wire) continue;
+      const w = wires[i];
+      const anchored = [w.a, w.b].some(
+        (e) => !isPinEndpoint(e) && e.join.wire === wire && e.join.segment === segment,
+      );
+      if (anchored && distanceToPolyline(world, w.points) <= BRANCH_TOL) return i;
+    }
+    return null;
+  }
+
   deleteSelection(): void {
     if (this.selection.isEmpty) return;
-    this.doc.deleteSelection(this.circuitIdx(), this.selection.components, this.selection.wires);
+    const piece = this.selection.segment;
+    if (piece !== null) {
+      this.doc.removeSegment(this.circuitIdx(), piece.wire, piece.seg);
+    } else {
+      this.doc.deleteSelection(this.circuitIdx(), this.selection.components, this.selection.wires);
+    }
     this.selection.clear();
     this.changed();
   }
@@ -661,10 +722,14 @@ export class ToolMachine {
   /** Cut (UI_OVERHAUL §36): copy the selection, then delete it. */
   cut(): void {
     if (this.selection.isEmpty) return;
-    this.clipboard = copySelection(this.doc.circuit(this.circuitIdx()), this.selection.components);
-    this.doc.deleteSelection(this.circuitIdx(), this.selection.components, this.selection.wires);
-    this.selection.clear();
-    this.changed();
+    // A narrowed segment is not copyable, so Cut takes the same path as Delete.
+    if (this.selection.segment === null) {
+      this.clipboard = copySelection(
+        this.doc.circuit(this.circuitIdx()),
+        this.selection.components,
+      );
+    }
+    this.deleteSelection();
   }
 
   copy(): void {

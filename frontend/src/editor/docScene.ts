@@ -12,7 +12,7 @@ import {
   type Rect,
   type Vec2,
 } from "../render/geom";
-import { rectPath, roundedPath, wirePath } from "../render/paths";
+import { polylinePath, rectPath, roundedPath, wirePath } from "../render/paths";
 import type { PathCmd, Renderer, WireState } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
@@ -1047,6 +1047,22 @@ export class DocScene {
         stroke,
         lineWidth: selected ? width * 1.25 : width,
       });
+      // The narrowed piece (UI_OVERHAUL §65): the second click picks ONE drawn
+      // segment, so show exactly which one Delete would take.
+      const piece = selection.segment;
+      const pts = this.wires[i]?.points;
+      if (piece !== null && piece.wire === i && pts !== undefined && pts.length >= 2) {
+        const seg = Math.max(0, Math.min(piece.seg, pts.length - 2));
+        const [ax, ay] = pts[seg];
+        const [bx, by] = pts[seg + 1];
+        renderer.drawPath(
+          polylinePath([
+            { x: ax, y: ay },
+            { x: bx, y: by },
+          ]),
+          { stroke: theme.accent, lineWidth: width * 2.4 },
+        );
+      }
     }
     renderer.flush();
     // Net-extent highlight pass (hover brighten, DESIGN.md §7.1).

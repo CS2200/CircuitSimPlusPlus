@@ -614,7 +614,14 @@ export class CircuitDocument {
    * segment and their end segments repaired — see
    * [`reprojectJunctionDependents`].
    */
-  updateWirePoints(circuitIdx: number, wireIdx: number, points: [number, number][]): void {
+  updateWirePoints(
+    circuitIdx: number,
+    wireIdx: number,
+    points: [number, number][],
+    label = "edit wire route",
+    // `null` = its own undo step (the default key merges drag sequences).
+    coalesceKey: string | null = `points:${circuitIdx}:${wireIdx}`,
+  ): void {
     const c = this.circuit(circuitIdx);
     const w = c.wires[wireIdx];
     if (w === undefined) throw new RangeError(`no wire at index ${wireIdx}`);
@@ -624,13 +631,43 @@ export class CircuitDocument {
     );
     wires = reprojectJunctionDependents(wires, wireIdx);
     this.exec(
-      "edit wire route",
-      `points:${circuitIdx}:${wireIdx}`,
+      label,
+      coalesceKey ?? undefined,
       this.replaceCircuit(circuitIdx, {
         ...c,
         wires,
       }),
     );
+  }
+
+  /**
+   * Delete one drawn SEGMENT of a wire (UI_OVERHAUL §65, the two-click
+   * narrowing): the leg goes and the wire takes a shortcut past the bend it
+   * turned at. A wire *is* a connection — its endpoints are pin attachment
+   * points — so they are never touched; only bends (interior points) can
+   * disappear. A wire drawn without bends is nothing *but* that leg, so
+   * deleting its segment deletes the wire (with the usual junction cascade).
+   * Junction dependents follow via [`updateWirePoints`]'s re-projection.
+   */
+  removeSegment(circuitIdx: number, wireIdx: number, segment: number): void {
+    const c = this.circuit(circuitIdx);
+    const w = c.wires[wireIdx];
+    if (w === undefined) return;
+    const last = w.points.length - 1;
+    if (last <= 1) {
+      // Straight (or undrawn): there is no bend to drop.
+      this.removeWires(circuitIdx, new Set([wireIdx]));
+      return;
+    }
+    const seg = Math.max(0, Math.min(segment, last - 1));
+    // Drop the bend this segment turns at: its far end, unless that is the
+    // wire's endpoint — then its near end is the interior one.
+    const drop = seg + 1 <= last - 1 ? seg + 1 : seg;
+    const points = w.points
+      .filter((_, i) => i !== drop)
+      .map((p) => [p[0], p[1]] as [number, number]);
+    // No coalescing: a delete is a discrete step, not a drag sequence.
+    this.updateWirePoints(circuitIdx, wireIdx, points, "remove wire segment", null);
   }
 
   /**

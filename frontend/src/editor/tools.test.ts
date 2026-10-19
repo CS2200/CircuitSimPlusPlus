@@ -358,6 +358,39 @@ describe("wiring", () => {
     expect(sel.hasWire(0)).toBe(true);
   });
 
+  it("a second click narrows a wire to the segment under the cursor (§65)", () => {
+    const { doc, sel, tool, sync } = setup();
+    // Draw a wire, then give it a bend we can point at.
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    doc.updateWirePoints(0, 0, [
+      [15, 11.5],
+      [18, 11.5],
+      [20, 11],
+    ]);
+    sync();
+
+    // First click: the whole wire, nothing narrowed.
+    tool.down({ x: 16.5, y: 11.5 }, PI());
+    tool.up(PI());
+    expect(sel.hasWire(0)).toBe(true);
+    expect(sel.segment).toBeNull();
+
+    // Second click on the same piece: just that segment.
+    tool.down({ x: 16.5, y: 11.5 }, PI());
+    tool.up(PI());
+    expect(sel.segment).toEqual({ wire: 0, seg: 0 });
+
+    // Delete takes the piece: the wire survives, one bend shorter.
+    tool.deleteSelection();
+    const wires = doc.circuit(0).wires;
+    expect(wires).toHaveLength(1);
+    expect(wires[0].points).toHaveLength(2);
+    expect(sel.segment).toBeNull();
+  });
+
   it("the canvas cursor hints at pins, wires and idle space (UI_OVERHAUL §55)", () => {
     const { tool, sync } = setup();
     // over the AND's in0 pin → wiring
