@@ -5,9 +5,10 @@ import type { RecoveryMeta } from "../model/recovery";
 
 /**
  * "Recover unsaved work" dialog (autosave, phase 1): shown once on launch when
- * the crash-recovery store holds a copy of a document that was never saved.
- * Restore loads it into the editor (it comes back dirty, so autosave/Save
- * protect it again); Discard throws the copy away.
+ * the crash-recovery store still holds a copy — which now means the last session
+ * ended **without closing** (a clean close asks first and discards the copy; see
+ * `ClosePrompt`). Restore loads it into the editor (it comes back dirty, so
+ * autosave/Save protect it again); Discard throws the copy away.
  */
 
 export default function RecoveryDialog({
@@ -44,7 +45,9 @@ export default function RecoveryDialog({
       <div className="settings-card" onClick={(e) => e.stopPropagation()}>
         <div className="settings-head">
           <h2>Recover unsaved work</h2>
-          <span className="settings-hint">Autosaved copies from an earlier session.</span>
+          <span className="settings-hint">
+            The last session ended without closing — these edits were never saved.
+          </span>
         </div>
         <section className="settings-section">
           <ul className="recovery-list">

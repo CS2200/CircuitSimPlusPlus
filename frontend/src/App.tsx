@@ -9,6 +9,7 @@ import MenuBar, { type MenuDef } from "./components/MenuBar";
 
 import HistoryDrawer from "./components/HistoryDrawer";
 import HistoryPreview from "./components/HistoryPreview";
+import ClosePrompt, { type CloseChoice } from "./components/ClosePrompt";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -252,6 +253,11 @@ export default function App() {
   const [saveState, setSaveState] = useState<SaveState>({ kind: "clean" });
   const [recoveries, setRecoveries] = useState<RecoveryMeta[]>([]);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  /** A close request waiting on the "Save your work?" answer. */
+  const [closeAsk, setCloseAsk] = useState<{
+    name: string;
+    resolve: (choice: CloseChoice) => void;
+  } | null>(null);
   // Version history (autosave phase 3): the dialog's own little state.
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<VersionMeta[]>([]);
@@ -292,6 +298,8 @@ export default function App() {
   const docRef = useRef(doc);
   const filePathRef = useRef(filePath);
   const autosaveOnRef = useRef(autosaveOn);
+  /** The close guard, for the once-registered window close handler. */
+  const guardCloseRef = useRef<(() => Promise<boolean>) | null>(null);
   const autosaveFileRef = useRef(autosaveFileOn);
   const undoLabelRef = useRef<string | null>(null);
   const docKeyRef = useRef(newDocKey());
@@ -636,9 +644,9 @@ export default function App() {
    * "Save As" (or the first save) opens the picker.
    */
   const saveInBrowser = useCallback(
-    async (suggested: string, forcePicker: boolean): Promise<void> => {
+    async (suggested: string, forcePicker: boolean): Promise<boolean> => {
       const saved = await saveTextFile(suggested, doc.toJson(), { forcePicker });
-      if (!saved) return; // cancelled — nothing was written
+      if (!saved) return false; // cancelled — nothing was written
       doc.markClean();
       setFilePath(doc.name);
       editorRef.current?.refresh();
@@ -646,36 +654,71 @@ export default function App() {
       void discardRecovery();
       void takeVersion(0);
       toast(`Saved ${suggested}`);
+      return true;
     },
     [doc, discardRecovery, takeVersion, toast],
   );
 
+  /**
+   * The one save entry point. The Tauri shell writes to the known path; the
+   * browser writes to the file it already has a handle for. Either way only the
+   * FIRST save (or `forcePicker`) asks where. Resolves true when bytes were
+   * written — a cancelled dialog and a failed write both resolve false, which is
+   * what the close guard needs to know before letting the window go.
+   */
+  const saveNow = useCallback(
+    async (forcePicker: boolean): Promise<boolean> => {
+      const suggested = `${doc.name}.csx`;
+      try {
+        if (!isTauri()) {
+          return await saveInBrowser(suggested, forcePicker || !hasSavedFileHandle());
+        }
+        const known = filePathRef.current;
+        let path = known;
+        if (forcePicker || !isRealFilePath(known)) {
+          path = await pickSavePath(suggested, isRealFilePath(known) ? known : null);
+          if (path === null) return false; // cancelled
+        }
+        if (path === null) return false;
+        await doSave(path);
+        return !docRef.current.dirty; // `doSave` marks clean only on success
+      } catch (err) {
+        toast(`Save failed: ${String(err)}`);
+        return false;
+      }
+    },
+    [doc, doSave, saveInBrowser, toast],
+  );
+
   const onSaveAs = useCallback(() => {
-    const suggested = `${doc.name}.csx`;
-    if (isTauri()) {
-      void pickSavePath(suggested, isRealFilePath(filePath) ? filePath : null)
-        .then((path) => {
-          if (path !== null) void doSave(path);
-        })
-        .catch((err) => toast(`Save failed: ${String(err)}`));
-    } else {
-      void saveInBrowser(suggested, true).catch((err) => toast(`Save failed: ${String(err)}`));
-    }
-  }, [doc, filePath, doSave, saveInBrowser, toast]);
+    void saveNow(true);
+  }, [saveNow]);
 
   const onSave = useCallback(() => {
-    // The Tauri shell writes to the known path; the browser writes to the file
-    // it already has a handle for. Either way only the FIRST save asks where.
-    if (isTauri() && isRealFilePath(filePath)) {
-      void doSave(filePath);
-    } else if (!isTauri() && hasSavedFileHandle()) {
-      void saveInBrowser(`${doc.name}.csx`, false).catch((err) =>
-        toast(`Save failed: ${String(err)}`),
-      );
-    } else {
-      onSaveAs();
-    }
-  }, [filePath, doc, doSave, onSaveAs, saveInBrowser, toast]);
+    void saveNow(false);
+  }, [saveNow]);
+
+  /**
+   * The close guard (2026-10-19). A *clean* close must never need recovery after
+   * the fact, so an unsaved document is resolved before the window goes: Save
+   * (a Save As when it has never been named), Don't save, or Cancel. Resolves
+   * true when the window may close.
+   */
+  const guardClose = useCallback(async (): Promise<boolean> => {
+    if (!docRef.current.dirty) return true; // nothing at risk
+    const choice = await new Promise<CloseChoice>((resolve) =>
+      setCloseAsk({ name: docRef.current.name, resolve }),
+    );
+    setCloseAsk(null);
+    if (choice === "cancel") return false;
+    // A save that was cancelled or failed leaves the document dirty: stay, and
+    // keep the recovery copy — the work is still at risk.
+    if (choice === "save" && !(await saveNow(false))) return false;
+    // Any resolved decision ends the recovery copy's purpose: it exists for
+    // sessions that ended without one (a crash).
+    void discardRecovery();
+    return true;
+  }, [saveNow, discardRecovery]);
 
   /** What the inline title editor starts from (no `.csx`, no path). */
   const renameValue = useMemo(
@@ -802,6 +845,9 @@ export default function App() {
     filePathRef.current = filePath;
   }, [filePath]);
   useEffect(() => {
+    guardCloseRef.current = guardClose;
+  }, [guardClose]);
+  useEffect(() => {
     autosaveOnRef.current = autosaveOn;
   }, [autosaveOn]);
   useEffect(() => {
@@ -838,11 +884,10 @@ export default function App() {
         getCurrentWindow()
           .onCloseRequested(async (e) => {
             e.preventDefault();
-            try {
-              await autosaveRef.current?.flush("close");
-            } finally {
-              await getCurrentWindow().destroy();
-            }
+            // Ask before closing rather than offering recovery afterwards: a
+            // clean close leaves nothing to recover.
+            if ((await guardCloseRef.current?.()) !== true) return;
+            await getCurrentWindow().destroy();
           })
           .then((u) => {
             unlisten = u;
@@ -852,7 +897,23 @@ export default function App() {
     return () => unlisten?.();
   }, []);
 
-  // Recovery on launch: offer any autosaved copies from a previous session.
+  // The browser (dev fallback) has no close request to intercept, so its own
+  // warning is the guard: it fires only while the document is dirty, and the
+  // recovery copy stays behind it (a reload is as likely as a close there).
+  useEffect(() => {
+    if (isTauri()) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!docRef.current.dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  // Recovery on launch: a copy is left behind only when the last session ended
+  // without closing (a crash) — a clean close discards it, because by then the
+  // person has decided.
   useEffect(() => {
     if (stress) return;
     void recoveryStore()
@@ -1356,6 +1417,17 @@ export default function App() {
     };
   }, [doc]);
 
+  // DEV hook: e2e asks for a close, so the guard's prompt is reachable in the
+  // browser build (where there is no Tauri close request to intercept).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as { __circuitRequestClose?: () => Promise<boolean> };
+    w.__circuitRequestClose = () => guardCloseRef.current?.() ?? Promise.resolve(true);
+    return () => {
+      delete w.__circuitRequestClose;
+    };
+  }, []);
+
   // DEV hook: e2e drives/inspects the sim session through this.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -1844,6 +1916,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {closeAsk !== null && <ClosePrompt name={closeAsk.name} onChoose={closeAsk.resolve} />}
       {recoveryOpen && recoveries.length > 0 && (
         <RecoveryDialog
           entries={recoveries}

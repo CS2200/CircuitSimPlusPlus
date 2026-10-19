@@ -1663,6 +1663,28 @@ one made the whole document unloadable.
 baselines were re-blessed (a pin dot departed) and verified deterministic across
 two consecutive runs.
 
+## 64. Follow-up batch BC (2026-10-19): ask before closing, not after
+
+The "Recover unsaved work" dialog was the wrong half of the mechanic: it offered
+recovery for _clean_ closes too, asking after the fact about work the person had
+just deliberately closed. Closing is a moment they are present for, so we ask
+then.
+
+- **"Save your work?"** — the close guard (desktop: the window's close request;
+  web: the browser's own `beforeunload` warning) names the document and offers
+  **Save** (a Save As only when it has never been named), **Don't save**, and
+  **Cancel**; Escape is Cancel, the choice that loses nothing. A cancelled or
+  failed save keeps the window open _and_ keeps the recovery copy — the work is
+  still at risk.
+- **Any resolved decision ends the recovery copy**, so the launch dialog now
+  means what it says: the last session ended without closing (a crash), because a
+  clean close has nothing left to offer. Save writes through the ordinary save
+  path, so an unnamed document still asks where.
+- The once-registered window handler reads the guard through a ref (the same
+  pattern as the autosave/pref refs), and `saveNow(forcePicker)` is now the one
+  save entry point behind Ctrl+S, Save As, and the guard — so "did it save?"
+  has a single answer (the bytes were written).
+
 ## 63. Follow-up batch BB (2026-10-19): a memory's address width, and one Clear
 
 - **A memory's address width is yours.** `addr` was always `ceil(log2 depth)`

@@ -148,6 +148,12 @@ address *(8879681)*.
 
 **Clarified 2026-10-19 (real, being worked):**
 
+- **"Recover unsaved work" was the wrong half of the mechanic** *(maintainer,
+  fixed this round)*: it offered recovery after *clean* closes too. The app now
+  asks when the window is closed — **Save / Don't save / Cancel** — and any
+  resolved decision ends the recovery copy, so the launch dialog means "the last
+  session ended without closing" (a crash). *(this round)*
+
 - **Wire segment deletion is all-or-nothing.** Removing an "unnecessary" wire
   segment currently deletes the *whole wire*. Wanted: graded granularity — press
   once to select the entire segment (bends and all), press twice to select only

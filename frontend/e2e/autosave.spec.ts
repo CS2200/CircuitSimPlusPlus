@@ -95,3 +95,52 @@ test("autosave can be turned off in Settings", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("dialog", { name: RECOVERY_DIALOG })).toHaveCount(0);
 });
+
+/**
+ * The close guard (2026-10-19): a clean close asks *before* it happens, so there
+ * is nothing to "recover" afterwards. The prompt itself is Tauri-only (a close
+ * request); this drives the same guard through the dev hook, which is the only
+ * way the browser build can reach it.
+ */
+test("closing with unsaved changes asks to save first — no after-the-fact recovery", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await placeAndGate(page);
+  await expect(page.locator(INDICATOR)).toContainText("Autosaved locally", { timeout: 15000 });
+
+  const prompt = page.getByRole("dialog", { name: "Save your work" });
+  const requestClose = (): Promise<void> =>
+    page.evaluate(
+      () =>
+        void (
+          window as unknown as { __circuitRequestClose?: () => Promise<boolean> }
+        ).__circuitRequestClose?.(),
+    );
+
+  // Cancel: the window stays, and so does the work.
+  await requestClose();
+  await expect(prompt).toBeVisible();
+  await prompt.getByRole("button", { name: "Cancel" }).click();
+  await expect(prompt).toHaveCount(0);
+  expect((await doc(page)).circuits[0].components).toHaveLength(1);
+
+  // "Don't save" is a decision, so the recovery copy goes with it: relaunching
+  // has nothing to offer — that is the point of asking before, not after.
+  await requestClose();
+  await prompt.getByRole("button", { name: "Don't save" }).click();
+  await expect(prompt).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("dialog", { name: RECOVERY_DIALOG })).toHaveCount(0);
+
+  // Save writes through the ordinary save path (a download in the browser) and
+  // settles the document; a relaunch still has nothing to offer.
+  await placeAndGate(page);
+  const download = page.waitForEvent("download");
+  await requestClose();
+  await prompt.getByRole("button", { name: "Save", exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/\.csx$/);
+  await expect(page.locator(INDICATOR)).toHaveText(/^Saved/);
+  await page.reload();
+  await expect(page.getByRole("dialog", { name: RECOVERY_DIALOG })).toHaveCount(0);
+});
