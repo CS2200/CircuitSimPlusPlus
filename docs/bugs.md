@@ -170,8 +170,9 @@ address *(8879681)*.
 ## P3 — Features (sizeable; schedule deliberately)
 
 **Done:** a memory's address width is independent of its word count (`addrBits`;
-default `ceil(log2 depth)`, the Inspector's **Address bits** field, unset = auto).
-Additive, so no format bump. *(this round)*
+default `ceil(log2 depth)`). Both widths are one-click pickers in the Inspector —
+**Address Bits** + **Data Bits**, the same grid every other width uses. Additive,
+so no format bump. *(this round)*
 
 - Export the canvas/circuit as an image.
 - Right-click context-menu overhaul.

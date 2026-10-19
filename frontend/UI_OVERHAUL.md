@@ -1668,9 +1668,11 @@ two consecutive runs.
 - **A memory's address width is yours.** `addr` was always `ceil(log2 depth)`
   wide, which made a deliberately narrow address — a 4-bit address reaching a
   16-word window of a 256-word memory — impossible to draw, and an address space
-  larger than the word count inexpressible. The Inspector now offers **Address
-  bits** (`addrBits`, format-v2 §4): unset = auto (the derived width, and a
-  default memory writes no attr at all), set = exactly that width. Fewer bits
+  larger than the word count inexpressible. The Inspector now offers **two
+  one-click pickers** — **Address Bits** (`addrBits`, format-v2 §4) and **Data
+  Bits** (`bitsize`) — the same 8-column grid every other bit width uses (§28);
+  no dropdown. Unset = auto (the width derived from `depth`, which a default
+  memory leaves unwritten), set = exactly that width. Fewer bits
   address a window, more leave the extra addresses reading `X`. Additive, so no
   format-version bump; the engine test and the catalog unit test pin the same
   rule (`components.rs::addr_width`).

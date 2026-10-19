@@ -635,7 +635,10 @@ function FieldRow({
   }
 
   if (field.kind === "picker") {
-    const n = typeof value === "number" ? value : (field.dflt ?? field.min ?? 1);
+    const n =
+      typeof value === "number"
+        ? value
+        : (field.derive?.(comp.attrs ?? {}) ?? field.dflt ?? field.min ?? 1);
     return (
       <div className="inspector-field">
         <span className="inspector-field-label">{field.label}</span>

@@ -162,14 +162,38 @@ test("Inspector memory: one Clear — it lives in the editor, and it empties the
   await expect(page.locator(".inspector-mem-contents")).toContainText("0 words");
 });
 
-test("Inspector memory: the address width is independent of the word count", async ({ page }) => {
+test("Inspector memory: both widths are one-click picks, and the address one follows depth", async ({
+  page,
+}) => {
   await page.goto("/?simdemo=1");
-  await selectImem(page); // 32-bit, 256 words — an 8-bit address by default
+  await selectImem(page); // 32-bit, 256 words
 
-  // Auto: a default memory carries no `addrBits` at all.
+  // Two pickers, the way every other bit width is chosen — and the address
+  // picker shows the DERIVED width (8 for 256 words) while `addrBits` is absent.
+  await expect(page.getByRole("radio", { name: "Address Bits 8" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(page.getByRole("radio", { name: "Data Bits 32" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
   expect(imemAttrs(await doc(page))?.addrBits).toBeUndefined();
 
-  // An explicit width is written as given (here: a 16-word window of 256).
-  await page.getByRole("spinbutton", { name: "Address bits" }).fill("4");
-  expect(imemAttrs(await doc(page))?.addrBits).toBe(4);
+  // Shrinking the memory moves the derived width with it — the picker tracks
+  // `depth` for as long as `addrBits` is absent.
+  await page.getByRole("spinbutton", { name: "Words" }).fill("16");
+  await expect(page.getByRole("radio", { name: "Address Bits 4" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(imemAttrs(await doc(page))?.addrBits).toBeUndefined();
+
+  // Picking a width makes it explicit, independent of the word count from then
+  // on; the data width is never involved.
+  await page.getByRole("radio", { name: "Address Bits 12" }).click();
+  const attrs = imemAttrs(await doc(page));
+  expect(attrs?.addrBits).toBe(12);
+  expect(attrs?.depth).toBe(16);
+  expect(attrs?.bitsize).toBe(32);
 });

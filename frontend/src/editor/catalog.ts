@@ -893,6 +893,12 @@ export type AttrField =
       kind: "picker";
       /** Effective default when the attr is absent (format-v2 §4). */
       dflt?: number;
+      /**
+       * Effective value when the attr is absent, computed from the component's
+       * attrs (the memory address width follows `depth` unless `addrBits` is
+       * set). Wins over `dflt`.
+       */
+      derive?: (attrs: Readonly<Record<string, unknown>>) => number;
       /** Inclusive range offered (defaults 1..32). */
       min?: number;
       max?: number;
@@ -1114,8 +1120,18 @@ function baseFields(type: string): AttrField[] {
     case "mem.rom":
       // `autoload` and `contents` are edited by the Inspector's Memory
       // section (file picker + hex-table dialog), not as plain fields.
+      // Both widths are one-click picks, the way bit widths are everywhere
+      // else (§28): a memory reads as Address Bits + Data Bits, never as a
+      // dropdown. `addrBits` follows `depth` until it is picked.
       return [
-        BITSIZE_FIELD,
+        {
+          key: "addrBits",
+          label: "Address Bits",
+          kind: "picker",
+          derive: memAddrBits,
+          group: "Width",
+        },
+        { ...BITSIZE_FIELD, label: "Data Bits" },
         {
           key: "depth",
           label: "Words",
@@ -1123,17 +1139,6 @@ function baseFields(type: string): AttrField[] {
           min: 1,
           max: 1_048_576,
           placeholder: "256",
-          group: "Width",
-        },
-        {
-          // `addr` is `ceil(log2 depth)` wide by default. Unset = auto, so a
-          // default memory writes no `addrBits` at all; setting it writes one.
-          key: "addrBits",
-          label: "Address bits",
-          kind: "number",
-          min: 1,
-          max: 32,
-          placeholder: "auto",
           group: "Width",
         },
       ];

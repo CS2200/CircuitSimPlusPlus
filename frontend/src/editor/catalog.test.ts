@@ -59,11 +59,21 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("wiring.splitter")).toEqual(["splits"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
-    expect(keys("mem.ram")).toEqual(["bitsize", "depth", "addrBits"]);
+    expect(keys("mem.ram")).toEqual(["addrBits", "bitsize", "depth"]);
+    expect(keys("mem.rom")).toEqual(["addrBits", "bitsize", "depth"]);
     // The register shows its stored value, so it carries a base chooser (§57).
     expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
     expect(keys("io.button")).toEqual(["bitsize"]);
     expect(keys("subcircuit")).toEqual(["circuit"]);
+  });
+
+  it("a memory offers both widths as one-click picks, never a dropdown", () => {
+    const widths = editableAttrs("mem.ram").filter((f) => f.group === "Width");
+    expect(widths.map((f) => [f.key, f.label, f.kind])).toEqual([
+      ["addrBits", "Address Bits", "picker"],
+      ["bitsize", "Data Bits", "picker"],
+      ["depth", "Words", "number"],
+    ]);
   });
 
   it("a memory's address width follows depth, unless addrBits says otherwise", () => {
