@@ -171,22 +171,23 @@ describe("DiffPump raw tap (waveform recording, UI_OVERHAUL §89)", () => {
     );
 
     // Three cycles inside one frame — exactly the case a trace cannot afford to
-    // lose, and exactly what the merged flush does lose.
-    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1") }] });
-    pump.push({ cycle: 2, full: false, changes: [{ net: 0, val: val("2") }] });
-    pump.push({ cycle: 3, full: false, changes: [{ net: 0, val: val("3") }] });
+    // lose, and exactly what the merged flush does lose.  The two events of a
+    // cycle share its number, which is why the samples carry `at` as well.
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1"), at: 0 }] });
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("0"), at: 50 }] });
+    pump.push({ cycle: 2, full: false, changes: [{ net: 0, val: val("2"), at: 100 }] });
     queue.forEach((cb) => cb());
 
     // The paint path: one flush, latest value only.
     expect(flushes).toHaveLength(1);
-    expect(flushes[0][0].get(0)?.val.v).toBe("3");
-    expect(flushes[0][1]).toBe(3);
+    expect(flushes[0][0].get(0)?.val.v).toBe("2");
+    expect(flushes[0][1]).toBe(2);
 
-    // The trace: every cycle.
-    expect(recorder.samples(0).map((s) => [s.cycle, s.val.v])).toEqual([
-      [1, "1"],
-      [2, "2"],
-      [3, "3"],
+    // The trace: every event, in order.
+    expect(recorder.samples(0).map((s) => [s.cycle, s.t, s.val.v])).toEqual([
+      [1, 0, "1"],
+      [1, 50, "0"],
+      [2, 100, "2"],
     ]);
   });
 

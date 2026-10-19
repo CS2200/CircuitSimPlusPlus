@@ -5,31 +5,49 @@
  * The engine streams `net_diffs`: `{ cycle, full, changes: [{ net, val, at?,
  * contended? }] }`.  `DiffPump` merges those down to AT MOST one batch per
  * animation frame before the UI paints (DESIGN.md §7.2) — deliberately lossy,
- * because a paint only needs the latest value.  A *trace* cannot afford that:
- * at speed, many cycles pass between frames, and a merged batch keeps only the
- * last value of each net, so whole cycles would vanish from the picture.
+ * because a paint only needs the latest value.  A *trace* cannot afford that,
+ * so the recorder taps the batches BEFORE the merge (`DiffPump`'s `onRaw`) and
+ * keeps every change.
  *
- * So the recorder taps the batches BEFORE the merge (`DiffPump`'s `onRaw`) and
- * keeps **one sample per cycle per net** — the value the net settled to that
- * cycle, which is exactly what a cycle-axis trace shows.  Repeated changes
- * inside one cycle collapse to the last one; an unchanging net keeps a single
- * sample, and `valueAt` walks back to it.  That is compact (a 2000-net design
- * that runs still costs one entry per net) and it is lossless at the
- * resolution the axis actually has.
+ * **Every change, not every cycle.**  A cycle is not the quantum of the
+ * simulation: a *tick* (one clock half-period) is, and the contract says so —
+ * `cycle` advances once per clock period while `at` (ns since run start)
+ * advances per event.  Keeping one sample per cycle therefore *aliases*
+ * anything that moves more than once in a cycle, and the clock is the visible
+ * case: it rises and falls inside every single cycle, so a per-cycle trace
+ * collapses it into a flat line.  Samples are keyed by `at` instead, and the
+ * x-axis is a **fractional cycle** — `cycle + elapsed/period` — so the axis is
+ * still measured in cycles, but the edges inside a cycle are visible.
  *
- * The recording is bounded: `WAVE_SAMPLE_CAP` per net and `WAVE_TOTAL_CAP`
- * overall, oldest-first, with the sacrifice recorded in `truncated` so the view
- * can say so rather than quietly lying about the past.
+ * The period is derived from the data (the first `at` seen in each cycle), not
+ * assumed, so nothing here hard-codes a clock rate.  When the engine sends no
+ * `at` at all — a core that only knows cycles — the axis degenerates to whole
+ * cycles, exactly the old behaviour, and a fast toggle aliases: that is a
+ * limitation of such a core, and `hasTime` says which case you are in.
+ *
+ * Recording is bounded: `WAVE_SAMPLE_CAP` per net and `WAVE_TOTAL_CAP` overall,
+ * oldest-first, with the sacrifice recorded in `truncated` so the view can say
+ * so rather than quietly lying about the past.
  */
 
 import type { NetId, NetDiffs, NamedComponent, WireValue } from "../ipc/types";
 import { wireValueState } from "../lib/value";
 
-/** One value, in effect from `cycle` until the next sample. */
-export interface CycleSample {
+/** One value, in effect from `t` until the next sample. */
+export interface WaveSample {
+  /** Engine event time in ns since run start (`NetChange.at`), or the cycle when absent. */
+  t: number;
+  /** The cycle this event belongs to — several events share one. */
   cycle: number;
   val: WireValue;
   /** The engine flagged a genuine short circuit at this change (v1.2). */
+  contended?: boolean;
+}
+
+/** A sample placed on the axis: x is a fractional cycle. */
+export interface PlacedSample {
+  x: number;
+  val: WireValue;
   contended?: boolean;
 }
 
@@ -44,8 +62,8 @@ export interface WaveSignal {
   kind: string;
 }
 
-/** Per-net sample cap.  A net that changes every cycle for 2048 cycles is a lot of trace. */
-export const WAVE_SAMPLE_CAP = 2048;
+/** Per-net sample cap.  A net that changes every tick for a long run is a lot of trace. */
+export const WAVE_SAMPLE_CAP = 4096;
 /** Overall cap, so a huge design with long runs cannot grow without bound. */
 export const WAVE_TOTAL_CAP = 400_000;
 
@@ -54,11 +72,14 @@ function sameValue(a: WireValue, b: WireValue): boolean {
 }
 
 export class WaveformRecorder {
-  private readonly byNet = new Map<NetId, CycleSample[]>();
+  private readonly byNet = new Map<NetId, WaveSample[]>();
+  /** First event time seen in each cycle — the time base (a cycle's start). */
+  private readonly starts = new Map<number, number>();
   private readonly _truncated = new Set<NetId>();
   private _count = 0;
-  private _first = Number.POSITIVE_INFINITY;
-  private _last = 0;
+  private _hasTime = false;
+  private _span: { firstT: number; firstCycle: number; lastT: number; lastCycle: number } | null =
+    null;
 
   /** Total samples held (all nets). */
   get sampleCount(): number {
@@ -70,65 +91,106 @@ export class WaveformRecorder {
     return this._truncated;
   }
 
-  /** Cycles seen, or `null` before anything was recorded. */
-  get span(): { first: number; last: number } | null {
-    return this._count === 0 ? null : { first: this._first, last: this._last };
+  /**
+   * Whether the engine stamped `at` (ns) on its changes.  False means the axis
+   * can only be whole cycles — and that a signal toggling twice in one cycle
+   * cannot be drawn.
+   */
+  get hasTime(): boolean {
+    return this._hasTime;
+  }
+
+  /**
+   * The run's event span, as the two ends to project through the time base.  Kept
+   * incrementally so the view never walks every net to find it.
+   */
+  get timeSpan(): { firstT: number; firstCycle: number; lastT: number; lastCycle: number } | null {
+    return this._span;
+  }
+
+  /** Last cycle seen, or `null` before anything was recorded. */
+  get lastCycle(): number | null {
+    if (this.starts.size === 0) return null;
+    let max = -Infinity;
+    for (const c of this.starts.keys()) if (c > max) max = c;
+    return max;
   }
 
   netCount(): number {
     return this.byNet.size;
   }
 
-  samples(net: NetId): readonly CycleSample[] {
+  samples(net: NetId): readonly WaveSample[] {
     return this.byNet.get(net) ?? [];
+  }
+
+  /** The axis: `t` and a cycle → a fractional cycle.  Cheap enough to rebuild per draw. */
+  timebase(): Timebase {
+    return new Timebase(this.starts, this._hasTime);
   }
 
   /**
    * One engine batch, straight from `DiffPump`'s raw tap.
    *
-   * A `full` batch (the initial paint after load/resume) seeds every net at its
-   * cycle, so a trace starts defined instead of blank.
+   * A `full` batch (the initial paint after load/resume) seeds every net, so a
+   * trace starts defined instead of blank.
    */
   recordBatch(diffs: NetDiffs): void {
     const cycle = diffs.cycle;
     for (const change of diffs.changes) {
-      const list = this.byNet.get(change.net);
-      if (list === undefined) {
-        this.byNet.set(change.net, [this.makeSample(cycle, change.val, change.contended)]);
-        this._count++;
+      const hasAt = typeof change.at === "number" && Number.isFinite(change.at);
+      // Without `at` the cycle number is the only clock we have.
+      const t = hasAt ? change.at! : cycle;
+      if (hasAt) this._hasTime = true;
+
+      const start = this.starts.get(cycle);
+      if (start === undefined || t < start) this.starts.set(cycle, t);
+
+      const span = this._span;
+      if (span === null) {
+        this._span = { firstT: t, firstCycle: cycle, lastT: t, lastCycle: cycle };
       } else {
-        const last = list[list.length - 1];
-        if (last.cycle === cycle) {
-          // Same cycle: the later value wins — the sample is replaced, not added,
-          // because a cycle axis has no finer resolution than the cycle.
-          last.val = change.val;
-          if (change.contended === true) last.contended = true;
-          else delete last.contended;
-        } else if (!sameValue(last.val, change.val)) {
-          // A change: one new sample.  (No sample for a cycle in which the net
-          // did not move — `valueAt` walks back to the one still in effect.)
-          list.push(this.makeSample(cycle, change.val, change.contended));
-          this._count++;
+        if (t < span.firstT) {
+          span.firstT = t;
+          span.firstCycle = cycle;
         }
-        if (list.length > WAVE_SAMPLE_CAP) {
-          // Amortised: shed a block, mark the past as incomplete.
-          const shed = Math.max(1, Math.floor(WAVE_SAMPLE_CAP / 4));
-          list.splice(0, shed);
-          this._count -= shed;
-          this._truncated.add(change.net);
+        if (t > span.lastT) {
+          span.lastT = t;
+          span.lastCycle = cycle;
         }
       }
-      if (cycle < this._first) this._first = cycle;
-      if (cycle > this._last) this._last = cycle;
-    }
-    // Global cap: shed whole nets' older halves until we are under.
-    if (this._count > WAVE_TOTAL_CAP) this.shedOldest();
-  }
 
-  private makeSample(cycle: number, val: WireValue, contended?: boolean): CycleSample {
-    const s: CycleSample = { cycle, val };
-    if (contended === true) s.contended = true;
-    return s;
+      const contended = change.contended === true;
+      const list = this.byNet.get(change.net);
+      if (list === undefined) {
+        this.byNet.set(change.net, [
+          { t, cycle, val: change.val, ...(contended ? { contended } : {}) },
+        ]);
+        this._count++;
+        continue;
+      }
+      const last = list[list.length - 1];
+      // Nothing to record: same value, same contention, seen at the same event
+      // time (two batches can describe one event).  A *new* event time with an
+      // unchanged value adds nothing to a step trace — the value holds.
+      if (
+        last !== undefined &&
+        sameValue(last.val, change.val) &&
+        (last.contended === true) === contended
+      ) {
+        continue;
+      }
+      list.push({ t, cycle, val: change.val, ...(contended ? { contended } : {}) });
+      this._count++;
+      if (list.length > WAVE_SAMPLE_CAP) {
+        // Amortised: shed a block, mark the past as incomplete.
+        const shed = Math.max(1, Math.floor(WAVE_SAMPLE_CAP / 4));
+        list.splice(0, shed);
+        this._count -= shed;
+        this._truncated.add(change.net);
+      }
+    }
+    if (this._count > WAVE_TOTAL_CAP) this.shedOldest();
   }
 
   /** Nobody may grow past the total cap: drop the oldest block anywhere. */
@@ -156,30 +218,103 @@ export class WaveformRecorder {
   /** Drop everything (circuit unload, or an explicit Clear). */
   clear(): void {
     this.byNet.clear();
+    this.starts.clear();
     this._truncated.clear();
     this._count = 0;
-    this._first = Number.POSITIVE_INFINITY;
-    this._last = 0;
+    this._hasTime = false;
+    this._span = null;
   }
 }
 
 /**
- * The value in effect during `cycle`: the last sample at or before it, or `null`
- * when the trace has nothing that early.
+ * The x-axis: a fractional cycle.  Cycle `N` starts at `x = N` and ends at
+ * `N + 1`, so the axis is measured in cycles (the model the course reasons in)
+ * while events inside one are placed by their real time.
  */
-export function valueAt(samples: readonly CycleSample[], cycle: number): CycleSample | null {
-  if (samples.length === 0 || cycle < samples[0].cycle) return null;
+export class Timebase {
+  private readonly firstT: number;
+  private readonly firstCycle: number;
+  private readonly lastT: number;
+  private readonly period: number;
+
+  constructor(
+    private readonly starts: ReadonlyMap<number, number>,
+    readonly hasTime: boolean,
+  ) {
+    let first = Number.POSITIVE_INFINITY;
+    let firstCycle = 0;
+    let last = Number.NEGATIVE_INFINITY;
+    const cycles: number[] = [];
+    for (const [cycle, t] of starts) {
+      if (t < first) {
+        first = t;
+        firstCycle = cycle;
+      }
+      if (t > last) last = t;
+      cycles.push(cycle);
+    }
+    cycles.sort((a, b) => a - b);
+    this.firstT = Number.isFinite(first) ? first : 0;
+    this.firstCycle = Number.isFinite(first) ? firstCycle : 0;
+    this.lastT = Number.isFinite(last) ? last : 0;
+    // The period is *derived*: the median gap between cycle starts, so a gap in
+    // the data (a cycle where nothing moved) does not skew it.
+    const gaps: number[] = [];
+    for (let i = 1; i < cycles.length; i++) {
+      const g = (starts.get(cycles[i]) ?? 0) - (starts.get(cycles[i - 1]) ?? 0);
+      if (g > 0) gaps.push(g / (cycles[i] - cycles[i - 1]));
+    }
+    gaps.sort((a, b) => a - b);
+    const median = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : 0;
+    this.period = median > 0 ? median : Math.max(1, this.lastT - this.firstT);
+  }
+
+  /** Fractional-cycle position of an event. */
+  x(t: number, cycle: number): number {
+    if (!this.hasTime) return cycle;
+    const start = this.cycleStart(cycle);
+    return cycle + (t - start) / this.period;
+  }
+
+  /** First event time seen in `cycle` — the cycle's own start, as observed. */
+  cycleStart(cycle: number): number {
+    const known = this.starts.get(cycle);
+    if (known !== undefined) return known;
+    // No event in that cycle: place it by extrapolating from the first one, so
+    // the axis stays linear across a gap.
+    return this.firstT + (cycle - this.firstCycle) * this.period;
+  }
+}
+
+/** Place a net's samples on the axis.  Pure; the view calls it per draw. */
+export function projectSamples(samples: readonly WaveSample[], tb: Timebase): PlacedSample[] {
+  const out: PlacedSample[] = [];
+  for (const s of samples) {
+    const x = tb.x(s.t, s.cycle);
+    const placed: PlacedSample = { x, val: s.val };
+    if (s.contended === true) placed.contended = true;
+    out.push(placed);
+  }
+  return out;
+}
+
+/**
+ * The sample in effect at `x`: the last one at or before it, or `null` when the
+ * trace has nothing that early.
+ */
+export function valueAt(samples: readonly PlacedSample[], x: number): PlacedSample | null {
+  if (samples.length === 0 || x < samples[0].x) return null;
   let lo = 0;
   let hi = samples.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
-    if (samples[mid].cycle <= cycle) lo = mid;
+    if (samples[mid].x <= x) lo = mid;
     else hi = mid - 1;
   }
   return samples[lo];
 }
 
-/** One held value over a cycle range, half-open `[from, to)`. */
+/** One held value over an x range, half-open `[from, to)`. */
 export interface StepSegment {
   from: number;
   to: number;
@@ -188,12 +323,11 @@ export interface StepSegment {
 }
 
 /**
- * Steps covering `[from, to)`.  Only the samples that matter are visited, and
- * the first segment is clipped to `from` (the value that was already in effect
- * when the window opens).
+ * Steps covering `[from, to)`.  The first segment is clipped to `from` (the
+ * value already in effect when the window opens) and the last holds to `to`.
  */
 export function stepSegments(
-  samples: readonly CycleSample[],
+  samples: readonly PlacedSample[],
   from: number,
   to: number,
 ): StepSegment[] {
@@ -204,9 +338,9 @@ export function stepSegments(
   const firstIdx = samples.indexOf(start);
   for (let i = firstIdx; i < samples.length; i++) {
     const s = samples[i];
-    if (s.cycle >= to) break;
-    const segFrom = Math.max(from, s.cycle);
-    const next = samples[i + 1]?.cycle ?? to;
+    if (s.x >= to) break;
+    const segFrom = Math.max(from, s.x);
+    const next = samples[i + 1]?.x ?? to;
     const segTo = Math.min(to, next);
     if (segTo <= segFrom) continue;
     const seg: StepSegment = { from: segFrom, to: segTo, val: s.val };
@@ -323,4 +457,30 @@ export function pickedSignals(opts: {
     add(`p:${want.comp}.${want.pin}`, `${want.comp}.${want.pin}`, "pin", opts.wireToNet.get(at));
   }
   return out;
+}
+
+/**
+ * The clocks of the open circuit, as trace rows.
+ *
+ * A `wiring.clock` is not a *named* part (contract v1.2's `NamedComponent` covers
+ * registers, RAM, ROM and probes), so it would never appear on its own — and the
+ * clock is the first thing anyone looks at in a trace, and the signal whose
+ * aliasing exposed the recording bug this module used to have.  Resolved through
+ * the wire that reaches its `out` pin, like any other pick.
+ */
+export function clockSignals(opts: {
+  wires: readonly { a: unknown; b: unknown }[];
+  wireToNet: ReadonlyMap<number, NetId>;
+  components: readonly { id: string; type: string; name?: string }[];
+}): WaveSignal[] {
+  const clocks = opts.components.filter((c) => c.type === "wiring.clock");
+  const resolved = pickedSignals({
+    wires: opts.wires,
+    wireToNet: opts.wireToNet,
+    selectedPins: clocks.map((c) => ({ comp: c.id, pin: "out" })),
+  });
+  return resolved.map((sig) => {
+    const comp = clocks.find((c) => sig.key === `p:${c.id}.out`);
+    return { ...sig, key: `k:${comp?.id ?? sig.key}`, kind: "clock", label: comp?.name || "clk" };
+  });
 }

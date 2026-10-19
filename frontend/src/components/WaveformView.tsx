@@ -4,12 +4,13 @@ import { resolveTheme, type Theme } from "../render/theme";
 import type { SimController } from "../sim/controller";
 import {
   bitLaneIndices,
-  defaultSignals,
   extractBit,
+  projectSamples,
   stepSegments,
   valueAt,
   valueBits,
   waveText,
+  type PlacedSample,
   type WaveSignal,
 } from "../sim/waveform";
 import { wireValueState } from "../lib/value";
@@ -47,12 +48,15 @@ interface Row {
 
 export default function WaveformView({
   sim,
+  defaults,
   picked,
   circuitLabel,
   onClose,
   onNotify,
 }: {
   sim: SimController;
+  /** What a fresh trace opens with: the named parts plus every clock (App derives it). */
+  defaults: WaveSignal[];
   /** Signals the canvas selection resolves to right now (App resolves them). */
   picked: WaveSignal[];
   circuitLabel: string;
@@ -61,9 +65,7 @@ export default function WaveformView({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [rows, setRows] = useState<Row[]>(() =>
-    defaultSignals(sim.store.named).map((signal) => ({ signal })),
-  );
+  const [rows, setRows] = useState<Row[]>(() => defaults.map((signal) => ({ signal })));
   const [pxPerCycle, setPxPerCycle] = useState(6);
   const [origin, setOrigin] = useState(0);
   const [follow, setFollow] = useState(true);
@@ -77,7 +79,21 @@ export default function WaveformView({
   // Redraw on every applied frame (the store bumps ≤ once per frame while
   // running) — reading the recorder directly, like the canvas reads netValues.
   const version = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
-  const span = sim.waves.span;
+  /**
+   * The axis: `x` is a fractional cycle, so a signal that moves twice inside one
+   * cycle (the clock) is drawn as it really is.  Several events share a cycle
+   * number — the mock says so outright (`cycle = tick / 2`) — so the cycle count
+   * alone cannot place them.
+   */
+  const tb = useMemo(() => sim.waves.timebase(), [sim.waves, version]);
+  const span = useMemo(() => {
+    const ts = sim.waves.timeSpan;
+    if (ts === null) return null;
+    return {
+      first: tb.x(ts.firstT, ts.firstCycle),
+      last: tb.x(ts.lastT, ts.lastCycle),
+    };
+  }, [tb, sim.waves, version]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -110,7 +126,8 @@ export default function WaveformView({
     for (const row of rows) {
       out.push(row);
       if (expanded.has(row.signal.key)) {
-        const sample = valueAt(sim.waves.samples(row.signal.net), sim.waves.span?.last ?? 0);
+        const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
+        const sample = valueAt(placed, placed[placed.length - 1]?.x ?? 0);
         const bits = Math.min(32, valueBits(sample?.val ?? { v: "0", x: "0", z: "0" }));
         for (const bit of bitLaneIndices(bits)) {
           out.push({ signal: row.signal, bit, parent: row.signal.key });
@@ -118,7 +135,7 @@ export default function WaveformView({
       }
     }
     return out;
-  }, [rows, expanded, sim.waves, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, expanded, sim.waves, tb, version]);
 
   /**
    * Fit the whole recorded run into the canvas — the *whole* width, so a short
@@ -161,19 +178,26 @@ export default function WaveformView({
     Math.min(LANE_H_MAX, Math.floor((size.h - AXIS_H - PAD_TOP) / Math.max(1, drawRows.length))),
   );
 
+  /**
+   * The canvas is the whole signal list, not just what fits: rows outgrow the
+   * panel and the wrapper scrolls to reach them.  A trace you cannot scroll is a
+   * trace whose lower half you cannot see.
+   */
+  const contentH = Math.max(size.h, PAD_TOP + drawRows.length * laneH + AXIS_H);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     const theme = themeRef.current ?? (themeRef.current = resolveTheme(canvas));
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(size.w * dpr);
-    canvas.height = Math.round(size.h * dpr);
+    canvas.height = Math.round(contentH * dpr);
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.w, size.h);
+    ctx.clearRect(0, 0, size.w, contentH);
     ctx.fillStyle = theme.bg;
-    ctx.fillRect(0, 0, size.w, size.h);
+    ctx.fillRect(0, 0, size.w, contentH);
 
     const laneW = size.w - GUTTER;
     const x = (cycle: number) => GUTTER + (cycle - origin) * pxPerCycle;
@@ -195,12 +219,12 @@ export default function WaveformView({
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(Math.round(gx) + 0.5, 0);
-      ctx.lineTo(Math.round(gx) + 0.5, size.h - AXIS_H);
+      ctx.lineTo(Math.round(gx) + 0.5, contentH - AXIS_H);
       ctx.stroke();
       if (gx < size.w - 14) {
         ctx.fillStyle = theme.textDim;
         ctx.textAlign = "center";
-        ctx.fillText(String(c), gx, size.h - AXIS_H / 2);
+        ctx.fillText(String(c), gx, contentH - AXIS_H / 2);
       }
     }
 
@@ -208,14 +232,15 @@ export default function WaveformView({
     ctx.textAlign = "left";
     drawRows.forEach((row, i) => {
       const yTop = PAD_TOP + i * laneH;
-      if (yTop > size.h - AXIS_H) return;
+      if (yTop > contentH - AXIS_H) return;
       const mid = yTop + laneH / 2;
       const high = yTop + 5;
       const low = yTop + laneH - 5;
-      const samples = sim.waves.samples(row.signal.net);
+      const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
 
       // Gutter: label + the value under the cursor.
-      const atCursor = cursor === null ? null : rowValueAt(row, samples, cursor.cycle);
+      const atCursor = cursor === null ? null : rowValueAt(row, placed, cursor.cycle);
+
       ctx.fillStyle = row.bit !== undefined ? theme.textDim : theme.text;
       const indent = row.bit !== undefined ? 12 : 0;
       const label = row.bit !== undefined ? `[${row.bit}]` : row.signal.label;
@@ -230,7 +255,7 @@ export default function WaveformView({
       }
 
       // The trace: hold the level, then drop/raise at each change.
-      const segs = stepSegments(samples, first, last);
+      const segs = stepSegments(placed, first, last);
       let plotted = false;
       for (const seg of segs) {
         const x0 = Math.max(GUTTER, x(seg.from));
@@ -267,7 +292,7 @@ export default function WaveformView({
         }
         plotted = true;
       }
-      if (samples.length === 0) {
+      if (placed.length === 0) {
         ctx.fillStyle = theme.textDim;
         ctx.fillText("no data", GUTTER + 8, mid);
       } else if (sim.waves.truncated.has(row.signal.net)) {
@@ -314,7 +339,7 @@ export default function WaveformView({
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx, 0);
-      ctx.lineTo(cx, size.h - AXIS_H);
+      ctx.lineTo(cx, contentH - AXIS_H);
       ctx.stroke();
     }
 
@@ -322,25 +347,22 @@ export default function WaveformView({
     ctx.strokeStyle = theme.panelBorder;
     ctx.beginPath();
     ctx.moveTo(GUTTER - 0.5, 0);
-    ctx.lineTo(GUTTER - 0.5, size.h);
+    ctx.lineTo(GUTTER - 0.5, contentH);
     ctx.stroke();
 
     function bitsOf(val: WireValue): number {
       return Math.max(4, valueBits(val));
     }
-    function rowValueAt(
-      row: Row,
-      samples: readonly { cycle: number; val: WireValue }[],
-      cycle: number,
-    ) {
-      const s = valueAt(samples, cycle);
+    function rowValueAt(row: Row, samples: readonly PlacedSample[], x: number) {
+      const s = valueAt(samples, x);
       if (s === null) return null;
       return row.bit === undefined ? s : { val: extractBit(s.val, row.bit) };
     }
-  }, [drawRows, size, pxPerCycle, origin, cursor, sim.waves, version, span, laneH]);
+  }, [drawRows, size, contentH, pxPerCycle, origin, cursor, sim.waves, tb, version, span, laneH]);
 
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLCanvasElement>) => {
+      if (!e.ctrlKey && !e.metaKey) return; // plain wheel scrolls the rows
       const rect = e.currentTarget.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       if (cx < GUTTER) return;
@@ -353,6 +375,34 @@ export default function WaveformView({
     },
     [origin, pxPerCycle],
   );
+
+  /** Drag horizontally to pan; vertical movement stays the wrapper's scroll. */
+  const drag = useRef<{ x: number; origin: number } | null>(null);
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (e.clientX - rect.left < GUTTER) return;
+      drag.current = { x: e.clientX, origin };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [origin, pxPerCycle],
+  );
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const d = drag.current;
+      if (d === null) return;
+      setOrigin(d.origin - (e.clientX - d.x) / pxPerCycle);
+      setFollow(false);
+      setManual(true);
+    },
+    [pxPerCycle],
+  );
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, []);
 
   const onMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -377,9 +427,14 @@ export default function WaveformView({
     onNotify?.(`Added ${picked.length} selected signal${picked.length === 1 ? "" : "s"}`);
   }, [picked, onNotify]);
 
-  const current = cursor === null ? (span?.last ?? 0) : Math.round(cursor.cycle);
+  // The axis is fractional (a cycle is several events), but a *readout* is a
+  // cycle number: nobody wants 1.6041666666666665 in the bar.
+  const current =
+    cursor === null ? Math.floor(span?.last ?? 0) : Math.max(0, Math.floor(cursor.cycle));
   const spanText =
-    span === null ? "no samples yet — run the sim" : `cycles ${span.first}–${span.last}`;
+    span === null
+      ? "no samples yet — run the sim"
+      : `cycles ${Math.floor(span.first)}–${Math.floor(span.last)}`;
 
   return (
     <div className="wave-view">
@@ -393,6 +448,7 @@ export default function WaveformView({
         <span className="wave-bar-text">cycle {current}</span>
         <button
           className="secondary"
+          title="Zoom out (Ctrl+wheel zooms at the cursor)"
           onClick={() => {
             setPxPerCycle((p) => Math.max(0.25, p / 1.5));
             setManual(true);
@@ -402,6 +458,7 @@ export default function WaveformView({
         </button>
         <button
           className="secondary"
+          title="Zoom in (Ctrl+wheel zooms at the cursor)"
           onClick={() => {
             setPxPerCycle((p) => Math.min(400, p * 1.5));
             setManual(true);
@@ -440,10 +497,14 @@ export default function WaveformView({
         <canvas
           ref={canvasRef}
           className="wave-canvas"
-          style={{ width: size.w, height: size.h }}
+          style={{ width: size.w, height: contentH }}
           onWheel={onWheel}
           onMouseMove={onMove}
           onMouseLeave={() => setCursor(null)}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
           onDoubleClick={(e) => {
             // Double-click a label to expand/collapse a bus, or drop the row.
             const rect = e.currentTarget.getBoundingClientRect();
@@ -451,12 +512,9 @@ export default function WaveformView({
             const i = Math.floor((y - PAD_TOP) / laneH);
             const row = drawRows[i];
             if (row === undefined || row.bit !== undefined) return;
+            const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
             const bits = valueBits(
-              valueAt(sim.waves.samples(row.signal.net), span?.last ?? 0)?.val ?? {
-                v: "0",
-                x: "0",
-                z: "0",
-              },
+              valueAt(placed, placed[placed.length - 1]?.x ?? 0)?.val ?? { v: "0", x: "0", z: "0" },
             );
             if (e.clientX - rect.left < GUTTER && bits > 1) {
               setExpanded((cur) => {

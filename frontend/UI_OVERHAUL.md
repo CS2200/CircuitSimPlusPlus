@@ -2212,13 +2212,28 @@ only the last one, so whole cycles would be missing from the picture. So the pum
 optional **`onRaw` tap** that sees every batch _before_ the merge, and the recorder reads that.
 The ≤ 1-per-frame rule stays exactly what it was: a painting rule.
 
-**What is recorded.** One sample per cycle per net — the value the net settled to in that cycle.
-Repeated changes inside a cycle collapse to the last (the axis has no finer resolution), and a
-cycle in which a net did not move adds no sample; `valueAt` walks back to the one still in
-effect. That is both correct for a cycle axis and compact — an idle net costs one entry for the
-whole run. Recording is bounded (`WAVE_SAMPLE_CAP` per net, `WAVE_TOTAL_CAP` overall,
-oldest-first) and a net that lost history is marked, so the view can show `…` instead of lying
-about the past. `sim_reset` drops the trace: it is one run, and the engine restarts at cycle 0.
+**What is recorded: every _event_, not every cycle.** This is the one thing the first version
+got wrong, and the clock made it obvious. A cycle is **not** the quantum of the simulation — a
+_tick_ (one clock half-period) is, and the contract says so: `cycle` advances once per clock
+period while `at` (ns since run start) advances per event. The mock states its own model
+outright (`cycle = tick / 2`; a tick is 50ns, and each tick emits two batches). Sampling once
+per cycle therefore **aliases** anything that moves more than once in a cycle, and the clock —
+which rises and falls inside _every_ cycle — collapsed into a flat line. Samples are now keyed
+by `at`, and only a value _change_ is stored (a held value costs nothing), so a clock is a
+square wave half a cycle wide.
+
+**The axis is a fractional cycle.** `x = cycle + (t − cycleStart) / period`, so the axis is
+still _measured in cycles_ (the model the course reasons in) while the edges inside one are
+placed by their real time. The period is **derived from the data** — the median gap between
+observed cycle starts, so a gap where nothing moved does not skew it — rather than assuming a
+clock rate. A core that sends no `at` degenerates to whole cycles (`hasTime` reports which case
+you are in), and there a fast toggle aliases: that is a limitation of such a core, not of the
+viewer. Working in unit steps at the start also _showed_ the aliasing, which is why it was
+caught.
+
+Recording is bounded (`WAVE_SAMPLE_CAP` per net, `WAVE_TOTAL_CAP` overall, oldest-first) and a
+net that lost history is marked, so the view can show `…` instead of lying about the past.
+`sim_reset` drops the trace: it is one run, and the engine restarts at cycle 0.
 
 **Rows.** A fresh trace opens with every **named part** the engine exposed a `value_net` for —
 probes, registers, RAM, ROM (contract v1.2), which is what that field exists for and is always
@@ -2228,8 +2243,7 @@ selected wire is itself, and a selected part contributes its **output pin's** ne
 so App does it and the viewer just draws. A bus can be expanded into per-bit lanes by
 double-clicking its label.
 
-**Axis and colours.** Cycles only: that is the model the course reasons in, and the delay
-model's ns (`at`) is on every change if a finer axis is ever wanted. Lane colours are the
+**Colours.** Lane colours are the
 canvas's own — `theme.wire[state]` — so a signal is the same colour in the trace as on the
 schematic (§35). That required moving `wireValueState` out of the scene and into `lib/value.ts`,
 because a value must _read_ the same way in both places; the scene imports it from there now.
@@ -2260,3 +2274,23 @@ Two follow-ups from the first look at it (§89):
   signals than rows, the band below the last lane is a ruled line plus one line of help ("no more
   signals — select a wire or part on the canvas, then Add selection"). Empty space under a trace
   is _expected_ in a scope, but it should not read as data that failed to draw.
+
+Follow-ups after using it on a real circuit (§89):
+
+- **The aliasing bug above**, found by looking at a clock in the trace rather than trusting the
+  tests: the model's own unit test had recorded one sample per cycle and _agreed with itself_.
+  The regression test now builds a mock-shaped clock (two events sharing a cycle number,
+  half a cycle apart) and asserts the step segments alternate, which is the assertion the first
+  version should have had.
+- **Many signals scroll, and the wheel scrolls them.** A trace taller than the panel used to be
+  clipped with no way to reach the rows below. The canvas is now the whole signal list inside a
+  scrolling wrapper, with the cycle axis at the bottom of that content; a plain wheel scrolls,
+  `Ctrl`/`Cmd`+wheel zooms at the cursor, and dragging the lane area pans. The `−`/`+`/`Fit`
+  buttons say so in their tooltips.
+- **The bar reports cycle numbers, not the axis' fractions.** The axis is fractional internally
+  (a cycle holds several events) but "cycle 1.6041666666666665" is not a readout anyone wants.
+- **The clock is on the trace from the start.** A `wiring.clock` is not a _named_ part (contract
+  v1.2 covers registers, RAM, ROM and probes), so it used to appear only if you selected its
+  wire — and the clock is the first signal anyone looks at, and the one whose aliasing exposed
+  the bug above. A fresh trace now opens with the named parts **plus every clock in the sheet**,
+  resolved through the wire on its `out` pin and labelled with the part's name or `clk`.

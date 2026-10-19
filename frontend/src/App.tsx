@@ -44,7 +44,7 @@ import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
-import { pickedSignals, type WaveSignal } from "./sim/waveform";
+import { clockSignals, defaultSignals, pickedSignals, type WaveSignal } from "./sim/waveform";
 import { diffDocuments, highlightIds } from "./model/versionDiff";
 import {
   PALETTE,
@@ -581,6 +581,19 @@ export default function App() {
   const toast = useCallback((text: string) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
   }, []);
+
+  /** What a fresh trace opens with: the named parts, plus every clock (§89). */
+  const waveDefaults = useMemo<WaveSignal[]>(() => {
+    const circuit = doc.circuits[sheet];
+    const wireToNet = sim.store.wireToNet;
+    const named = defaultSignals(sim.store.named);
+    if (circuit === undefined || wireToNet === null) return named;
+    return [
+      ...named,
+      ...clockSignals({ wires: circuit.wires, wireToNet, components: circuit.components }),
+    ];
+    // simVersion keeps the net map fresh across a reload.
+  }, [doc, sheet, sim.store.named, sim.store.wireToNet, simVersion]);
 
   const openWaveform = useCallback(() => {
     if (!sim.store.loaded) {
@@ -2044,6 +2057,7 @@ export default function App() {
         {waveOpen && (
           <WaveformView
             sim={sim}
+            defaults={waveDefaults}
             picked={wavePicked}
             circuitLabel={doc.circuits[sheet]?.name ?? ""}
             onClose={() => setWaveOpen(false)}

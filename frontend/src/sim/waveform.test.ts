@@ -4,10 +4,12 @@ import type { NamedComponent, NetDiffs, WireValue } from "../ipc/types";
 import {
   WAVE_SAMPLE_CAP,
   WaveformRecorder,
+  clockSignals,
   bitLaneIndices,
   defaultSignals,
   extractBit,
   pickedSignals,
+  projectSamples,
   stepSegments,
   valueAt,
   valueBits,
@@ -22,139 +24,166 @@ const hex = (v: number, bits = 4): WireValue => ({
 const X = (bits = 1): WireValue => ({ v: "0", x: "1".repeat(Math.ceil(bits / 4)), z: "0" });
 const Z = (bits = 1): WireValue => ({ v: "0", x: "0", z: "1".repeat(Math.ceil(bits / 4)) });
 
-const batch = (cycle: number, changes: Array<[number, WireValue]>, full = false): NetDiffs => ({
+/** One engine batch: `cycle` advances once per clock period, `at` per event. */
+const batch = (
+  cycle: number,
+  changes: Array<[number, WireValue, number]>,
+  full = false,
+): NetDiffs => ({
   cycle,
   full,
-  changes: changes.map(([net, val]) => ({ net, val })),
+  changes: changes.map(([net, val, at]) => ({ net, val, at })),
 });
 
-describe("WaveformRecorder", () => {
-  it("keeps every cycle even when many arrive before a paint", () => {
-    // The whole point: DiffPump merges batches per frame, so a recorder that
-    // read the merged frame would see only cycle 3's value.
+describe("WaveformRecorder: every event, not every cycle", () => {
+  it("keeps both halves of a cycle, so a clock is a square wave", () => {
+    // The mock states its own model: `cycle = tick / 2`, and `at = tick * 50`.
+    // Two events share cycle 0 (clk rises at 0, falls at 50) — recording one
+    // sample per cycle collapses them and the clock comes out flat, which is
+    // exactly the bug this pins.
     const r = new WaveformRecorder();
-    r.recordBatch(batch(0, [[7, hex(0)]]));
-    r.recordBatch(batch(1, [[7, hex(1)]]));
-    r.recordBatch(batch(2, [[7, hex(2)]]));
-    r.recordBatch(batch(3, [[7, hex(3)]]));
-    expect(r.samples(7).map((s) => [s.cycle, s.val.v])).toEqual([
-      [0, "0"],
-      [1, "1"],
-      [2, "2"],
-      [3, "3"],
-    ]);
-    expect(r.span).toEqual({ first: 0, last: 3 });
-  });
-
-  it("collapses repeated changes inside one cycle to the last value", () => {
-    const r = new WaveformRecorder();
-    r.recordBatch(batch(0, [[1, hex(0)]]));
-    r.recordBatch(batch(5, [[1, hex(9)]]));
-    r.recordBatch(batch(5, [[1, hex(3)]]));
-    expect(r.samples(1).map((s) => [s.cycle, s.val.v])).toEqual([
-      [0, "0"],
-      [5, "3"],
-    ]);
-  });
-
-  it("holds a value across cycles in which nothing changed", () => {
-    const r = new WaveformRecorder();
-    r.recordBatch(batch(0, [[1, hex(0)]]));
-    r.recordBatch(batch(1, [[1, hex(0)]])); // same value: no new sample
-    r.recordBatch(batch(9, [[1, hex(1)]]));
-    expect(r.samples(1).length).toBe(2);
-    expect(valueAt(r.samples(1), 4)?.val.v).toBe("0");
-    expect(valueAt(r.samples(1), 9)?.val.v).toBe("1");
-  });
-
-  it("seeds the initial full batch so a trace starts defined", () => {
-    const r = new WaveformRecorder();
+    // Mock-shaped: falls at the start of each cycle, rises half a cycle later.
     r.recordBatch(
-      batch(
-        0,
-        [
-          [1, hex(0)],
-          [2, hex(7)],
-        ],
-        true,
-      ),
+      batch(0, [
+        [1, hex(0, 1), 0],
+        [1, hex(1, 1), 50],
+      ]),
     );
-    expect(r.netCount()).toBe(2);
-    expect(valueAt(r.samples(2), 0)?.val.v).toBe("7");
+    r.recordBatch(
+      batch(1, [
+        [1, hex(0, 1), 100],
+        [1, hex(1, 1), 150],
+      ]),
+    );
+    r.recordBatch(
+      batch(2, [
+        [1, hex(0, 1), 200],
+        [1, hex(1, 1), 250],
+      ]),
+    );
+    const s = r.samples(1);
+    expect(s.map((x) => [x.cycle, x.t, x.val.v])).toEqual([
+      [0, 0, "0"],
+      [0, 50, "1"],
+      [1, 100, "0"],
+      [1, 150, "1"],
+      [2, 200, "0"],
+      [2, 250, "1"],
+    ]);
+
+    // Placed on the axis, the two halves of a cycle sit at .0 and .5.
+    const tb = r.timebase();
+    expect(tb.hasTime).toBe(true);
+    expect(projectSamples(s, tb).map((p) => p.x)).toEqual([0, 0.5, 1, 1.5, 2, 2.5]);
+
+    // And the trace alternates, half a cycle at each level: a square wave, not
+    // the flat line a per-cycle sample produced.
+    const segs = stepSegments(projectSamples(s, tb), 0, 3);
+    expect(segs.map((g) => [g.from, g.to, g.val.v])).toEqual([
+      [0, 0.5, "0"],
+      [0.5, 1, "1"],
+      [1, 1.5, "0"],
+      [1.5, 2, "1"],
+      [2, 2.5, "0"],
+      [2.5, 3, "1"],
+    ]);
   });
 
-  it("carries the contention flag, and clears it on the next change", () => {
+  it("derives the cycle period from the data rather than assuming one", () => {
     const r = new WaveformRecorder();
-    r.recordBatch({ cycle: 0, full: false, changes: [{ net: 1, val: X(4), contended: true }] });
-    expect(r.samples(1)[0].contended).toBe(true);
-    r.recordBatch(batch(1, [[1, hex(5)]]));
-    expect(r.samples(1)[1].contended).toBeUndefined();
+    // A 200ns period, one event per cycle.
+    for (let c = 0; c < 4; c++) r.recordBatch(batch(c, [[1, hex(c), c * 200]]));
+    const tb = r.timebase();
+    expect(tb.x(0, 0)).toBe(0);
+    expect(tb.x(200, 1)).toBe(1);
+    expect(tb.x(100, 1)).toBe(0.5);
+    expect(r.lastCycle).toBe(3);
+    expect(r.timeSpan).toEqual({ firstT: 0, firstCycle: 0, lastT: 600, lastCycle: 3 });
+  });
+
+  it("falls back to whole cycles when the core sends no `at`", () => {
+    const r = new WaveformRecorder();
+    r.recordBatch({ cycle: 0, full: true, changes: [{ net: 1, val: hex(0) }] });
+    r.recordBatch({ cycle: 1, full: false, changes: [{ net: 1, val: hex(1) }] });
+    expect(r.hasTime).toBe(false);
+    const tb = r.timebase();
+    const placed = projectSamples(r.samples(1), tb);
+    expect(placed.map((p) => p.x)).toEqual([0, 1]);
+  });
+
+  it("records no sample while a value holds, but records contention", () => {
+    const r = new WaveformRecorder();
+    r.recordBatch(batch(0, [[1, hex(0, 1), 0]]));
+    r.recordBatch(batch(0, [[1, hex(0, 1), 50]])); // same value, later event: nothing to draw
+    expect(r.samples(1)).toHaveLength(1);
+    r.recordBatch(batch(1, [[1, hex(0, 1), 100]]));
+    expect(r.samples(1)).toHaveLength(1);
+    // An X that becomes a *contended* X *is* news: the lane underlines it.
+    r.recordBatch({
+      cycle: 1,
+      full: false,
+      changes: [{ net: 1, val: X(4), at: 150, contended: true }],
+    });
+    r.recordBatch({ cycle: 2, full: false, changes: [{ net: 1, val: hex(5), at: 200 }] });
+    expect(r.samples(1).map((s) => [s.t, s.val.v, s.contended === true])).toEqual([
+      [0, "0", false],
+      [150, "0", true],
+      [200, "5", false],
+    ]);
   });
 
   it("bounds itself, keeping the newest and admitting it dropped the past", () => {
     const r = new WaveformRecorder();
     for (let c = 0; c < WAVE_SAMPLE_CAP + 50; c++) {
-      r.recordBatch(batch(c, [[1, hex(c % 16)]]));
+      r.recordBatch(batch(c, [[1, hex(c % 16), c]]));
     }
     const s = r.samples(1);
     expect(s.length).toBeLessThanOrEqual(WAVE_SAMPLE_CAP);
-    // Newest kept.
     expect(s[s.length - 1].cycle).toBe(WAVE_SAMPLE_CAP + 49);
     expect(r.truncated.has(1)).toBe(true);
   });
 
   it("clears on request", () => {
     const r = new WaveformRecorder();
-    r.recordBatch(batch(0, [[1, hex(1)]]));
+    r.recordBatch(batch(0, [[1, hex(1), 0]]));
     r.clear();
     expect(r.netCount()).toBe(0);
-    expect(r.span).toBeNull();
+    expect(r.timeSpan).toBeNull();
     expect(r.sampleCount).toBe(0);
+    expect(r.hasTime).toBe(false);
   });
 });
 
-describe("valueAt", () => {
+describe("valueAt and stepSegments on the axis", () => {
   const r = new WaveformRecorder();
-  r.recordBatch(batch(3, [[1, hex(1)]]));
-  r.recordBatch(batch(8, [[1, hex(2)]]));
-  const s = r.samples(1);
+  r.recordBatch(batch(3, [[1, hex(1), 300]]));
+  r.recordBatch(batch(8, [[1, hex(2), 800]]));
+  // Cycle 3 starts at t=300 and cycle 8 at t=800, so the derived period is 100ns
+  // per cycle and these two events sit at whole cycles 3 and 8.
+  const placed = projectSamples(r.samples(1), r.timebase());
 
   it("is null before the first sample", () => {
-    expect(valueAt(s, 2)).toBeNull();
+    expect(valueAt(placed, -1)).toBeNull();
   });
-  it("is exact on a sample boundary and holds between samples", () => {
-    expect(valueAt(s, 3)?.val.v).toBe("1");
-    expect(valueAt(s, 5)?.val.v).toBe("1");
-    expect(valueAt(s, 8)?.val.v).toBe("2");
-    expect(valueAt(s, 100)?.val.v).toBe("2");
+
+  it("holds a value between samples, on either side of an edge", () => {
+    expect(valueAt(placed, 2)).toBeNull(); // before the trace starts
+    expect(valueAt(placed, 3)?.val.v).toBe("1");
+    expect(valueAt(placed, 5)?.val.v).toBe("1");
+    expect(valueAt(placed, 8)?.val.v).toBe("2");
+    expect(valueAt(placed, 100)?.val.v).toBe("2");
   });
-});
 
-describe("stepSegments", () => {
-  const r = new WaveformRecorder();
-  r.recordBatch(batch(0, [[1, hex(1)]]));
-  r.recordBatch(batch(2, [[1, hex(2)]]));
-  r.recordBatch(batch(6, [[1, hex(3)]]));
-  const s = r.samples(1);
-
-  it("clips the window and holds the tail to its end", () => {
-    const segs = stepSegments(s, 1, 8);
-    expect(segs.map((g) => [g.from, g.to, g.val.v])).toEqual([
-      [1, 2, "1"],
-      [2, 6, "2"],
-      [6, 8, "3"],
+  it("clips a window and holds the last value to its end", () => {
+    expect(stepSegments(placed, 5, 9).map((g) => [g.from, g.to, g.val.v])).toEqual([
+      [5, 8, "1"],
+      [8, 9, "2"],
     ]);
   });
 
-  it("returns nothing before the trace starts or for an empty window", () => {
-    expect(stepSegments(s, -5, -1)).toEqual([]);
-    expect(stepSegments(s, 4, 4)).toEqual([]);
+  it("returns nothing for an empty window or an empty trace", () => {
+    expect(stepSegments(placed, 8, 8)).toEqual([]);
     expect(stepSegments([], 0, 10)).toEqual([]);
-  });
-
-  it("covers a window that falls entirely inside one held value", () => {
-    const segs = stepSegments(s, 3, 5);
-    expect(segs.map((g) => [g.from, g.to, g.val.v])).toEqual([[3, 5, "2"]]);
   });
 });
 
@@ -169,7 +198,6 @@ describe("value rendering", () => {
   it("pads a bus to its declared width and marks any unknown bit as X", () => {
     expect(waveText(hex(0xabc, 16), 16)).toBe("0ABC");
     expect(waveText(hex(5, 8), 8)).toBe("05");
-    // A bus with one X bit reads as X, matching how the canvas colours it.
     expect(waveText({ v: "f", x: "0", z: "0" }, 8)).toBe("0F");
     expect(waveText({ v: "0", x: "8", z: "0" }, 8)).toBe("X");
   });
@@ -181,7 +209,6 @@ describe("value rendering", () => {
 });
 
 describe("bit expansion", () => {
-  // 0x5 across two nibbles: bit 0 and bit 2 set.
   const val: WireValue = { v: "05", x: "00", z: "00" };
 
   it("extracts bits from the LSB up, across a nibble boundary", () => {
@@ -190,7 +217,6 @@ describe("bit expansion", () => {
     expect(extractBit(val, 2).v).toBe("1");
     expect(extractBit(val, 3).v).toBe("0");
     expect(extractBit(val, 7).v).toBe("0");
-    // Beyond the masks is 0, not a crash.
     expect(extractBit(val, 40).v).toBe("0");
   });
 
@@ -239,11 +265,7 @@ describe("pickedSignals (Add selection)", () => {
   });
 
   it("resolves a selected pin through the wire that reaches it", () => {
-    const s = pickedSignals({
-      wires,
-      wireToNet,
-      selectedPins: [{ comp: "c1", pin: "out" }],
-    });
+    const s = pickedSignals({ wires, wireToNet, selectedPins: [{ comp: "c1", pin: "out" }] });
     expect(s.map((x) => [x.label, x.net])).toEqual([["c1.out", 11]]);
   });
 
@@ -259,5 +281,38 @@ describe("pickedSignals (Add selection)", () => {
     });
     expect(s).toHaveLength(1);
     expect(s[0].net).toBe(11);
+  });
+});
+
+describe("clockSignals", () => {
+  const wires = [
+    { a: { comp: "clk1", pin: "out" }, b: { comp: "r1", pin: "clk" } },
+    { a: { comp: "g1", pin: "out" }, b: { comp: "r1", pin: "d" } },
+  ];
+  const wireToNet = new Map([
+    [0, 7],
+    [1, 8],
+  ]);
+  const components = [
+    { id: "clk1", type: "wiring.clock", name: "" },
+    { id: "g1", type: "gate.and" },
+    { id: "r1", type: "mem.register", name: "pc" },
+  ];
+
+  it("adds the clock, which is never a named part", () => {
+    const s = clockSignals({ wires, wireToNet, components });
+    expect(s.map((x) => [x.key, x.label, x.kind, x.net])).toEqual([["k:clk1", "clk", "clock", 7]]);
+  });
+
+  it("uses the clock's own name when it has one, and skips an unwired clock", () => {
+    const named = clockSignals({
+      wires,
+      wireToNet,
+      components: [
+        { id: "clk1", type: "wiring.clock", name: "CLK50" },
+        { id: "clk2", type: "wiring.clock" },
+      ],
+    });
+    expect(named.map((x) => x.label)).toEqual(["CLK50"]);
   });
 });
