@@ -455,6 +455,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
   }, [pathOn, sim, doc, sheetName, simVersion]);
 
+  // §74: the same path's *observed* settle time, offered only for a selected part
+  // that is on it — a path's delay is not a property of an arbitrary part.
+  const criticalPathNs =
+    pathIds !== null && inspectorCompId !== null && pathIds.includes(inspectorCompId)
+      ? sim.topPathDelay(sheetName)
+      : null;
+
   // U7: setup/hold violation markers for the current sheet.
   const violationMarkers = useMemo(() => {
     if (!sim.store.loaded || sim.store.timing === null) return null;
@@ -1826,6 +1833,7 @@ export default function App() {
               <InspectorPanel
                 doc={doc}
                 compId={inspectorCompId}
+                criticalPathNs={criticalPathNs}
                 selectionCount={selectedComps.length}
                 circuitIdx={sheet}
                 circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}

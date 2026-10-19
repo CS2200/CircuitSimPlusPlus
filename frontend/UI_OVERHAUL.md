@@ -1841,3 +1841,18 @@ have. It is its own `CompKind`/`BehaviorKind` pair, and the delay engine needed 
 change at all: `SinkKind` comes from the **pin name**, so `gate` lands on
 `SinkKind::Other` (a plain combinational input). It is drawn as a box for now
 (`FET`) — a proper transistor symbol is a follow-up.
+
+## 74. Follow-up batch BM (2026-10-19): the observed number beside the design one
+
+A part's delay row now has two halves when there is something to compare: `prop
+10 ns · observed 12 ns on the critical path`. The first is the published table (the
+design cost, §67); the second is what DTA actually measured for the critical path
+the part sits on.
+
+The measured half needed no new IPC surface, and the reason is worth recording: a
+commit in the delay engine is scheduled at `input_arrival + t_pd` (inertial), so a
+part's observed delay **is** its table delay by construction — a per-part field
+would re-serialize the table into every `timing_update`. What is genuinely observed
+is the path (`TimingPath.delay_ns`), which the UI already received for the canvas
+highlight. `topPathDelay()` reads that same `top_paths[0]`, and App passes it only
+for a part that is on the path.

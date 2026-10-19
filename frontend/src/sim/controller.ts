@@ -395,6 +395,20 @@ export class SimController {
   }
 
   /**
+   * Observed settle time of that same critical path (ns) — the *measured* number
+   * beside a part's design cost (UI_OVERHAUL §74). Null when the path is not on
+   * the viewed sheet, the same contract v1.1 filter `topPathIds` applies.
+   */
+  topPathDelay(sheetName?: string): number | null {
+    const timing = this.store.timing;
+    if (timing === null || this.doc === null) return null;
+    const top = timing.top_paths[0];
+    if (top === undefined || top.comps.length === 0) return null;
+    const name = sheetName ?? this.doc.circuit(0).name;
+    return top.circuit === name ? top.delay_ns : null;
+  }
+
+  /**
    * The top observed critical path as document comp ids — only when the
    * path's `circuit` is the viewed sheet (contract v1.1 filter).
    */

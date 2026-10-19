@@ -307,7 +307,27 @@ on the buffer's), a `BehaviorKind` mirroring `ControlledBuffer`'s arm with
 naming `gate` — the assertion that motivates the whole thing. The compiler names
 every exhaustive `CompKind` match the new variant breaks; that is the loop.
 
-### The measured per-part delay (IPC change authorized 2026-10-19)
+### The measured per-part delay — RESOLVED, and the contract change was not needed
+
+**Outcome (2026-10-19):** the Inspector now shows the *observed* settle time beside
+the design cost, but the contract was left alone — see below for why, because the
+reason is the interesting part.
+
+A commit in the delay engine is scheduled as `Fire { comp, gen }` at
+`input_arrival + t_pd` (inertial, `delay.rs`). So a part's **observed delay is its
+table delay by construction** — an IPC `delays` field would re-serialize the
+published table into every `timing_update` for a number the Inspector already
+shows. What *is* genuinely observed is the **path** (`TimingPath { circuit, comps,
+delay_ns }`), which the frontend already receives for the canvas highlight. The UI
+therefore reads that: `topPathDelay()` (+ `topPathIds`) with the same contract v1.1
+sheet filter, shown for a selected part that is on the path (UI_OVERHAUL §74).
+
+**Still authorized, if a per-part measured number is ever wanted for its own sake**
+(say, to show how long an overclocked chain's parts actually took): the engine
+records each component's last committed transition magnitude into a `Vec` plus an
+accessor; the contract grows `delays: [{ comp_id, ns }]` on the existing
+`timing_update` (additive, v1.3); the Inspector gains the second number everywhere
+rather than only on the path. The original sketch, for reference:
 
 - **Engine:** the delay engine already reschedules a gate's commit per input event,
   so it can record each component's last committed transition magnitude

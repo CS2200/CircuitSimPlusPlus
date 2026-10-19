@@ -69,6 +69,7 @@ export default function InspectorPanel({
   circuits = [],
   sheetCircuits = [],
   wireIdx = null,
+  criticalPathNs = null,
   filePath = null,
   onEdit,
   onNotify,
@@ -88,6 +89,8 @@ export default function InspectorPanel({
   sheetCircuits?: readonly CsxCircuit[];
   /** The single selected wire (index in the current sheet), or null. */
   wireIdx?: number | null;
+  /** Observed settle time of the critical path this part sits on (ns), else null. */
+  criticalPathNs?: number | null;
   /** Current circuit file path (autoload paths resolve next to it). */
   filePath?: string | null;
   /** Called after any document mutation (canvas repaint + status refresh). */
@@ -317,7 +320,10 @@ export default function InspectorPanel({
       {componentDelayText(comp.type) !== null && (
         <div className="inspector-row">
           <span>Delay</span>
-          <span className="inspector-file">{componentDelayText(comp.type)}</span>
+          <span className="inspector-file">
+            {componentDelayText(comp.type)}
+            {criticalPathNs !== null ? ` · observed ${criticalPathNs} ns on the critical path` : ""}
+          </span>
         </div>
       )}
 

@@ -162,6 +162,7 @@ describe("SimController", () => {
     await ctl.load(buildMockDemoDoc());
     await ctl.runUntil(3);
     expect(ctl.topPathIds()).toHaveLength(3); // demo sheet matches
+    expect(typeof ctl.topPathDelay()).toBe("number"); // …and its observed ns (§74)
     // Rewrite the timing event as belonging to a different circuit.
     const foreign = ctl.store.timing!;
     ctl.store.onTiming({
@@ -171,6 +172,7 @@ describe("SimController", () => {
     });
     expect(ctl.violationMarkers()).toEqual([]); // filtered out
     expect(ctl.topPathIds()).toBeNull(); // filtered out
+    expect(ctl.topPathDelay()).toBeNull(); // …delay too (same sheet filter)
   });
 });
 
