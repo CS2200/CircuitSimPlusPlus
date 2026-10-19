@@ -67,6 +67,7 @@ import {
 } from "./files";
 import { relativeAge } from "./lib/time";
 import { scopeHue } from "./lib/scope";
+import { instantiators, usedByText } from "./lib/subcircuit";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import {
   loadBoolPref,
@@ -427,13 +428,21 @@ export default function App() {
   // a hue of its own (stable per name) for the tab, the canvas frame and the
   // status chip, so "which scope am I in" is never a guess.
   const scope = sheet > 0 && sheetName !== undefined ? scopeHue(sheetName) : null;
+  // §80: where this sheet is used, and the way back. The parent is DERIVED from the
+  // document — the sheets that instantiate this circuit — rather than a navigation
+  // history that goes stale the moment someone switches sheets by tab.
+  const scopeParents =
+    scope !== null && sheetName !== undefined ? instantiators(doc.circuits, sheetName) : [];
+  const scopeParentName = scopeParents[0] ?? doc.circuits[0]?.name;
 
   // Palette rail groups (UI_OVERHAUL §8): Subcircuits only exists while the
   // document has more than one circuit; if the active group disappears the
   // body falls back to the first group. Computed inline — the document is
   // mutated in place, so there is no identity to memoize on.
-  const paletteGroups = PALETTE.map((g) => g.group);
-  if (doc.circuits.length > 1) paletteGroups.push("Subcircuits");
+  // The rail always carries a Subcircuits group (UI_OVERHAUL §80): a feature you
+  // only find after making your first subcircuit is one most people never find, so
+  // the group has an empty state and its own "New subcircuit" button.
+  const paletteGroups = [...PALETTE.map((g) => g.group), "Subcircuits"];
   const activePaletteGroup = paletteGroups.includes(paletteGroup) ? paletteGroup : PALETTE[0].group;
 
   // Preference persistence (best-effort; non-fatal without storage).
@@ -1771,6 +1780,16 @@ export default function App() {
               <div className="palette-body">
                 <div className="palette-group-title">{activePaletteGroup}</div>
                 <div className="palette-group" role="tabpanel" aria-label={activePaletteGroup}>
+                  {activePaletteGroup === "Subcircuits" && doc.circuits.length === 1 && (
+                    <p className="palette-hint">
+                      No subcircuits yet. Make one, then place instances of it on any sheet.
+                    </p>
+                  )}
+                  {activePaletteGroup === "Subcircuits" && (
+                    <button className="palette-new" onClick={onNewSheet}>
+                      + New subcircuit
+                    </button>
+                  )}
                   {activePaletteGroup === "Subcircuits"
                     ? doc.circuits.map(
                         (c, i) =>
@@ -1795,6 +1814,11 @@ export default function App() {
                             >
                               <CompIcon type="subcircuit" />
                               <span className="palette-item-label">{c.name}</span>
+                              {/* Where this definition is placed (§80) — the one
+                               *  thing the palette cannot otherwise tell you. */}
+                              <span className="palette-item-note">
+                                {usedByText(doc.circuits, c.name)}
+                              </span>
                             </button>
                           ),
                       )
@@ -1876,6 +1900,26 @@ export default function App() {
                   showValues={showValues}
                   showPerf={showPerf}
                 />
+                {/* §80: inside a definition, the way out — named after a sheet that
+                    really instantiates it — and where it is used. */}
+                {scope !== null && sheetName !== undefined && (
+                  <div
+                    className="scope-bar"
+                    style={{ "--scope-hue": String(scope) } as CSSProperties}
+                  >
+                    <button
+                      className="scope-back"
+                      onClick={() => {
+                        const i = doc.circuitIdxByName(scopeParentName ?? "");
+                        if (i >= 0) setSheet(i);
+                      }}
+                    >
+                      ‹ {scopeParentName}
+                    </button>
+                    <span className="scope-name">{sheetName}</span>
+                    <span className="scope-note">{usedByText(doc.circuits, sheetName)}</span>
+                  </div>
+                )}
                 {/* §77: the scope frame. A subcircuit sheet is a different scope,
                     and this says so without touching a single drawing. */}
                 {scope !== null && (

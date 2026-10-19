@@ -3129,3 +3129,72 @@ body {
 .sheet-tab-wrap[data-scope="subcircuit"] .sheet-tab.active {
   border-bottom: 2px solid hsl(var(--scope-hue) 65% 55%);
 }
+
+/* ---- Subcircuits in the palette, and the way into a definition (§80) ---- */
+.palette-hint {
+  margin: 0 0 0.3rem;
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.palette-item-note {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.palette-new {
+  background: transparent;
+  color: var(--text);
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.palette-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The scope bar: inside a definition, the way back and where it is used. The hue
+   is the sheet's own (§77), so the bar and the frame read as the same place. */
+.scope-bar {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid hsl(var(--scope-hue) 65% 55% / 0.5);
+  border-radius: 999px;
+  font-size: 0.76rem;
+}
+
+.scope-back {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.scope-back:hover {
+  color: hsl(var(--scope-hue) 65% 62%);
+}
+
+.scope-name {
+  font-weight: 600;
+}
+
+.scope-note {
+  color: var(--text-dim);
+}

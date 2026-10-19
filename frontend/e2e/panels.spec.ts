@@ -77,8 +77,10 @@ test("dock resizes by drag (grows leftward) with its own bounds", async ({ page 
 test("palette rail groups: hover swaps the body; every item keeps its icon", async ({ page }) => {
   await page.goto("/");
 
-  // One rail tab per registry group (Subcircuits appears only with >1 circuit).
-  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(7);
+  // One rail tab per registry group, plus Subcircuits — which is always on the
+  // rail now (UI_OVERHAUL §80), hint and all, so the feature is discoverable
+  // before anyone has made one.
+  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(8);
 
   // Gates is the default group.
   await expect(page.getByRole("button", { name: "AND", exact: true })).toBeVisible();
@@ -102,6 +104,12 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await checkGroup("I/O", "LED");
   await checkGroup("Misc", "TEXT");
   await checkGroup("Gates", "NAND");
+
+  // Subcircuits has no tiles to check yet (there is nothing to place), and that is
+  // the point: its empty state and New button are what make the group worth having.
+  await page.locator('[data-group="Subcircuits"]').hover();
+  await expect(page.locator(".palette-hint")).toContainText("No subcircuits yet");
+  await expect(page.locator(".palette-new")).toBeVisible();
 
   // Clicking also selects (touch/keyboard paths).
   await page.locator('[data-group="Memory"]').click();

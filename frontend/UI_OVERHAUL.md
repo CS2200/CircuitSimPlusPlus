@@ -1978,3 +1978,25 @@ core's `AttrCheck` is what rejects unknown attrs — so `width`/`height` are in 
 subcircuit's allowed set and range-checked like any other numeric attr. That split is
 the existing one: the engine checks what it can see (`1..=400`), and the editor
 clamps to the interface's floor, which needs the document to resolve.
+
+## 80. A definition is a place: a home in the palette, and a way in and out
+
+**The panel is always there.** The palette's Subcircuits group used to appear only
+once the document had a second circuit — that is, only after you had already found
+the "+" tab — which is backwards for a feature nobody has used yet. The rail always
+carries it now, with an empty state that says what a subcircuit is for and its own
+`+ New subcircuit` button. Each definition's tile also says where it is placed
+(`used by main`, `not placed yet`) and updates as you place it.
+
+**In and out.** Double-clicking an instance opens its definition — what "click into
+the box" should obviously do; the right-click jump stays as it was, and it is the one
+the e2e has pinned all along. Inside a definition a small scope bar sits at the top of
+the canvas, carrying the way back, the sheet's name, and where it is used.
+
+The parent is **derived, not remembered**: `instantiators()` (lib/subcircuit.ts) asks
+the document which sheets place a given circuit, so "back to main" always names a
+sheet that really instantiates the definition — rather than a navigation history that
+goes stale the moment someone switches sheets by tab. The same helper is what the
+palette's usage note reads, so the two can never disagree, and it is unit-tested on
+its own (a definition used by two sheets, one used by none, and a pin that merely
+shares the name).

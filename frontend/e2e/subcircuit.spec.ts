@@ -33,3 +33,42 @@ test("an instance offers its own box size in the Inspector", async ({ page }) =>
   await expect(inspector).toContainText("Height");
   await expect(inspector).toContainText("Width");
 });
+
+test("the panel is there first, and a definition is a place you can enter and leave", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // Before any subcircuit exists the group is still on the rail, with an empty
+  // state and the way to make one (§80).
+  await page.locator('[data-group="Subcircuits"]').click();
+  await expect(page.locator(".palette-hint")).toContainText("No subcircuits yet");
+  await page.locator(".palette-new").click();
+  await page.keyboard.press("Escape"); // keeps the default name
+  await page.getByRole("tab", { name: "main" }).click();
+
+  // Place an instance of it: the tile says where it is used, and that changes the
+  // moment it is placed.
+  await page.locator('[data-group="Subcircuits"]').click();
+  const tile = page.locator(".palette-group").getByRole("button", { name: "sub1" });
+  await expect(tile).toContainText("not placed yet");
+  await tile.click();
+  const canvas = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (canvas === null) throw new Error("canvas not visible");
+  const center = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+  await page.mouse.click(center.x, center.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toHaveText("Subcircuit");
+  await expect(tile).toContainText("used by main");
+
+  // Double-clicking the instance opens the definition, and the scope bar says so
+  // and knows the way back.
+  await page.mouse.dblclick(center.x, center.y);
+  await expect(page.locator(".scope-bar")).toContainText("sub1");
+  await expect(page.locator(".scope-bar")).toContainText("used by main");
+  await expect(page.locator(".scope-frame")).toBeVisible();
+
+  await page.locator(".scope-back").click();
+  await expect(page.locator(".scope-frame")).toHaveCount(0);
+  await expect(page.locator(".scope-bar")).toHaveCount(0);
+});

@@ -246,8 +246,14 @@ format bump. _(this round)_
   range check); unset still means "derive from the pins", an explicit height may
   shrink a tall default but never below one grid unit between pins, and nonsense
   falls back to the derived box. UI_OVERHAUL §79.
-  Still open here: an always-visible panel, and click-into-an-_instance_ vs the
-  template.
+  **Always-visible panel + instance vs template** _(this round)_: the palette's
+  Subcircuits group is always on the rail now (it used to appear only once the
+  document already had a second circuit — backwards for a feature nobody has used
+  yet), with an empty state, a "New subcircuit" button, and a per-tile "used by
+  main" / "not placed yet" note. Double-clicking an instance opens its definition
+  (the right-click jump stays), and inside a definition a scope bar gives the way
+  back — named after a sheet that really instantiates it, since the parent is
+  DERIVED via `instantiators()` rather than remembered. UI_OVERHAUL §80.
 
 - Primitives: **power, ground and the transistor** — all done. Power and ground
   (`wiring.power` / `wiring.ground`): fixed 1-bit sources with no attrs, additive so

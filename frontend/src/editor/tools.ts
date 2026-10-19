@@ -694,17 +694,21 @@ export class ToolMachine {
    * Double-click: select the component and open the right-dock Inspector
    * (UI_OVERHAUL §3.2 — kept as a shortcut; single selection alone also
    * opens the Inspector).
+   *
+   * A SUBCIRCUIT instance is the exception (UI_OVERHAUL §80): clicking into the box
+   * should open what it stands for, not a panel. Everything else opens the
+   * Inspector, and a constant jumps straight into its value input (§53); a register
+   * is edited inline by typing (App handles it).
    */
   doubleClick(world: Vec2): void {
     const comp = this.scene.pickComponent(world);
-    if (comp !== null) {
-      this.selection.set([comp.compId], []);
-      // Double-clicking a constant puts you straight into its value input
-      // (UI_OVERHAUL §53); a register is edited inline by typing (App handles it).
-      const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
-      this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
-      this.changed();
-    }
+    if (comp === null) return;
+    this.selection.set([comp.compId], []);
+    const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
+    const target = hit?.type === "subcircuit" ? hit.attrs?.circuit : undefined;
+    if (typeof target === "string" && target !== "") this.onOpenSubcircuit?.(target);
+    else this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
+    this.changed();
   }
 
   // ---- commands (keyboard/menu) ----
