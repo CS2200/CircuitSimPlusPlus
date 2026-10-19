@@ -134,3 +134,30 @@ test("Inspector memory: choosing a .hex file embeds the image (browser mode)", a
   expect(String(attrs?.contents ?? "")).toContain("000000de");
   await expect(page.locator(".inspector-mem-contents")).toContainText("4 words");
 });
+
+test("Inspector memory: one Clear — it lives in the editor, and it empties the image", async ({
+  page,
+}) => {
+  await page.goto("/?simdemo=1");
+  await selectImem(page);
+
+  // The panel offers choosing a file and editing the image; the bare `Clear`
+  // that used to sit between them (and did something different) is gone.
+  await expect(page.getByRole("button", { name: "Clear", exact: true })).toHaveCount(0);
+
+  // Set an image through the editor, then clear it through the same editor.
+  await page.getByRole("button", { name: "Edit hex…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Memory contents" });
+  await dialog.locator('input[data-addr="0"]').click();
+  await pasteInto(dialog, "0a 0b");
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  expect(String(imemAttrs(await doc(page))?.contents ?? "")).toContain("0000000a");
+
+  await page.getByRole("button", { name: "Edit hex…" }).click();
+  await expect(dialog.locator('input[data-addr="0"]')).toHaveValue("0000000a");
+  await dialog.getByRole("button", { name: "Clear all" }).click();
+  await expect(dialog.locator('input[data-addr="0"]')).toHaveValue("");
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  expect(imemAttrs(await doc(page))?.contents).toBeFalsy();
+  await expect(page.locator(".inspector-mem-contents")).toContainText("0 words");
+});

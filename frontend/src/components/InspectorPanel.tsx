@@ -203,6 +203,17 @@ export default function InspectorPanel({
     if ((comp.attrs ?? {})[key] === value) return;
     commit({ attrs: { ...(comp.attrs ?? {}), [key]: value } }, `attr:${key}`);
   };
+  /**
+   * Several attributes in ONE commit. Two `commitAttr` calls back to back would
+   * each spread the same (stale) `comp.attrs`, so the second silently reverts
+   * the first — e.g. "clear contents and the autoload file" undid itself.
+   */
+  const commitAttrs = (patch: Record<string, unknown>) => {
+    commit(
+      { attrs: { ...(comp.attrs ?? {}), ...patch } },
+      `attr:${Object.keys(patch).sort().join("+")}`,
+    );
+  };
 
   // Subcircuit instances pick their target from the file's circuits, not
   // free text (a typo would only surface as an engine load error).
@@ -377,16 +388,8 @@ export default function InspectorPanel({
             <button className="secondary" onClick={() => void chooseAutoload()}>
               Choose file…
             </button>
-            <button
-              className="secondary"
-              disabled={autoload === ""}
-              onClick={() => {
-                commitAttr("autoload", null);
-                onNotify?.("Autoload cleared");
-              }}
-            >
-              Clear
-            </button>
+            {/* Clearing lives inside the editor (`Clear all`), so there is one
+                clear control, not two that look alike but do different things. */}
             <button className="secondary" onClick={() => setMemOpen(true)}>
               Edit hex…
             </button>
@@ -398,9 +401,10 @@ export default function InspectorPanel({
         <MemContentsDialog
           depth={memDepth}
           bitsize={memBits}
+          autoload={autoload}
           initial={contentsImage ?? null}
-          onApply={(image) => {
-            commitAttr("contents", image);
+          onApply={(image, clearAutoload) => {
+            commitAttrs(clearAutoload ? { contents: image, autoload: null } : { contents: image });
             onEdit();
           }}
           onClose={() => setMemOpen(false)}

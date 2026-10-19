@@ -1,8 +1,8 @@
 # CircuitSim++ — Bug & Task Backlog
 
 *Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
-`0462adf`; P1 and P2 since** (the only open P2 item is an optional per-wire
-colour palette, below). The trial tester's raw list was verified item-by-item
+`0462adf`; P1 and P2 since** — two P2 items were clarified 2026-10-19 (wire
+segment deletion, one Clear) and are open below. The trial tester's raw list was verified item-by-item
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest.*
 
@@ -146,6 +146,18 @@ now scales with its bit width (`0x5` → `0x05`) *(028ffc7)*; a wired-up part's
 unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
 address *(8879681)*.
 
+**Clarified 2026-10-19 (real, being worked):**
+
+- **Wire segment deletion is all-or-nothing.** Removing an "unnecessary" wire
+  segment currently deletes the *whole wire*. Wanted: graded granularity — press
+  once to select the entire segment (bends and all), press twice to select only
+  that straight part — with segment auto-detection that never removes too much or
+  too little.
+- **One Clear, inside the memory editor.** The Inspector's `Clear` (it drops the
+  `autoload` file reference) is unnecessary beside the editor's `Clear all`; the
+  editor is the single place to clear, and `Clear all` takes the autoload file
+  with it so the capability is not lost. *(this round)*
+
 **Left (optional; maintainer's call):**
 - **Wires**: a *per-wire* colour palette, if identity colours are wanted back.
   The default is one bus colour with no net-id dependency *(66f46e0)*, and a
@@ -171,16 +183,9 @@ address *(8879681)*.
 
 ## Appendix A — Needs info (can't reproduce / ambiguous)
 
-- **"Remove unnecessary wire end segments method"** — no such method exists;
-  which symptom?
-- **"Fix clear/edit button state inconsistencies"** — which buttons?
-- **"Reposition 'Restore Version' tab to the far right"** — that control isn't a
-  tab today.
-- **"Make cycle counting continuous"** — geometry-only edits no longer reset the
-  counter (Phase 1); a *topology* change still reboots the engine, by design. If
-  the counter must survive even that, the load contract needs a `startCycle`.
-- **"Intermittent general circuit execution bug"** — a reload race is fixed
-  (`bf41341`); ask the tester for a repro if it recurs.
+- **"Intermittent general circuit execution bug"** — believed fixed by the
+  reload-race fix (`bf41341`) (the tester's read too); re-open with a repro if it
+  ever recurs.
 
 ## Appendix B — Removed from the list (fixed / by design / out of scope)
 
@@ -203,6 +208,13 @@ address *(8879681)*.
   if requested.
 - **"Remove 'Named' bubble"** — read as the history `named` badge, which is gone
   *(70f6eb4)*; recorded in the P2 list.
+- **"Reposition 'Restore Version' tab to the far right"** — this meant the
+  *History* tab's "Restore this version" / "Back to current" bar, which sat
+  misaligned at the top; fixed by unrelated work.
+- **"Make cycle counting continuous"** — fixed by the same netlist-fingerprint
+  work as Phase 1's edit fix (`bf41341`): geometry-only edits no longer reset the
+  counter. A *topology* change still reboots the engine, by design — surviving
+  even that would need a `startCycle` in the load contract.
 - **"Polish application logo"** — subjective, not actionable.
 - **"Support floating-point resistors"** — there is no resistor part, and a
   digital net is 0/1/Z/X. Clarify what's wanted.

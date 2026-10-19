@@ -23,6 +23,7 @@ const ARROW_DELTA: Readonly<Record<string, number | undefined>> = {
 export default function MemContentsDialog({
   depth,
   bitsize,
+  autoload,
   initial,
   onApply,
   onClose,
@@ -31,10 +32,16 @@ export default function MemContentsDialog({
   depth: number;
   /** Word width in bits. */
   bitsize: number;
+  /** Current `attrs.autoload` file reference ("" when none). */
+  autoload: string;
   /** Current `attrs.contents` (rle-hex) or null. */
   initial: string | null;
-  /** Apply the canonical image (null = no contents). */
-  onApply: (contents: string | null) => void;
+  /**
+   * Apply the canonical image (null = no contents). `clearAutoload` asks to
+   * drop the autoload reference as well — this dialog is the *only* place a
+   * memory is cleared (`Clear all`), so it clears all of it.
+   */
+  onApply: (contents: string | null, clearAutoload: boolean) => void;
   onClose: () => void;
 }) {
   const width = hexWidthFor(bitsize);
@@ -51,6 +58,8 @@ export default function MemContentsDialog({
   });
   const [sel, setSel] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Set by `Clear all`: Apply drops the autoload file too. */
+  const [clearAutoload, setClearAutoload] = useState(false);
   // Cell 0 starts focused/selected so a paste works without a first click.
   const [focusAddr, setFocusAddr] = useState<number | null>(0);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -128,13 +137,13 @@ export default function MemContentsDialog({
     let max = -1;
     for (const addr of cells.keys()) if (addr > max) max = addr;
     if (max < 0) {
-      onApply(null);
+      onApply(null, clearAutoload);
       onClose();
       return;
     }
     const words: number[] = new Array<number>(max + 1).fill(0);
     for (const [addr, value] of cells) if (addr <= max) words[addr] = value;
-    onApply(encodeRleHex(words, width));
+    onApply(encodeRleHex(words, width), clearAutoload);
     onClose();
   };
 
@@ -159,6 +168,7 @@ export default function MemContentsDialog({
         {error !== null && <p className="mem-error">{error}</p>}
         <p className="settings-hint">
           {cells.size.toLocaleString()} of {depth.toLocaleString()} words set · cell {selLabel}
+          {clearAutoload && autoload !== "" ? ` · Apply also clears ${autoload}` : ""}
         </p>
 
         <div className="mem-table-wrap" ref={gridRef} onKeyDown={onKeyDown}>
@@ -200,6 +210,7 @@ export default function MemContentsDialog({
             onClick={() => {
               setCells(new Map());
               setError(null);
+              setClearAutoload(true);
             }}
           >
             Clear all
