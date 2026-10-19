@@ -77,7 +77,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 
 ## 4. Component type registry (pinned naming)
 
-Type strings per DESIGN.md §6 (the authoritative list is `KNOWN_TYPES` in `crates/core/src/components.rs`): `gate.and|or|xor|not|buffer|nand|nor|xnor`, `wiring.pin|constant|clock|splitter|probe|controlled-buffer|power|ground`, `plexers.mux|demux|decoder|priority-decoder`, `arith.adder|subtractor|multiplier|divider|comparator|negator|shifter|bit-extender`, `mem.register|ram|rom`, `subcircuit`, `io.button|led|hexdisplay`, `misc.text`. Backend owns semantics; Frontend owns rendering. Adding one = Backend behavior first, then Frontend visuals.
+Type strings per DESIGN.md §6 (the authoritative list is `KNOWN_TYPES` in `crates/core/src/components.rs`): `gate.and|or|xor|not|buffer|nand|nor|xnor`, `wiring.pin|constant|clock|splitter|probe|controlled-buffer|power|ground|transistor`, `plexers.mux|demux|decoder|priority-decoder`, `arith.adder|subtractor|multiplier|divider|comparator|negator|shifter|bit-extender`, `mem.register|ram|rom`, `subcircuit`, `io.button|led|hexdisplay`, `misc.text`. Backend owns semantics; Frontend owns rendering. Adding one = Backend behavior first, then Frontend visuals.
 
 ## 5. Spawn prompts (paste-ready)
 

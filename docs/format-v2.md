@@ -142,6 +142,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32) |
 | `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
 | `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
+| `wiring.transistor` | `in`, `gate`, `out` | `bitsize` (1) — a pass gate: the `in` value while `gate` is 1, `Z` while it is 0, `X` while it is unknown (a floating `gate` halts naming `gate`) |
 | `wiring.power` / `wiring.ground` | `out` | *none* — a fixed 1-bit `1` / `0` source (UI_OVERHAUL §71); the same behaviour kind as `wiring.constant`, so a stray attr is an unknown-attr error |
 | `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only |
 | `wiring.clock` | `out` | — |

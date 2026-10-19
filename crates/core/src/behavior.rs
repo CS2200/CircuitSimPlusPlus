@@ -137,6 +137,12 @@ enum BehaviorKind {
         op: GateOp,
         bitsize: u32,
     },
+    /// Transistor / pass gate (`wiring.transistor`): the controlled buffer's
+    /// behaviour with a `gate` control, so a halt names the pin the part has.
+    Transistor {
+        /// Data width in bits.
+        bitsize: u32,
+    },
     ControlledBuffer {
         bitsize: u32,
     },
@@ -255,6 +261,7 @@ impl Behavior {
                 op: *op,
                 bitsize: *bitsize,
             },
+            CompKind::Transistor { bitsize } => BehaviorKind::Transistor { bitsize: *bitsize },
             CompKind::ControlledBuffer { bitsize } => {
                 BehaviorKind::ControlledBuffer { bitsize: *bitsize }
             }
@@ -386,6 +393,25 @@ impl Behavior {
                     acc = acc.not();
                 }
                 Ok(vec![acc])
+            }
+            BehaviorKind::Transistor { bitsize } => {
+                // A pass gate. `gate` is the control — and its NAME is what a
+                // halt reports, which is why this is not the buffer's arm.
+                let (data, gate) = (ins[0], ins[1]);
+                consume(gate, "gate")?;
+                match ctl(gate) {
+                    Bit::Zero => Ok(vec![Value::z(*bitsize)]),
+                    Bit::One => {
+                        consume(data, "in")?;
+                        Ok(vec![data.clone()])
+                    }
+                    // gate = X: it might be conducting — consume the data
+                    // conservatively, output unknown.
+                    _ => {
+                        consume(data, "in")?;
+                        Ok(vec![Value::x(*bitsize)])
+                    }
+                }
             }
             BehaviorKind::ControlledBuffer { bitsize } => {
                 let (data, en) = (ins[0], ins[1]);
@@ -742,6 +768,7 @@ impl Behavior {
                 },
                 *bitsize,
             ),
+            BehaviorKind::Transistor { bitsize } => ("wiring.transistor", *bitsize),
             BehaviorKind::ControlledBuffer { bitsize } => ("wiring.controlled-buffer", *bitsize),
             BehaviorKind::Pin { .. } => ("wiring.pin", 1),
             BehaviorKind::Constant { .. } => ("wiring.constant", 1),
@@ -1486,6 +1513,31 @@ mod tests {
 
     fn reg_ins(d: Value, en: Value) -> [Value; 3] {
         [d, k(1, 1), en] // clk=1 (engine calls rising_edge on the edge)
+    }
+
+    #[test]
+    fn transistor_conducts_on_its_gate_and_halts_naming_it() {
+        let t = mk("wiring.transistor", json!({"bitsize": 8}));
+        // gate high → conducts; gate low → floats.
+        assert_eq!(
+            t.eval(&refs(&[k(8, 0x5a), k(1, 1)])).unwrap(),
+            vec![k(8, 0x5a)]
+        );
+        assert_eq!(
+            t.eval(&refs(&[k(8, 0x5a), k(1, 0)])).unwrap(),
+            vec![Value::z(8)]
+        );
+        // gate X → unknown, and the data is consumed (it might be passing).
+        assert_eq!(
+            t.eval(&refs(&[k(8, 0x5a), Value::x(1)])).unwrap(),
+            vec![Value::x(8)]
+        );
+        // A floating gate halts ON THE GATE — not on "en", which this part does
+        // not have. That is the whole reason it is its own behaviour kind.
+        assert_eq!(
+            t.eval(&refs(&[k(8, 0x5a), Value::z(1)])),
+            Err(FloatingRead::at("gate"))
+        );
     }
 
     #[test]

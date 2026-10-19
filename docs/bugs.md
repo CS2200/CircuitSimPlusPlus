@@ -226,7 +226,9 @@ format bump. *(this round)*
   **Delete a sheet tab** is already there — the tab's right/middle-click menu
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
   active sheet re-pointed) and its e2e test predate this list.
-- Primitives: **power and ground done** (`wiring.power` / `wiring.ground` — fixed
+- Primitives: **power, ground and the transistor done** (`wiring.transistor`: a
+  pass gate that halts naming `gate`, UI_OVERHAUL §73 — drawn as a box for now, a
+  transistor symbol is a follow-up). Power and ground: (`wiring.power` / `wiring.ground` — fixed
   1-bit sources with no attrs, additive so no format bump; UI_OVERHAUL §71). A
   **transistor** (a gate-driven switch: `in`/`gate`/`out`) still needs a behaviour
   kind (and a sink kind in the delay engine for its halt message to name `gate`,

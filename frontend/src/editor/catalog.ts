@@ -517,6 +517,20 @@ const REGISTRY: Record<string, CompSpec> = {
   },
   // The constant is roomy enough to read its value (UI_OVERHAUL §55): 3x2,
   // its `out` on the right edge.
+  // A pass gate (UI_OVERHAUL §73): the controlled buffer with a `gate` control,
+  // so a floating gate halts naming the pin the part actually has.
+  "wiring.transistor": boxSpec(
+    3,
+    3,
+    [
+      { name: "in", dx: 0, dy: 1.5, kind: "in", bitsize: BUS_WIDTH },
+      { name: "gate", dx: 1.5, dy: 3, kind: "in" },
+      { name: "out", dx: 3, dy: 1.5, kind: "out", bitsize: BUS_WIDTH },
+    ],
+    "FET",
+    { label: "TRANSISTOR" },
+  ),
+
   // Power / ground (UI_OVERHAUL §71): fixed 1-bit sources drawn like a constant —
   // the caption IS the value, and there is nothing to configure.
   "wiring.power": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: 1 }], "1"),
@@ -747,6 +761,7 @@ const TYPE_NAMES: Readonly<Record<string, string>> = {
   "wiring.probe": "Probe",
   "wiring.power": "Power",
   "wiring.ground": "Ground",
+  "wiring.transistor": "Transistor",
   "wiring.splitter": "Splitter",
   "plexers.mux": "Multiplexer",
   "plexers.demux": "Demultiplexer",
@@ -818,6 +833,7 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
       { type: "wiring.probe" },
       { type: "wiring.power" },
       { type: "wiring.ground" },
+      { type: "wiring.transistor" },
     ],
   },
   {

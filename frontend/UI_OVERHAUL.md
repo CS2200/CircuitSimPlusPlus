@@ -1826,3 +1826,18 @@ tell you which source you are looking at.
 No committed screenshot contains these parts, so instead of re-blessing baselines
 the geometry is pinned by a unit test (`shapes.test.ts`) asserting both glyphs
 stay inside their rect.
+
+## 73. Follow-up batch BL (2026-10-19): the transistor
+
+A **transistor / pass gate** (`wiring.transistor`) in the Wiring group: it
+conducts `in` → `out` while `gate` is high, floats (`Z`) while it is low, and
+outputs `X` while the gate is unknown (consuming the data, since the gate might be
+open). A floating gate **halts naming `gate`**.
+
+That last sentence is why it is not simply the tri-state buffer: the buffer's arm
+hardcodes `consume(en, "en")`, and that string is what a halt reports and the
+canvas highlights — so a transistor built on it would name a pin the part does not
+have. It is its own `CompKind`/`BehaviorKind` pair, and the delay engine needed no
+change at all: `SinkKind` comes from the **pin name**, so `gate` lands on
+`SinkKind::Other` (a plain combinational input). It is drawn as a box for now
+(`FET`) — a proper transistor symbol is a follow-up.

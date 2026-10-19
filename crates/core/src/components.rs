@@ -84,6 +84,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "wiring.power",
     "wiring.probe",
     "wiring.splitter",
+    "wiring.transistor",
 ];
 
 /// Electrical direction of a pin (used for net driver/sink accounting).
@@ -185,6 +186,14 @@ pub enum CompKind {
     },
     /// Tri-state controlled buffer (`wiring.controlled-buffer`).
     ControlledBuffer {
+        /// Data width in bits.
+        bitsize: u32,
+    },
+    /// Transistor / pass gate (`wiring.transistor`): conducts `in` → `out` while
+    /// `gate` is high, floats otherwise. Electrically the controlled buffer's
+    /// shape, but its own kind so a halt names **`gate`** — that string is what
+    /// the UI highlights (`sim_halted.details`), and the buffer hardcodes `en`.
+    Transistor {
         /// Data width in bits.
         bitsize: u32,
     },
@@ -556,6 +565,20 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 vec![PinSig::i("in", b), PinSig::i("en", 1), PinSig::o("out", b)],
                 c,
                 CompKind::ControlledBuffer { bitsize: b },
+            )
+        }
+        "wiring.transistor" => {
+            let mut c = AttrCheck::new(attrs, &["bitsize"] as &[&str]);
+            let b = c.bitsize(1);
+            c.finish();
+            (
+                vec![
+                    PinSig::i("in", b),
+                    PinSig::i("gate", 1),
+                    PinSig::o("out", b),
+                ],
+                c,
+                CompKind::Transistor { bitsize: b },
             )
         }
         // A pin's direction is from the perspective of the circuit that
