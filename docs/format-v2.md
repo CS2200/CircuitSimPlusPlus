@@ -254,6 +254,11 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
 
 **Values and state initialization.**
 
+- A wire's optional `name` is a **label, not a joining rule**: two wires sharing one are
+  connected by their geometry like any other wires, and the engine ignores the name beyond
+  round-tripping it. It exists so a _tunnel_ (UI_OVERHAUL §86) can be carried in the file —
+  the new tool's replacement for the old format's `Tunnel` component, which the transpiler
+  materialises as the spanning wire that format only implied.
 - Four-state logic per DESIGN.md §4.1. **RAM powers on `X`**: a word that no
   `contents`/autoload image defines, and that no write has touched, reads `X`. Real RAM
   has no defined power-on contents, so a program that reads storage it never initialized

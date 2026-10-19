@@ -70,6 +70,13 @@ export interface CsxWire {
    * beyond round-tripping it (docs/format-v2.md §2).
    */
   color?: string;
+  /**
+   * Optional NAME: a labelled wire is a **tunnel** (UI_OVERHAUL §86) — the UI hides its
+   * route while it is unselected and reveals it, dashed, on selection, with a straight
+   * guide to each partner. The connection is still this wire's own geometry; the name
+   * is a label, not a merging rule (docs/format-v2.md §9).
+   */
+  name?: string;
 }
 
 export interface CsxCircuit {

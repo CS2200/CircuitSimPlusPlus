@@ -136,6 +136,16 @@ pub struct Wire {
     /// it. Omitted when unset so uncolored files stay byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Optional NAME: a labelled wire is the new tool's **tunnel** — a connection the
+    /// UI hides (drawn dashed only while selected, plus a straight guide to each
+    /// partner) so a sheet stays readable, while the wire itself stays real: same
+    /// length, same delay, editable and reshapable (UI_OVERHAUL §86).
+    ///
+    /// A name is a NAME, not a net-merging rule: two wires sharing one are joined by
+    /// their geometry like any other wires (docs/format-v2.md §9). Omitted when unset
+    /// so unnamed wires stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Serde wire-points codec: parses any finite JSON numbers, serializes
@@ -589,6 +599,21 @@ fn canonicalize(v: &mut Json) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_wire_name_round_trips_and_stays_cosmetic() {
+        let json = r#"{"a":{"comp":"c1","pin":"out"},"b":{"comp":"c2","pin":"in"},"points":[[0,0],[1,0]],"name":"ALU_OUT"}"#;
+        let w: super::Wire = serde_json::from_str(json).unwrap();
+        assert_eq!(w.name.as_deref(), Some("ALU_OUT"));
+        assert!(serde_json::to_string(&w)
+            .unwrap()
+            .contains(r#""name":"ALU_OUT""#));
+        // An unnamed wire serializes exactly as it always did: no `name` key at all.
+        let plain = serde_json::json!({"a":{"comp":"c1","pin":"out"},"b":{"comp":"c2","pin":"in"},"points":[[0,0],[1,0]]});
+        let w2: super::Wire = serde_json::from_value(plain).unwrap();
+        assert!(w2.name.is_none());
+        assert!(!serde_json::to_string(&w2).unwrap().contains("name"));
+    }
+
     use super::*;
 
     /// A representative document: two circuits (one used as a subcircuit),
@@ -891,6 +916,7 @@ mod tests {
     #[test]
     fn wire_segment_count() {
         let w = |n: usize| Wire {
+            name: None,
             a: Endpoint::Pin(PinEndpoint {
                 comp: "x".into(),
                 pin: "out".into(),

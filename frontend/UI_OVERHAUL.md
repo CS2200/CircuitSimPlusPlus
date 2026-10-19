@@ -2090,3 +2090,36 @@ The strip carries a 4px left pad now, so the tab's border is clear of the seam a
 boundary stops at the strip instead of passing through it. The canvas is untouched — it
 still starts at the palette's edge, so no drawing and no baseline moves — and the tabs
 still line up with the canvas content (§16's intent), just not with the panel's seam.
+
+## 86. Tunnels are wires with a name
+
+The old tool's `Tunnel` connected by label: two markers with the same label were one net,
+and nothing was drawn between them. The new tool has no such component, and it should not:
+this simulator charges delay by _drawn length_, so a connection that spans the plane has to
+be drawn across it to be honest about what it costs.
+
+So a tunnel is a **wire**:
+
+- drawn like any other wire, across the plane, bends and all — its delay is its length, and
+  a student who reshapes it changes its cost;
+- carrying a **label** (`Wire.name`), which is what makes it a tunnel and what the palette
+  and the Inspector show;
+- **hidden while unselected** — the route is invisible and the LABEL is the marker, so a
+  sheet reads as the schematic it is rather than as a pile of long diagonals;
+- **revealed on selection**: the actual route, dashed, with its bends grabbable (the
+  existing bend-drag and narrowing machinery, not a new interaction state), plus a
+  **straight faint guide** to each partner — "where it should go", visible even when the
+  real route takes a detour;
+- scoped **per circuit**, like the old tool; an unpaired label warns and floats (and a
+  consumer of it halts with a `Z`, per §9).
+
+The connection is the wire's own **geometry** — that is the whole point, and the reason no
+engine change was needed. A labelled wire is not merged with its namesakes by name; the
+importer draws the spanning wire the old format implied, and the label rides along as its
+name. An imported old schematic therefore _looks_ like the old schematic: every former
+tunnel site shows its label.
+
+Two consequences worth stating, because they are the traps: reshaping or deleting a tunnel
+wire changes or breaks the connection (intended — it is a wire), and copy/paste does **not**
+carry the name, since a pasted duplicate silently joining the original's net would be a
+surprise.
