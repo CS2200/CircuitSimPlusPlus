@@ -306,7 +306,9 @@ pass; lint / unit / build / e2e green.
 Team direction: one rail icon per component group; hovering a group icon
 opens that group's components.
 
-- **Layout:** the palette is a fixed 44px **activity rail** plus the
+- **Layout:** the palette is a fixed 44px **activity rail** plus the _(superseded: the
+  rail sizes to its longest group label — `palette-rail-label` arrived later and
+  "Subcircuits" is the widest, so it measures 74px. See §85.)_ the
   resizable body. The rail carries one glyph per registry group (Gates,
   Wiring, Plexers, Arithmetic, Memory, I/O — plus Subcircuits while the
   document has more than one circuit); the body shows the active group's
@@ -435,7 +437,8 @@ unchanged).
 ## 13. Follow-up batch D (2026-10-16): rail labels + drag-wiring
 
 - **Activity rail:** every rail button now shows its group name under the icon
-  (`palette-rail-label`; the rail widens 56 → 68 px). The palette _panel_ width
+  (`palette-rail-label`; the rail widens 56 → 68 px — **stale, see §85: it measures
+  74px**). The palette _panel_ width
   is unchanged, so canvas geometry and the sheet-tab inset are unaffected.
 - **Wire gesture** — the report was "drag a wire from one component to another,
   then I click the wire and it re-routes it, and even clicking something else
@@ -526,7 +529,10 @@ run on Linux.
   settings-style card — same head + ✕ close, hint-free single field, and
   Cancel/accent-submit buttons as the Settings dialog, instead of the old
   bare `help-card`.
-- **Tabs align with the canvas**: the strip has no left padding, so the first
+- **Tabs align with the canvas** _(superseded by §84: a flush first tab lands its border
+  on the palette/editor boundary, and the active tab paints itself in the canvas colour,
+  so the boundary ran through it — the strip carries a small left inset now)_: the strip
+  has no left padding, so the first
   tab's edge lines up with the grid edge (it already sat above the canvas
   column only, per §15).
 - **Hex grid editing**: the memory dialog's table no longer stretches while its

@@ -1,4 +1,4 @@
-# `.csx` — CircuitSim++ File Format v3 (normative)
+# `.csx` — CircuitSim++ File Format v4 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
 > **current** format, version 4.
@@ -340,7 +340,7 @@ the schema constrains common shapes only.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://circuitsim-plus-plus/schema/csx-v3.json",
+  "$id": "https://circuitsim-plus-plus/schema/csx-v4.json",
   "title": "CircuitSim++ .csx v3",
   "type": "object",
   "additionalProperties": false,

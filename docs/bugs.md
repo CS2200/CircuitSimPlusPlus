@@ -7,7 +7,8 @@ against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), 200 backend + 343 unit + 64 e2e tests green. The
+and RAMs have no `rst` pin), **203 backend + 381 unit + 77 e2e** tests green. RAM powers
+on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
 committed `.csx` fixtures are gated against their generators in CI
 (`node scripts/build.mjs fixtures`), and the specs were re-audited against the
 code the same day — `DESIGN.md`, `docs/format-v2.md`, `docs/ipc.md`,
@@ -469,6 +470,11 @@ did the right thing for an `X` address and for a past-end address, and a write w
 `we = X` already stored `X`. An image or a write makes a word defined, explicitly
 including a zero. Normative statement: docs/format-v2.md §9; also DESIGN.md §4.1,
 UI_OVERHAUL §82.
+
+**Still open (UI).** The memory dialog should say what an unset word now means and offer
+**Fill with 0s** (UI_OVERHAUL §82): "no image" now means "all unknown", and the common
+case — a lab that wants a zeroed memory — deserves one click rather than hand-typing an
+RLE run.
 
 **Question for the Head TA — registers.** RAM now powers on `X`; registers still power on
 `0`. The same argument applies to them (a real flip-flop's power-on value is
