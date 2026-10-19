@@ -2197,3 +2197,50 @@ leaves the result `X`, and an `X` below a known `1` is masked by it.
 Transpiler side: `PriorityEncoderPeer`'s `Enable In`/`Enable Out`/`Group Signal` now map one
 to one onto `en_in`/`en_out`/`valid`, so the two pins that the old→new conversion used to drop
 are carried across instead.
+
+## 89. The waveform viewer
+
+`DESIGN.md` §2.2 had the waveform viewer as a **v1 non-goal** ("probes + inspection cover the
+need"). Watching a running design is worth more than that, and it turned out to cost no new
+engine and no new IPC: the viewer is a _view_ over the `net_diffs` stream the UI already
+receives. The non-goal is revoked in place there rather than quietly dropped.
+
+**The one thing that had to change.** `DiffPump` deliberately merges engine batches down to at
+most one per animation frame, keeping the latest value of each net (DESIGN.md §7.2) — right for
+painting, fatal for a trace: at speed many cycles pass between frames, and a merged frame keeps
+only the last one, so whole cycles would be missing from the picture. So the pump gained an
+optional **`onRaw` tap** that sees every batch _before_ the merge, and the recorder reads that.
+The ≤ 1-per-frame rule stays exactly what it was: a painting rule.
+
+**What is recorded.** One sample per cycle per net — the value the net settled to in that cycle.
+Repeated changes inside a cycle collapse to the last (the axis has no finer resolution), and a
+cycle in which a net did not move adds no sample; `valueAt` walks back to the one still in
+effect. That is both correct for a cycle axis and compact — an idle net costs one entry for the
+whole run. Recording is bounded (`WAVE_SAMPLE_CAP` per net, `WAVE_TOTAL_CAP` overall,
+oldest-first) and a net that lost history is marked, so the view can show `…` instead of lying
+about the past. `sim_reset` drops the trace: it is one run, and the engine restarts at cycle 0.
+
+**Rows.** A fresh trace opens with every **named part** the engine exposed a `value_net` for —
+probes, registers, RAM, ROM (contract v1.2), which is what that field exists for and is always
+meaningful, unlike a nameless wire. **Add selection** appends the current canvas selection: a
+selected wire is itself, and a selected part contributes its **output pin's** net (`out`, `q`,
+`dout`) — the value you would probe. Resolving _which_ pin is the registry's per-type pin spec,
+so App does it and the viewer just draws. A bus can be expanded into per-bit lanes by
+double-clicking its label.
+
+**Axis and colours.** Cycles only: that is the model the course reasons in, and the delay
+model's ns (`at`) is on every change if a finer axis is ever wanted. Lane colours are the
+canvas's own — `theme.wire[state]` — so a signal is the same colour in the trace as on the
+schematic (§35). That required moving `wireValueState` out of the scene and into `lib/value.ts`,
+because a value must _read_ the same way in both places; the scene imports it from there now.
+A contended net (a real driver fight, §4.1) gets a violation-coloured underline.
+
+**Layout.** A full view, like version history: `app-main.wave` hides the palette, canvas and
+dock, and the viewer takes the area. The sim transport is **not** hidden — `SimBar` lives in the
+header — so you can step, run to a cycle or play while the trace is open, and _Follow_ keeps the
+newest cycle at the right edge like a scope. Wheel zooms at the cursor, dragging the canvas pans.
+
+**What is still open.** Breakpoints. `HaltReason::Breakpoint` exists in `api.rs` but nothing
+constructs it, and the old `BreakpointPeer` converts to a probe. Setting one from a value in the
+trace is the natural next step — which is why `bugs.md` always triaged "waveform viewer" and
+"debugging with breakpoints" as one item.

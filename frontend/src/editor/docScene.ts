@@ -13,11 +13,12 @@ import {
   type Vec2,
 } from "../render/geom";
 import { polylinePath, rectPath, roundedPath, wirePath } from "../render/paths";
-import type { PathCmd, Renderer, WireState } from "../render/renderer";
+import type { PathCmd, Renderer } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
+import { wireValueState } from "../lib/value";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
 import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
@@ -68,17 +69,6 @@ export interface SimOverlay {
   pulses?: readonly { wireIdx: number; phase: number }[] | null;
   /** Engine cycle count (a clock's phase when its own output is unwired, §51). */
   cycle?: number;
-}
-
-/** Collapse a 4-state value to a render state (X dominates, then Z). */
-export function wireValueState(val: WireValue): WireState {
-  if (maskNonzero(val.x)) return "x";
-  if (maskNonzero(val.z) && !maskNonzero(val.v)) return "z";
-  return maskNonzero(val.v) ? "high" : "low";
-}
-
-function maskNonzero(hex: string): boolean {
-  return hex !== "" && BigInt(`0x${hex}`) !== 0n;
 }
 
 /**

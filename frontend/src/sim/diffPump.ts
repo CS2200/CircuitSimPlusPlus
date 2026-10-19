@@ -8,6 +8,13 @@
  * change keeps its v1.1 `at` timestamp (latest batch's, like the value) so
  * U7 pulses can spawn from engine event times. `full` is OR-ed across the
  * merged batches: a full (initial-paint) frame never spawns pulses.
+ *
+ * `onRaw` is the **lossless tap**: it sees every batch, before the merge, and
+ * is what the waveform recorder listens to (`sim/waveform.ts`, UI_OVERHAUL
+ * §89). A trace cannot use the merged frames — at speed many cycles pass
+ * between paints and the merge would keep only the last value of each net, so
+ * whole cycles would be missing from the picture.  The tap is optional and
+ * costs nothing when absent.
  */
 
 import type { NetDiffs, NetId, WireValue } from "../ipc/types";
@@ -35,10 +42,13 @@ export class DiffPump {
   constructor(
     private readonly onFlush: FlushHandler,
     private readonly schedule: (cb: () => void) => void = (cb) => requestAnimationFrame(() => cb()),
+    /** Lossless per-batch tap (waveform recording); sees pre-merge batches. */
+    private readonly onRaw?: (diffs: NetDiffs) => void,
   ) {}
 
   /** Merge one engine batch into the pending frame. */
   push(diffs: NetDiffs): void {
+    this.onRaw?.(diffs);
     for (const c of diffs.changes) {
       const change: StampedChange = { val: c.val, at: c.at };
       if (c.contended === true) change.contended = true;

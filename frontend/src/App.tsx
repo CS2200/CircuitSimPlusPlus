@@ -14,11 +14,12 @@ import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import CanvasMenu, { type CanvasMenuAction } from "./components/CanvasMenu";
 import type { CanvasMenuState } from "./editor/tools";
-import { AppLogoIcon, HistoryIcon, RedoIcon, UndoIcon } from "./components/icons";
+import { AppLogoIcon, HistoryIcon, RedoIcon, UndoIcon, WaveIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 
 import HistoryDrawer from "./components/HistoryDrawer";
+import WaveformView from "./components/WaveformView";
 import HistoryPreview from "./components/HistoryPreview";
 import ClosePrompt, { type CloseChoice } from "./components/ClosePrompt";
 import RecoveryDialog from "./components/RecoveryDialog";
@@ -36,6 +37,7 @@ import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
+import { pickedSignals, type WaveSignal } from "./sim/waveform";
 import { diffDocuments, highlightIds } from "./model/versionDiff";
 import {
   PALETTE,
@@ -194,6 +196,7 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
       ["Ctrl+S / Ctrl+Shift+S", "save / save as"],
       ["Ctrl+Z / Ctrl+Y", "undo / redo"],
       ["Ctrl+Alt+H", "version history"],
+      ["Ctrl+Alt+W", "waveform viewer"],
     ],
   },
   {
@@ -202,6 +205,7 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
       ["Ctrl+J", "step one tick"],
       ["Ctrl+K", "run (until halt) / pause"],
       ["Ctrl+R", "reset (autoload re-applies)"],
+      ["Ctrl+Alt+W", "waveform viewer (trace the run)"],
     ],
   },
   {
@@ -276,6 +280,7 @@ export default function App() {
   } | null>(null);
   // Version history (autosave phase 3): the dialog's own little state.
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [waveOpen, setWaveOpen] = useState(false);
   const [versions, setVersions] = useState<VersionMeta[]>([]);
   const [historySelectedId, setHistorySelectedId] = useState<string | null>(null);
   const [historyPreview, setHistoryPreview] = useState<string | null>(null);
@@ -507,6 +512,34 @@ export default function App() {
   // (UI_OVERHAUL §11), so the dock is Inspector-only.
   const selectedComps = status?.selectedComponents ?? EMPTY_SELECTION;
   const selectedWires = status?.selectedWires ?? EMPTY_SELECTION_NUM;
+  /**
+   * Signals the current canvas selection would add to the trace (UI_OVERHAUL
+   * §89).  A selected wire is itself; a selected part contributes its OUTPUT
+   * pin's net (a gate's `out`, a register's `q`) — the value you would probe.
+   * Resolved here rather than in the viewer because picking that pin needs the
+   * registry's per-type pin specs.
+   */
+  const wavePicked = useMemo<WaveSignal[]>(() => {
+    if (!waveOpen) return [];
+    const circuit = doc.circuits[sheet];
+    const wireToNet = sim.store.wireToNet;
+    if (circuit === undefined || wireToNet === null) return [];
+    const selectedPins: { comp: string; pin: string }[] = [];
+    for (const id of selectedComps) {
+      const comp = circuit.components.find((c) => c.id === id);
+      if (comp === undefined) continue;
+      const out = compPins(comp, doc.circuits).find((pin) => pin.kind === "out");
+      if (out !== undefined) selectedPins.push({ comp: id, pin: out.name });
+    }
+    return pickedSignals({
+      wires: circuit.wires,
+      wireToNet,
+      selectedWires,
+      selectedPins,
+    });
+    // simVersion keeps the net map fresh across a reload.
+  }, [waveOpen, doc, sheet, selectedComps, selectedWires, sim, simVersion]);
+
   const inspectorCompId = selectedComps.length === 1 ? selectedComps[0] : null;
   const inspectorWireIdx =
     selectedComps.length === 0 && selectedWires.length === 1 ? selectedWires[0] : null;
@@ -541,6 +574,15 @@ export default function App() {
   const toast = useCallback((text: string) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
   }, []);
+
+  const openWaveform = useCallback(() => {
+    if (!sim.store.loaded) {
+      toast("Load a circuit and run the sim first — a trace has nothing to show yet");
+      return;
+    }
+    setHistoryOpen(false);
+    setWaveOpen(true);
+  }, [sim, toast]);
   /** Click a toast to dismiss: bulge briefly, then remove it. */
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
@@ -1646,6 +1688,11 @@ export default function App() {
         void openHistory();
         return;
       }
+      if (mod && e.altKey && e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        openWaveform();
+        return;
+      }
       if (e.key === "?") setShowHelp((v) => !v);
       if (e.key === "Escape") setShowHelp(false);
     };
@@ -1656,6 +1703,7 @@ export default function App() {
     onSave,
     onSaveAs,
     openHistory,
+    openWaveform,
     inspectorCompId,
     doc,
     sheet,
@@ -1725,6 +1773,14 @@ export default function App() {
                 >
                   <HistoryIcon />
                 </button>
+                <button
+                  className="icon-btn"
+                  aria-label="Waveform viewer"
+                  title="Waveform viewer (Ctrl+Alt+W) — trace the running sim"
+                  onClick={openWaveform}
+                >
+                  <WaveIcon />
+                </button>
               </>
             )}
           </>
@@ -1732,7 +1788,7 @@ export default function App() {
       />
       {/* While the history view is open it owns the viewport, so it carries a
           modifier the editor row is hidden by (§76). */}
-      <main className={`app-main${historyOpen ? " history" : ""}`}>
+      <main className={`app-main${historyOpen ? " history" : ""}${waveOpen ? " wave" : ""}`}>
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
             <StressCanvas scene={stressScene} themeName={`${theme}|${accent}`} animate={animate} />
@@ -1967,6 +2023,15 @@ export default function App() {
               />
             </aside>
           </>
+        )}
+        {waveOpen && (
+          <WaveformView
+            sim={sim}
+            picked={wavePicked}
+            circuitLabel={doc.circuits[sheet]?.name ?? ""}
+            onClose={() => setWaveOpen(false)}
+            onNotify={toast}
+          />
         )}
         {historyOpen && (
           <div className="history-view">

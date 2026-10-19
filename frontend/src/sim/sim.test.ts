@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DiffPump, type StampedChange } from "./diffPump";
+import { WaveformRecorder } from "./waveform";
 import { SimStore } from "./simStore";
 import type { NetId, WireValue } from "../ipc/types";
 
@@ -155,5 +156,44 @@ describe("SimStore", () => {
     store.applyDiffs(new Map([[7, { ...stamped("0", 30), contended: true }]]), 5);
     store.resetRunState();
     expect(store.contendedNets.size).toBe(0);
+  });
+});
+
+describe("DiffPump raw tap (waveform recording, UI_OVERHAUL §89)", () => {
+  it("sees every batch, so a trace keeps cycles the merge would drop", () => {
+    const flushes: [ReadonlyMap<NetId, StampedChange>, number][] = [];
+    const recorder = new WaveformRecorder();
+    const queue: (() => void)[] = [];
+    const pump = new DiffPump(
+      (changes, cycle) => flushes.push([changes, cycle]),
+      (cb) => queue.push(cb),
+      (diffs) => recorder.recordBatch(diffs),
+    );
+
+    // Three cycles inside one frame — exactly the case a trace cannot afford to
+    // lose, and exactly what the merged flush does lose.
+    pump.push({ cycle: 1, full: false, changes: [{ net: 0, val: val("1") }] });
+    pump.push({ cycle: 2, full: false, changes: [{ net: 0, val: val("2") }] });
+    pump.push({ cycle: 3, full: false, changes: [{ net: 0, val: val("3") }] });
+    queue.forEach((cb) => cb());
+
+    // The paint path: one flush, latest value only.
+    expect(flushes).toHaveLength(1);
+    expect(flushes[0][0].get(0)?.val.v).toBe("3");
+    expect(flushes[0][1]).toBe(3);
+
+    // The trace: every cycle.
+    expect(recorder.samples(0).map((s) => [s.cycle, s.val.v])).toEqual([
+      [1, "1"],
+      [2, "2"],
+      [3, "3"],
+    ]);
+  });
+
+  it("is optional: a pump with no tap behaves exactly as before", () => {
+    const flushes: number[] = [];
+    const pump = new DiffPump((_c, cycle) => flushes.push(cycle), sync);
+    pump.push({ cycle: 4, full: false, changes: [{ net: 0, val: val("1") }] });
+    expect(flushes).toEqual([4]);
   });
 });

@@ -102,7 +102,9 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 - Built-in Verilog/VHDL import. (The external Yosys transpiler is a separate tool; if it's wanted again it needs a new emitter — v2 has no tunnels to lean on. Out of scope for v1.)
 - Conversion of legacy `.sim` files (course material is rebuilt by hand).
 - Multi-clock-domain designs (never used in this course).
-- Waveform viewer (probes + inspection cover the need).
+- ~~Waveform viewer~~ — **now in v1** (UI_OVERHAUL §89). It turned out to need no new
+  engine or IPC surface: it is a view over the `net_diffs` stream the UI already receives,
+  tapped before the per-frame merge so a trace keeps every cycle (§7.2).
 - Browser/web builds — **explicitly rejected**: desktop app; students install real software.
 
 ---
@@ -376,7 +378,7 @@ Now that we know the circuit canvas is a custom renderer either way, the honest 
 Sim runs on a dedicated Rust thread. The UI never receives full per-tick state:
 
 - Core emits **diffs**: `(internal_net_id, new_value)` for changed nets + cycle counter. A few KB per frame at most.
-- UI consumes ≤ 1 batch per animation frame; at high sim speeds intermediate states are dropped — display shows the latest, never a backlog.
+- UI consumes ≤ 1 batch per animation frame; at high sim speeds intermediate states are dropped — display shows the latest, never a backlog. That merge is for *painting*: a consumer that needs history (the waveform viewer, §89) taps the batches **before** it (`DiffPump`'s `onRaw`), so a cycle in which a net moved is never lost. The engine still sends nothing extra.
 - Controls (load/play/pause/step/poke/speed) via Tauri commands; state via events.
 - Nets are engine-internal and reach the UI only as identifiers: `LoadResult.net_map` (net ↔ wires)
   and, since contract **v1.2**, `NamedComponent.value_net`. The engine gives **every pin** a net —

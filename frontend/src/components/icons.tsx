@@ -84,6 +84,16 @@ export function HistoryIcon() {
   );
 }
 
+/** Waveform viewer (UI_OVERHAUL §89): a two-bit step trace. */
+export function WaveIcon() {
+  return (
+    <Svg>
+      <path d="M2.5 8.5h3v-4h5v4h5" />
+      <path d="M2.5 14.5h5v-3h4v3h4" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon() {
   return (
     <Svg>

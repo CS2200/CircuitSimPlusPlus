@@ -7,7 +7,7 @@ against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), **205 backend + 385 unit + 78 e2e** tests green. RAM powers
+and RAMs have no `rst` pin), **205 backend + 410 unit + 79 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
 priority decoder gained CircuitSim CE's enable chain (`en_in`/`en_out`, `valid` as CE's
 Group Signal, `out` = `X` when nothing wins) so the class's cascaded encoder — the
@@ -318,9 +318,15 @@ format bump. _(this round)_
   when resolved); verify on the next release and close.
 - **Dashed lines between paired tunnels** — no tunnel feature exists (excluded by
   `DESIGN.md`); drop unless tunnels are added.
-- **Waveform viewer tab / Debugging tab with breakpoints** — `DESIGN.md` keeps
-  these out of scope for now (probes + inspection cover the need); revisit only
-  if requested.
+- **Waveform viewer** — **done** (UI_OVERHAUL §89): a full-view cycle trace over the
+  existing `net_diffs` stream, recording before the per-frame merge so no cycle is dropped.
+  No engine or IPC change was needed. Signals default to the named parts and take the canvas
+  selection; the axis is cycles.
+- **Debugging tab with breakpoints** — still open, and now has a home. `HaltReason::Breakpoint`
+  exists in `api.rs` but nothing constructs it, and the halting component the old
+  `BreakpointPeer` mapped to was never built (that part converts to a probe). The natural next
+  step is to set a breakpoint from a value in the waveform viewer, which is why the two were
+  triaged together.
 - **"Remove 'Named' bubble"** — read as the history `named` badge, which is gone
   _(70f6eb4)_; recorded in the P2 list.
 - **"Reposition 'Restore Version' tab to the far right"** — this meant the

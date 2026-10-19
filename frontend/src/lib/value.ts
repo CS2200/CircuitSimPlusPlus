@@ -1,4 +1,5 @@
 import type { WireValue } from "../ipc/types";
+import type { WireState } from "../render/renderer";
 
 /**
  * Format a 4-state wire value as a bit string (MSB first), e.g. "01XZ".
@@ -19,4 +20,23 @@ export function formatWireValue(val: WireValue): string {
     else out += (v & bit) !== 0n ? "1" : "0";
   }
   return out;
+}
+
+/** True when any bit is set in a hex mask (empty/absent masks are zero). */
+function maskNonzero(hex: string): boolean {
+  return hex !== "" && BigInt(`0x${hex}`) !== 0n;
+}
+
+/**
+ * Collapse a 4-state value to a render state (X dominates, then Z).
+ *
+ * Lives here rather than in the scene because the *renderer* and the
+ * **waveform viewer** must colour a value identically: the canvas picks
+ * `theme.wire[state]` for a wire, and a trace lane does the same, so a signal
+ * is the same colour in both (UI_OVERHAUL §35/§89).
+ */
+export function wireValueState(val: WireValue): WireState {
+  if (maskNonzero(val.x)) return "x";
+  if (maskNonzero(val.z) && !maskNonzero(val.v)) return "z";
+  return maskNonzero(val.v) ? "high" : "low";
 }

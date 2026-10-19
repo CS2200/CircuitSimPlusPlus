@@ -195,3 +195,45 @@ test("U5: wires render in sim state colors (lit-circuit baseline)", async ({ pag
     maxDiffPixelRatio: 0.02,
   });
 });
+
+test("waveform viewer: traces the run and takes the canvas selection", async ({ page }) => {
+  const tick = page.getByRole("button", { name: "tick", exact: true });
+  await tick.click(); // loads the document into the core
+  await tick.click();
+  await tick.click(); // cycle 2
+
+  // Select the sheet BEFORE opening: the viewer takes over the canvas area, so
+  // "Add selection" consumes the selection that was already made.
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Control+Alt+w");
+
+  await expect(page.locator(".wave-view")).toBeVisible();
+  // The cursor readout starts at the newest recorded cycle.  It may lag the
+  // engine's cycle number, and correctly so: a cycle in which no net changed
+  // adds no sample to the trace.
+  await expect(page.locator(".wave-bar-text").last()).toHaveText(/^cycle \d+$/);
+  const rows = async (): Promise<number> =>
+    Number(
+      /(\d+) rows?/.exec(await page.locator(".wave-bar-text").first().innerText())?.[1] ?? "0",
+    );
+  const before = await rows();
+
+  // The selection resolves to each part's OUTPUT pin and the trace grows.
+  await page.getByRole("button", { name: /Add selection/ }).click();
+  await expect
+    .poll(rows, { message: "the trace gained the selected signals" })
+    .toBeGreaterThan(before);
+
+  // The sim transport lives in the header, so it still drives the run while the
+  // viewer is open — and the trace follows it to the live edge.
+  const cycle = async (): Promise<number> =>
+    Number(/cycle (\d+)/.exec(await page.locator(".wave-bar-text").last().innerText())?.[1] ?? "0");
+  const atOpen = await cycle();
+  await page.locator(".sim-runto input").fill("12");
+  await page.getByRole("button", { name: "run to" }).click();
+  await expect.poll(cycle, { message: "the trace followed the run" }).toBeGreaterThan(atOpen);
+
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.locator(".wave-view")).toHaveCount(0);
+  await expect(page.locator("canvas.circuit-canvas")).toBeVisible();
+});

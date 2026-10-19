@@ -3201,3 +3201,62 @@ body {
 .scope-note {
   color: var(--text-dim);
 }
+
+/* ---- Waveform viewer (UI_OVERHAUL §89) ---------------------------------- */
+
+.app-main.wave > .palette,
+.app-main.wave > .editor-col,
+.app-main.wave > .right-dock,
+.app-main.wave > .editor-wrap {
+  display: none;
+}
+
+.wave-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wave-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel);
+  flex: none;
+}
+
+.wave-bar-text {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.wave-bar-spacer {
+  flex: 1;
+}
+
+.wave-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.wave-canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+.wave-empty {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2rem;
+  color: var(--text-dim);
+  text-align: center;
+  pointer-events: none;
+}

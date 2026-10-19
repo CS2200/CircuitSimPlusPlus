@@ -25,6 +25,7 @@ import { CircuitDocument } from "../model/document";
 import { isPinEndpoint, type CsxEndpoint } from "../model/csx";
 import { DiffPump } from "./diffPump";
 import { SimStore } from "./simStore";
+import { WaveformRecorder } from "./waveform";
 
 /** Watch panel display modes (DESIGN.md §7.1). */
 export type ValueMode = "unsigned" | "signed" | "hex" | "bin";
@@ -69,6 +70,8 @@ function netlistSignature(doc: CircuitDocument): string {
 export class SimController {
   readonly store = new SimStore();
   private readonly pump: DiffPump;
+  /** Cycle-sampled trace of every net seen this run (UI_OVERHAUL §89). */
+  readonly waves = new WaveformRecorder();
   private readonly unlisteners: Unlisten[] = [];
   private doc: CircuitDocument | null = null;
   /**
@@ -112,6 +115,9 @@ export class SimController {
     this.pump = new DiffPump(
       (changes, cycle, full) => this.store.applyDiffs(changes, cycle, full),
       schedule,
+      // Raw batches feed the trace: pre-merge, so no cycle is ever skipped
+      // between paints (waveform.ts).
+      (diffs) => this.waves.recordBatch(diffs),
     );
     this.unlisteners.push(
       this.core.events.on(IpcEvents.NetDiffs, (d) => this.pump.push(d)),
@@ -238,6 +244,7 @@ export class SimController {
 
   unload(): void {
     this.pump.clear();
+    this.waves.clear();
     this.clearPoked();
     this.store.reset();
     this.doc = null;
@@ -252,6 +259,9 @@ export class SimController {
    */
   async reset(): Promise<void> {
     this.pump.clear();
+    // A trace is one run: the engine restarts at cycle 0, so keeping the old
+    // samples would put cycles out of order (and mean nothing).
+    this.waves.clear();
     this.clearPoked();
     this.store.resetRunState();
     return this.core.api.reset();
