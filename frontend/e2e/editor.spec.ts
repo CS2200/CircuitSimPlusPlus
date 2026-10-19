@@ -246,6 +246,26 @@ test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ 
   await expect(page.locator(".inspector-id")).toBeVisible();
 });
 
+test("the bottom zoom slider drives the camera", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(
+    () => (window as unknown as { __circuitCamera?: unknown }).__circuitCamera !== undefined,
+  );
+  const scale = () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __circuitCamera: () => { scale: number } }).__circuitCamera().scale,
+    );
+  expect(await scale()).toBeCloseTo(16, 5); // the default fit
+
+  // The slider is log₂(scale): 6 → 64 px/unit, 2 → 4 px/unit.
+  const slider = page.getByLabel("Zoom");
+  await slider.fill("6");
+  await expect.poll(scale).toBeCloseTo(64, 5);
+  await slider.fill("2");
+  await expect.poll(scale).toBeCloseTo(4, 5);
+});
+
 test("the status bar explains how to finish or cancel a wire", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "AND", exact: true }).click();

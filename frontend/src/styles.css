@@ -2469,6 +2469,26 @@ body {
   cursor: grabbing;
 }
 
+/* Bottom zoom slider (P2): a quiet control floating at the canvas's bottom
+ * edge. */
+.canvas-zoom {
+  position: absolute;
+  bottom: 0.45rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  border: 1px solid var(--panel-border);
+}
+
+.canvas-zoom input {
+  width: 8rem;
+}
+
 .canvas-overlay {
   position: absolute;
   /* Flush with the canvas edge so it lines up with the circuit tab above it

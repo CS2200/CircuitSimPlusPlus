@@ -137,6 +137,13 @@ export default function CanvasHost({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef(new Camera(0, 0, BASE_SCALE));
+  /**
+   * Bottom zoom slider: the camera's scale mirrored into React (so the handle
+   * follows wheel zooming as well as dragging it). The camera itself stays a
+   * mutable ref — the 60 FPS path never re-renders — and only a zoom change
+   * touches state.
+   */
+  const [zoom, setZoom] = useState(BASE_SCALE);
   const viewportRef = useRef<Viewport>({ width: 1, height: 1, dpr: 1 });
   const themeRef = useRef<Theme | null>(null);
   const dirtyRef = useRef(true);
@@ -188,6 +195,7 @@ export default function CanvasHost({
     cam.y = sceneBounds.y + sceneBounds.h / 2;
     cam.scale = BASE_SCALE;
     alignToGrid();
+    setZoom(cam.scale);
     dirtyRef.current = true;
   }, [sceneBounds, alignToGrid]);
 
@@ -301,6 +309,7 @@ export default function CanvasHost({
         Math.exp(-e.deltaY * 0.0015),
         viewportRef.current,
       );
+      setZoom(cameraRef.current.scale);
       scheduleAlign();
       dirtyRef.current = true;
     };
@@ -511,6 +520,29 @@ export default function CanvasHost({
           onDoubleClick?.(worldOf(e), infoOf(e));
         }}
       />
+      {!bench && (
+        <label className="canvas-zoom" title="Zoom">
+          {/* Log₂ of the camera scale, so the range covers exactly the camera's
+           *  limits (2..128 px per grid unit) with the default 16 in the
+           *  middle — a linear slider would squash every useful zoom into its
+           *  first tenth (P2). */}
+          <input
+            type="range"
+            min={1}
+            max={7}
+            step={0.05}
+            value={Math.log2(zoom)}
+            aria-label="Zoom"
+            onChange={(e) => {
+              const scale = 2 ** Number(e.target.value);
+              cameraRef.current.scale = scale;
+              alignToGrid();
+              setZoom(scale);
+              dirtyRef.current = true;
+            }}
+          />
+        </label>
+      )}
       {showPerf && (
         <div className="canvas-overlay">
           {fpsText}
