@@ -36,15 +36,16 @@
 //! | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal (§4.1) |
 //! | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
 //!
-//! When a control input is X (mux select, buffer enable, register
-//! enable/reset, RAM write-enable), behaviors consume *conservatively* —
+//! When a control input is X (mux select, buffer enable, register enable,
+//! RAM write-enable), behaviors consume *conservatively* —
 //! any input that could affect the output is consumed.
 //!
 //! ## Documented semantics decisions (flagged for review)
 //!
-//! - **Register reset is synchronous** (sampled at the rising edge, wins
-//!   over enable) — the course teaches synchronous design (§4.3's register
-//!   timing model assumes it).
+//! - **A register has no reset input.** It latches `d` on a rising edge while
+//!   `en` is asserted and holds otherwise; restarting a circuit is the
+//!   session's job (`sim_reset`, which also re-applies memory autoload), never
+//!   a pin's — a canvas-side reset wire hid what the clock was doing.
 //! - **Registers and RAM power on at 0** (contents/autoload aside), not X
 //!   — matches legacy CircuitSim and keeps grading deterministic.
 //! - **RAM addressing:** `depth` is required to be a power of two at load
@@ -640,10 +641,6 @@ impl Behavior {
                 Ok(())
             }
             BehaviorKind::Ram { bitsize, words, .. } => {
-                // Pin signature (input order): addr, din, we, clk, rst. An
-                // UNWIRED rst reads Z, treated as deasserted (0) — a RAM that
-                // drives only we/clk keeps working. A synchronous reset wins
-                // over a write (mirrors the register).
                 // Pin signature (input order): addr, din, we, clk. `clk` needs
                 // no handling here — the engine calls this on its 0→1 edge.
                 let (addr, din, we) = (ins[0], ins[1], ins[2]);
@@ -792,7 +789,7 @@ impl Behavior {
     }
 
     /// Set a register's stored value (live poke, UI decision). Temporary: the
-    /// next clock edge latches `d`/`rst` as usual. Returns false for non-registers.
+    /// next clock edge latches `d` as usual. Returns false for non-registers.
     pub fn set_register(&mut self, v: Value) -> bool {
         if let BehaviorKind::Register { state } = &mut self.kind {
             *state = v;
@@ -1517,7 +1514,7 @@ mod tests {
             r.rising_edge(&refs(&reg_ins(k(8, 1), Value::z(1)))),
             Err(FloatingRead::at("en"))
         );
-        // Unknown enable → state unknown; unknown reset → state unknown.
+        // Unknown enable → state unknown.
         r.rising_edge(&refs(&reg_ins(k(8, 5), Value::x(1))))
             .unwrap();
         assert_eq!(r.eval(&[]).unwrap(), vec![Value::x(8)]);

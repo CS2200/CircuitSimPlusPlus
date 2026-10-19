@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fixture generator for the course-scale .csx fixtures (BACKEND.md B11).
 
-Emits JSON in format v3 (docs/format-v2.md). The fixtures are committed; this
+Emits JSON in format v4 (docs/format-v2.md). The fixtures are committed; this
 generator is how they were made, and how to regenerate after a format, pin or
 delay-table change:
 
@@ -66,7 +66,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 3,
+            "version": 4,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

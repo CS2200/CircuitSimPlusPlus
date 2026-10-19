@@ -1,6 +1,6 @@
 //! Interactive simulation session — the [`crate::api::Sim`] contract keystone
 //! the Tauri shell wires to (`crates/app`, FRONTEND.md task U5; contract
-//! v1.1).
+//! v1.2).
 //!
 //! One [`Session`] owns one open circuit: the stored [`Document`], the
 //! flattened [`Netlist`], and the live delay-aware engine. All engine access

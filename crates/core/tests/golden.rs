@@ -6,10 +6,11 @@
 //! platform-dependent ordering, RNG, wall-clock in eval) flips a hash
 //! and fails CI. Negative fixtures must produce their error class.
 //!
-//! Fixture regeneration: `python3 tests/gen/gen_fixtures.py`. Hash
-//! re-blessing after an *intentional* engine-semantics change:
-//! `CSIM_BLESS=1 cargo test -p csim-core --test golden` prints the new
-//! table to paste below.
+//! Fixture regeneration: `python3 tests/gen/gen_fixtures.py` (+ gen_cpus.py);
+//! `node scripts/check-fixtures.mjs` fails CI if the committed files drift from
+//! their generators. Hash re-blessing after an *intentional* engine-semantics
+//! change: `CSIM_BLESS=1 cargo test -p csim-core --test golden -- --nocapture`
+//! *prints* the new table — paste it below (the file is not rewritten).
 
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
@@ -212,6 +213,39 @@ fn run_scenario(s: &Scenario) -> (u64, u64) {
     }
     eng.run(s.cycles).expect("scenario runs clean");
     (eng.t_obs(), eng.trace_hash())
+}
+
+/// Fixtures are committed artifacts of `tests/gen/*.py` (plus the
+/// hand-authored `sanity.csx`), and the loader migrates older versions
+/// silently — so a fixture left behind at the previous version would otherwise
+/// go unnoticed, and this suite would quietly exercise the migration path
+/// rather than today's parser. Assert the raw files are written at the current
+/// version.
+#[test]
+fn fixtures_are_written_at_the_current_version() {
+    let current = csim_core::format::FORMAT_VERSION;
+    let mut checked = 0;
+    for entry in std::fs::read_dir(FIXTURES).expect("fixtures dir read") {
+        let path = entry.expect("fixture dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("csx") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("fixture read");
+        let version = serde_json::from_str::<serde_json::Value>(&text)
+            .expect("fixture parses as JSON")
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(|| panic!("{} has no version field", path.display()));
+        assert_eq!(
+            version,
+            u64::from(current),
+            "{} is written at version {version}; regenerate the fixtures for version {current} \
+             (`python3 tests/gen/gen_fixtures.py && python3 tests/gen/gen_cpus.py`)",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked >= 5, "only {checked} fixtures were checked");
 }
 
 #[test]

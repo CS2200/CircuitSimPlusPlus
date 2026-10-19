@@ -1,12 +1,52 @@
 # CircuitSim++ — Bug & Task Backlog
 
 *Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
-`0462adf`** — see "Phase 1 — done" below.* The trial tester's raw list was
-verified item-by-item against the code; already-fixed, by-design, and
-out-of-scope entries live in the appendices so the active list stays honest.
+`0462adf`; P1 and every unambiguous P2 item since** — see the sections below.*
+The trial tester's raw list was verified item-by-item against the code;
+already-fixed, by-design, and out-of-scope entries live in the appendices so the
+active list stays honest.
+
+**Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
+and RAMs have no `rst` pin), 200 backend + 343 unit + 64 e2e tests green. The
+committed `.csx` fixtures are gated against their generators in CI
+(`node scripts/build.mjs fixtures`), and the specs were re-audited against the
+code the same day — `DESIGN.md`, `docs/format-v2.md`, `docs/ipc.md`,
+`docs/autograder.md`, `docs/delay-table.md`, `docs/tasks/**`, `README.md`, the
+frontend planning docs, and the source comments that restated them.
 
 **Priority:** **P1** course-facing · **P2** UX polish (small) · **P3** feature
 (sizeable) · **?** needs info.
+
+---
+
+## Latest round — done (2026-10-19)
+
+- **Text annotations load again.** `misc.text` had no behavior, and the builder
+  treats a missing behavior as a hard load error — so *placing a text label made
+  the document unloadable*. It now has an inert `BehaviorKind::Text` (no pins, no
+  evaluation), with a delay-engine test that loads a document containing one and
+  runs it. *(commit `c42533f`)*
+- **Settings spacing.** The 24-hour clock toggle sat directly under the accent
+  swatches with only its bottom margin; `.accent-row + .settings-toggle` now
+  carries top spacing. *(commit `c42533f`)*
+- **The `rst` pin is gone, format-wide** — the item the previous two attempts
+  reverted. `mem.register` is `d, clk, en, q` and `mem.ram` is
+  `addr, din, dout, we, clk` in engine, format, fixtures, tests, frontend and
+  docs. The pin only ever existed because the old simulator had no RAM autoload:
+  a canvas button wired into every register's reset was how a circuit restarted.
+  Both replacements exist now — memory autoload on load/reset, and the
+  transport's **reset** (Ctrl+R) — so the pin was dead weight, and a reset trace
+  across a schematic hid what the clock was doing. *(commit `72b8473`)*
+- **…and that break is migrated, not just declared** *(this round)*: the format
+  is now **v4** (`FORMAT_VERSION`), with a v3 → v4 migration that drops wiring to
+  the retired pins — including wires *junctioned onto* a dropped wire, the
+  fan-out shape a shared reset produced — and renumbers the surviving `join`
+  targets. The steps chain, so a v2 file (which also predates v3 but used `rst`
+  too) is walked v2 → v3 → v4 in one load. A circuit saved by the tester before
+  this change still opens. The frontend mirrors the chain, and the fixtures were
+  regenerated at v4 with a golden test asserting they never lag the version
+  (otherwise the suite would quietly test the migration path instead of today's
+  parser). *(this round)*
 
 ---
 
@@ -74,7 +114,9 @@ regeneration.
 
 ## P2 — UX polish
 
-**Done:** the cycle input is typed (`cycle #`, no steppers) *(70f6eb4)*; palette
+**Done:** the cycle input is typed (`cycle #`, no steppers) *(70f6eb4)*; the
+**wiring hint** sits in the status bar and timestamps have a **12-/24-hour**
+preference *(93c93ea)*; a **bottom zoom slider** on the canvas *(6227196)*; palette
 tooltips name the part *(70f6eb4)*; sheet-tab right-click → Rename *(70f6eb4)*;
 Reload-from-Disk confirms first *(70f6eb4)*; the `named` history pill is gone
 *(70f6eb4)*; the header light/dark toggle is gone — Settings is the single path
@@ -92,12 +134,11 @@ unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
 address *(8879681)*.
 
 **Left:**
-- **Canvas**: bottom zoom slider.- **Clock**: 12-/24-hour timestamp toggle.
-- **Wire editing**: on-screen "press Esc to exit" hint.
-- **Wires**: stable colors — done for the default (one bus colour, no net-id
-  dependency, *(66f46e0)*); a *per-wire* palette is still open if the maintainer
-  wants identity colours back.
-- **Theme**: reconcile light-mode history colors.
+- **Wires**: a *per-wire* colour palette is still open if the maintainer wants
+  identity colours back (the default is one bus colour with no net-id dependency,
+  *(66f46e0)*; a wire's own `attrs.color` already wins).
+- **Theme**: reconcile light-mode history colors — **needs a repro**; the
+  drawer's swatches read the theme tokens, and nothing supplied shows a mismatch.
 - **Trim (ambiguous)**: "simplify the reset label" — the transport already reads
   `reset`, so which control? — and "tidy tab / timing-readout alignment" (no
   repro).

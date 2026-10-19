@@ -55,7 +55,7 @@ at X MHz". When staff finalize the numbers, a **new table version**
 
 Unknown fields anywhere in the document are rejected.
 
-## Wire delay semantics (contract v1.1, F14)
+## Wire delay semantics (contract v1.2, F14)
 
 Wire delay is **per-path, never net-lumped**: a sink pin's arrival is
 

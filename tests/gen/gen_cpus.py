@@ -15,7 +15,7 @@ the multicycle; their est_time comparison is the course's lesson
 (CPI ~4.5 vs ~1.x). Pipeline hazards are handled by stalling (no
 forwarding) — the students' first-pipeline shape.
 
-Writes format v3 JSON plus the program image:
+Writes format v4 JSON plus the program image:
 
     python3 tests/gen/gen_cpus.py            # rewrite tests/fixtures/
     python3 tests/gen/gen_cpus.py --out DIR  # write somewhere else
@@ -122,7 +122,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 3,
+            "version": 4,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

@@ -5,6 +5,11 @@ Items deliberately deferred until the **real Backend session** (B9's concrete
 is pinned to a specific swap point so the integration pass is mechanical.
 Ordered roughly by dependency.
 
+> **Historical.** This was the pre-integration plan; the swap points named here
+> were all retired when the real `Session` landed, and the contract has since
+> moved to **v1.2** (`docs/ipc.md`). Kept as the record of how the mock seam
+> was closed — see `UI_OVERHAUL.md` for what the UI did next.
+
 ---
 
 ## 1. Wire the real engine (Backend B9 → this repo)

@@ -1,7 +1,7 @@
 # Autograder Interface — `csim` CLI (normative)
 
 **Status:** Implemented by `crates/cli` + `crates/core/src/autograde.rs` (BACKEND.md tasks
-B9/B10; contract v1.1). Where this file and `DESIGN.md` §8 disagree, `DESIGN.md` wins (route
+B9/B10; contract v1.2). Where this file and `DESIGN.md` §8 disagree, `DESIGN.md` wins (route
 corrections through the human). This document is the normative realization of the §8 contract:
 exit codes, the assertion language, the JSON test-spec, the snapshot format, named-component
 addressing, and memory preloading + sandboxing.

@@ -114,7 +114,7 @@ export class CircuitDocument {
     if (data.format !== CSX_FORMAT) {
       throw new Error(`not a CircuitSim++ file (format=${JSON.stringify(data.format)})`);
     }
-    migrateDelayModel(data);
+    migrate(data);
     if (data.version !== CSX_VERSION) {
       throw new Error(`unsupported .csx version ${JSON.stringify(data.version)}`);
     }
@@ -739,21 +739,33 @@ export class CircuitDocument {
 // ---- pure structural helpers (exported for tests) ----
 
 /**
- * Backward compatibility: early frontend builds called the `wiring.pin`
- * terminal "port"; the backend registry has always named it "pin". Files
- * saved (browser download) during that window carry "port" endpoints that
- * fail engine validation (unresolved-pin) — rename them on load.
+ * Load-time version migrations, mirroring the backend's `format::migrate`
+ * (`crates/core/src/format/mod.rs`). Each step upgrades a document **one**
+ * version and the steps run in order, so a file several versions behind is
+ * walked forward — a v2 file can carry `rst` wiring too (the pin predates v3),
+ * so v2 → v3 → v4 is the real path.
  */
+function migrate(data: CsxDocument): void {
+  let version = data.version as number;
+  if (version === 2) {
+    dropDelayModel(data);
+    version = 3;
+  }
+  if (version === 3) {
+    dropResetWires(data);
+    version = CSX_VERSION;
+  }
+  if (version !== (data.version as number)) {
+    data.version = version as typeof CSX_VERSION;
+  }
+}
+
 /**
- * Backward compatibility: format v2 carried `settings.delayModel`
- * ("zero" | "delay") and a per-instance `attrs.delay` override; v3 dropped
- * both — the zero-delay engine was removed (every file is delay-aware) and
- * timing is unit-wide. Strip them and bump the version. Mirrors the
- * backend's `format::migrate`.
+ * v2 → v3: `settings.delayModel` ("zero" | "delay") and the per-instance
+ * `attrs.delay` override were dropped — the zero-delay engine was removed
+ * (every file is delay-aware) and timing is unit-wide.
  */
-function migrateDelayModel(data: CsxDocument): void {
-  const version = data.version as number;
-  if (version !== 2) return;
+function dropDelayModel(data: CsxDocument): void {
   const settings = data.settings as unknown as Record<string, unknown> | undefined;
   if (settings !== undefined) delete settings.delayModel;
   for (const c of data.circuits ?? []) {
@@ -761,9 +773,59 @@ function migrateDelayModel(data: CsxDocument): void {
       if (comp.attrs !== undefined) delete comp.attrs.delay;
     }
   }
-  data.version = CSX_VERSION;
 }
 
+/**
+ * v3 → v4: `mem.register`/`mem.ram` lost their `rst` pin, so wiring to one can
+ * never resolve again. Drop those wires — and any wire junctioned onto one (its
+ * net is gone; that fan-out is what a shared reset produced) — then renumber
+ * the junction targets that survive, so the wires that remain still point at
+ * the same neighbour.
+ */
+function dropResetWires(data: CsxDocument): void {
+  for (const c of data.circuits ?? []) {
+    const retired = new Set(
+      (c.components ?? [])
+        .filter((x) => x.type === "mem.register" || x.type === "mem.ram")
+        .map((x) => x.id),
+    );
+    const wires = c.wires ?? [];
+    const dropped = wires.map(() => false);
+    for (;;) {
+      let changed = false;
+      wires.forEach((w, i) => {
+        if (dropped[i]) return;
+        const gone = [w.a, w.b].some((e) =>
+          isPinEndpoint(e) ? e.pin === "rst" && retired.has(e.comp) : dropped[e.join.wire] === true,
+        );
+        if (gone) {
+          dropped[i] = true;
+          changed = true;
+        }
+      });
+      if (!changed) break;
+    }
+    const remap: (number | null)[] = [];
+    let next = 0;
+    for (const drop of dropped) remap.push(drop ? null : next++);
+    wires.forEach((w, i) => {
+      if (dropped[i]) return;
+      for (const e of [w.a, w.b]) {
+        if (isPinEndpoint(e)) continue;
+        const target = remap[e.join.wire];
+        if (target !== null && target !== undefined) e.join.wire = target;
+      }
+    });
+    c.wires = wires.filter((_, i) => !dropped[i]);
+  }
+}
+
+/**
+ * Backward compatibility: early frontend builds called the `wiring.pin`
+ * terminal "port"; the backend registry has always named it "pin". Files
+ * saved (browser download) during that window carry "port" endpoints that
+ * fail engine validation (unresolved-pin) — rename them on load.
+ */
 function migratePinTerminals(data: CsxDocument): void {
   for (const c of data.circuits) {
     const pinComps = new Set(c.components.filter((x) => x.type === "wiring.pin").map((x) => x.id));

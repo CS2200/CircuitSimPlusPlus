@@ -11,6 +11,8 @@
 > Follow-ups filed: pin/component spatial indexing, hover re-render churn, U4 spec-letter
 > partials (wire-thickness∝bitsize, idle-wire hover), file open/save UI (planned seam).
 
+_(Recorded as of that date. See `README.md` for the live gate and `docs/bugs.md` for the open backlog; the `.csx` format has been revised since — `docs/format-v2.md` is normative, not the sketch quoted in `DESIGN.md` §5.2.)_
+
 **Mission:** Build the Tauri + React desktop app per `DESIGN.md` — Milestones M2, M3, the UI side of M4, and M5.
 **Owns:** `frontend/**`, `crates/app/**` (Tauri shell), `docs/ipc.md`, `.github/workflows/frontend.yml`.
 **Never touches:** `crates/core/**`, `crates/cli/**`, `tests/**`, `docs/tasks/**`, `DESIGN.md`, `docs/format-v2.md`, `docs/delay-table.md`. (Exception: may append `crates/app` to the root `Cargo.toml` workspace members — nothing else in that file.)

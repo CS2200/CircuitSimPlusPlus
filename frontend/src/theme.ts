@@ -31,7 +31,7 @@ export interface ThemeMeta {
   readonly blurb: string;
   /** Preview chips (bg, panel, accent, high wire) — display only. */
   readonly swatches: readonly [string, string, string, string];
-  /** Light themes pair with the moon→sun toggle; dark ones with sun→moon. */
+  /** True for light themes: legibility decisions (e.g. annotation text) read it. */
   readonly light?: boolean;
 }
 
@@ -110,7 +110,7 @@ export const THEMES: readonly ThemeMeta[] = [
 
 export const DEFAULT_THEME: ThemeId = "oled";
 
-/** True for themes that pair with the light side of the light/dark toggle. */
+/** True for light themes. */
 export function isLightTheme(id: ThemeId): boolean {
   return THEMES.find((t) => t.id === id)?.light === true;
 }

@@ -80,6 +80,45 @@ describe("CircuitDocument.create/fromJson", () => {
     expect(doc.circuit(0).components[0].attrs).not.toHaveProperty("delay");
   });
 
+  it("migrates a v3 document by dropping wiring to the retired rst pins", () => {
+    // Mirrors the backend's `format::migrate` v3 → v4 step: registers and RAMs
+    // have no `rst` pin, so those wires go — including a wire junctioned onto a
+    // dropped one (a shared reset fanned out) — and the surviving junction
+    // targets are renumbered to match.
+    const v3 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 3,
+      name: "old",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [
+            { id: "n0", type: "gate.not", pos: [0, 0] },
+            { id: "n1", type: "gate.not", pos: [2, 0] },
+            { id: "n2", type: "gate.not", pos: [4, 0] },
+            { id: "r1", type: "mem.register", pos: [6, 0] },
+            { id: "r2", type: "mem.register", pos: [6, 4] },
+          ],
+          wires: [
+            { a: { comp: "n0", pin: "out" }, b: { comp: "r1", pin: "rst" }, points: [] },
+            { a: { join: { wire: 0, segment: 0 } }, b: { comp: "r2", pin: "rst" }, points: [] },
+            { a: { comp: "n0", pin: "out" }, b: { comp: "n1", pin: "in" }, points: [] },
+            { a: { comp: "n1", pin: "out" }, b: { comp: "n2", pin: "in" }, points: [] },
+            { a: { join: { wire: 3, segment: 0 } }, b: { comp: "n2", pin: "in" }, points: [] },
+          ],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v3);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    const wires = doc.circuit(0).wires;
+    expect(wires).toHaveLength(3);
+    expect(wires[0].a).toEqual({ comp: "n0", pin: "out" });
+    // The junction that pointed at wire 3 now points at wire 1.
+    expect(wires[2].a).toEqual({ join: { wire: 1, segment: 0 } });
+  });
+
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
     // Early frontend builds called the wiring.pin terminal "port"; files
     // from that window fail engine validation — rename on load.

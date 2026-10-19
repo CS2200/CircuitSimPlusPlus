@@ -12,14 +12,14 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/format-v2.md`](docs/format-v2.md) | The `.csx` file format + simulation semantics (§9) |
 | [`docs/delay-table.md`](docs/delay-table.md) | Delay model, 74LS timing table, DTA/STA conventions |
 | [`docs/autograder.md`](docs/autograder.md) | Exit codes, assertion grammar, test-spec & snapshot schemas |
-| [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.1) |
+| [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
 ## Repository layout
 
 ```
 crates/
-  core/     csim-core — simulation engine (both modes), .csx format, STA/DTA,
+  core/     csim-core — delay-aware simulation engine, .csx format, STA/DTA,
             autograder API, Session (the api::Sim the UI drives)
   cli/      csim — headless autograder / CLI binary
   app/      csim-app — Tauri desktop shell (thin adapter over csim-core)
@@ -36,6 +36,7 @@ docs/       Specs and task lists (above)
 |---|---|---|
 | Rust | recent stable (developed on 1.98) | via rustup preferred (needed for the musl target) |
 | Node.js | ≥ 22 | includes npm |
+| Python | 3.8+ | fixture drift gate (`node scripts/build.mjs fixtures`); `PYTHON=` overrides the interpreter |
 | Playwright browsers | — | `npx playwright install --with-deps chromium` (e2e only) |
 | Linux webview deps | — | desktop app only: `sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` (Ubuntu; equivalents on other distros) |
 
@@ -80,7 +81,7 @@ musl`); the raw invocations below are what it and CI execute.
 ```bash
 # Build + test the workspace default members (core + cli; not the Tauri shell)
 cargo build
-cargo test -p csim-core -p csim          # ~193 tests
+cargo test -p csim-core -p csim          # 200 tests (unit + 9 golden + CLI)
 cargo clippy -p csim-core -p csim --all-targets -- -D warnings
 cargo fmt --all -- --check
 
@@ -130,25 +131,29 @@ npm run dev            # Vite dev server on :1420 — runs against the in-app
                        # MOCK core (frontend/.env.development sets VITE_MOCK_CORE=1),
                        # so UI work needs no Rust
 
-npm run test           # unit tests (vitest, ~182)
+npm run test           # unit tests (vitest, 342)
 npm run test:e2e       # Playwright (needs browsers, see prerequisites)
 npm run lint           # eslint + prettier --check
 npm run build          # tsc --noEmit && vite build → frontend/dist
 ```
 
-The UI is organized around a menu bar: **File** (New / Open / Save / Save As
-— native dialogs in the shell, download/upload fallbacks in the browser),
-**Simulation** (step/run-to/reset, speed presets, zero/delay mode,
-critical-path highlight), and **Subcircuits** (new/rename). Every circuit in
-the file gets a tab in the scrolling tab strip (double-click renames; "+"
-adds a subcircuit). A subcircuit's interface is its named **pin components**
-(`wiring.pin`): input pins face left by default, output pins (`isOutput`)
-face right. Instances are placed from the palette's Subcircuits group (any
-number of copies); the instance's pins mirror the target's interface — inputs
-on the left edge, outputs on the right, in document order, matching the
-netlist's bridge order. File shortcuts: Ctrl+O open, Ctrl+S save,
-Ctrl+Shift+S save-as. Saving always goes through the engine's canonical
-serializer (`save_circuit`), never local JSON.
+The UI is a VS Code-style **top bar** (File / Edit / View / Help) over a
+**transport bar** (play-pause, step one tick, reset, run-to, speed presets, live
+`T_obs`), a **palette** rail of part families, a **right-dock Inspector** for the
+selection, and a **sheet-tab strip** with one tab per circuit. Preferences —
+theme, accent, grid, live values, default label side, 12-/24-hour timestamps,
+autosave — live in **File → Settings…** (the only path to theme, light or dark);
+byte-level history is **File → Version history…** (Ctrl+Alt+H). A zoom slider
+sits at the bottom edge of the canvas.
+
+A subcircuit's interface is its named **pin components** (`wiring.pin`): input
+pins face left by default, output pins (`isOutput`) face right. Instances are
+placed from the palette's Subcircuits group (any number of copies); the
+instance's pins mirror the target's interface — inputs on the left edge, outputs
+on the right, in document order, matching the netlist's bridge order. Double-click
+a tab to rename it, "+" to add a subcircuit, right-click for the tab menu. File
+shortcuts: Ctrl+O open, Ctrl+S save, Ctrl+Shift+S save-as. Saving always goes
+through the engine's canonical serializer (`save_circuit`), never local JSON.
 
 The browser-based dev flow uses the mock; the **real engine** is exercised
 through the Tauri shell. Gotcha: `.env.development` forces the mock in *every*
@@ -205,7 +210,7 @@ codes, assertions, test-spec files): `docs/autograder.md`.
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `.github/workflows/backend.yml` | backend paths | fmt, clippy `-D warnings`, tests, musl build, Gradescope image build |
+| `.github/workflows/backend.yml` | backend + `scripts/**` paths | fixture drift, fmt, clippy `-D warnings`, tests, musl build, Gradescope image build |
 | `.github/workflows/frontend.yml` | frontend paths | lint, unit, e2e, unsigned Tauri bundles (3 OS matrix) |
 | `.github/workflows/release.yml` | tags `v*` | release artifacts + release notes |
 

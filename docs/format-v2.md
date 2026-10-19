@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v3 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 3.
+> **current** format, version 4.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,8 +11,9 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `3`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 3 and migrates version 2 (see below).
+- Top-level `version` must be `4`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 4 and walks older files forward one version at a
+  time (see below).
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
 ## 2. Document structure
@@ -20,7 +21,7 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 3,
+  "version": 4,
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1,                     // UI clock speed at load time
@@ -40,6 +41,13 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   (the delay table alone, §4.3) — so neither field carries meaning. Migration
   is automatic on load: a v2 file loads and is re-saved as v3 with both
   removed, regardless of their old values.
+- **v3 → v4** drops wiring to the retired `rst` pins of `mem.register` and
+  `mem.ram` (§4). Resetting a circuit is the session's job (`sim_reset`, which
+  also re-applies memory autoload), never a pin's, so the pin — and every wire
+  reaching it — is gone. A wire **junctioned onto** a dropped wire goes with it
+  (its net no longer exists; that is the shape a shared reset fanned out into),
+  and the surviving wires are renumbered so every `join` target still points at
+  the same neighbour.
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -131,7 +139,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | Type | Pins | Attrs (defaults) |
 |---|---|---|
 | `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1) |
-| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32), `delay` |
+| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32) |
 | `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
 | `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
 | `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only |
@@ -242,7 +250,8 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
 
 - Four-state logic per DESIGN.md §4.1. Registers and RAM **power on at 0** (not `X`;
   contents/autoload aside) — matches legacy CircuitSim and keeps grading deterministic.
-- Register reset is **synchronous**, sampled at the rising edge, and **wins over enable**.
+- A register has **no reset input**: it latches `d` on a rising edge while `en` is asserted and
+  holds otherwise. A circuit restarts through the session (`sim_reset`), not through a pin.
 - Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
   deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
   carry values but never originate them.
@@ -269,7 +278,7 @@ simulation-halting error naming the component and pin. What counts as *consuming
 | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal |
 | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
 
-When a control input is `X` (mux select, buffer enable, register enable/reset, RAM
+When a control input is `X` (mux select, buffer enable, register enable, RAM
 write-enable), behaviors consume *conservatively* — any input that could affect the output.
 The engine enforces register/RAM edge rules immediately and combinational rules via a
 per-consumer cycle-close sweep (a pin that consumes still seeing a never-driven `Z` view
@@ -297,7 +306,7 @@ halt — F6).
 **Named access.** Autograder/watch-visible components (`mem.ram/rom`, `mem.register`,
 `wiring.probe` with a `name`) are addressed by hierarchical name: the plain name at root,
 `instance/.../name` when nested (docs/autograder.md §7). Their wire-facing `comp_id`s are
-document-order indices within the defining circuit (contract v1.1).
+document-order indices within the defining circuit (contract v1.2).
 
 **Reporting pointers.** Exit-code taxonomy, assertion grammar, JSON test-spec, snapshot
 schema, and the `est_time`/`timing_violations`/`errors` report fields: docs/autograder.md.
@@ -317,7 +326,7 @@ the schema constrains common shapes only.
   "required": ["format", "version", "name", "settings", "circuits"],
   "properties": {
     "format": { "const": "circuitsim-plus-plus" },
-    "version": { "const": 3 },
+    "version": { "const": 4 },
     "name": { "type": "string" },
     "settings": {
       "type": "object",

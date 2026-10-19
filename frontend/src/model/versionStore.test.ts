@@ -9,7 +9,7 @@ import {
 const T: HistoryTarget = { path: "/home/me/alu.csx", docKey: "session-1" };
 
 function doc(name: string): unknown {
-  return { format: "circuitsim-plus-plus", version: 3, name, settings: {}, circuits: [] };
+  return { format: "circuitsim-plus-plus", version: 4, name, settings: {}, circuits: [] };
 }
 
 afterEach(() => setHistoryStore(null));

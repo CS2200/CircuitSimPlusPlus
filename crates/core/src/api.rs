@@ -318,8 +318,9 @@ pub trait EventSink: Send {
 /// - Exactly one *full* [`NetDiffs`] batch (`full: true`, all nets) is
 ///   emitted after each successful `load_circuit_*`/`resume`/`reset`;
 ///   every later batch is diff-only (`full: false`).
-/// - A *tick* is one clock half-period in delay mode (advance to the next
-///   clock edge) and one full cycle in zero mode.
+/// - A *tick* is one clock half-period (advance to the next clock edge).
+///   There is one engine; the removed zero-delay mode had its own notion of a
+///   tick, and nothing else did.
 /// - `CompId`s on the wire are always document-order indices within the
 ///   referenced circuit (see [`NamedComponent`]); engine-internal
 ///   flattened ids are mapped back at the boundary.
@@ -395,7 +396,7 @@ pub trait Sim {
     /// from bytes has no base path and resolves against the current
     /// working directory). Emits a fresh full [`NetDiffs`] batch.
     fn reset(&mut self) {
-        unimplemented!("csim-core engine — contract v1.1")
+        unimplemented!("csim-core engine — contract v1.2")
     }
 }
 

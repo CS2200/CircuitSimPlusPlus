@@ -388,7 +388,7 @@ mod tests {
 
     fn header(circuits: &str) -> String {
         format!(
-            r#"{{"format":"circuitsim-plus-plus","version":3,"name":"t",
+            r#"{{"format":"circuitsim-plus-plus","version":{FORMAT_VERSION},"name":"t",
                 "settings":{{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
                 "circuits":[{circuits}]}}"#
         )
@@ -450,10 +450,16 @@ mod tests {
 
     #[test]
     fn wrong_version() {
-        let json = header(AND2).replace(r#""version":3"#, r#""version":4"#);
+        // One past the current version: the migration chain leaves unknown
+        // (newer) versions alone for `validate` to reject.
+        let next = FORMAT_VERSION + 1;
+        let json = header(AND2).replace(
+            &format!(r#""version":{FORMAT_VERSION}"#),
+            &format!(r#""version":{next}"#),
+        );
         let errors = check(&json);
         assert_eq!(kinds(&errors), vec![LoadErrorKind::Other]);
-        assert!(errors[0].message.contains("version 4"));
+        assert!(errors[0].message.contains(&format!("version {next}")));
     }
 
     #[test]

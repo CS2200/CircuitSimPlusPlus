@@ -36,7 +36,7 @@ use crate::components::KNOWN_TYPES;
 const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 
 /// Component kinds a table must define — everything with a nonzero delay
-/// in the reference table. Kinds not listed here are ideal (zero-delay).
+/// in the reference table. Kinds not listed here are ideal (no delay).
 const REQUIRED_KINDS: &[&str] = &[
     "arith.adder",
     "arith.comparator",

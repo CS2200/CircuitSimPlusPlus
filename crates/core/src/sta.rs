@@ -8,11 +8,11 @@
 //! STA exists so TAs can eyeball anomalies and students can bound their
 //! clock before running the suite.
 //!
-//! ## Model (contract v1.1: per-path wires + setup-inclusive totals)
+//! ## Model (contract v1.2: per-path wires + setup-inclusive totals)
 //!
 //! - **Breaks:** register `q` and source components (`wiring.pin` inputs,
 //!   constants, clocks, buttons) start paths at arrival 0. Register
-//!   `d`/`en`/`rst` and RAM `din`/`we`/`addr` are **endpoints** (they
+//!   `d`/`en` and RAM `din`/`we`/`addr` are **endpoints** (they
 //!   must settle before the clock edge); so are output pins, probes, and
 //!   LEDs/displays (they bound comb-only designs like an ALU).
 //! - **Setup-inclusive totals (F13):** an endpoint at a register or RAM
@@ -22,7 +22,7 @@
 //!   edge-to-settle (clk→Q included, setup excluded). Both conventions
 //!   are documented in docs/delay-table.md.
 //! - **Through-edges:** combinational comps contribute `prop` (table,
-//!   per-bit scaled, `attrs.delay` applied) from every input pin to
+//!   per-bit scaled) from every input pin to
 //!   every output pin; RAM/ROM `addr → dout` contributes `access`
 //!   (asynchronous read, §6).
 //! - **Wires (per-path, F14):** a sink pin's arrival adds the

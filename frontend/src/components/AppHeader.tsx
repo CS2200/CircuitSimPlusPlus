@@ -3,8 +3,8 @@ import { useRef, useState, type ReactNode } from "react";
 /**
  * Application header (UI_OVERHAUL.md §28): a Docs-style two-row bar.
  *
- *   row 1   [logo] alu.csx  ·  Saved 14:32              undo redo | history | theme
- *   row 2   File  Edit  View  Tools  Help    play tick reset run-to speed T_obs
+ *   row 1   [logo] alu.csx  ·  Saved 14:32                    undo redo | history
+ *   row 2   File  Edit  View  Help        play tick reset run-to speed T_obs
  *
  * The sim transport lives *inside* row 2 instead of owning a row of its own, so
  * the chrome stays two rows tall while the identity and the menus read like a

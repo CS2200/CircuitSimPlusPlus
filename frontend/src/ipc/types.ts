@@ -1,6 +1,6 @@
 /**
  * IPC contract types — the single source of truth the frontend compiles
- * against. Mirrors `docs/tasks/README.md` §3, `docs/ipc.md` (v1.1), and
+ * against. Mirrors `docs/tasks/README.md` §3, `docs/ipc.md` (v1.2), and
  * `crates/core/src/api.rs` field-for-field. Do not deviate.
  */
 

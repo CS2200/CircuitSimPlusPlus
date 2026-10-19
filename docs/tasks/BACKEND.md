@@ -9,6 +9,8 @@
 > Q6 (`--timeout` overflow), Q9 (cross-mode resume error message), Q10 (snapshot exit-code
 > mapping) — non-blocking follow-ups.
 
+_(Recorded as of that date. See `README.md` for the live gate and `docs/bugs.md` for the open backlog; the `.csx` format has been revised since — `docs/format-v2.md` is normative, not the sketch quoted in `DESIGN.md` §5.2.)_
+
 **Mission:** Build `csim-core` (simulation engine) and `csim-cli` (headless autograder) per `DESIGN.md` — Milestones M0 + M1, plus the engine side of M4.
 **Owns:** `crates/core/**`, `crates/cli/**`, `tests/**`, `docs/format-v2.md`, `docs/delay-table.md`, `crates/core/data/**`, `.github/workflows/backend.yml`, root `Cargo.toml`.
 **Never touches:** `frontend/**`, `crates/app/**`, `docs/tasks/**`, `DESIGN.md`, `docs/ipc.md`.

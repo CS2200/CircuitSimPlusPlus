@@ -1,5 +1,5 @@
 /**
- * TypeScript mirror of the `.csx` file format v2 (DESIGN.md §5.2). The
+ * TypeScript mirror of the `.csx` file format v4 (DESIGN.md §5.2). The
  * normative prose + JSON Schema is backend-owned (docs/format-v2.md, task
  * B2); the backend's canonical serializer and validator are authoritative —
  * saving goes through the `save_circuit` IPC command, never local JSON.
@@ -16,7 +16,8 @@
  */
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
-export const CSX_VERSION = 3;
+/** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
+export const CSX_VERSION = 4;
 
 export interface CsxSettings {
   clockHz: number;

@@ -1,5 +1,10 @@
 # Sub-Agent Task Lists — Overview, Ownership, Contracts
 
+> **These are execution records.** Everything below describes the 2026-10-06
+> parallel build and is kept as history. For the live state read `README.md`
+> and `DESIGN.md`; the open backlog is `docs/bugs.md`; the normative IPC
+> contract is `docs/ipc.md`.
+
 This directory contains the task lists for the two implementation agents:
 
 - **`BACKEND.md`** — the Backend Agent: `csim-core` + `csim-cli` (Milestones M0, M1, engine side of M4).
@@ -39,9 +44,9 @@ The only real coupling is: **Frontend needs Core's API; Core doesn't exist yet.*
 3. Integration point: when Backend B5/B6 land, Frontend U5 swaps the mock for the real Tauri commands. Same contract, no rewrites.
 4. Joint smoke test (both agents + human): load `tests/fixtures/alu.csx` in the app, run it, watch wires light up. That's MVP.
 
-## 3. IPC contract (pinned — both agents implement to this)
+## 3. IPC contract (summary — `docs/ipc.md` is normative)
 
-Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). `crates/app` (Frontend-owned) is a thin adapter over `csim_core::api` (Backend-owned); all types below are the contract.
+Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). `crates/app` (Frontend-owned) is a thin adapter over `csim_core::api` (Backend-owned). The tables below are the 2026-10-06 snapshot, updated to **v1.2**; where they and `docs/ipc.md` disagree, `docs/ipc.md` wins.
 
 **Value encoding (4-state, packed as hex masks):** a bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — bit set in `v` = 1; bit set in `x` = X (contention); bit set in `z` = Z (floating). `x` and `z` never both set for the same bit.
 
@@ -50,7 +55,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 | Command | Args | Returns |
 |---|---|---|
 | `load_circuit` | `{ path }` or `{ bytes }` | `{ ok, errors: [LoadError], net_map: [{ net: u32, wires: [u32] }], named: [{ name, kind, comp_id, value_net? }] }` |
-| `save_circuit` | `{ path, document }` | `{ ok, errors }` |
+| `save_circuit` | `{ path, document }` | `{ ok, errors }` — a document that fails validation still saves (`ok: true`) and returns the problems as warnings; only an unparseable document is refused (version snapshots stay strict) |
 | `sim_play` / `sim_pause` | `{ hz }` / `{}` | — |
 | `sim_step_tick` / `sim_step_cycles` | `{}` / `{ n }` | — |
 | `sim_run_until` | `{ cycle }` | — |
@@ -63,7 +68,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 
 | Event | Payload | Semantics |
 |---|---|---|
-| `net_diffs` | `{ cycle, changes: [{ net: u32, val: {v,x,z} }] }` | Only changed nets; ≤ 1 batch per animation frame consumed; intermediate frames may be dropped — never queue a backlog |
+| `net_diffs` | `{ cycle, full, changes: [{ net: u32, val: {v,x,z}, at?, contended? }] }` | Only changed nets (except the single `full: true` batch after load/resume/reset); `at` = ns; `contended` = a genuine driver fight; ≤ 1 batch per animation frame consumed; intermediate frames may be dropped — never queue a backlog |
 | `sim_status` | `{ running, cycle, eff_hz }` | On play/pause and ~1 Hz while running |
 | `sim_halted` | `{ cycle, reason, details }` | `reason`: `breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names component/pin for highlighting |
 | `timing_update` | `{ t_obs, est_time, violations, top_paths }` | After `sim_run_until` / pause |
@@ -72,7 +77,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 
 ## 4. Component type registry (pinned naming)
 
-Type strings per DESIGN.md §6: `gate.and|or|xor|not|buffer|nand|nor|xnor`, `wiring.pin|constant|clock|splitter|probe`, `plexers.mux|demux|decoder`, `arith.adder|subtractor|multiplier|divider|comparator|negator|shifter|bit-extender`, `mem.register|ram|rom`, `subcircuit`, `io.button|led|hexdisplay`. Backend owns semantics; Frontend owns rendering. Adding one = Backend behavior first, then Frontend visuals.
+Type strings per DESIGN.md §6 (the authoritative list is `KNOWN_TYPES` in `crates/core/src/components.rs`): `gate.and|or|xor|not|buffer|nand|nor|xnor`, `wiring.pin|constant|clock|splitter|probe|controlled-buffer`, `plexers.mux|demux|decoder|priority-decoder`, `arith.adder|subtractor|multiplier|divider|comparator|negator|shifter|bit-extender`, `mem.register|ram|rom`, `subcircuit`, `io.button|led|hexdisplay`, `misc.text`. Backend owns semantics; Frontend owns rendering. Adding one = Backend behavior first, then Frontend visuals.
 
 ## 5. Spawn prompts (paste-ready)
 

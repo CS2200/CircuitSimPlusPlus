@@ -7,7 +7,7 @@ import {
   type RecoveryWrite,
 } from "./recovery";
 
-const DOC = { format: "circuitsim-plus-plus", version: 3, name: "t" };
+const DOC = { format: "circuitsim-plus-plus", version: 4, name: "t" };
 
 function entry(over: Partial<RecoveryWrite> = {}): RecoveryWrite {
   return {

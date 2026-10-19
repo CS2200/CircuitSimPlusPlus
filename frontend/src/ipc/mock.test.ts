@@ -61,7 +61,7 @@ describe("mock core (U9)", () => {
     it("applies an embedded memory image (attrs.contents) on load", async () => {
       const csx = JSON.stringify({
         format: "circuitsim-plus-plus",
-        version: 3,
+        version: 4,
         name: "contents",
         settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
         circuits: [

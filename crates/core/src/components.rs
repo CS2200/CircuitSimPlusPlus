@@ -292,7 +292,7 @@ pub enum CompKind {
         /// Fill mode for the new upper bits (`mode` attr).
         mode: ExtendMode,
     },
-    /// Register (`mem.register`); `d`/`clk`/`en`/`rst` in, `q` out.
+    /// Register (`mem.register`); `d`/`clk`/`en` in, `q` out.
     Register {
         /// Width in bits.
         bitsize: u32,
@@ -944,8 +944,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("dout", b),
                     PinSig::i("we", 1),
                     PinSig::i("clk", 1),
-                    // Synchronous reset (UI decision): clears memory on a rising
-                    // edge with rst=1; wins over a write (see behavior.rs).
                 ],
                 c,
                 CompKind::Ram {

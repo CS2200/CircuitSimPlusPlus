@@ -1,7 +1,7 @@
-//! Shared scaffolding for the simulation engines (tasks B5/B6): behavior
-//! construction, drive-slot layout, and net resolution. Extracted so the
-//! zero-delay and delay-aware engines can never disagree on these basics
-//! (DESIGN.md §3: behaviorally identical by construction).
+//! Shared scaffolding for the simulation engine (tasks B5/B6): behavior
+//! construction, drive-slot layout, and net resolution. Extracted so the CLI,
+//! the autograder and the interactive session can never disagree on these
+//! basics (DESIGN.md §3: one engine, one set of semantics).
 
 use serde::{Deserialize, Serialize};
 

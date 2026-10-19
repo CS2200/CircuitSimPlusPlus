@@ -602,7 +602,7 @@ const REGISTRY: Record<string, CompSpec> = {
     markSize: 1.5,
   },
 
-  // Memory. Clock/reset/write-enable inputs sit on the BOTTOM edge, the way
+  // Memory. Clock and write-enable inputs sit on the BOTTOM edge, the way
   // they're drawn on a data sheet (UI_OVERHAUL §24); pin names follow
   // format-v2 §4 exactly (d/clk/en/q, addr/din/dout/we/clk, addr/out).
   "mem.register": boxSpec(
@@ -930,8 +930,8 @@ const RADIX_FIELD: AttrField = {
  * Every attribute the panel offers for a type, grouped for the Inspector
  * (§18): Width / Options. Names and defaults mirror the engine's
  * `components.rs` so what the panel writes is exactly what loads. Timing is
- * unit-wide — the per-instance `delay` attr stays in the format (§4/§6) but is
- * deliberately not offered here (§26).
+ * unit-wide: the format has no per-instance `delay` override (dropped in v3)
+ * and the panel offers none (§26).
  */
 export function editableAttrs(type: string): AttrField[] {
   return baseFields(type);

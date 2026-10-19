@@ -1,10 +1,10 @@
 # CircuitSim++ — Design & Specification
 
-**Status:** v1.0-draft — integrated. M0–M3 built and merged; contract v1.1 (docs/ipc.md) is the live IPC norm; amendments below are ratified.
+**Status:** v1.0-draft — integrated. M0–M5 built and merged; contract **v1.2** (`docs/ipc.md`) is the live IPC norm and the file format is at **v4** (`docs/format-v2.md` is normative — §5 below is the original sketch, kept as design intent); amendments below are ratified.
 
 **Changelog v0.4 → v1.0-draft (integration amendments, ratified after the parallel build)**
 
-*IPC contract (now normative in docs/ipc.md v1.1):*
+*IPC contract (now normative in docs/ipc.md, v1.2):*
 - `timing_update.violations` is a structured list `{circuit, comp_id, kind, detail}[]` (was count-only; count = length). Report keeps a `timing_violations` count field per §8.2.
 - `net_diffs.changes[]` gains optional `at` (ns since run start) - true propagation animation.
 - `NetDiffs.full`: the one initial full-state batch after load/resume/reset — the documented exception to "diffs only."
@@ -13,9 +13,9 @@
 - Tick = one clock half-period. `top_paths` entries carry `{circuit, comps, delay_ns}`; `NamedComponent` gains `circuit`; hierarchical memory addressing is `instance/…/name`.
 
 *Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/delay-table.md, docs/autograder.md):*
-- Resource caps: bitsize ≤ 32; gate inputs ≤ 64; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
+- Resource caps: bitsize ≤ 32; gate inputs ≤ 32; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
 - Power-on state = 0 for registers/RAM (deterministic, not X); combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
-- Register reset is synchronous and wins over enable; divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
+- Divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
 - The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters never).
 - `clock_half_period_ns` engine parameter (CLI default 1000 ns).
 - **Boot settle**: the delay engine settles to quiescence before cycle accounting begins — overclocked designs now correctly yield setup/hold violations instead of spurious floating-read halts.
@@ -26,6 +26,14 @@
 - Gate pins are named `in0..inN`/`out` (the §5.2 sketch's `a`/`b` was illustrative).
 
 *Deferred:* **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, draw-wires-first, delete-component-keep-wires). Proposed by the frontend build; needs schema + editor op + engine semantics. Not scheduled.
+
+**Changelog since v1.0-draft**
+
+- **IPC contract v1.2** (`docs/ipc.md`): `NamedComponent.value_net` — the engine net carrying a named part's watchable value, so a register's readout and the Watch panel work even when its value pin is unwired; and `NetChange.contended` — `X` that is a genuine driver fight, so the sim bar can call a short circuit a short circuit.
+- **File format v4** (`docs/format-v2.md` §1/§4): `mem.register` and `mem.ram` lost their `rst` pin (register `d, clk, en, q`; RAM `addr, din, dout, we, clk`). The pin existed because the old simulator had no memory autoload: a reset wire was how a circuit restarted. `sim_reset` (which re-applies autoload) replaced it, so the pin was dead weight — and a reset trace across a schematic hid what the clock was doing. A v3 → v4 migration drops wiring to the retired pins, so a file saved before this change still opens.
+- **One path to the theme, one bus colour:** the header's light/dark toggle was removed (Settings → Appearance is the only entry) and per-net rainbow hues narrowed to a single themeable bus colour — a wire's own `color` still wins (D8).
+- **UI robustness pass:** `misc.text` annotations gained an inert behavior (placing one used to make the whole document unloadable), readouts pad to their pin's declared width, a memory's `addr` pin is as wide as its address space, wired-up parts blink unconnected inputs, and the tester's transport/wiring fixes landed (typed cycle input, wiring hint in the status bar, 12-/24-hour timestamps, bottom zoom slider). Log: `docs/bugs.md`.
+
 **Audience:** CS 2200 TA team, implementers (human or agent).
 **Scope:** Clean-slate rewrite of CircuitSim (Java/JavaFX, `com.ra4king.circuitsim`, format `1.11.2-CE`) as a Rust simulation core with a Tauri + React desktop frontend, a headless autograder CLI, and a new graph-based file format.
 
@@ -232,7 +240,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 3,
+  "version": 4,
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1,
@@ -248,7 +256,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
           "pos": [15, 10],
           "rot": "E",
           "name": "",                 // optional; REQUIRED on autograder-exposed parts
-          "attrs": { "bitsize": 32, "delay": null }
+          "attrs": { "bitsize": 32 }
           // pins have no connectivity fields at all — wires own connectivity
         },
         {
@@ -308,13 +316,13 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 
 | Category | Components |
 |---|---|
-| Gates | `and or xor not buffer nand nor xnor` - configurable input count, **per-input negation bubbles** (De Morgan "bubbled" variants are configuration, not separate parts) |
+| Gates | `and or xor not buffer nand nor xnor` — configurable input count (2..32); the De Morgan "bubbled" variants are separate parts, not a per-input setting |
 | Wiring | `pin` (subcircuit I/O; bitsize; value display mode: unsigned/signed/hex), `constant`, `clock` (mirrors the global clock), `splitter` (arbitrary bit mapping — the bus plumbing), `probe` (named value display; autograder-readable) |
-| Plexers | `mux`, `demux`, `decoder` |
+| Plexers | `mux`, `demux`, `decoder`, `priority-decoder` |
 | Arithmetic | `adder`, `subtractor`, `multiplier`, `divider`, `comparator`, `negator`, `shifter`, `bit-extender` |
 | Memory | `register`, `ram`, `rom` — RAM/ROM expose `name`, `autoload`, embedded `contents` |
 | Hierarchy | `subcircuit` (pins referenced by name from wires) |
-| I/O (UI-only) | button, LED, hex display — inert headless |
+| I/O (UI-only) | button, LED, hex display, text annotation (`misc.text`) — inert headless |
 
 Deliberately **excluded**: tunnels, named wires, `counter` (register + adder is the lesson), any "black-box convenience" parts that hide the underlying logic from students.
 
@@ -343,11 +351,11 @@ Now that we know the circuit canvas is a custom renderer either way, the honest 
 
 - **Stack:** Tauri 2, React 18+, TypeScript, Vite.
 - **Circuit canvas: hand-rolled Canvas 2D inside one React component.** On `react-canvas` specifically: **no** — the Flipboard `react-canvas` library has been unmaintained for years; the maintained scene-graph equivalents (react-konva) keep a per-node retained tree, which is overhead we don't need when a frame is 5k+ batched wire paths. A custom renderer with a spatial index for hit-testing is *less* code than fighting a scene graph and gives exact control over batching, zoom-dependent detail, and state-color pass ordering. (DLS reaches the same conclusion: immediate-mode drawing via its own SebVis layer.) React owns the chrome. If Canvas2D ever profiles insufficient, the renderer hides behind an interface and PixiJS/WebGL slots in locally.
-- **Theming:** CSS custom properties; dark and light themes; per-bus wire hues (DLS-style rainbow buses). Palettes are data, not code, so a dedicated colorblind-accessibility pass later is a theme drop-in, not a refactor (deferred — no colorblind students this semester; resolved D8).
+- **Theming:** CSS custom properties; dark and light themes; **one themeable bus colour** (per-net rainbow hues read as noise on a busy datapath; a wire's own `color` still wins). Palettes are data, not code, so a dedicated colorblind-accessibility pass later is a theme drop-in, not a refactor (deferred — no colorblind students this semester; resolved D8).
 - **Wire rendering (the DLS look, App. B):** quadratic-Bézier-rounded corners, per-state colors (low / high / `X` error / `Z` floating / disconnected), thickness option ∝ bitsize, hover = brighten + net-extent highlight (the no-tunnels navigability feature).
 - **Editing:** drag-and-drop palette; click-drag wire routing with placeable bends; junction on drop-onto-wire; drag components with wires attached; copy/paste; multi-select; undo/redo; probe value display modes (unsigned/signed/hex).
 - **Simulation control:** play/pause/step-tick/step-cycle, speed slider (time compression), run-to-cycle-N, watch panel of named probes/registers, savestate/restore.
-- **Clock/reset pins: not hidden (resolved D2).** De-emphasized visually; one-click "connect to global clock." Hiding invites magic; showing teaches synchronous design.
+- **Clock pins: shown, not hidden (resolved D2).** De-emphasized visually; one-click "connect to global clock." Hiding invites magic; showing teaches synchronous design. There are no *reset* pins: resetting is the session's job (§8, `sim_reset`).
 
 ### 7.2 IPC & streaming
 
@@ -380,7 +388,7 @@ csim run submission.csx \
   --assert "probe('result') == 0x2A" \
   --assert "mem('dmem')[0x100] == 0x1234" \
   --json report.json
-# delay-aware engine + DTA is the default; --mode zero available for quick functional-only checks
+# DTA is the default and the only mode (the zero-delay engine was removed)
 ```
 
 Other subcommands: `csim validate file.csx`, `csim timing file.csx --paths 10` (observed-critical-path detail), `csim snapshot …` / `csim resume …`.
@@ -480,11 +488,11 @@ MVP for limited student pilot = M0–M3. Performance-project readiness = + M5. M
 | # | Question | Recommendation | Status |
 |---|---|---|---|
 | D1 | Delay model | **Hybrid: transport wires + inertial gates + register clk→Q/setup/hold (§4.3) — resolved (team; matches curriculum)** | ✅ resolved |
-| D2 | Hide clock/reset pins? | **No — resolved (team)**; de-emphasize + auto-connect | ✅ resolved |
+| D2 | Hide clock pins? | **No — resolved (team)**; de-emphasize + auto-connect. The `rst` inputs themselves were removed in format v4 — reset is `sim_reset`. | ✅ resolved |
 | D3 | Floating input semantics | **Halt-on-consume — resolved (team)**; watch-item §13.5 | ✅ resolved |
 | D4 | Extension | **`.csx` — resolved (team)** | ✅ resolved |
 | D7 | Tunnels? | **No tunnels, no named nets — resolved (team)** | ✅ resolved |
-| D8 | Wire palette | **DLS-style per-bus hues, themeable; accessibility pass later — resolved (team)** | ✅ resolved |
+| D8 | Wire palette | **One themeable bus colour + per-state wire colours; accessibility pass later — resolved (team)** | ✅ resolved |
 | D9 | Legacy `revisionSignatures` | **Dropped — resolved (team)** | ✅ resolved |
 | D10 | Name/licensing | **Resolved** — BSD-licensed original, 2110 permission granted; keep attribution | ✅ resolved |
 | D11 | Grading timing metric | **DTA primary; STA informational-only — resolved (team)** | ✅ resolved |

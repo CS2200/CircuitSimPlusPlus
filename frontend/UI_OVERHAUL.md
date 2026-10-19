@@ -4,6 +4,11 @@
 `DESIGN.md` and `docs/tasks/**` are human-only, so the three UX decisions below
 are recorded here until the human folds them into `DESIGN.md` §7.1.
 
+> **Reading order.** §1–§3 are normative. From §7 on this is a per-pass
+> changelog, written as each batch landed. **Where a later section contradicts an
+> earlier one, the later one wins** — §62 supersedes the memory pin layout and the
+> header theme toggle that §9 and §24 describe.
+
 **Scope (what this pass changes):**
 
 1. **Pan gestures** — holding right-click and dragging pans; Shift+left-drag
@@ -1624,3 +1629,36 @@ covers create-inline, double-click rename and the middle-click Rename… box).
 
 **Acceptance:** frontend lint / build green; e2e 54-of-55 (visual baselines
 unchanged within tolerance).
+
+## 62. Follow-up batch BA (2026-10-19): the reset pin and the header theme toggle retire
+
+Two things this document specifies are gone; where §9 and §24 describe them, this
+section wins.
+
+- **`mem.register` / `mem.ram` lost their `rst` pin** — format-wide (engine,
+  fixtures, frontend, docs). The pin existed because the old simulator had no RAM
+  autoload: a canvas button wired into every register's reset was how a circuit
+  restarted. Both replacements exist now — memory autoload on load/reset, and the
+  transport's **reset** (Ctrl+R) — so the pin was dead weight. Register pins are
+  `d`/`en` on the left edge, `clk` on the bottom, `q` on the right; RAM pins are
+  `addr`/`din` left, `dout` right, `we`/`clk` bottom. A memory's `addr` pin is as
+  wide as its address space (`ceil(log2 depth)`), and readouts pad to the pin's
+  declared width, so a 32-bit part reads `0x00000000`.
+- **The top-bar light/dark toggle is gone.** Theme — light or dark — is chosen in
+  **Settings → Appearance**, which is the only path to it (the 24-hour clock
+  toggle sits on the same row).
+
+Everything else from the tester's report is logged, with commit hashes, in
+`docs/bugs.md`: probe width auto-match, RAM/ROM previewing the word at the
+address, readouts zero-padded to the pin's declared width, a typed cycle input
+(no steppers), palette tooltips naming the part, sheet-tab right-click rename,
+reload-from-disk confirmation, **one** bus colour instead of per-net colours, red
+blinking unconnected inputs on otherwise-wired parts, the wiring hint in the
+status bar, the 12-/24-hour timestamp preference, the bottom zoom slider, inset
+focus rings on sheet tabs, annotation text that stays legible in light themes,
+and text annotations that load at all — `misc.text` had no behavior, so placing
+one made the whole document unloadable.
+
+**Acceptance:** frontend lint / 342 unit / build green, e2e 64 passed; the canvas
+baselines were re-blessed (a pin dot departed) and verified deterministic across
+two consecutive runs.
