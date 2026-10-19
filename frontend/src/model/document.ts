@@ -328,20 +328,35 @@ export class CircuitDocument {
       const glueB = isPinEndpoint(w.b) && ids.has(w.b.comp);
       if (!glueA && !glueB) return w;
       movedWires.push(i);
-      // The end segment's axis BEFORE the move: after translating the
-      // endpoint, that segment may turn diagonal — repairEnd() slides the
-      // adjacent bend so the wire keeps leaving the pin orthogonally
-      // ("routes stretch", never skew). Both ends glued = the whole wire
-      // translates rigidly (already orthogonal) — nothing to repair.
+      // Both ends are PINS of dragged parts: the wire is the same shape somewhere
+      // else, so it translates WHOLE — interior bends included. Moving only the
+      // endpoints turned a Z-route into a skew (UI_OVERHAUL §81).
+      if (glueA && glueB) {
+        return {
+          ...w,
+          points: w.points.map((p) => [p[0] + delta.x, p[1] + delta.y] as [number, number]),
+        };
+      }
+      // Otherwise a JOINED end travels with the drag exactly as a pin end does: a
+      // junction belongs to the cluster, so it must not stay behind. The
+      // re-seating pass below then puts it back exactly on its parent's segment —
+      // a no-op when the parent came along, a slide along the parent when it did
+      // not. (A wire always has at least one pin end, so at most one end is a
+      // join.)
+      const joinA = !isPinEndpoint(w.a);
+      const joinB = !isPinEndpoint(w.b);
+      // The end segment's axis BEFORE the move: after translating the endpoint,
+      // that segment may turn diagonal — repairEnd() slides the adjacent bend so
+      // the wire keeps leaving the pin orthogonally ("routes stretch", never skew).
       const axisA = glueA ? segmentAxis(w.points[0], w.points[1]) : null;
       const axisB = glueB
         ? segmentAxis(w.points[w.points.length - 1], w.points[w.points.length - 2])
         : null;
-      const translated = w.points.map((p, i) => {
-        const glued = (i === 0 && glueA) || (i === w.points.length - 1 && glueB);
-        return glued ? ([p[0] + delta.x, p[1] + delta.y] as [number, number]) : p;
+      let points = w.points.map((p, i) => {
+        const moving =
+          (i === 0 && (glueA || joinA)) || (i === w.points.length - 1 && (glueB || joinB));
+        return moving ? ([p[0] + delta.x, p[1] + delta.y] as [number, number]) : p;
       });
-      let points = translated;
       if (glueA && !glueB) points = repairEnd(points, "a", axisA);
       if (glueB && !glueA) points = repairEnd(points, "b", axisB);
       return { ...w, points };
@@ -1125,26 +1140,42 @@ export function reprojectJunctionDependents(
 ): CsxWire[] {
   const out: CsxWire[] = wires.slice();
   const moved = new Set<number>([movedIdx]);
+
+  /** Seat one joined endpoint of `w` on its (live) parent segment; null if it is
+   *  a pin end, degenerate, or its parent is not there. */
+  const seat = (w: CsxWire, end: "a" | "b"): CsxWire | null => {
+    const ep = w[end];
+    if (isPinEndpoint(ep)) return null;
+    const parent = out[ep.join.wire];
+    if (parent === undefined || parent.points.length < 2 || w.points.length < 2) return null;
+    const segment = Math.max(0, Math.min(ep.join.segment, parent.points.length - 2));
+    const pts = w.points.map((p) => [p[0], p[1]] as [number, number]);
+    const idx = end === "a" ? 0 : pts.length - 1;
+    const adjIdx = end === "a" ? 1 : pts.length - 2;
+    const axis = segmentAxis(pts[idx], pts[adjIdx]);
+    pts[idx] = nearestOnSegment(pts[idx], parent.points[segment], parent.points[segment + 1]);
+    return {
+      ...w,
+      [end]: { join: { wire: ep.join.wire, segment } },
+      points: repairEnd(pts, end, axis),
+    };
+  };
+
+  // The wire's OWN joins first (UI_OVERHAUL §81): a branch dragged away from a
+  // parent that is staying put still has to end up ON that parent — and the
+  // dependents pass below only ever touches its children.
+  for (const end of ["a", "b"] as const) {
+    const seated = seat(out[movedIdx], end);
+    if (seated !== null) out[movedIdx] = seated;
+  }
   for (let i = movedIdx + 1; i < wires.length; i++) {
     const w = out[i];
     let next: CsxWire | null = null;
     for (const end of ["a", "b"] as const) {
       const ep = (next ?? w)[end];
       if (isPinEndpoint(ep) || !moved.has(ep.join.wire)) continue;
-      const parent = out[ep.join.wire];
-      if (parent === undefined || parent.points.length < 2) continue;
-      if (next === null) {
-        next = { ...w, points: w.points.map((p) => [p[0], p[1]] as [number, number]) };
-      }
-      const segment = Math.max(0, Math.min(ep.join.segment, parent.points.length - 2));
-      next[end] = { join: { wire: ep.join.wire, segment } };
-      const pts = next.points;
-      const idx = end === "a" ? 0 : pts.length - 1;
-      const adjIdx = end === "a" ? 1 : pts.length - 2;
-      if (pts.length < 2) continue;
-      const axis = segmentAxis(pts[idx], pts[adjIdx]);
-      pts[idx] = nearestOnSegment(pts[idx], parent.points[segment], parent.points[segment + 1]);
-      next.points = repairEnd(pts, end, axis);
+      const seated = seat(next ?? w, end);
+      if (seated !== null) next = seated;
     }
     if (next !== null) {
       out[i] = next;

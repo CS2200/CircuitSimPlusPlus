@@ -2006,3 +2006,26 @@ goes stale the moment someone switches sheets by tab. The same helper is what th
 palette's usage note reads, so the two can never disagree, and it is unit-tested on
 its own (a definition used by two sheets, one used by none, and a pin that merely
 shares the name).
+
+## 81. Dragging a selection, with junctions
+
+Moving a _set_ of parts (lasso, then drag) had two coupled defects, both invisible to
+the single-component path the tests covered:
+
+- A wire whose two ends **both** travelled kept its interior bends, so a Z-route came
+  out skewed. It is the same shape somewhere else, so it now translates whole.
+- A dragged wire's **joined** end did not travel with the cluster at all, so the
+  junction — the thing you were looking at — stayed behind. "They don't move at all."
+
+They had to be fixed together, which is the interesting part: once a rigid wire's
+interior moves, the _segment_ a junction sits on moves too, so the junction cannot
+stay behind without leaving its parent. A joined end now translates with the drag
+exactly as a pin end does, and the re-seating pass (`reprojectJunctionDependents`)
+puts it back precisely on its parent's segment — a no-op when the parent came along,
+a slide along the parent when it did not.
+
+That pass also re-seats the moved wire's **own** joins now, not only its children's: a
+branch dragged away from a parent that stays put still has to end up on that parent.
+The invariant "every join endpoint lies on its parent's segment" is asserted across
+three different moved sets in the unit tests, which is what keeps the two halves
+honest.

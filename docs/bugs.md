@@ -288,8 +288,16 @@ format bump. _(this round)_
 
 ## Appendix B — Removed from the list (fixed / by design / out of scope)
 
-- **Wire relocation with a bend/junction** — works; junction dependents are
-  re-projected (`document.ts:997`), tested.
+- **Wire relocation with a bend/junction** — the maintainer was right and this note
+  was wrong: it said "works" and it did not. Dragging a SELECTION left junctions
+  behind ("they don't move at all"). Two coupled defects in the multi-move path (the
+  single-component path was tested, the set path was not): a wire whose ends both
+  travelled kept its interior bends, so a Z-route came out skewed; and a dragged
+  wire's joined end did not travel with the cluster at all. Fixed together in
+  `moveComponents` + the re-seating pass (UI_OVERHAUL §81), pinned by four unit tests
+  over a trunk-with-a-bend plus a branch (including an invariant sweep across which
+  parts move) and an e2e that lassos a wired pair and drags it.
+
 - **Routing a new wire from an existing junction** — press-and-sweep does this
   (`editor/tools.ts:403`), tested.
 - **Unintended wire deletion near a removed part** — only pin-endpoint wires
