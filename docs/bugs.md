@@ -233,8 +233,9 @@ format bump. *(this round)*
   5 ns` for a register), and a selected *wire* shows its per-path delay (drawn
   length × the table's 0.1 ns/unit). Both are **design** numbers; the transport's
   `T_obs`/`top_paths` stay the measured ones.
-- Animation **pulse-rate slider**: still open (one constant, `PULSE_MS`, wants a
-  pref + a Settings row + the tracker hand-off).
+- ~~Animation pulse-rate slider~~ **done**: Settings → Canvas has a **Pulse speed**
+  picker (50…200%); the pref is a percentage, and `PulseTracker` takes its
+  duration from it, so the whole bullet is closed.
 
 ---
 

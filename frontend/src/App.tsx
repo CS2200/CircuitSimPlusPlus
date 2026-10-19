@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { PULSE_MS } from "./sim/pulses";
 import AppHeader from "./components/AppHeader";
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
@@ -66,6 +67,7 @@ import {
   PREF_DEFAULT_INPUTS,
   PREF_GRID,
   PREF_PULSES,
+  PREF_PULSE_SPEED,
   PREF_SHOW_PERF,
   PREF_SHOW_VALUES,
   PREF_TIME_24H,
@@ -209,6 +211,7 @@ export default function App() {
   // animation, startup update check — per machine, all persisted.
   const [accent, setAccent] = useState<AccentId>(loadAccentPref);
   const [pulsesOn, setPulsesOn] = useState(() => loadBoolPref(PREF_PULSES, true));
+  const [pulseSpeed, setPulseSpeed] = useState(() => loadNumPref(PREF_PULSE_SPEED, 100));
   const [gridOn, setGridOn] = useState(() => loadBoolPref(PREF_GRID, false));
   /** Clock timestamps: 24-hour (default) or `h:MM AM/PM` (Settings → Appearance). */
   const [time24h, setTime24h] = useState(() => loadBoolPref(PREF_TIME_24H, true));
@@ -387,6 +390,7 @@ export default function App() {
   }, [accent]);
   useEffect(() => {
     saveBoolPref(PREF_PULSES, pulsesOn);
+    saveNumPref(PREF_PULSE_SPEED, pulseSpeed);
   }, [pulsesOn]);
   useEffect(() => {
     saveBoolPref(PREF_GRID, gridOn);
@@ -1782,6 +1786,7 @@ export default function App() {
               />
               <div className="editor-wrap">
                 <EditorCanvas
+                  pulseMs={Math.round((PULSE_MS * 100) / pulseSpeed)}
                   ref={editorRef}
                   doc={doc}
                   themeName={`${theme}|${accent}`}
@@ -1933,6 +1938,9 @@ export default function App() {
           onClearHistory={() => void clearHistory()}
           onReset={resetAppearance}
           onClose={() => setSettingsOpen(false)}
+
+          pulseSpeed={pulseSpeed}
+          onPulseSpeed={setPulseSpeed}
         />
       )}
       {closeAsk !== null && <ClosePrompt name={closeAsk.name} onChoose={closeAsk.resolve} />}

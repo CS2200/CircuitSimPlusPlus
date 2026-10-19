@@ -1,3 +1,4 @@
+import { PULSE_SPEEDS } from "../sim/pulses";
 import { useEffect, useState } from "react";
 import { bytesLabel } from "../lib/time";
 import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
@@ -43,6 +44,8 @@ export default function SettingsDialog({
   time24h,
   autosaveOn,
   autosaveFileOn,
+  pulseSpeed,
+  onPulseSpeed,
   showValues,
   showPerf,
   defaultBits,
@@ -78,6 +81,9 @@ export default function SettingsDialog({
   autosaveOn: boolean;
   /** Autosave rewrites the real `.csx` for named documents (default on). */
   autosaveFileOn: boolean;
+  /** Pulse speed as a percentage (100 = normal, UI_OVERHAUL §70). */
+  pulseSpeed: number;
+  onPulseSpeed: (v: number) => void;
   showValues: boolean;
   showPerf: boolean;
   /** Bit width seeded on newly placed parts. */
@@ -273,6 +279,13 @@ export default function SettingsDialog({
                   "Clocks, pins, registers and I/O read out their current value.",
                   showValues,
                   onShowValues,
+                )}
+                {choose(
+                  "Pulse speed",
+                  "How fast a value travels along a wire — longer is calmer.",
+                  pulseSpeed,
+                  PULSE_SPEEDS.map((s) => ({ value: s, label: s === 100 ? "Normal" : `${s}%` })),
+                  onPulseSpeed,
                 )}
                 {toggle(
                   "Animate signal pulses",

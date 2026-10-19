@@ -11,6 +11,9 @@ export const PREF_UPDATE_CHECK = "csx.updateCheck";
 export const PREF_TIME_24H = "csx.time24h";
 /** Canvas grid overlay (UI_OVERHAUL §15) — off by default. */
 export const PREF_GRID = "csx.grid";
+/** Signal-pulse animation speed, as a percentage (100 = normal). */
+export const PREF_PULSE_SPEED = "csx.pulseSpeed";
+
 /** Autosave: crash-recovery copy + (named docs) periodic file write. */
 export const PREF_AUTOSAVE = "csx.autosave";
 /** Autosave also rewrites the real `.csx` (named documents only). */

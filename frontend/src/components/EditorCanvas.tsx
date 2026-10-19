@@ -16,7 +16,7 @@ import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docSc
 import { ToolMachine } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
-import { PulseTracker } from "../sim/pulses";
+import { PULSE_MS, PulseTracker } from "../sim/pulses";
 
 /** Pulses animate up to this effective speed (U7). */
 const PULSE_MAX_EFF_HZ = 120;
@@ -90,6 +90,8 @@ export default forwardRef<
     violations?: readonly ViolationMarker[] | null;
     /** Signal-pulse animation (Settings → Canvas); default on. */
     pulsesOn?: boolean;
+    /** Pulse animation duration in ms (the user's speed pref; UI_OVERHAUL §70). */
+    pulseMs?: number;
     /** Coarse canvas grid (Settings → Canvas, UI_OVERHAUL §15); default off. */
     gridOn?: boolean;
     /** Live value readouts on parts (Settings → Canvas, §25); default on. */
@@ -110,6 +112,7 @@ export default forwardRef<
     pathIds,
     violations,
     pulsesOn = true,
+    pulseMs = PULSE_MS,
     gridOn = false,
     showValues = true,
     showPerf = false,
@@ -119,7 +122,7 @@ export default forwardRef<
   const [tick, setTick] = useState(0);
   // One tracker per document (fresh pulse state per circuit).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- doc identity is the reset signal
-  const pulses = useMemo(() => new PulseTracker(), [doc]);
+  const pulses = useMemo(() => new PulseTracker(pulseMs), [doc, pulseMs]);
   const [pulsesLive, setPulsesLive] = useState(false);
   const lastPulseChanges = useRef<readonly unknown[] | null>(null);
   // Blinking warnings (width mismatch, dangling pins) keep the canvas

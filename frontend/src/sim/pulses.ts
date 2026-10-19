@@ -17,6 +17,8 @@ import type { NetId } from "../ipc/types";
 import type { NetChangeEvent } from "./simStore";
 
 export const PULSE_MS = 350;
+/** The offered pulse speeds (percent) — a Settings picker feeds the tracker. */
+export const PULSE_SPEEDS = [50, 75, 100, 150, 200] as const;
 /** Engine-ns window that maps to one PULSE_MS of spawn stagger. */
 const NS_STAGGER = 100;
 
@@ -27,6 +29,13 @@ export interface Pulse {
 }
 
 export class PulseTracker {
+  /** Animation duration for one pulse, ms (the user's speed scales it). */
+  private readonly ms: number;
+
+  constructor(ms: number = PULSE_MS) {
+    this.ms = ms;
+  }
+
   private pulses: Pulse[] = [];
 
   /**
@@ -42,7 +51,7 @@ export class PulseTracker {
       const stagger =
         e.at === undefined || atMin === Infinity
           ? 0
-          : Math.min(PULSE_MS, ((e.at - atMin) / NS_STAGGER) * PULSE_MS);
+          : Math.min(this.ms, ((e.at - atMin) / NS_STAGGER) * this.ms);
       this.pulses.push({ net: e.net, t0: tNow + stagger });
     }
   }
@@ -58,7 +67,7 @@ export class PulseTracker {
     const live: { net: NetId; phase: number }[] = [];
     const keep: Pulse[] = [];
     for (const p of this.pulses) {
-      const phase = (tNow - p.t0) / PULSE_MS;
+      const phase = (tNow - p.t0) / this.ms;
       if (phase < 1) {
         keep.push(p);
         if (phase >= 0) live.push({ net: p.net, phase });

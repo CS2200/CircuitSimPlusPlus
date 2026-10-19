@@ -1787,3 +1787,17 @@ build-time table the part readouts use (docs/delay-table.md, §67). A routed wir
 of 5.5 units reads `≈ 0.6 ns (5.5 units × 0.10 ns)`. Like a part's row, this is
 the **design** number: the transport's `T_obs` and `top_paths` remain what a run
 observed.
+
+## 70. Follow-up batch BI (2026-10-19): pulse speed, and where it stops
+
+The signal-pulse animation had one fixed duration (`PULSE_MS = 350`). **Settings →
+Canvas → Pulse speed** (50 / 75 / 100 / 150 / 200 %, default Normal) now scales it:
+the pref is an integer percentage (`csx.pulseSpeed`), `PulseTracker` takes its
+duration from it, and `EditorCanvas` rebuilds the tracker when it changes. The
+switch it modifies ("Animate signal pulses") sits directly below it.
+
+That closes the propagation-delay/pulse bullet: a part's table cost, a wire's
+per-path cost, and the animation's pace are all visible and adjustable. The last
+piece of the _measured_ story is deliberately not done — see `docs/bugs.md`: a
+per-part **observed** delay needs a new IPC field, which is a contract change
+(`docs/ipc.md`) and therefore wants a sign-off rather than a drive-by.
