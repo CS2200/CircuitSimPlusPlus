@@ -2214,6 +2214,28 @@ mod tests {
             "stub must not inflate the sink's arrival"
         );
     }
+    /// A text annotation has no pins and no behavior — but every flattened
+    /// component still needs a behavior built for it. Returning `None` here
+    /// failed the WHOLE document ("component 'main: c22' has no behavior
+    /// (type 'misc.text')"), so a label made a circuit unloadable.
+    #[test]
+    fn a_text_annotation_loads_and_is_inert() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"note","type":"misc.text","pos":[0,0],"attrs":{{"text":"hello"}}}}
+            ], "wires": []}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        assert_eq!(eng.cycle(), 0);
+        // It drives nothing, so a run just ticks the clock.
+        eng.run(2).unwrap();
+        assert_eq!(eng.cycle(), 2);
+    }
+
     /// A register's stored state must not depend on `q` being wired: the readout
     /// falls back to `named_value` when `q` is open, so the latch must still
     /// happen. (Bug report: "register non-update when the output is

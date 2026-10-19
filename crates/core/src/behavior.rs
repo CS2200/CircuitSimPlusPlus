@@ -211,6 +211,9 @@ enum BehaviorKind {
     },
     Led,
     HexDisplay,
+    /// Text annotation (`misc.text`): a label with no pins. Inert — it exists
+    /// only so every flattened component has a behavior built for it.
+    Text,
 }
 
 /// Initialize memory words from an optional embedded `rle-hex-v1` image;
@@ -324,7 +327,10 @@ impl Behavior {
             CompKind::Button => BehaviorKind::Button { pressed: false },
             CompKind::Led { .. } => BehaviorKind::Led,
             CompKind::HexDisplay { .. } => BehaviorKind::HexDisplay,
-            CompKind::Text => return None,
+            // A text annotation has no pins and no behavior — but every
+            // flattened component needs a behavior, so it gets an inert one
+            // (it used to return None, which failed the whole load).
+            CompKind::Text => BehaviorKind::Text,
             CompKind::Subcircuit { .. } => return None,
         };
         Some(Behavior { kind })
@@ -409,7 +415,10 @@ impl Behavior {
             BehaviorKind::Splitter { .. } => {
                 unreachable!("splitters evaluate via eval_splitter (bidirectional pins)")
             }
-            BehaviorKind::Probe | BehaviorKind::Led | BehaviorKind::HexDisplay => Ok(vec![]),
+            BehaviorKind::Probe
+            | BehaviorKind::Led
+            | BehaviorKind::HexDisplay
+            | BehaviorKind::Text => Ok(vec![]),
             BehaviorKind::Mux {
                 bitsize,
                 select_bits,
@@ -784,6 +793,7 @@ impl Behavior {
             BehaviorKind::Button { .. } => ("io.button", 1),
             BehaviorKind::Led => ("io.led", 1),
             BehaviorKind::HexDisplay => ("io.hexdisplay", 1),
+            BehaviorKind::Text => ("misc.text", 1),
         };
         table.timing(type_, bitsize)
     }

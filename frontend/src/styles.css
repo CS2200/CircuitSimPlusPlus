@@ -2097,6 +2097,13 @@ body {
   cursor: pointer;
 }
 
+/* A toggle that lands directly under the accent swatches needs its own
+ * breathing room: the swatch row is the end of its block, so the toggle's
+ * bottom-only margin left it touching the row above (tester report). */
+.accent-row + .settings-toggle {
+  margin-top: 0.9rem;
+}
+
 .settings-toggle:hover {
   border-color: var(--accent);
 }
