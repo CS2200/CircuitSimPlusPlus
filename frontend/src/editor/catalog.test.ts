@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  showsBodyCaption,
   circuitInterface,
   compPins,
   compSize,
@@ -11,6 +12,7 @@ import {
   type AttrField,
 } from "./catalog";
 import type { CsxCircuit } from "../model/csx";
+import { gateShape } from "./shapes";
 
 /**
  * Catalog geometry for the hierarchy pair: `wiring.pin` (the subcircuit
@@ -311,5 +313,28 @@ describe("an instance box that carries its own size (§79)", () => {
     // …and a taller box spreads them further down it.
     const tall = compPins({ type: "subcircuit", attrs: { circuit: "alu", height: 12 } }, CIRCUITS);
     expect(tall.filter((p) => p.kind === "in").map((p) => p.dy)).toEqual([4, 8]);
+  });
+});
+
+describe("showsBodyCaption (§17 rule 3 / §83)", () => {
+  it("marks the shaped bodies whose outline cannot say what they are", () => {
+    for (const type of ["plexers.mux", "plexers.demux", "wiring.power", "wiring.ground"]) {
+      expect(showsBodyCaption(type)).toBe(true);
+    }
+  });
+
+  it("leaves gates shape-only — their outline is the mark", () => {
+    for (const type of ["gate.and", "gate.nand", "gate.not", "misc.text", "wiring.transistor"]) {
+      expect(showsBodyCaption(type)).toBe(false);
+    }
+  });
+
+  it("covers exactly the shaped types that carry a caption", () => {
+    // The canvas draws a caption on a shaped body only through this predicate, so the
+    // two lists cannot drift — and every marked type must be shaped and have a caption.
+    for (const type of ["plexers.mux", "plexers.demux", "wiring.power", "wiring.ground"]) {
+      expect(gateShape(type, 0, 0, 3, 2)).not.toBeNull();
+      expect(compSpec(type).caption({})).not.toBe("");
+    }
   });
 });

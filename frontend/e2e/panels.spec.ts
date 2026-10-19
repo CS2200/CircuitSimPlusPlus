@@ -96,6 +96,12 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
 
   await checkGroup("Wiring", "INPUT");
   await checkGroup("Plexers", "MUX");
+  // A trapezoid says WHICH plexer it is (§17 rule 3), as its canvas body does: the
+  // palette used to draw a bare trapezoid, which is ambiguity, not an icon.
+  const muxTile = page
+    .locator(".palette-group .palette-item")
+    .filter({ has: page.locator(".palette-item-label", { hasText: /^MUX$/ }) });
+  await expect(muxTile.locator("svg text")).toHaveText("MUX");
   await checkGroup("Plexers", "DEC");
   await checkGroup("Plexers", "PRI");
   // Arithmetic tiles keep the human name; the body shows the symbol (§18).

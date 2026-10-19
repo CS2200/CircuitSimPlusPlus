@@ -155,7 +155,11 @@ address _(8879681)_.
   trapezoid is far less self-evident than a NAND gate, which is why the note
   exists. Evidence: the committed demo baseline draws the mux as a bare
   trapezoid. Fix: keep the suppression for gates and draw the abbreviation on
-  plexer trapezoids (and re-bless the visual baselines).
+  plexer trapezoids (and re-bless the visual baselines). **Resolved for the canvas**
+  _(§68)_; the **palette icon** half had not landed — the maintainer's screenshot shows
+  MUX/DEMUX still drawing bare trapezoids in the Plexers palette while DEC/PRI showed
+  their word. Both now read one predicate (`showsBodyCaption`, UI_OVERHAUL §83), so a
+  body mark cannot drift between canvas and palette again.
 - **Body marks read as "off"** — _diagnosed_ (screenshot + measurement). At the
   maintainer's zoom the adder's `+` sits ~0.47 world units below its box centre
   and ~0.22 left; in the committed demo baseline (default zoom) the same `+`

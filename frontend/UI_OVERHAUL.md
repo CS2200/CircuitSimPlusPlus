@@ -2052,3 +2052,19 @@ divergence that turns into a confusing bug report later.
 unset word now means and offer **Fill with 0s**, since "no image" now means "all unknown"
 and the common case (a lab that wants a zeroed memory) deserves one click. Registers
 still power on `0`; that decision is with the Head TA (docs/bugs.md).
+
+## 83. One rule for which shaped bodies say their name
+
+A trapezoid is ambiguous, so a plexer's shape carries its abbreviation on the body
+(§17 rule 3) — while a NAND's outline is unmistakable, so gates stay shape-only, and
+that asymmetry is deliberate. Power and ground are in for the same reason as a plexer:
+a rake and a bar do not name a supply.
+
+That rule lived in exactly one place, `docScene`'s shaped-body pass, so the palette
+drifted: `CompIcon` drew MUX and DEMUX as bare trapezoids while their canvas bodies
+said which plexer they were, and nothing asserted otherwise (a missing mark in a 20px
+glyph is easy to miss). It is a shared predicate now — `showsBodyCaption` in the
+catalog — read by both the canvas body pass and the palette icon, which draws the
+caption inside the shape with the same treatment its box glyphs use. The two cannot
+disagree again, and the plexer tiles now follow the convention the DEC/PRI tiles
+already used.

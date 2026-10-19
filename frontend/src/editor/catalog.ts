@@ -1261,6 +1261,25 @@ function baseFields(type: string): AttrField[] {
   }
 }
 
+/**
+ * Shaped bodies that still say WHICH part they are (UI_OVERHAUL §17 rule 3).
+ *
+ * A trapezoid is ambiguous, so a plexer's shape carries its abbreviation on the body;
+ * a NAND's outline is unmistakable, so gates stay shape-only. Power and ground are in
+ * for the same reason as a plexer: a rake and a bar do not name a supply.
+ *
+ * ONE predicate, because the canvas body pass and the palette icon must agree — they
+ * had drifted, and the palette drew bare trapezoids for a while (UI_OVERHAUL §83).
+ */
+export function showsBodyCaption(type: string): boolean {
+  return (
+    type === "plexers.mux" ||
+    type === "plexers.demux" ||
+    type === "wiring.power" ||
+    type === "wiring.ground"
+  );
+}
+
 export function compSize(
   comp: Pick<CsxComponent, "type" | "attrs">,
   circuits?: readonly CsxCircuit[],

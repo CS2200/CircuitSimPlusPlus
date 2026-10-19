@@ -1,4 +1,4 @@
-import { compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
+import { showsBodyCaption, compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
 import { probePath, chipPath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
 
@@ -89,6 +89,10 @@ export default function CompIcon({
   const shape = gateShape(type, 0, 0, w, h);
   const glyph = GLYPHS[type];
   const caption = compSpec(type).caption(attrs);
+  // A shaped body that says which part it is (§17 rule 3 / §83): MUX, DEMUX, power,
+  // ground — everything else keeps the box glyph's own mark, or none (a gate's
+  // outline is the mark).
+  const bodyCaption = showsBodyCaption(type) ? caption : null;
   // An output pin is a rounded stadium whose terminal faces left (it seeds
   // rotation W); it must look like the placed part, not like the input pin
   // (UI_OVERHAUL §55).
@@ -122,6 +126,22 @@ export default function CompIcon({
             {bubblePaths(shape, []).map((cmds, i) => (
               <path key={i} d={d(cmds)} />
             ))}
+            {bodyCaption !== null && (
+              <text
+                x={w / 2}
+                y={h / 2}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={fontSize(bodyCaption, w, h)}
+                fontFamily="ui-monospace, monospace"
+                fontWeight={600}
+                fill="currentColor"
+                stroke="none"
+                opacity={0.9}
+              >
+                {bodyCaption}
+              </text>
+            )}
           </>
         ) : type === "wiring.clock" ? (
           // square-wave source — no box, the waveform is the icon

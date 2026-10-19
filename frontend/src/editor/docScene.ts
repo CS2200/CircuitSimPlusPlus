@@ -20,7 +20,7 @@ import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
-import { compSize, compSpec, type PinKind } from "./catalog";
+import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
 import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
 
 /**
@@ -1312,13 +1312,9 @@ export class DocScene {
         // A plexer's trapezoid says "plexer", not WHICH plexer: the abbreviation
         // (MUX / DEMUX) belongs on the body, exactly as §17's rule 3 lists it —
         // the shape is the mark for a NAND, whose outline is unmistakable, but a
-        // bare trapezoid is ambiguous (UI_OVERHAUL §68).
-        if (
-          comp.type === "plexers.mux" ||
-          comp.type === "plexers.demux" ||
-          comp.type === "wiring.power" ||
-          comp.type === "wiring.ground"
-        ) {
+        // bare trapezoid is ambiguous (UI_OVERHAUL §68). The predicate is shared with
+        // the palette icon (§83), which had drifted and drawn bare trapezoids.
+        if (showsBodyCaption(comp.type)) {
           const mark = spec.caption(comp.attrs ?? {});
           renderer.drawText(cx, cy, mark, {
             color: theme.textDim,
