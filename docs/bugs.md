@@ -1,10 +1,10 @@
 # CircuitSim++ — Bug & Task Backlog
 
 *Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
-`0462adf`; P1 and every unambiguous P2 item since** — see the sections below.*
-The trial tester's raw list was verified item-by-item against the code;
-already-fixed, by-design, and out-of-scope entries live in the appendices so the
-active list stays honest.
+`0462adf`; P1 and P2 since** (the only open P2 item is an optional per-wire
+colour palette, below). The trial tester's raw list was verified item-by-item
+against the code; already-fixed, by-design, and out-of-scope entries live in the
+appendices so the active list stays honest.*
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
 and RAMs have no `rst` pin), 200 backend + 343 unit + 64 e2e tests green. The
@@ -126,6 +126,19 @@ Version history; only an unparseable document is still refused; the save
 indicator reads **"Saved"** / **"Saving changes"** instead of
 "All changes saved" / "Unsaved changes".
 
+**Resolved from the ambiguous list (2026-10-19, human-confirmed):**
+
+- **"Simplify the reset label"** *was* the reset pin: the memory parts have no
+  reset input at all any more (format v4 — see the latest round above), so there
+  is no label to simplify. Done, not parked. *(72b8473)*
+- **Light-mode history colours** were reconciled by the dynamic contrast helper
+  (`readableOn`, *(3fcf504)*): an authored colour that would wash out against the
+  light background falls back to the theme's text colour. The drawer's previews
+  render through the same `DocScene`, so they inherit it.
+- **"Text element load-failed bug"** was real after all and is fixed — `misc.text`
+  had no behavior, so placing one made the document unloadable *(c42533f)*.
+  Removed from Appendix A.
+
 **New tester feedback (fixed this round):** a memory's `addr` pin was as wide as
 its DATA (a fresh RAM drew a 1-bit address while the core indexed 256 words, so a
 correct 8-bit address looked like a mismatch) *(028ffc7)*; a constant's readout
@@ -133,15 +146,12 @@ now scales with its bit width (`0x5` → `0x05`) *(028ffc7)*; a wired-up part's
 unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
 address *(8879681)*.
 
-**Left:**
-- **Wires**: a *per-wire* colour palette is still open if the maintainer wants
-  identity colours back (the default is one bus colour with no net-id dependency,
-  *(66f46e0)*; a wire's own `attrs.color` already wins).
-- **Theme**: reconcile light-mode history colors — **needs a repro**; the
-  drawer's swatches read the theme tokens, and nothing supplied shows a mismatch.
-- **Trim (ambiguous)**: "simplify the reset label" — the transport already reads
-  `reset`, so which control? — and "tidy tab / timing-readout alignment" (no
-  repro).
+**Left (optional; maintainer's call):**
+- **Wires**: a *per-wire* colour palette, if identity colours are wanted back.
+  The default is one bus colour with no net-id dependency *(66f46e0)*, and a
+  wire's own `attrs.color` already wins.
+- **"Tidy tab / timing-readout alignment"** — no repro was ever supplied; fold
+  into the P3 tab/context-menu work if it turns up again.
 
 ---
 
@@ -163,14 +173,7 @@ address *(8879681)*.
 
 - **"Remove unnecessary wire end segments method"** — no such method exists;
   which symptom?
-- **"Text element load-failed bug"** — not reproducible; text annotations are
-  validated and covered by tests. Need the failing file.
 - **"Fix clear/edit button state inconsistencies"** — which buttons?
-- **"Remove 'Named' bubble"** — assumed the history `named` badge; confirm.
-- **"Simplify reset label to Reset"** — the transport already reads `reset`;
-  which control?
-- **"Show propagation delays"** — per-component numbers, or is the `T_obs`
-  readout enough?
 - **"Reposition 'Restore Version' tab to the far right"** — that control isn't a
   tab today.
 - **"Make cycle counting continuous"** — geometry-only edits no longer reset the
@@ -198,6 +201,8 @@ address *(8879681)*.
 - **Waveform viewer tab / Debugging tab with breakpoints** — `DESIGN.md` keeps
   these out of scope for now (probes + inspection cover the need); revisit only
   if requested.
+- **"Remove 'Named' bubble"** — read as the history `named` badge, which is gone
+  *(70f6eb4)*; recorded in the P2 list.
 - **"Polish application logo"** — subjective, not actionable.
 - **"Support floating-point resistors"** — there is no resistor part, and a
   digital net is 0/1/Z/X. Clarify what's wanted.
