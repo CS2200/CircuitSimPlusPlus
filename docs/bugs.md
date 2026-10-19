@@ -229,7 +229,8 @@ format bump. *(this round)*
 - Primitives: **power and ground done** (`wiring.power` / `wiring.ground` — fixed
   1-bit sources with no attrs, additive so no format bump; UI_OVERHAUL §71). A
   **transistor** (a gate-driven switch: `in`/`gate`/`out`) still needs a behaviour
-  kind, and bar/rake glyphs for the two sources are a follow-up.
+  kind (and a sink kind in the delay engine for its halt message to name `gate`,
+  not `en`). Bar/rake glyphs landed (UI_OVERHAUL §72, pinned by a shape test).
 - ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
   own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
   at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold

@@ -295,6 +295,32 @@ export function gateShape(
         ],
         outBubble: null,
       };
+    case "wiring.ground":
+      // A rake: three bars of decreasing width (the schematic habit).
+      return {
+        body: [
+          { t: "M", x: x + w * 0.1, y: y + h * 0.3 },
+          { t: "L", x: x + w * 0.9, y: y + h * 0.3 },
+          { t: "M", x: x + w * 0.25, y: y + h * 0.55 },
+          { t: "L", x: x + w * 0.75, y: y + h * 0.55 },
+          { t: "M", x: x + w * 0.4, y: y + h * 0.8 },
+          { t: "L", x: x + w * 0.6, y: y + h * 0.8 },
+        ],
+        extra: [],
+        outBubble: null,
+      };
+    case "wiring.power":
+      // A bar on a stem — the other half of the pair.
+      return {
+        body: [
+          { t: "M", x: x + w / 2, y: y + h * 0.25 },
+          { t: "L", x: x + w / 2, y: y + h * 0.65 },
+          { t: "M", x: x + w * 0.25, y: y + h * 0.25 },
+          { t: "L", x: x + w * 0.75, y: y + h * 0.25 },
+        ],
+        extra: [],
+        outBubble: null,
+      };
     case "plexers.mux":
       return { body: trapPath(x, y, w, h, true), extra: [], outBubble: null };
     case "plexers.demux":

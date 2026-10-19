@@ -1306,7 +1306,12 @@ export class DocScene {
         // (MUX / DEMUX) belongs on the body, exactly as §17's rule 3 lists it —
         // the shape is the mark for a NAND, whose outline is unmistakable, but a
         // bare trapezoid is ambiguous (UI_OVERHAUL §68).
-        if (comp.type === "plexers.mux" || comp.type === "plexers.demux") {
+        if (
+          comp.type === "plexers.mux" ||
+          comp.type === "plexers.demux" ||
+          comp.type === "wiring.power" ||
+          comp.type === "wiring.ground"
+        ) {
           const mark = spec.caption(comp.attrs ?? {});
           renderer.drawText(cx, cy, mark, {
             color: theme.textDim,

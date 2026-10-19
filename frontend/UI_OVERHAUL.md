@@ -1813,3 +1813,16 @@ constant (netlist, DTA/STA, autograder) handles them. They accept **no attrs**: 
 stray `value` is an unknown-attr error rather than a silent override of what the
 part means. Distinct glyphs (the legacy bar / rake) and the **transistor** are the
 rest of the primitives bullet.
+
+## 72. Follow-up batch BK (2026-10-19): a rake and a bar
+
+Power and ground (§71) get their classical glyphs: **ground is a rake** (three
+bars of decreasing width), **power is a bar on a stem**, both drawn inside the
+body rect so they rotate with the part like every other shaped body. They keep
+their `1` / `0` caption — the shaped-body rule that dropped captions (§68) now
+exempts them for the same reason it exempts the plexers: the shape alone does not
+tell you which source you are looking at.
+
+No committed screenshot contains these parts, so instead of re-blessing baselines
+the geometry is pinned by a unit test (`shapes.test.ts`) asserting both glyphs
+stay inside their rect.
