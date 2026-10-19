@@ -221,7 +221,13 @@ format bump. _(this round)_
   named `<document>-view.png` so it can sit beside its `.csx`. The pixels are the
   renderer's, so the canvas element is the source; the export is the _current
   view_ (fit-the-whole-circuit export is a follow-up).
-- Right-click context-menu overhaul.
+- ~~Right-click context-menu overhaul~~ **done** _(this round)_: a right **click** on
+  the canvas (press and release without movement — the same gate that keeps
+  right-**drag** panning) opens a part / wire / canvas menu that acts on what is
+  under the pointer, selecting it first so the menu and the highlight agree. The two
+  older meanings of right-click stay exactly as they were: cancel a gesture, and jump
+  to a subcircuit instance's definition — which is why the menu offers no
+  "Open definition" duplicate. UI_OVERHAUL §75.
 - ~~Version history: full-viewport view (no overlay), diff highlighting + copy~~
   **done** _(this round)_: the history is a view that owns the viewport — the editor
   row is not displayed, so nothing sits behind the preview — each change is tagged
