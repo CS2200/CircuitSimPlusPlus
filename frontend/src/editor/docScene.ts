@@ -374,6 +374,33 @@ export function memPreviewWord(
   return word === undefined ? null : word & maskFor(bits);
 }
 
+/** Relative luminance of a `#rrggbb` colour: 0 (black) … 1 (white), WCAG weights. */
+function luminance(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const channel = (v: number): number => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * channel((n >> 16) & 0xff) +
+    0.7152 * channel((n >> 8) & 0xff) +
+    0.0722 * channel(n & 0xff)
+  );
+}
+
+/**
+ * A readable text colour on `bg`: the author's own when it contrasts enough,
+ * else the fallback. An annotation's colour is stored ABSOLUTELY, so a white
+ * note on a light sheet is invisible — this keeps it legible when the theme
+ * flips without rewriting what the user authored.
+ */
+export function readableOn(color: string, bg: string, fallback: string): string {
+  const a = luminance(color);
+  const b = luminance(bg);
+  const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  return ratio < 2 ? fallback : color;
+}
+
 /** Font size that keeps `text` inside a `w × h` body (never below 0.5). */
 function fitTextSize(text: string, w: number, h: number, base = 1): number {
   const byWidth = (w * 0.92) / Math.max(1, text.length * 0.62);
@@ -1063,10 +1090,14 @@ export class DocScene {
       if (comp.type === "misc.text") {
         const attrs = comp.attrs ?? {};
         const text = typeof attrs.text === "string" ? attrs.text : "";
-        const color =
+        const authored =
           typeof attrs.color === "string" && /^#[0-9a-f]{6}$/i.test(attrs.color)
             ? attrs.color
             : theme.text;
+        // A white note on a light sheet would be invisible (the colour is stored
+        // absolutely), so it falls back to the theme's text colour when it
+        // cannot be read against the canvas.
+        const color = readableOn(authored, theme.bg, theme.text);
         const font = TEXT_FONTS[typeof attrs.font === "string" ? attrs.font : "sans"];
         if (selected) {
           renderer.drawPath(rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h), {

@@ -6,6 +6,7 @@ import {
   ellipsize,
   fitValueLine,
   memPreviewWord,
+  readableOn,
   valueTextAtWidth,
 } from "./docScene";
 
@@ -114,6 +115,21 @@ describe("valueTextAtWidth", () => {
     expect(valueTextAtWidth(hex("1"), "unsigned", 1)).toBe("1");
     expect(valueTextAtWidth({ v: "", x: "1", z: "" }, "hex", 8)).toBe("X");
     expect(valueTextAtWidth({ v: "", x: "", z: "1" }, "hex", 8)).toBe("Z");
+  });
+});
+
+describe("readableOn", () => {
+  it("keeps a colour that contrasts with the sheet", () => {
+    expect(readableOn("#ffffff", "#101010", "#e8e8ee")).toBe("#ffffff"); // white on dark
+    expect(readableOn("#101010", "#f4f4f8", "#e8e8ee")).toBe("#101010"); // black on light
+  });
+
+  it("falls back when the colour would vanish into the sheet", () => {
+    // The reported case: a white note opened in a light theme.
+    expect(readableOn("#ffffff", "#f4f4f8", "#1a1a22")).toBe("#1a1a22");
+    expect(readableOn("#fafafa", "#ffffff", "#000000")).toBe("#000000");
+    // …and the mirror: black text on a near-black sheet.
+    expect(readableOn("#000000", "#101010", "#ffffff")).toBe("#ffffff");
   });
 });
 

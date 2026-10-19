@@ -759,6 +759,17 @@ body {
   outline-offset: -2px;
 }
 
+/* Sheet tabs sit FLUSH against the canvas strip, so their focus ring is drawn
+ * INSIDE the tab (like the resize handles). The global ring's 1px offset
+ * overhangs the strip's top/left edge and reads as a misaligned box around the
+ * tab (tester report). */
+.sheet-tab-wrap:focus-within,
+.sheet-tab:focus-visible,
+.sheet-tab-close:focus-visible,
+.sheet-tab-input:focus-visible {
+  outline-offset: -2px;
+}
+
 .palette-item:hover {
   border-color: var(--accent);
 }
