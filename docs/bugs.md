@@ -151,7 +151,8 @@ address *(8879681)*.
 - Right-click context-menu overhaul.
 - Version history: full-viewport view (no overlay), diff highlighting + copy.
 - Subcircuits: always-visible panel, click into an *instance* vs template,
-  scope colors, resizing, dynamic outer pins from inner pin rotation.
+  scope colors, resizing, dynamic outer pins from inner pin rotation; **delete a
+  sheet tab** (the last item in the root `TODO.md`).
 - RAM: independent address/data bit widths.
 - Primitives: transistor / power / ground.
 - Propagation-delay readout + an animation pulse-rate slider.
