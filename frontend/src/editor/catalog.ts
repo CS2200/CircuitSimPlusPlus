@@ -1,3 +1,4 @@
+import { encodeRleHex, hexWidthFor, parseRleHex } from "../lib/rleHex";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
 
 /**
@@ -88,6 +89,32 @@ export function memAddrBits(attrs: Readonly<Record<string, unknown>>): number {
   }
   const depth = Math.max(1, Math.floor(numAttr(attrs, "depth", DEFAULT_MEM_DEPTH)));
   return Math.max(1, 32 - Math.clz32(depth - 1));
+}
+
+/**
+ * Picking a memory's address width resizes it. In the editor a memory's size is
+ * its address space (`depth = 2^addrBits`); the FORMAT keeps the two
+ * independent, so a hand-authored or autograder file can still say "256 words,
+ * 4 address bits" (format-v2 §9) — the picker just normalizes once it is used.
+ *
+ * An embedded image longer than the new size would be a load error ("image has
+ * N words, exceeding the limit of M"), so the tail is dropped along with the
+ * resize; Undo is the way back.
+ */
+function memoryWidthPatch(
+  bits: number,
+  attrs: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const depth = 2 ** bits;
+  const patch: Record<string, unknown> = { addrBits: bits, depth };
+  const contents = attrs["contents"];
+  if (typeof contents === "string" && contents.trim() !== "") {
+    const words = parseRleHex(contents);
+    if (words.length > depth) {
+      patch["contents"] = encodeRleHex(words.slice(0, depth), hexWidthFor(bitsOf(attrs)));
+    }
+  }
+  return patch;
 }
 
 /** Integer attr clamped to 1..32 (format-v2's bit-width range). */
@@ -899,6 +926,15 @@ export type AttrField =
        * set). Wins over `dflt`.
        */
       derive?: (attrs: Readonly<Record<string, unknown>>) => number;
+      /**
+       * The whole attr patch a pick writes, when one pick means more than one
+       * attr (a memory's word count follows its address width). Defaults to
+       * `{ [key]: value }`.
+       */
+      attrsFor?: (
+        value: number,
+        attrs: Readonly<Record<string, unknown>>,
+      ) => Record<string, unknown>;
       /** Inclusive range offered (defaults 1..32). */
       min?: number;
       max?: number;
@@ -1122,25 +1158,19 @@ function baseFields(type: string): AttrField[] {
       // section (file picker + hex-table dialog), not as plain fields.
       // Both widths are one-click picks, the way bit widths are everywhere
       // else (§28): a memory reads as Address Bits + Data Bits, never as a
-      // dropdown. `addrBits` follows `depth` until it is picked.
+      // dropdown. There is no separate word-count field: a memory's size IS its
+      // address space, so the address pick is what resizes it.
       return [
         {
           key: "addrBits",
           label: "Address Bits",
           kind: "picker",
           derive: memAddrBits,
+          attrsFor: memoryWidthPatch,
           group: "Width",
+          hint: "Sets the size too: 2^bits words.",
         },
         { ...BITSIZE_FIELD, label: "Data Bits" },
-        {
-          key: "depth",
-          label: "Words",
-          kind: "number",
-          min: 1,
-          max: 1_048_576,
-          placeholder: "256",
-          group: "Width",
-        },
       ];
     case "subcircuit":
       return [{ key: "circuit", label: "Circuit", kind: "select", group: "Options", options: [] }];

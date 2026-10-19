@@ -260,7 +260,11 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   address width belongs to the design rather than to the word count. Fewer bits than the
   depth needs address a **window** of the memory — the rest is loaded but unreachable;
   more bits leave the extra addresses on the past-end path below. A write with `X` in the
-  address is dropped (target unknown).
+  address is dropped (target unknown). The **editor** does not express a window: picking an
+  address width there sets `depth = 2^addrBits` (a memory's size *is* its address space, so
+  there is no word-count field), and an embedded image longer than the new size is trimmed
+  to fit. The format keeps both attributes independent for hand-authored and autograder
+  files that need the extra storage.
 - The defensive past-end path (reads `X`, writes drop) covers the `depth = 1` corner, an
   over-wide `addrBits`, and the lenient post-validation path.
 - Divide by zero yields quotient and remainder `X`. A mux with an `X` select outputs the

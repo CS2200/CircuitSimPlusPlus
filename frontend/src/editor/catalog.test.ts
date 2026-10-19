@@ -8,6 +8,7 @@ import {
   editableAttrs,
   memAddrBits,
   typeDisplayName,
+  type AttrField,
 } from "./catalog";
 import type { CsxCircuit } from "../model/csx";
 
@@ -59,8 +60,8 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("wiring.splitter")).toEqual(["splits"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
-    expect(keys("mem.ram")).toEqual(["addrBits", "bitsize", "depth"]);
-    expect(keys("mem.rom")).toEqual(["addrBits", "bitsize", "depth"]);
+    expect(keys("mem.ram")).toEqual(["addrBits", "bitsize"]);
+    expect(keys("mem.rom")).toEqual(["addrBits", "bitsize"]);
     // The register shows its stored value, so it carries a base chooser (§57).
     expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
     expect(keys("io.button")).toEqual(["bitsize"]);
@@ -72,8 +73,28 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(widths.map((f) => [f.key, f.label, f.kind])).toEqual([
       ["addrBits", "Address Bits", "picker"],
       ["bitsize", "Data Bits", "picker"],
-      ["depth", "Words", "number"],
     ]);
+  });
+
+  it("picking an address width resizes the memory, trimming an over-long image", () => {
+    const addr = editableAttrs("mem.ram").find(
+      (f): f is AttrField & { kind: "picker" } => f.key === "addrBits",
+    );
+    // The word count IS the address space, so one pick writes both.
+    expect(addr?.attrsFor?.(4, {})).toEqual({ addrBits: 4, depth: 16 });
+    expect(addr?.attrsFor?.(12, { bitsize: 32 })).toEqual({ addrBits: 12, depth: 4096 });
+    // An image longer than the new size is a load error, so the tail goes with
+    // the resize (6 words → 4 words; canonical runs preserved).
+    expect(addr?.attrsFor?.(2, { bitsize: 32, contents: "6-0000000a" })).toEqual({
+      addrBits: 2,
+      depth: 4,
+      contents: "4-0000000a",
+    });
+    // One that still fits is left exactly as it is.
+    expect(addr?.attrsFor?.(4, { bitsize: 32, contents: "3-0000000a" })).toEqual({
+      addrBits: 4,
+      depth: 16,
+    });
   });
 
   it("a memory's address width follows depth, unless addrBits says otherwise", () => {

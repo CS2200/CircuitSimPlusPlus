@@ -209,10 +209,10 @@ export default function InspectorPanel({
    * the first — e.g. "clear contents and the autoload file" undid itself.
    */
   const commitAttrs = (patch: Record<string, unknown>) => {
-    commit(
-      { attrs: { ...(comp.attrs ?? {}), ...patch } },
-      `attr:${Object.keys(patch).sort().join("+")}`,
-    );
+    const current = comp.attrs ?? {};
+    // A re-pick of the cell that is already selected must not touch the file.
+    if (Object.entries(patch).every(([key, value]) => current[key] === value)) return;
+    commit({ attrs: { ...current, ...patch } }, `attr:${Object.keys(patch).sort().join("+")}`);
   };
 
   // Subcircuit instances pick their target from the file's circuits, not
@@ -355,6 +355,7 @@ export default function InspectorPanel({
             draft={draft}
             onDraft={setDraft}
             onCommitAttr={commitAttr}
+            onCommitAttrs={commitAttrs}
             focusKey={focusField}
             onFocusHandled={onFocusHandled}
           />
@@ -551,6 +552,7 @@ function FieldRow({
   draft,
   onDraft,
   onCommitAttr,
+  onCommitAttrs,
   focusKey = null,
   onFocusHandled,
 }: {
@@ -559,6 +561,8 @@ function FieldRow({
   draft: { key: string; text: string } | null;
   onDraft: (d: { key: string; text: string } | null) => void;
   onCommitAttr: (key: string, value: unknown) => void;
+  /** Several attrs at once (a pick that also resizes), never a stale spread. */
+  onCommitAttrs: (patch: Record<string, unknown>) => void;
   /** Focus this row's input when it matches (UI_OVERHAUL §53). */
   focusKey?: string | null;
   onFocusHandled?: () => void;
@@ -647,7 +651,7 @@ function FieldRow({
           min={field.min ?? 1}
           max={field.max ?? 32}
           label={field.label}
-          onPick={(v) => onCommitAttr(field.key, v)}
+          onPick={(v) => onCommitAttrs(field.attrsFor?.(v, comp.attrs ?? {}) ?? { [field.key]: v })}
         />
       </div>
     );

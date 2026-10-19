@@ -162,7 +162,7 @@ test("Inspector memory: one Clear — it lives in the editor, and it empties the
   await expect(page.locator(".inspector-mem-contents")).toContainText("0 words");
 });
 
-test("Inspector memory: both widths are one-click picks, and the address one follows depth", async ({
+test("Inspector memory: the pickers size a memory, and a resize trims its image", async ({
   page,
 }) => {
   await page.goto("/?simdemo=1");
@@ -170,30 +170,32 @@ test("Inspector memory: both widths are one-click picks, and the address one fol
 
   // Two pickers, the way every other bit width is chosen — and the address
   // picker shows the DERIVED width (8 for 256 words) while `addrBits` is absent.
-  await expect(page.getByRole("radio", { name: "Address Bits 8" })).toHaveAttribute(
+  await expect(page.getByRole("radio", { name: "Address Bits 8", exact: true })).toHaveAttribute(
     "aria-checked",
     "true",
   );
-  await expect(page.getByRole("radio", { name: "Data Bits 32" })).toHaveAttribute(
+  await expect(page.getByRole("radio", { name: "Data Bits 32", exact: true })).toHaveAttribute(
     "aria-checked",
     "true",
   );
+  // No word-count field: with the address width picked, the size is 2^bits.
+  await expect(page.getByRole("spinbutton", { name: "Words" })).toHaveCount(0);
   expect(imemAttrs(await doc(page))?.addrBits).toBeUndefined();
 
-  // Shrinking the memory moves the derived width with it — the picker tracks
-  // `depth` for as long as `addrBits` is absent.
-  await page.getByRole("spinbutton", { name: "Words" }).fill("16");
-  await expect(page.getByRole("radio", { name: "Address Bits 4" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  expect(imemAttrs(await doc(page))?.addrBits).toBeUndefined();
+  // An image, then a resize that cannot hold all of it: picking Address Bits 2
+  // makes the memory 4 words, so the 6-word image is trimmed to fit (the loader
+  // rejects an over-long image outright — "image has 6 words, exceeding 4").
+  await page.getByRole("button", { name: "Edit hex…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Memory contents" });
+  await dialog.locator('input[data-addr="0"]').click();
+  await pasteInto(dialog, "6-0000000a");
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  expect(String(imemAttrs(await doc(page))?.contents ?? "")).toContain("6-0000000a");
 
-  // Picking a width makes it explicit, independent of the word count from then
-  // on; the data width is never involved.
-  await page.getByRole("radio", { name: "Address Bits 12" }).click();
+  await page.getByRole("radio", { name: "Address Bits 2", exact: true }).click();
   const attrs = imemAttrs(await doc(page));
-  expect(attrs?.addrBits).toBe(12);
-  expect(attrs?.depth).toBe(16);
-  expect(attrs?.bitsize).toBe(32);
+  expect(attrs?.addrBits).toBe(2);
+  expect(attrs?.depth).toBe(4);
+  expect(attrs?.bitsize).toBe(32); // the data width is never involved
+  expect(attrs?.contents).toBe("4-0000000a");
 });

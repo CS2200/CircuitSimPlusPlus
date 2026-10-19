@@ -1671,8 +1671,13 @@ two consecutive runs.
   larger than the word count inexpressible. The Inspector now offers **two
   one-click pickers** — **Address Bits** (`addrBits`, format-v2 §4) and **Data
   Bits** (`bitsize`) — the same 8-column grid every other bit width uses (§28);
-  no dropdown. Unset = auto (the width derived from `depth`, which a default
-  memory leaves unwritten), set = exactly that width. Fewer bits
+  no dropdown. There is **no word-count field**: the address pick _is_ the size
+  (`depth = 2^addrBits`), so 4 address bits means 16 words and nothing can hide
+  beyond the end — and since an image longer than the memory is a load error, a
+  resize trims it (Undo is the way back). Unset = auto (the width derived from
+  `depth`, which a default memory leaves unwritten), set = exactly that width.
+  The format still keeps the two attributes independent, so a hand-authored file
+  may express a window. Fewer bits
   address a window, more leave the extra addresses reading `X`. Additive, so no
   format-version bump; the engine test and the catalog unit test pin the same
   rule (`components.rs::addr_width`).
