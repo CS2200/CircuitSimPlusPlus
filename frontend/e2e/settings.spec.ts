@@ -93,6 +93,19 @@ test("theme: the Settings picker switches themes (the header toggle is gone)", a
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled");
 });
 
+test("Settings: the 24-hour clock toggle persists (24h is the default)", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Settings…" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("tab", { name: "Appearance" }).click();
+
+  const toggle = settings.locator(".settings-toggle", { hasText: "24-hour clock" });
+  await expect(toggle.locator("input")).toBeChecked();
+  await toggle.locator("input").uncheck();
+  expect(await page.evaluate(() => localStorage.getItem("csx.time24h"))).toBe("0");
+});
+
 test("Settings: the canvas grid overlay toggles and persists", async ({ page }) => {
   await page.goto("/");
   // Off by default (the pref is written on load, so it lands as "0").

@@ -246,6 +246,24 @@ test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ 
   await expect(page.locator(".inspector-id")).toBeVisible();
 });
 
+test("the status bar explains how to finish or cancel a wire", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "AND", exact: true }).click();
+  const spot = await world(page, 2.5, 1.5);
+  await page.mouse.click(spot.x, spot.y); // body becomes [0,0]-[5,3]
+  await page.keyboard.press("Escape");
+
+  // Clicking a pin starts a wire: the hint appears (it used to change the
+  // cursor and nothing else).
+  const out = await world(page, 5, 1.5); // AND.out
+  await page.mouse.click(out.x, out.y);
+  await expect(page.locator(".app-statusbar")).toContainText("Esc cancel");
+  await expect(page.locator(".app-statusbar")).toContainText("plant a bend");
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".app-statusbar")).not.toContainText("plant a bend");
+});
+
 test("palette tooltips name the part, with no gesture boilerplate", async ({ page }) => {
   await page.goto("/");
   // Gates is the default group; BUFFER is the tri-state buffer's tile. The

@@ -39,6 +39,8 @@ export interface EditorStatus {
   revision: number;
   dirty: boolean;
   placing: string | null;
+  /** True while a wire is being drawn (UI: the status bar says how to finish). */
+  wiring: boolean;
   busy: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -314,6 +316,7 @@ export default forwardRef<
       revision: doc.revision,
       dirty: doc.dirty,
       placing: tool.placingType,
+      wiring: tool.isWiring,
       busy: tool.isBusy,
       canUndo: doc.canUndo,
       canRedo: doc.canRedo,

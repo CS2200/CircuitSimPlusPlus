@@ -66,6 +66,7 @@ import {
   PREF_PULSES,
   PREF_SHOW_PERF,
   PREF_SHOW_VALUES,
+  PREF_TIME_24H,
   PREF_UPDATE_CHECK,
   saveBoolPref,
   saveNumPref,
@@ -207,6 +208,8 @@ export default function App() {
   const [accent, setAccent] = useState<AccentId>(loadAccentPref);
   const [pulsesOn, setPulsesOn] = useState(() => loadBoolPref(PREF_PULSES, true));
   const [gridOn, setGridOn] = useState(() => loadBoolPref(PREF_GRID, false));
+  /** Clock timestamps: 24-hour (default) or `h:MM AM/PM` (Settings → Appearance). */
+  const [time24h, setTime24h] = useState(() => loadBoolPref(PREF_TIME_24H, true));
   // Canvas readouts / overlays (Settings → Canvas).
   const [showValues, setShowValues] = useState(() => loadBoolPref(PREF_SHOW_VALUES, true));
   const [showPerf, setShowPerf] = useState(() => loadBoolPref(PREF_SHOW_PERF, false));
@@ -379,6 +382,9 @@ export default function App() {
   useEffect(() => {
     saveBoolPref(PREF_GRID, gridOn);
   }, [gridOn]);
+  useEffect(() => {
+    saveBoolPref(PREF_TIME_24H, time24h);
+  }, [time24h]);
   useEffect(() => {
     saveBoolPref(PREF_SHOW_VALUES, showValues);
   }, [showValues]);
@@ -1779,6 +1785,9 @@ export default function App() {
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}
+        {status?.wiring && (
+          <span>wiring — click a pin to finish, click to plant a bend, Esc cancel</span>
+        )}
         {status !== null && status.selection > 0 && <span>{status.selection} selected</span>}
         {status?.cursor && (
           <span>
@@ -1807,6 +1816,7 @@ export default function App() {
           accent={accent}
           pulsesOn={pulsesOn}
           gridOn={gridOn}
+          time24h={time24h}
           autosaveOn={autosaveOn}
           autosaveFileOn={autosaveFileOn}
           showValues={showValues}
@@ -1819,6 +1829,7 @@ export default function App() {
           onAccent={setAccent}
           onPulses={setPulsesOn}
           onGrid={setGridOn}
+          onTime24h={setTime24h}
           onAutosave={setAutosaveOn}
           onAutosaveFile={setAutosaveFileOn}
           onShowValues={setShowValues}

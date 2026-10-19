@@ -40,6 +40,7 @@ export default function SettingsDialog({
   accent,
   pulsesOn,
   gridOn,
+  time24h,
   autosaveOn,
   autosaveFileOn,
   showValues,
@@ -54,6 +55,7 @@ export default function SettingsDialog({
   onAccent,
   onPulses,
   onGrid,
+  onTime24h,
   onAutosave,
   onAutosaveFile,
   onShowValues,
@@ -69,6 +71,9 @@ export default function SettingsDialog({
   accent: AccentId;
   pulsesOn: boolean;
   gridOn: boolean;
+  /** Timestamps: 24-hour (default) or `h:MM AM/PM`. */
+  time24h: boolean;
+  onTime24h: (v: boolean) => void;
   /** Autosave: crash-recovery copy + (named docs) periodic file write. */
   autosaveOn: boolean;
   /** Autosave rewrites the real `.csx` for named documents (default on). */
@@ -244,6 +249,12 @@ export default function SettingsDialog({
                       </button>
                     ))}
                   </div>
+                  {toggle(
+                    "24-hour clock",
+                    "Timestamps read 14:32; turn this off for 2:32 PM.",
+                    time24h,
+                    onTime24h,
+                  )}
                 </section>
               </>
             )}
