@@ -280,3 +280,50 @@ format bump. *(this round)*
 - **"Polish application logo"** — subjective, not actionable.
 - **"Support floating-point resistors"** — there is no resistor part, and a
   digital net is 0/1/Z/X. Clarify what's wanted.
+
+---
+
+## Notes for the next rounds (2026-10-19)
+
+Two plans, written down so the rounds are mechanical. Neither is a promise about
+scope — they are what I would do, in this order.
+
+### The transistor (P3 primitives, the last piece)
+
+It must name its control pin **`gate`**, and that name is what a halt reports and
+the UI highlights — so it **cannot** reuse the controlled buffer's behaviour arm,
+which hardcodes `consume(en, "en")`. A transistor that halted saying `pin "en"`
+would name a pin the part does not have, and the canvas would highlight nothing.
+
+**Checked, and this makes it smaller than feared:** `delay.rs`'s `SinkKind` is
+derived from the **pin name** (`SinkKind::from_pin`), so a `gate` pin already maps
+to `SinkKind::Other` — no enum variant, no timing-table entry, no delay-engine
+change. The work is: a `CompKind` shape (its own variant, or a control-name field
+on the buffer's), a `BehaviorKind` mirroring `ControlledBuffer`'s arm with
+`"gate"`, the registry arm (`in`/`gate`/`out`, `bitsize` only), catalog + palette +
+`typeDisplayName`, docs, and a behaviour test asserting that a floating gate halts
+naming `gate` — the assertion that motivates the whole thing. The compiler names
+every exhaustive `CompKind` match the new variant breaks; that is the loop.
+
+### The measured per-part delay (IPC change authorized 2026-10-19)
+
+- **Engine:** the delay engine already reschedules a gate's commit per input event,
+  so it can record each component's last committed transition magnitude
+  (`commit_time − input_arrival`) into a `Vec` plus an accessor. That is the number
+  students ask about: not the table's design cost, but what the part actually took.
+- **Contract (v1.3, additive):** a `delays: [{ comp_id, ns }]` array on the existing
+  `timing_update` event — no new round trip, since the UI already merges that event
+  after each run/pause. `docs/ipc.md` gains a v1.3 stanza; `api.rs` and `types.ts`
+  the field. Strictly additive, so nothing existing changes meaning.
+- **UI:** the Inspector's Delay row grows a second half — `Design 10 ns · Observed
+  12.4 ns` — and shows the design number alone until a run has produced one.
+- **Tests:** engine (recorded, deterministic), the contract shape, the store merge,
+  the Inspector display, and an e2e (run, select a gate, expect "Observed").
+
+### Still queued behind those
+
+The canvas context-menu overhaul (right-click currently pans; needs the
+click-versus-drag split plus per-target actions), the version-history full-viewport
+view with diff highlighting and copy (the structural diff already exists), and the
+subcircuit panel work (always-visible panel, instance-versus-template scope, scope
+colours, resizing, dynamic outer pins).
