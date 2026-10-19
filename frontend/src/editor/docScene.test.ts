@@ -6,6 +6,7 @@ import {
   ellipsize,
   fitValueLine,
   memPreviewWord,
+  valueTextAtWidth,
 } from "./docScene";
 
 /**
@@ -90,6 +91,29 @@ describe("danglingPins", () => {
       { name: "dout", kind: "out" as const },
     ];
     expect(danglingPins("mem.ram", ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
+  });
+});
+
+describe("valueTextAtWidth", () => {
+  const hex = (h: string) => ({ v: h, x: "", z: "" });
+
+  it("pads hex to the pin's width, so 4 bits is 1 char and 8 bits is 2", () => {
+    expect(valueTextAtWidth(hex("5"), "hex", 4)).toBe("0x5");
+    expect(valueTextAtWidth(hex("5"), "hex", 8)).toBe("0x05");
+    expect(valueTextAtWidth(hex(""), "hex", 8)).toBe("0x00");
+    expect(valueTextAtWidth(hex("5"), "hex", 32)).toBe("0x00000005");
+  });
+
+  it("pads binary to the bit count and leaves decimal alone", () => {
+    expect(valueTextAtWidth(hex("5"), "bin", 8)).toBe("0b00000101");
+    // A decimal number has no fixed digit count.
+    expect(valueTextAtWidth(hex("ff"), "unsigned", 8)).toBe("255");
+  });
+
+  it("keeps a single-bit readout bare and X/Z symbolic", () => {
+    expect(valueTextAtWidth(hex("1"), "unsigned", 1)).toBe("1");
+    expect(valueTextAtWidth({ v: "", x: "1", z: "" }, "hex", 8)).toBe("X");
+    expect(valueTextAtWidth({ v: "", x: "", z: "1" }, "hex", 8)).toBe("Z");
   });
 });
 

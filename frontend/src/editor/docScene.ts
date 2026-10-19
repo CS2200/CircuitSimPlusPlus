@@ -327,6 +327,24 @@ export function constantText(hex: string, radix: unknown, bits: number): string 
   return `0x${n.toString(16).toUpperCase().padStart(hexWidthFor(w), "0")}`;
 }
 
+/**
+ * A value readout sized to the pin's DECLARED width, so the digits follow the
+ * bit size: widening a register from 4 to 8 bits turns `0x5` into `0x05`
+ * immediately, whatever the engine (or the mock) happens to send. Hex pads to
+ * `ceil(bits/4)` digits and binary to `bits`; decimal is a plain number and is
+ * left alone, and `X`/`Z` stay symbolic — there is nothing to zero-pad.
+ */
+export function valueTextAtWidth(val: WireValue, mode: ValueMode, bits: number): string {
+  const text = formatValue(val, mode);
+  if (text === "X" || text === "Z") return text;
+  const w = Math.min(32, Math.max(1, bits));
+  if (mode === "hex") {
+    return `0x${text.replace(/^0x/, "").toUpperCase().padStart(hexWidthFor(w), "0")}`;
+  }
+  if (mode === "bin") return `0b${text.replace(/^0b/, "").padStart(w, "0")}`;
+  return text;
+}
+
 /** A hex string (net mask or attr) as a plain number, or null if not one. */
 function hexToNumber(hex: string | null | undefined): number | null {
   if (hex === null || hex === undefined || hex === "") return null;
@@ -1308,11 +1326,12 @@ export class DocScene {
             const val =
               wireIdx !== undefined ? sim.valueForWire(wireIdx) : sim.valueForNamed?.(comp.id);
             if (val !== undefined) {
-              // A single-bit readout is a plain 0/1 — no hex prefix (§21).
+              // A single-bit readout is a plain 0/1 — no hex prefix (§21); wider
+              // ones are padded to the pin's DECLARED width, so the digit count
+              // follows the bit size (4-bit `0x5` → 8-bit `0x05`).
               const pinBits = layout.pins.find((p) => p.name === pinName)?.bitsize ?? 1;
-              const bits = wireIdx !== undefined ? (this.wireBits[wireIdx] ?? pinBits) : pinBits;
-              const mode = bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
-              valueText = formatValue(val, mode);
+              const mode = pinBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
+              valueText = valueTextAtWidth(val, mode, pinBits);
               valuePin = pinName;
             }
           }
@@ -1342,9 +1361,10 @@ export class DocScene {
           const val = this.livePinValue(comp, "addr", sim);
           const st = val !== undefined ? wireValueState(val) : undefined;
           if (val !== undefined && st !== "z" && st !== "x") {
-            addrText = formatValue(
+            addrText = valueTextAtWidth(
               val,
               addrBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+              addrBits,
             );
             addrNum = hexToNumber(val.v);
           } else {
@@ -1352,7 +1372,11 @@ export class DocScene {
             // before a run or over a stale Z/X (UI_OVERHAUL §51).
             const stat = this.staticPinText(comp, "addr");
             if (stat !== null) {
-              addrText = stat;
+              addrText = valueTextAtWidth(
+                { v: stat, x: "", z: "" },
+                addrBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+                addrBits,
+              );
               addrNum = hexToNumber(stat);
             }
           }
@@ -1367,18 +1391,18 @@ export class DocScene {
           const dataPin = VALUE_PIN[comp.type];
           const dataBits = layout.pins.find((p) => p.name === dataPin)?.bitsize ?? 1;
           const weVal = comp.type === "mem.ram" ? this.livePinValue(comp, "we", sim) : undefined;
+          const dataMode = dataBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
           if (weVal !== undefined && wireValueState(weVal) === "high") {
             const dinVal = this.livePinValue(comp, "din", sim);
-            if (dinVal !== undefined) {
-              valueText = formatValue(dinVal, probeDisplayMode(comp.attrs?.radix));
-            }
+            if (dinVal !== undefined) valueText = valueTextAtWidth(dinVal, dataMode, dataBits);
           } else if (valueText === null) {
             const word = memPreviewWord(comp.attrs?.contents, addrNum, dataBits);
             if (word !== null) {
-              valueText = `0x${word
-                .toString(16)
-                .toUpperCase()
-                .padStart(hexWidthFor(dataBits), "0")}`;
+              valueText = valueTextAtWidth(
+                { v: word.toString(16), x: "", z: "" },
+                dataMode,
+                dataBits,
+              );
             }
           }
         }
@@ -1409,10 +1433,10 @@ export class DocScene {
           if (poked !== undefined) {
             const q = layout.pins.find((p) => p.name === "q");
             const bits = q?.bitsize ?? 1;
-            const nibbles = Math.max(1, Math.ceil(bits / 4));
-            valueText = formatValue(
-              { v: poked.padStart(nibbles, "0").slice(-nibbles), x: "", z: "" },
+            valueText = valueTextAtWidth(
+              { v: poked, x: "", z: "" },
               bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+              bits,
             );
           }
         }
@@ -1423,10 +1447,10 @@ export class DocScene {
         if (valueText === null && showValues && comp.type === "mem.register") {
           const q = layout.pins.find((p) => p.name === "q");
           const bits = q?.bitsize ?? 1;
-          const zeros = "0".repeat(Math.max(1, Math.ceil(bits / 4)));
-          valueText = formatValue(
-            { v: zeros, x: "", z: "" },
+          valueText = valueTextAtWidth(
+            { v: "0", x: "", z: "" },
             bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+            bits,
           );
         }
         if (valueText !== null && !isMemory) caption = valueText;
