@@ -36,7 +36,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 3,
         pokes: &[],
         t_obs: 39,
-        trace_hash: 0x8f98_ade4_f0ae_3cb4,
+        trace_hash: 0x68f5_b528_349e_fc82,
     },
     Scenario {
         fixture: "fsm.csx",
@@ -44,7 +44,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 40,
-        trace_hash: 0x09b5_f93b_ac5d_4854,
+        trace_hash: 0x3ba3_9a51_f88e_85bc,
     },
     Scenario {
         fixture: "alu.csx",
@@ -60,7 +60,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x16fe_94f6_7c7c_7ee8,
+        trace_hash: 0x4121_8bb1_fa56_1270,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -68,7 +68,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0xbb3f_2b80_604d_4814,
+        trace_hash: 0x0889_0dfa_98d4_0cf9,
     },
 ];
 
@@ -124,11 +124,9 @@ fn delay_power_on_static_splitter_cone() {
             {"id": "p", "type": "wiring.probe", "pos": [0, 0], "name": "p"}
         ], "wires": [
             {"a": {"comp": "clk", "pin": "out"}, "b": {"comp": "ir", "pin": "clk"}},
-            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "ir", "pin": "rst"}},
             {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "ir", "pin": "en"}},
             {"a": {"comp": "z32", "pin": "out"}, "b": {"comp": "ir", "pin": "d"}},
             {"a": {"comp": "clk", "pin": "out"}, "b": {"comp": "v", "pin": "clk"}},
-            {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "rst"}},
             {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "en"}},
             {"a": {"comp": "z", "pin": "out"}, "b": {"comp": "v", "pin": "d"}},
             {"a": {"comp": "ir", "pin": "q"}, "b": {"comp": "sp", "pin": "bus"}},

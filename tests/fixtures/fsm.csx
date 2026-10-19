@@ -186,16 +186,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register0",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -212,16 +202,6 @@
           "b": {
             "comp": "register1",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register1",
-            "pin": "rst"
           }
         },
         {

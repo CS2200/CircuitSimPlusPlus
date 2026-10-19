@@ -902,7 +902,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::i("d", b),
                     PinSig::i("clk", 1),
                     PinSig::i("en", 1),
-                    PinSig::i("rst", 1),
                     PinSig::o("q", b),
                 ],
                 c,
@@ -947,7 +946,6 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::i("clk", 1),
                     // Synchronous reset (UI decision): clears memory on a rising
                     // edge with rst=1; wins over a write (see behavior.rs).
-                    PinSig::i("rst", 1),
                 ],
                 c,
                 CompKind::Ram {
@@ -1261,14 +1259,7 @@ mod tests {
         // words (so a correct 8-bit address was flagged as a mismatch).
         assert_eq!(
             names_widths("mem.ram", json!({ "bitsize": 8, "depth": 256 })),
-            expect(&[
-                ("addr", 8),
-                ("din", 8),
-                ("dout", 8),
-                ("we", 1),
-                ("clk", 1),
-                ("rst", 1),
-            ])
+            expect(&[("addr", 8), ("din", 8), ("dout", 8), ("we", 1), ("clk", 1),])
         );
         assert_eq!(
             names_widths("mem.rom", json!({ "bitsize": 8, "depth": 16 })),
@@ -1283,7 +1274,6 @@ mod tests {
                 ("dout", 32),
                 ("we", 1),
                 ("clk", 1),
-                ("rst", 1),
             ])
         );
     }

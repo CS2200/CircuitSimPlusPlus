@@ -407,7 +407,6 @@ enum SinkKind {
     D,
     Clk,
     En,
-    Rst,
     Addr,
     Din,
     We,
@@ -421,7 +420,6 @@ impl SinkKind {
             "d" => SinkKind::D,
             "clk" => SinkKind::Clk,
             "en" => SinkKind::En,
-            "rst" => SinkKind::Rst,
             "addr" => SinkKind::Addr,
             "din" => SinkKind::Din,
             "we" => SinkKind::We,
@@ -1736,8 +1734,6 @@ mod tests {
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r2","pin":"clk"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r2","pin":"en"}}}},
-                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r1","pin":"rst"}}}},
-                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r2","pin":"rst"}}}},
                 {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"inv","pin":"in"}}}},
                 {{"a":{{"comp":"inv","pin":"out"}},"b":{{"comp":"r1","pin":"d"}}}},
                 {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"n2","pin":"in"}}}},
@@ -1873,7 +1869,6 @@ mod tests {
             ], "wires": [
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
-                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
                 {{"a":{{"comp":"d","pin":"pin"}},"b":{{"comp":"r","pin":"d"}}}}
             ]}}]
         }}"##
@@ -2113,8 +2108,7 @@ mod tests {
         );
         wires.push_str(
             r#"{"a":{"comp":"clk","pin":"out"},"b":{"comp":"r2","pin":"clk"}},
-            {"a":{"comp":"one","pin":"out"},"b":{"comp":"r2","pin":"en"}},
-            {"a":{"comp":"zero","pin":"out"},"b":{"comp":"r2","pin":"rst"}},"#,
+            {"a":{"comp":"one","pin":"out"},"b":{"comp":"r2","pin":"en"}},"#,
         );
         let mut prev = ("src".to_string(), "pin".to_string());
         for i in 0..250 {
@@ -2253,7 +2247,6 @@ mod tests {
             ], "wires": [
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
-                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
             ]}}]
         }}"##

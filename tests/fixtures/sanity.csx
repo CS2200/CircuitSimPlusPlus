@@ -24,8 +24,6 @@
         { "a": { "comp": "clk", "pin": "out" }, "b": { "comp": "r2", "pin": "clk" } },
         { "a": { "comp": "one", "pin": "out" }, "b": { "comp": "r1", "pin": "en" } },
         { "a": { "comp": "one", "pin": "out" }, "b": { "comp": "r2", "pin": "en" } },
-        { "a": { "comp": "zero", "pin": "out" }, "b": { "comp": "r1", "pin": "rst" } },
-        { "a": { "comp": "zero", "pin": "out" }, "b": { "comp": "r2", "pin": "rst" } },
         { "a": { "comp": "one", "pin": "out" }, "b": { "comp": "a1", "pin": "in1" } },
         { "a": { "comp": "r1", "pin": "q" }, "b": { "comp": "n1", "pin": "in" } },
         { "a": { "comp": "n1", "pin": "out" }, "b": { "comp": "r1", "pin": "d" } },

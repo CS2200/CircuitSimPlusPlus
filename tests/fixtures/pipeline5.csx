@@ -1500,16 +1500,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register0",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "register0",
             "pin": "q"
           },
@@ -1570,16 +1560,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register1",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -1590,32 +1570,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register2",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register3",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register3",
-            "pin": "rst"
           }
         },
         {
@@ -1660,32 +1620,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register4",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register5",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register5",
-            "pin": "rst"
           }
         },
         {
@@ -1700,32 +1640,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register6",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register7",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register7",
-            "pin": "rst"
           }
         },
         {
@@ -1740,32 +1660,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register8",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register9",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register9",
-            "pin": "rst"
           }
         },
         {
@@ -1780,32 +1680,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register10",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register11",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register11",
-            "pin": "rst"
           }
         },
         {
@@ -1820,32 +1700,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register12",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register13",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register13",
-            "pin": "rst"
           }
         },
         {
@@ -1860,32 +1720,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register14",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register15",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register15",
-            "pin": "rst"
           }
         },
         {
@@ -1900,32 +1740,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register16",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register17",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register17",
-            "pin": "rst"
           }
         },
         {
@@ -1940,32 +1760,12 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register18",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register19",
             "pin": "clk"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register19",
-            "pin": "rst"
           }
         },
         {
@@ -2340,16 +2140,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register20",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -2366,16 +2156,6 @@
           "b": {
             "comp": "register21",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register21",
-            "pin": "rst"
           }
         },
         {
@@ -2400,16 +2180,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register22",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -2426,16 +2196,6 @@
           "b": {
             "comp": "register23",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register23",
-            "pin": "rst"
           }
         },
         {
@@ -2460,16 +2220,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register24",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -2486,16 +2236,6 @@
           "b": {
             "comp": "register25",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register25",
-            "pin": "rst"
           }
         },
         {
@@ -2520,16 +2260,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register26",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -2550,16 +2280,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register27",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -2576,16 +2296,6 @@
           "b": {
             "comp": "register28",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register28",
-            "pin": "rst"
           }
         },
         {
@@ -3250,16 +2960,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register29",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3276,16 +2976,6 @@
           "b": {
             "comp": "register30",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register30",
-            "pin": "rst"
           }
         },
         {
@@ -3310,16 +3000,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register31",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3340,16 +3020,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register32",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3366,16 +3036,6 @@
           "b": {
             "comp": "register33",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register33",
-            "pin": "rst"
           }
         },
         {
@@ -3520,16 +3180,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register34",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3546,16 +3196,6 @@
           "b": {
             "comp": "register35",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register35",
-            "pin": "rst"
           }
         },
         {
@@ -3580,16 +3220,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register36",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3610,16 +3240,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register37",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -3636,16 +3256,6 @@
           "b": {
             "comp": "register38",
             "pin": "en"
-          }
-        },
-        {
-          "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register38",
-            "pin": "rst"
           }
         },
         {

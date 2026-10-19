@@ -83,16 +83,6 @@
         },
         {
           "a": {
-            "comp": "constant1",
-            "pin": "out"
-          },
-          "b": {
-            "comp": "register0",
-            "pin": "rst"
-          }
-        },
-        {
-          "a": {
             "comp": "d",
             "pin": "pin"
           },

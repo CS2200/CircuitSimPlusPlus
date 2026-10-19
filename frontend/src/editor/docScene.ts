@@ -493,7 +493,6 @@ const PIN_DISPLAY: Readonly<Record<string, string>> = {
   // the format keeps the short registry name (`we`).
   we: "write enable",
   en: "enable",
-  rst: "reset",
   addr: "address",
   din: "data in",
   dout: "data out",
@@ -567,31 +566,22 @@ const PIN_TOL = 0.55;
 const CORNER_TOL = 0.4;
 
 /**
- * Inputs a memory may legitimately leave open: the core reads an unwired `rst`
- * as deasserted (a synchronous reset that nobody asserted).
- */
-const DANGLE_EXEMPT_PINS: ReadonlySet<string> = new Set(["mem.ram:rst"]);
-
-/**
  * Which pins to flag on ONE component: its unconnected **inputs**, but only once
  * the part is otherwise wired up. So a gate with its output wired and no inputs
  * is flagged (the classic "forgot to connect it"), while a part nobody has
  * touched yet is left alone. Unused outputs and inouts (a splitter's taps) are
- * never mistakes, and a memory's `rst` may float.
+ * never mistakes.
  *
  * Pure, so the rule is unit-tested rather than buried in the draw loop.
  */
 export function danglingPins<T extends { name: string; kind: PinKind }>(
-  type: string,
   pins: readonly T[],
   wired: (pin: string) => boolean,
 ): T[] {
   let wiredCount = 0;
   for (const p of pins) if (wired(p.name)) wiredCount++;
   if (wiredCount === 0 || wiredCount === pins.length) return [];
-  return pins.filter(
-    (p) => p.kind === "in" && !wired(p.name) && !DANGLE_EXEMPT_PINS.has(`${type}:${p.name}`),
-  );
+  return pins.filter((p) => p.kind === "in" && !wired(p.name));
 }
 
 /**
@@ -695,7 +685,7 @@ export class DocScene {
     for (const comp of this.components) {
       const layout = this.layouts.get(comp.id);
       if (layout === undefined) continue;
-      for (const p of danglingPins(comp.type, layout.pins, (pin) =>
+      for (const p of danglingPins(layout.pins, (pin) =>
         this.nets.pinToNet.has(`${comp.id}:${pin}`),
       )) {
         this.danglingPins.push({ x: p.x, y: p.y });

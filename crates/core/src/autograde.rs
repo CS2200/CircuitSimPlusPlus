@@ -1166,8 +1166,6 @@ mod tests {
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"dmem","pin":"clk"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r2","pin":"en"}}}},
-                {{"a":{{"comp":"zw","pin":"out"}},"b":{{"comp":"r1","pin":"rst"}}}},
-                {{"a":{{"comp":"zw","pin":"out"}},"b":{{"comp":"r2","pin":"rst"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"a1","pin":"in1"}}}},
                 {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"n1","pin":"in"}}}},
                 {{"a":{{"comp":"n1","pin":"out"}},"b":{{"comp":"r1","pin":"d"}}}},
@@ -1396,7 +1394,6 @@ mod tests {
             ], "wires": [
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
                 {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
-                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
                 {{"a":{{"comp":"d","pin":"pin"}},"b":{{"comp":"r","pin":"d"}}}}
             ]}}]
         }}"##
@@ -1516,7 +1513,7 @@ mod tests {
         assert_eq!(out.outcome.exit_code(), EXIT_FLOATING_READ);
         assert_eq!(out.report.halt_reason, "floating-read");
         assert!(
-            out.report.halt_details.contains('r'),
+            out.report.halt_details.contains("pin \"d\""),
             "{:?}",
             out.report.halt_details
         );

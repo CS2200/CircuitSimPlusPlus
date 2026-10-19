@@ -20,7 +20,7 @@ import json
 import os
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
-SETTINGS = {"delayModel": "delay", "clockHz": 1, "delayTable": "cs2200-74ls-v1"}
+SETTINGS = {"clockHz": 1, "delayTable": "cs2200-74ls-v1"}
 
 PROGRAM = [
     # 0-2: sum = 0; n = 5; i = 1
@@ -100,7 +100,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 2,
+            "version": 3,
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],
@@ -124,7 +124,7 @@ class Ctx:
     def const(self, value, bitsize):
         return self._const(value, bitsize)
 
-    def reg(self, name=None, bitsize=32, rst=None, en="tie"):
+    def reg(self, name=None, bitsize=32, en="tie"):
         """Clocked register. `en`: "tie" -> constant 1; "open" -> caller
         wires it; (comp, pin) -> driven. (Never wire en twice — X!)"""
         r = self.c.add("mem.register", name=name, bitsize=bitsize if bitsize != 1 else None)
@@ -135,7 +135,6 @@ class Ctx:
             pass
         else:
             self.c.wire(en[0], en[1], r, "en")
-        self.c.wire(rst if rst else self.zero, "out", r, "rst")
         return r
 
     def split(self, bus_comp, bus_pin, splits, prefix):
@@ -172,7 +171,6 @@ def register_file(ctx, n=16):
     for i in range(n):
         r = c.add("mem.register", name=f"r{i}", bitsize=32)
         c.wire(ctx.clk, "out", r, "clk")
-        c.wire(ctx.zero, "out", r, "rst")
         # en wired later (write decode); $0 never writes.
         regs.append(r)
     return regs

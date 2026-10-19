@@ -57,41 +57,36 @@ describe("danglingPins", () => {
 
   it("flags the unconnected inputs of a part that is otherwise wired up", () => {
     // Output wired, no inputs: the classic "forgot to connect it".
-    expect(danglingPins("gate.and", gate, (p) => p === "out").map((p) => p.name)).toEqual([
-      "in0",
-      "in1",
-    ]);
+    expect(danglingPins(gate, (p) => p === "out").map((p) => p.name)).toEqual(["in0", "in1"]);
     // One input wired: only the open one is flagged.
-    expect(danglingPins("gate.and", gate, (p) => p === "in0").map((p) => p.name)).toEqual(["in1"]);
+    expect(danglingPins(gate, (p) => p === "in0").map((p) => p.name)).toEqual(["in1"]);
   });
 
   it("stays quiet for an untouched part and for a fully wired one", () => {
-    expect(danglingPins("gate.and", gate, () => false)).toEqual([]);
-    expect(danglingPins("gate.and", gate, () => true)).toEqual([]);
+    expect(danglingPins(gate, () => false)).toEqual([]);
+    expect(danglingPins(gate, () => true)).toEqual([]);
   });
 
-  it("never flags outputs, inouts, or a memory's optional rst", () => {
+  it("never flags outputs or inouts", () => {
     // A decoder's unused outputs are not mistakes.
     const dec = [
       { name: "in", kind: "in" as const },
       { name: "out0", kind: "out" as const },
       { name: "out1", kind: "out" as const },
     ];
-    expect(danglingPins("plexers.decoder", dec, (p) => p === "in")).toEqual([]);
+    expect(danglingPins(dec, (p) => p === "in")).toEqual([]);
     // A splitter's taps are plumbing, not inputs the user owes.
     const split = [
       { name: "bus", kind: "inout" as const },
       { name: "b0", kind: "inout" as const },
     ];
-    expect(danglingPins("wiring.splitter", split, (p) => p === "bus")).toEqual([]);
-    // A RAM's `rst` may float (the core reads it as deasserted); `din` may not.
+    expect(danglingPins(split, (p) => p === "bus")).toEqual([]);
     const ram = [
       { name: "addr", kind: "in" as const },
       { name: "din", kind: "in" as const },
-      { name: "rst", kind: "in" as const },
       { name: "dout", kind: "out" as const },
     ];
-    expect(danglingPins("mem.ram", ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
+    expect(danglingPins(ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
   });
 });
 

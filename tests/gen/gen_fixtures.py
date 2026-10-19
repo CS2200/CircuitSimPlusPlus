@@ -12,7 +12,6 @@ import os
 OUT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 
 SETTINGS = {
-    "delayModel": "delay",
     "clockHz": 1,
     "delayTable": "cs2200-74ls-v1",
 }
@@ -48,7 +47,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 2,
+            "version": 3,
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],
@@ -60,11 +59,10 @@ def const(c, value, bitsize=1):
 
 
 def clocked_register(c, clk, one, zero, name=None, bitsize=32):
-    """A register with en=1, rst=0 wired; returns its id."""
+    """A register with en=1 wired; returns its id."""
     r = c.add("mem.register", name=name, bitsize=bitsize if bitsize != 1 else None)
     c.wire(clk, "out", r, "clk")
     c.wire(one, "out", r, "en")
-    c.wire(zero, "out", r, "rst")
     return r
 
 

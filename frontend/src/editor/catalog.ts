@@ -604,7 +604,7 @@ const REGISTRY: Record<string, CompSpec> = {
 
   // Memory. Clock/reset/write-enable inputs sit on the BOTTOM edge, the way
   // they're drawn on a data sheet (UI_OVERHAUL §24); pin names follow
-  // format-v2 §4 exactly (d/clk/en/rst/q, addr/din/dout/we/clk, addr/out).
+  // format-v2 §4 exactly (d/clk/en/q, addr/din/dout/we/clk, addr/out).
   "mem.register": boxSpec(
     6,
     4,
@@ -612,13 +612,12 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "d", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "en", dx: 0, dy: 3, kind: "in" },
       { name: "clk", dx: 2, dy: 4, kind: "in" },
-      { name: "rst", dx: 4, dy: 4, kind: "in" },
       { name: "q", dx: 6, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "REG",
   ),
-  // Clock/reset/write-enable left→right on the bottom edge (clk where we used
-  // to sit, rst where clk used to sit, we spaced under dout), and din spread
+  // Clock and write-enable left→right on the bottom edge (we spaced under
+  // dout), and din spread
   // further from addr (UI decision).
   // The `addr` pin is as wide as the ADDRESS SPACE (`ceil(log2 depth)`), not the
   // data width — see `memAddrBits`; `din`/`dout` follow `bitsize`.
@@ -630,7 +629,6 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "din", dx: 0, dy: 4, kind: "in", bitsize: bitsOf(attrs) },
       { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: bitsOf(attrs) },
       { name: "clk", dx: 3, dy: 6, kind: "in" },
-      { name: "rst", dx: 7, dy: 6, kind: "in" },
       { name: "we", dx: 9, dy: 6, kind: "in" },
     ],
     caption: () => "RAM",
