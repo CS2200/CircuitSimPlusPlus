@@ -769,3 +769,105 @@ describe("rotating a port pin keeps its direction in step (§77)", () => {
     expect(at()?.attrs).toEqual({ bits: 4 });
   });
 });
+
+/**
+ * Dragging a SELECTION — the lasso case (UI_OVERHAUL §81). The single-component
+ * path was covered; a set of them was not, and a set is where a wire's ends can
+ * both travel, or a branch can hang off a parent that travels with it.
+ */
+describe("moving a selection with junctions", () => {
+  /** On-segment test: collinear with ab and within it (the geometry invariant). */
+  const onSegment = (p: number[], a: number[], b: number[]): boolean => {
+    const cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    if (Math.abs(cross) > 1e-9) return false;
+    const dot = (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1]);
+    const len = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
+    return dot >= -1e-9 && dot <= len + 1e-9;
+  };
+
+  /**
+   * A trunk between two parts (with a BEND, so a rigid move is visible) and a
+   * branch hanging off it, glued to a third part.
+   */
+  function cluster() {
+    const doc = CircuitDocument.create("t");
+    const a = doc.addComponent(0, { type: "gate.and", pos: [0, 0] }); // out (5, 1.5)
+    const b = doc.addComponent(0, { type: "gate.not", pos: [20, 0] }); // in (20, 1)
+    const c = doc.addComponent(0, { type: "gate.and", pos: [0, 20] }); // out (5, 21.5)
+    const trunk = doc.addWire(0, {
+      a: { comp: a, pin: "out" },
+      b: { comp: b, pin: "in" },
+      points: [
+        [5, 1.5],
+        [12, 1.5],
+        [12, 1],
+        [20, 1],
+      ],
+    });
+    const branch = doc.addWire(0, {
+      a: { comp: c, pin: "out" },
+      b: { join: { wire: trunk, segment: 1 } }, // the (12, 1.5) → (12, 1) leg
+      points: [
+        [5, 21.5],
+        [5, 1],
+        [12, 1],
+      ],
+    });
+    return { doc, a, b, c, trunk, branch };
+  }
+
+  it("moves a wire whose ends BOTH travel rigidly, bends included", () => {
+    const { doc, a, b, trunk } = cluster();
+    doc.moveComponents(0, new Set([a, b]), { x: 4, y: 2 });
+    // Every point by the delta: the wire is the same shape, somewhere else.
+    expect(doc.circuit(0).wires[trunk].points).toEqual([
+      [9, 3.5],
+      [16, 3.5],
+      [16, 3],
+      [24, 3],
+    ]);
+  });
+
+  it("carries a dragged branch's junction along with the cluster", () => {
+    const { doc, a, b, c, trunk, branch } = cluster();
+    doc.moveComponents(0, new Set([a, b, c]), { x: 4, y: 2 });
+    const wires = doc.circuit(0).wires;
+    expect(wires[branch].points.at(-1)).toEqual([16, 3]);
+    // …and it is still exactly on its parent's segment.
+    const t = wires[trunk].points;
+    expect(onSegment(wires[branch].points.at(-1)!, t[1], t[2])).toBe(true);
+  });
+
+  it("stretches a branch that is NOT dragged onto its parent's new position", () => {
+    const { doc, a, b, trunk, branch } = cluster(); // c stays put
+    doc.moveComponents(0, new Set([a, b]), { x: 4, y: 2 });
+    const wires = doc.circuit(0).wires;
+    expect(wires[branch].points[0]).toEqual([5, 21.5]); // its pin end is anchored
+    const t = wires[trunk].points;
+    expect(onSegment(wires[branch].points.at(-1)!, t[1], t[2])).toBe(true);
+  });
+
+  it("keeps every junction on its parent segment, whatever moves", () => {
+    for (const which of [["a", "b"], ["a", "b", "c"], ["c"]] as const) {
+      const { doc, a, b, c } = cluster();
+      const byName = { a, b, c };
+      doc.moveComponents(0, new Set(which.map((n) => byName[n])), { x: -3, y: 5 });
+      const wires = doc.circuit(0).wires;
+      for (const [i, w] of wires.entries()) {
+        for (const end of ["a", "b"] as const) {
+          const ep = w[end];
+          if (!("join" in ep)) continue;
+          const parent = wires[ep.join.wire];
+          expect(
+            onSegment(
+              end === "a" ? w.points[0] : w.points[w.points.length - 1],
+              parent.points[ep.join.segment],
+              parent.points[ep.join.segment + 1],
+            ),
+          ).toBe(true);
+          expect(i).toBeGreaterThan(ep.join.wire); // parents precede children
+        }
+      }
+    }
+  });
+});
