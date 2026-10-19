@@ -155,13 +155,25 @@ address *(8879681)*.
   exists. Evidence: the committed demo baseline draws the mux as a bare
   trapezoid. Fix: keep the suppression for gates and draw the abbreviation on
   plexer trapezoids (and re-bless the visual baselines).
-- **Body marks read as "off"** (the adder's `+` called out). Note what this is
-  *not*: text is drawn with `textBaseline = "middle"` (`render/canvas2d.ts:115`),
-  so it is not a baseline-versus-centre bug, and the demo baseline's `+` measures
-  centred in its box. Needs a specific part (and zoom) — the suspicion is a
-  glyph's optical centre versus its em box (arithmetic symbols are `+ − × ÷ = ~ «`
-  at `fitTextSize`, which grows with the body), i.e. a per-symbol nudge rather
-  than a global one. A screenshot of the worst offender would pin it.
+- **Body marks read as "off"** — *diagnosed* (screenshot + measurement). At the
+  maintainer's zoom the adder's `+` sits ~0.47 world units below its box centre
+  and ~0.22 left; in the committed demo baseline (default zoom) the same `+`
+  measures centred. So it is **zoom-dependent**, which rules out the layout: the
+  mark is drawn at `layout.rect`'s centre (`docScene.ts:1284`) with
+  `textBaseline = "middle"` (`render/canvas2d.ts:115`).
+
+  **Cause:** the renderer sets `ctx.font = \`${size}px …\`` where `size` is in
+  *world* units (≈1 for a mark) and relies on the camera transform to scale the
+  glyph up (~60× when zoomed in). Font metrics are quantized at that ~1px size,
+  so "middle" is off by a fraction of a *world* pixel — invisible when zoomed out,
+  and multiplied by the zoom when zoomed in. Bigger marks and closer zooms make
+  it worse, which is exactly "everything's logo is off".
+
+  **Fix:** draw text in device space at the final pixel size — read the live
+  transform in the flush loop (`ctx.getTransform()`), reset it, set
+  `font = size × scale`, and place the glyph at the transformed point (or set an
+  explicit alphabetic baseline offset). Then re-bless the visual baselines (every
+  text draw shifts a hair).
 
 **Clarified 2026-10-19 (real, being worked):**
 
