@@ -222,7 +222,15 @@ format bump. _(this round)_
   renderer's, so the canvas element is the source; the export is the _current
   view_ (fit-the-whole-circuit export is a follow-up).
 - Right-click context-menu overhaul.
-- Version history: full-viewport view (no overlay), diff highlighting + copy.
+- ~~Version history: full-viewport view (no overlay), diff highlighting + copy~~
+  **done** _(this round)_: the history is a view that owns the viewport — the editor
+  row is not displayed, so nothing sits behind the preview — each change is tagged
+  and coloured with the palette's own wire colours, **Copy** puts the uncapped
+  comparison on the real clipboard, and the preview outlines the parts a version
+  adds or changes through `SceneOverlay.changedIds` rather than the selection model
+  (a selection also draws the rotate handle, which a read-only preview must not
+  offer). Removals are not marked on the canvas — the part is not in that version —
+  so they stay in the list. UI_OVERHAUL §76.
 - Subcircuits: always-visible panel, click into an _instance_ vs template,
   scope colors, resizing, dynamic outer pins from inner pin rotation.
   **Delete a sheet tab** is already there — the tab's right/middle-click menu

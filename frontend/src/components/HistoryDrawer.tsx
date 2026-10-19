@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { bytesLabel, clockTime, relativeAge } from "../lib/time";
 import type { HistoryUsage, VersionMeta } from "../model/versionStore";
-import { diffLines, diffSummary, type VersionDiff } from "../model/versionDiff";
+import { copyText } from "../lib/clipboard";
+import { diffEntries, diffSummary, diffText, type VersionDiff } from "../model/versionDiff";
 
 /**
  * Version-history drawer (UI_OVERHAUL §34): a Google-Docs-style panel that
@@ -21,6 +22,7 @@ export default function HistoryDrawer({
   onSelect,
   onRename,
   onClose,
+  onNotify,
 }: {
   versions: VersionMeta[];
   selectedId: string | null;
@@ -30,6 +32,8 @@ export default function HistoryDrawer({
   onSelect: (id: string) => void;
   onRename: (id: string, label: string) => void;
   onClose: () => void;
+  /** Toast line (the copy outcome). */
+  onNotify?: (message: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -46,6 +50,14 @@ export default function HistoryDrawer({
   }, [onClose, editingId]);
 
   const selected = versions.find((v) => v.id === selectedId) ?? null;
+  const entries = diff === null ? [] : diffEntries(diff);
+
+  /** Copy the whole comparison (summary + every change, uncapped) as text. */
+  const copyDiff = async (): Promise<void> => {
+    if (diff === null) return;
+    const ok = await copyText(diffText(diff));
+    onNotify?.(ok ? "Changes copied to the clipboard" : "Couldn't reach the clipboard");
+  };
 
   const commitRename = (id: string): void => {
     setEditingId(null);
@@ -117,12 +129,25 @@ export default function HistoryDrawer({
 
       {selected !== null && (
         <section className="history-diff" aria-label="Changes in this version">
-          <h3>This version vs the open document</h3>
+          <div className="history-diff-head">
+            <h3>This version vs the open document</h3>
+            {entries.length > 0 && (
+              <button
+                className="history-copy"
+                title="Copy these changes to the clipboard"
+                onClick={() => void copyDiff()}
+              >
+                Copy
+              </button>
+            )}
+          </div>
           <p className="history-diff-summary">{diff === null ? "Comparing…" : diffSummary(diff)}</p>
-          {diff !== null && diffLines(diff).length > 0 && (
+          {entries.length > 0 && (
             <ul className="history-diff-list">
-              {diffLines(diff).map((line, i) => (
-                <li key={i}>{line}</li>
+              {entries.map((entry, i) => (
+                <li key={i} className={`diff-${entry.kind}`}>
+                  {entry.text}
+                </li>
               ))}
             </ul>
           )}

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { CSX_FORMAT, CSX_VERSION } from "./csx";
 import { CircuitDocument } from "./document";
-import { diffDocuments, diffLines, diffSummary } from "./versionDiff";
+import {
+  diffDocuments,
+  diffEntries,
+  diffLines,
+  diffSummary,
+  diffText,
+  highlightIds,
+} from "./versionDiff";
 
 type Part = { id: string; type: string; pos?: [number, number]; attrs?: Record<string, unknown> };
 type Wire = { points: [number, number][] };
@@ -113,5 +120,33 @@ describe("diffDocuments (current → version)", () => {
     const lines = diffLines(diff, 5);
     expect(lines).toHaveLength(6); // 5 kept + "…and N more"
     expect(lines[5]).toContain("more");
+  });
+});
+
+describe("the change list as data (§76)", () => {
+  const current = doc([gate("1", 4), { id: "2", type: "gate.not" }]);
+  const version = doc([gate("1", 8), gate("3", 2)]);
+
+  it("tags each change with the kind that colours it", () => {
+    const entries = diffEntries(diffDocuments(current, version));
+    expect(entries.map((e) => e.kind)).toEqual(["added", "changed", "removed"]);
+    expect(entries.map((e) => e.text)).toEqual([
+      "+ gate.and (3)",
+      "~ gate.and (1): bits 4 → 8",
+      "− gate.not (2)",
+    ]);
+  });
+
+  it("highlights added and changed parts — never removals, which are not there", () => {
+    expect(highlightIds(diffDocuments(current, version))).toEqual(["3", "1"]);
+    expect(highlightIds(diffDocuments(current, doc([gate("1", 4)])))).toEqual([]);
+  });
+
+  it("copies the summary and EVERY change, past the drawer's cap", () => {
+    const parts = Array.from({ length: 12 }, (_, i) => ({ id: `p${i}`, type: "gate.not" }));
+    const text = diffText(diffDocuments(doc([]), doc(parts)));
+    expect(text.split("\n")[0]).toBe("12 parts added");
+    expect(text).toContain("+ gate.not (p11)");
+    expect(text).not.toContain("more"); // the drawer caps; a copy must not
   });
 });

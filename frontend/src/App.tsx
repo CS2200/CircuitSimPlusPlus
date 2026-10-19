@@ -28,7 +28,7 @@ import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
-import { diffDocuments } from "./model/versionDiff";
+import { diffDocuments, highlightIds } from "./model/versionDiff";
 import {
   PALETTE,
   compPins,
@@ -111,7 +111,6 @@ const VERSION_COALESCE_MS = 60_000;
  * Width of the version-history drawer (UI_OVERHAUL §34). The canvas preview
  * stops where the drawer starts, so the two never overlap.
  */
-const HISTORY_DRAWER_W = 320;
 
 /**
  * Debounce for the live re-sync on edit (UI_OVERHAUL §23): a structural edit
@@ -1108,6 +1107,13 @@ export default function App() {
     }
   }, [historyOpen, historyPreview, doc]);
 
+  // §76: the parts this version adds or changes — the preview outlines them on
+  // the canvas. Removals show only in the list (the part is not in the version).
+  const diffHighlight = useMemo(
+    () => (versionDiff === null ? [] : highlightIds(versionDiff)),
+    [versionDiff],
+  );
+
   // The preview follows the selection (read on demand — versions can be large).
   useEffect(() => {
     if (!historyOpen || historySelectedId === null) {
@@ -1702,7 +1708,9 @@ export default function App() {
           </>
         }
       />
-      <main className="app-main">
+      {/* While the history view is open it owns the viewport, so it carries a
+          modifier the editor row is hidden by (§76). */}
+      <main className={`app-main${historyOpen ? " history" : ""}`}>
         {stress && stressScene !== null ? (
           <div className="editor-wrap">
             <StressCanvas scene={stressScene} themeName={`${theme}|${accent}`} animate={animate} />
@@ -1893,38 +1901,51 @@ export default function App() {
           </>
         )}
         {historyOpen && (
-          <HistoryDrawer
-            versions={versions}
-            selectedId={historySelectedId}
-            usage={historyUsage}
-            diff={versionDiff}
-            onSelect={setHistorySelectedId}
-            onRename={renameVersion}
-            onClose={closeHistory}
-          />
-        )}
-        {historyOpen && historySelectedId !== null && historyPreview !== null && (
-          <div
-            className="history-preview"
-            style={{ left: panelWidths.palette, right: HISTORY_DRAWER_W }}
-          >
-            <div className="history-preview-bar">
-              <span className="history-preview-text">
-                Viewing an older version — {previewLabel}
-              </span>
-              <button onClick={() => void restoreVersion(historySelectedId)}>
-                Restore this version
-              </button>
-              <button className="secondary" onClick={() => setHistorySelectedId(null)}>
-                Back to current
-              </button>
-            </div>
-            <HistoryPreview
-              key={historySelectedId}
-              text={historyPreview}
-              themeName={`${theme}|${accent}`}
-              gridOn={gridOn}
-              showValues={showValues}
+          <div className="history-view">
+            {historySelectedId !== null && historyPreview !== null ? (
+              <div className="history-preview">
+                <div className="history-preview-bar">
+                  <span className="history-preview-text">
+                    Viewing an older version — {previewLabel}
+                    {diffHighlight.length > 0 &&
+                      ` · ${diffHighlight.length} part${
+                        diffHighlight.length === 1 ? "" : "s"
+                      } highlighted`}
+                  </span>
+                  <button onClick={() => void restoreVersion(historySelectedId)}>
+                    Restore this version
+                  </button>
+                  <button className="secondary" onClick={() => setHistorySelectedId(null)}>
+                    Back to current
+                  </button>
+                </div>
+                <HistoryPreview
+                  key={historySelectedId}
+                  text={historyPreview}
+                  themeName={`${theme}|${accent}`}
+                  gridOn={gridOn}
+                  showValues={showValues}
+                  changedIds={diffHighlight}
+                />
+              </div>
+            ) : (
+              <div className="history-preview-empty">
+                <p>
+                  {versions.length === 0
+                    ? "No versions yet — save the file to start the history."
+                    : "Pick a version on the right to preview it here."}
+                </p>
+              </div>
+            )}
+            <HistoryDrawer
+              versions={versions}
+              selectedId={historySelectedId}
+              usage={historyUsage}
+              diff={versionDiff}
+              onSelect={setHistorySelectedId}
+              onRename={renameVersion}
+              onClose={closeHistory}
+              onNotify={toast}
             />
           </div>
         )}

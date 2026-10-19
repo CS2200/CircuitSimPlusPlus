@@ -10,6 +10,10 @@ import { expect, test, type Page } from "@playwright/test";
  * app data directory), so every path here is the real one.
  */
 
+// Copy (§76) writes to the real system clipboard, so the context needs the
+// permission; the read-back below is how we assert it actually got there.
+test.use({ permissions: ["clipboard-read", "clipboard-write"] });
+
 const DRAWER = "Version history";
 
 interface CsxDoc {
@@ -126,4 +130,41 @@ test("version history: click a name to rename it, then clear from Settings", asy
   page.once("dialog", (d) => void d.accept()); // the clear confirmation
   await settings.getByRole("button", { name: "Clear this file's history" }).click();
   await expect(settings).toContainText("across 0 file(s)");
+});
+
+test("the history view owns the viewport, marks a version's changes and copies them", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await placeAndGate(page);
+  await saveAs(page); // version 1 — one gate
+  await placeAndGate(page);
+  await saveAs(page); // version 2 — two gates
+
+  // Drop a gate, so the newest SAVED version has a part the open document does
+  // not — that is the thing a preview can mark on the canvas.
+  const box = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (box === null) throw new Error("canvas not visible");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.keyboard.press("Delete");
+  await expect.poll(async () => (await doc(page)).circuits[0].components.length).toBe(1);
+
+  const drawer = await openHistory(page);
+  // It owns the viewport: the editor row is not displayed, not merely covered.
+  await expect(page.locator(".history-view")).toBeVisible();
+  await expect(page.locator(".palette")).toBeHidden();
+  await expect(page.locator(".editor-col")).toBeHidden();
+
+  // The newest version adds the part the open document lost: a "+" line, and a
+  // mark on the canvas the bar accounts for.
+  await expect(drawer.locator(".history-diff-summary")).toHaveText("1 part added");
+  await expect(drawer.locator(".history-diff-list li.diff-added")).toContainText("+ gate.and");
+  await expect(page.locator(".history-preview-text")).toContainText("1 part highlighted");
+
+  // Copy: the comparison as text, on the real clipboard.
+  await drawer.getByRole("button", { name: "Copy" }).click();
+  await expect(page.locator(".toast-stack")).toContainText("copied");
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain("1 part added");
+  expect(clip).toContain("+ gate.and");
 });

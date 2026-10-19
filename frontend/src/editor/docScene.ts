@@ -547,6 +547,13 @@ export interface SceneOverlay {
   boxRect: Rect | null;
   /** Shift-click wire info card: which wire + where to anchor the card. */
   wireInfo: { wireIdx: number; pos: Vec2 } | null;
+  /**
+   * Part ids to outline as added or changed by the document being previewed
+   * (version history, UI_OVERHAUL §76). Deliberately NOT the selection: a
+   * selection also draws the rotate handle and wire corner dots, which a
+   * read-only preview must not offer.
+   */
+  changedIds?: ReadonlySet<string> | null;
   /** Canvas clock (ms) for animated warnings; absent → static. */
   now?: number;
 }
@@ -1670,6 +1677,25 @@ export class DocScene {
         for (let k = 1; k + 1 < pts.length; k++) corners.push(p2v(pts[k]));
       }
       if (corners.length > 0) renderer.drawDots(corners, PIN_R * 0.8, theme.accent);
+    }
+
+    // Version-history preview (§76): outline the parts the previewed version
+    // adds or changes. A pass of its own over the layout rects, so it covers
+    // every part shape including the special-cased ones above, and outside the
+    // body so it reads as an annotation rather than a selection.
+    const changedIds = overlay.changedIds ?? null;
+    if (changedIds !== null && changedIds.size > 0) {
+      for (const comp of this.components) {
+        if (!changedIds.has(comp.id)) continue;
+        const layout = this.layouts.get(comp.id);
+        if (layout === undefined || !rectIntersects(layout.rect, visible)) continue;
+        const r = layout.rect;
+        renderer.drawPath(rectPath(r.x - 0.28, r.y - 0.28, r.w + 0.56, r.h + 0.56), {
+          stroke: theme.accent,
+          lineWidth: 0.1,
+        });
+      }
+      renderer.flush();
     }
 
     // Floating rotate button above the component selection (hidden while

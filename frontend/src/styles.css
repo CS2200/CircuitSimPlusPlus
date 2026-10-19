@@ -2260,16 +2260,14 @@ body {
  * plus a read-only canvas preview of the selected version. */
 
 .history-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 60;
+  position: relative;
+  z-index: 1;
+  width: 22rem;
+  flex: none;
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border-left: 1px solid var(--panel-border);
-  box-shadow: -14px 0 30px rgba(0, 0, 0, 0.28);
   user-select: none;
 }
 
@@ -2445,13 +2443,30 @@ body {
 
 /* The selected version, drawn over the canvas column (left of the drawer). */
 .history-preview {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 50;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+/* The preview canvas takes whatever the bar leaves (it is height:100% by
+   default, which would overflow a column that also holds the bar). */
+.history-preview > .canvas-host {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* No version picked (or none yet): the view still fills the space. */
+.history-preview-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  text-align: center;
 }
 
 .history-preview-bar {
@@ -3042,4 +3057,55 @@ body {
 
 .update-link:hover {
   filter: brightness(1.15);
+}
+
+/* ---- Version history as a view (UI_OVERHAUL §76) ---- */
+/* Open, it owns the viewport: the editor row is not displayed, so there is
+   nothing behind the preview and nothing to overlay. */
+.app-main.history > .palette,
+.app-main.history > .editor-col,
+.app-main.history > .right-dock,
+.app-main.history > .editor-wrap {
+  display: none;
+}
+
+.history-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.history-diff-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.history-copy {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.history-copy:hover {
+  border-color: var(--accent);
+}
+
+/* Kinds (§76), in the palette's own wire colours so they read in every theme. */
+.history-diff-list li.diff-added {
+  color: var(--wire-high);
+}
+
+.history-diff-list li.diff-changed {
+  color: var(--accent);
+}
+
+.history-diff-list li.diff-removed {
+  color: var(--wire-x);
 }

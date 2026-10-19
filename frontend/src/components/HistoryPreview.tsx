@@ -28,12 +28,18 @@ export default function HistoryPreview({
   themeName,
   gridOn,
   showValues,
+  changedIds,
 }: {
   /** Canonical `.csx` of the version to draw. */
   text: string;
   themeName: string;
   gridOn: boolean;
   showValues: boolean;
+  /**
+   * Parts this version adds or changes, outlined so the difference is visible on
+   * the canvas itself (§76). Removals cannot be marked — the part is not here.
+   */
+  changedIds?: readonly string[] | null;
 }) {
   const scene = useMemo(() => {
     const built = new DocScene();
@@ -41,7 +47,9 @@ export default function HistoryPreview({
     return built;
   }, [text]);
 
+  // Nothing is selected in a read-only preview; the marks ride the overlay.
   const selection = useMemo(() => new SelectionModel(), []);
+  const changed = useMemo(() => new Set(changedIds ?? []), [changedIds]);
 
   const draw = useCallback<CanvasHostProps["draw"]>(
     (renderer, camera, view, theme) => {
@@ -51,13 +59,13 @@ export default function HistoryPreview({
         camera,
         view,
         selection,
-        IDLE_OVERLAY,
+        { ...IDLE_OVERLAY, changedIds: changed },
         undefined,
         gridOn,
         showValues,
       );
     },
-    [scene, selection, gridOn, showValues],
+    [scene, selection, changed, gridOn, showValues],
   );
 
   return (

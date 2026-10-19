@@ -162,23 +162,55 @@ export function diffSummary(diff: VersionDiff): string {
   return bits.join(" · ");
 }
 
-/** The individual changes, capped so a big rewrite cannot flood the drawer. */
-export function diffLines(diff: VersionDiff, limit = 8): string[] {
-  const lines: string[] = [];
-  for (const part of diff.partsAdded) lines.push(`+ ${part.type} (${part.id})`);
+/** One change, with the kind that colours it in the drawer (UI_OVERHAUL §76). */
+export interface DiffEntry {
+  kind: "added" | "changed" | "removed" | "note";
+  text: string;
+}
+
+/**
+ * The individual changes in drawing order, capped so a big rewrite cannot flood
+ * the drawer. Pass `Infinity` for everything, uncapped, as copying does.
+ */
+export function diffEntries(diff: VersionDiff, limit = 8): DiffEntry[] {
+  const out: DiffEntry[] = [];
+  for (const part of diff.partsAdded)
+    out.push({ kind: "added", text: `+ ${part.type} (${part.id})` });
   for (const part of diff.changed) {
     const fields = part.fields.map((f) => `${f.field} ${f.from} → ${f.to}`).join(", ");
-    lines.push(`~ ${part.type} (${part.id}): ${fields}`);
+    out.push({ kind: "changed", text: `~ ${part.type} (${part.id}): ${fields}` });
   }
-  for (const part of diff.partsRemoved) lines.push(`− ${part.type} (${part.id})`);
-  if (lines.length <= limit) {
-    if (diff.wiresAdded > 0) lines.push(`+ ${diff.wiresAdded} wire(s)`);
-    if (diff.wiresRemoved > 0) lines.push(`− ${diff.wiresRemoved} wire(s)`);
-    return lines;
+  for (const part of diff.partsRemoved)
+    out.push({ kind: "removed", text: `− ${part.type} (${part.id})` });
+  if (out.length <= limit) {
+    if (diff.wiresAdded > 0) out.push({ kind: "added", text: `+ ${diff.wiresAdded} wire(s)` });
+    if (diff.wiresRemoved > 0)
+      out.push({ kind: "removed", text: `− ${diff.wiresRemoved} wire(s)` });
+    return out;
   }
-  const kept = lines.slice(0, limit);
-  kept.push(`…and ${lines.length - limit} more`);
-  if (diff.wiresAdded > 0) kept.push(`+ ${diff.wiresAdded} wire(s)`);
-  if (diff.wiresRemoved > 0) kept.push(`− ${diff.wiresRemoved} wire(s)`);
+  const kept = out.slice(0, limit);
+  kept.push({ kind: "note", text: `…and ${out.length - limit} more` });
+  if (diff.wiresAdded > 0) kept.push({ kind: "added", text: `+ ${diff.wiresAdded} wire(s)` });
+  if (diff.wiresRemoved > 0) kept.push({ kind: "removed", text: `− ${diff.wiresRemoved} wire(s)` });
   return kept;
+}
+
+/** The individual changes as plain text, for tests and the drawer's list. */
+export function diffLines(diff: VersionDiff, limit = 8): string[] {
+  return diffEntries(diff, limit).map((entry) => entry.text);
+}
+
+/**
+ * Part ids a version *adds or changes* — what a preview outlines on the canvas
+ * (§76). Removals are the one thing a preview cannot mark, because the part is
+ * not in that version at all; whole wires have no identity to outline either, so
+ * both stay in the list.
+ */
+export function highlightIds(diff: VersionDiff): string[] {
+  return [...diff.partsAdded.map((p) => p.id), ...diff.changed.map((p) => p.id)];
+}
+
+/** The whole diff as plain text (summary first), for the clipboard (§76). */
+export function diffText(diff: VersionDiff): string {
+  return [diffSummary(diff), ...diffLines(diff, Infinity)].join("\n");
 }

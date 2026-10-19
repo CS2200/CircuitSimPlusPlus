@@ -1885,3 +1885,31 @@ camera transform outside `CanvasHost` would make the same mapping have two sourc
 of truth. `ToolMachine` reports the menu as plain state (`CanvasMenuState`) through
 `onCanvasMenu`; App renders `CanvasMenu` and routes the pick back through the
 editor's existing public commands, so the actions themselves invent nothing new.
+
+## 76. The version history is a view now
+
+Opening the history hides the editor row and hands the whole viewport to the
+history: the version list and the comparison on the right, the previewed version on
+the canvas beside it. Nothing sits _behind_ the preview any more — it used to be an
+absolutely positioned rectangle over the dock, inset by a hard-coded
+`HISTORY_DRAWER_W`, which is gone; it is a flex column now, and the drawer is a
+column beside it rather than an overlay.
+
+The comparison reads as a diff and can leave the app:
+
+- Each change carries a kind, coloured with the palette's **own wire colours**
+  (`--wire-high` / `--accent` / `--wire-x`), so it stays legible in every theme
+  without adding a variable to all twelve. `diffEntries` is the source of those
+  kinds, `diffLines` is kept for tests, and `diffText` is the whole comparison
+  **uncapped**: the drawer list caps at 8 with a "…and N more" line, but a paste
+  should not quietly lose changes.
+- **Copy** puts that text on the real system clipboard through a small `copyText`
+  helper — the async Clipboard API first, a hidden textarea when a context refuses
+  it, and a toast either way saying which happened.
+- On the canvas, the parts a version **adds or changes** get an accent outline, and
+  the preview bar says how many. Two deliberate choices: it rides a new
+  `SceneOverlay.changedIds` rather than the selection model (a selection also draws
+  the rotate handle and the wire corner dots — affordances a read-only preview must
+  not offer), and **removals are not marked at all**, because the part is not in the
+  version being previewed. The canvas marks what it honestly can; the list carries
+  the rest.
