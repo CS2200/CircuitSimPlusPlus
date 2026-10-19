@@ -36,6 +36,10 @@ const tauriBin = path.join(
 const npm = (script) => ({ cmd: NPM, args: ["--prefix", FRONTEND, "run", script] });
 const cargo = (...args) => ({ cmd: "cargo", args });
 
+// The fixture drift gate is a script, not a command under some other tool: the
+// runner re-invokes it with the Node it is already running on.
+const CHECK_FIXTURES = path.join(ROOT, "scripts", "check-fixtures.mjs");
+
 // --- targets -----------------------------------------------------------------
 // Each target is a list of steps run in order, stopping at the first failure.
 const TARGETS = {
@@ -57,9 +61,14 @@ const TARGETS = {
     steps: [cargo("test", "-p", "csim-core", "-p", "csim")],
   },
 
+  fixtures: {
+    help: "regenerate the .csx fixtures into a temp dir and diff (no drift allowed)",
+    steps: [{ cmd: process.execPath, args: [CHECK_FIXTURES] }],
+  },
+
   "check:backend": {
-    help: "the backend commit gate: fmt, clippy, tests",
-    steps: ["lint", "test"],
+    help: "the backend commit gate: fixtures, fmt, clippy, tests",
+    steps: ["fixtures", "lint", "test"],
   },
 
   ui: {

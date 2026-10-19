@@ -5,9 +5,9 @@ name: backend
 
 on:
   push:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
   pull_request:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # The committed .csx fixtures are generated artifacts (BACKEND.md B11).
+      # Nothing forced them to track tests/gen/*.py, so they drifted once
+      # already; this regenerates into a temp dir and diffs. Runs first: it
+      # needs no toolchain and fails in seconds.
+      - name: Fixtures match their generators
+        run: node scripts/check-fixtures.mjs
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

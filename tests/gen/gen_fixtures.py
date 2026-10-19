@@ -1,15 +1,34 @@
 #!/usr/bin/env python3
 """Fixture generator for the course-scale .csx fixtures (BACKEND.md B11).
 
-Emits JSON in format v2 (docs/format-v2.md). The fixtures are committed;
-this generator is how they were made (and how to regenerate after format
-or table changes). Run: `python3 tests/gen/gen_fixtures.py`.
+Emits JSON in format v3 (docs/format-v2.md). The fixtures are committed; this
+generator is how they were made, and how to regenerate after a format, pin or
+delay-table change:
+
+    python3 tests/gen/gen_fixtures.py            # rewrite tests/fixtures/
+    python3 tests/gen/gen_fixtures.py --out DIR  # write somewhere else
+
+`scripts/check-fixtures.mjs` (a CI gate) regenerates into a temp dir and diffs
+against the committed files, so the two cannot drift apart silently.
 """
 
 import json
 import os
+import sys
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+OUT_DEFAULT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+OUT = OUT_DEFAULT
+
+
+def out_dir():
+    """`--out DIR` regenerates elsewhere (used by the CI drift check)."""
+    argv = sys.argv[1:]
+    if not argv:
+        return OUT_DEFAULT
+    if len(argv) == 2 and argv[0] == "--out":
+        return argv[1]
+    raise SystemExit("usage: gen_fixtures.py [--out DIR]")
+
 
 SETTINGS = {
     "clockHz": 1,
@@ -249,6 +268,8 @@ def write_fixture(name, doc):
 
 
 def main():
+    global OUT
+    OUT = out_dir()
     os.makedirs(OUT, exist_ok=True)
     write_fixture("alu.csx", gen_alu())
     write_fixture("fsm.csx", gen_fsm())

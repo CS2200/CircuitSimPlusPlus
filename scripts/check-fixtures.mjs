@@ -1,0 +1,135 @@
+#!/usr/bin/env node
+// Fixture drift gate (BACKEND.md B11).
+//
+// The .csx fixtures in tests/fixtures/ are *generated* artifacts: nobody types a
+// 40-register pipeline by hand. But nothing forced them to stay in sync with
+// tests/gen/*.py, and they duly drifted — the generators were left emitting the
+// previous format header, so regenerating after a change would have silently
+// downgraded every fixture (and the golden traces pinned to them). This
+// regenerates into a temp dir and compares both directions:
+//
+//   * every committed fixture is produced by a generator and identical to it,
+//   * every file a generator produces is committed (no orphan output).
+//
+// A few fixtures are hand-authored (one wire per line — easier to read and to
+// review); they are listed below and skipped.
+//
+//   node scripts/check-fixtures.mjs
+//
+// To refresh after a format, pin or delay-table change:
+//   python3 tests/gen/gen_fixtures.py && python3 tests/gen/gen_cpus.py
+//
+// `PYTHON=python` overrides the interpreter (Windows has no `python3`).
+
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const FIXTURES = path.join(ROOT, "tests", "fixtures");
+const GENERATORS_DIR = path.join(ROOT, "tests", "gen");
+const PYTHON = process.env.PYTHON ?? "python3";
+
+const GENERATORS = ["gen_fixtures.py", "gen_cpus.py"];
+
+// Written by hand, so there is nothing to compare them against.
+const HAND_AUTHORED = new Set(["sanity.csx"]);
+
+const EXTS = /\.(csx|hex)$/;
+
+function fail(message, ...hints) {
+  process.stderr.write(`\n  error: ${message}\n`);
+  for (const hint of hints) process.stderr.write(`  ${hint}\n`);
+  process.exit(1);
+}
+
+/** Where two files first disagree, in terms a human can act on. */
+function describe(committed, regenerated) {
+  const a = committed.toString("utf8").split("\n");
+  const b = regenerated.toString("utf8").split("\n");
+  const common = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < common && a[i] === b[i]) i += 1;
+  const show = (line) => JSON.stringify(line.length > 60 ? `${line.slice(0, 57)}...` : line);
+  const line = i + 1;
+  if (i >= a.length) return `line ${line}: missing (regenerated has ${show(b[i])})`;
+  if (i >= b.length) return `line ${line}: extra (committed has ${show(a[i])})`;
+  return `line ${line}: committed ${show(a[i].trim())} vs regenerated ${show(b[i].trim())}`;
+}
+
+const problems = [];
+const tmp = mkdtempSync(path.join(tmpdir(), "csim-fixtures-"));
+let committedCount = 0;
+let handAuthored = [];
+let canRegenerate = true;
+
+try {
+  for (const generator of GENERATORS) {
+    const result = spawnSync(PYTHON, [path.join(GENERATORS_DIR, generator), "--out", tmp], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
+    if (result.error) {
+      problems.push(
+        `could not run "${PYTHON}": ${result.error.message}`,
+        `set PYTHON to your interpreter if it is named differently`,
+      );
+      canRegenerate = false;
+      break;
+    }
+    if (result.status !== 0) {
+      // Quiet when green; the generator's own output lands here when it is not.
+      problems.push(
+        `tests/gen/${generator} failed (exit ${result.status})`,
+        ...(result.stdout + result.stderr).trim().split("\n").map((line) => `| ${line}`),
+      );
+      break;
+    }
+  }
+
+  if (problems.length === 0) {
+    // Everything the generators write is compared, whatever it is called; the
+    // committed side is filtered because tests/fixtures/ also holds notes.
+    const generated = readdirSync(tmp);
+    const committed = readdirSync(FIXTURES).filter((name) => EXTS.test(name));
+    committedCount = committed.length;
+
+    for (const name of committed) {
+      if (!generated.includes(name)) {
+        if (!HAND_AUTHORED.has(name)) {
+          problems.push(
+            `${name}: not produced by any generator (add it to HAND_AUTHORED if that is intended)`,
+          );
+        }
+        continue;
+      }
+      const [a, b] = [readFileSync(path.join(FIXTURES, name)), readFileSync(path.join(tmp, name))];
+      if (!a.equals(b)) problems.push(`${name}: drifted (${describe(a, b)})`);
+    }
+    for (const name of generated) {
+      if (!committed.includes(name)) problems.push(`${name}: generated but not committed`);
+    }
+    handAuthored = committed.filter((name) => HAND_AUTHORED.has(name));
+  }
+} finally {
+  // Cleanup always runs: process.exit() inside the try would leak the temp dir.
+  rmSync(tmp, { recursive: true, force: true });
+}
+
+if (problems.length > 0) {
+  fail(
+    `fixture check failed:`,
+    ...problems,
+    ...(canRegenerate
+      ? ["", "regenerate them with:", "  python3 tests/gen/gen_fixtures.py && python3 tests/gen/gen_cpus.py"]
+      : []),
+  );
+}
+
+process.stdout.write(
+  `fixtures up to date: ${committedCount - handAuthored.length} regenerated byte-for-byte` +
+    (handAuthored.length ? `, hand-authored: ${handAuthored.join(", ")}` : "") +
+    "\n",
+);

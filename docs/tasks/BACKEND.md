@@ -135,10 +135,10 @@ Execute in order. Do not start a task until its dependencies are accepted. After
 
 **Spec:** DESIGN.md §14. **Depends on:** B10
 
-- Hand-built `.csx` fixtures in `tests/fixtures/`: `alu.csx`, `fsm.csx`, `multicycle.csx`, `pipeline5.csx`, plus negative fixtures (floating-read, contention, oscillation, setup-violation, bitsize-mismatch).
+- Generated `.csx` fixtures in `tests/fixtures/`: `alu.csx`, `fsm.csx`, `multicycle.csx`, `pipeline5.csx`, plus negative fixtures (floating-read, contention, oscillation, setup-violation, bitsize-mismatch). They are output of `tests/gen/gen_fixtures.py` + `tests/gen/gen_cpus.py` (plus the hand-authored `sanity.csx`), which stay the source of truth for what a fixture contains.
 - Golden event-trace tests: trace hash per fixture pinned in CI (determinism tripwire per §4.6).
 
-**Done when:** CI runs the full golden suite on every push; a deliberate determinism-breaking change (e.g., HashMap iteration) fails CI.
+**Done when:** CI runs the full golden suite on every push; a deliberate determinism-breaking change (e.g., HashMap iteration) fails CI; and `node scripts/check-fixtures.mjs` regenerates every fixture into a temp dir and diffs it, so a fixture can never drift from its generator unnoticed — which it did once, when the generators were left emitting the previous format header while the committed files moved on.
 
 ---
 

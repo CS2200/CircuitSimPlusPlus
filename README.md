@@ -60,7 +60,8 @@ node scripts/build.mjs musl ui    # run targets in order, stop on first failure
 | `build` | `cargo build` (default members: core + cli) |
 | `lint` | format check + clippy `-D warnings` (core + cli) |
 | `test` | backend tests |
-| `check:backend` | `lint` + `test` — mirrors `backend.yml` |
+| `fixtures` | regenerate the `.csx` fixtures into a temp dir and diff — no drift |
+| `check:backend` | `fixtures` + `lint` + `test` — mirrors `backend.yml` |
 | `ui` | frontend production build → `frontend/dist` |
 | `check:frontend` | `lint` + `test` + `build` — mirrors `frontend.yml` |
 | `check` | `check:backend` + `check:frontend` (default) |
@@ -103,8 +104,18 @@ cargo build -p csim --release --target x86_64-unknown-linux-musl
 floats, wall-clock, or RNG in evaluation/serialization paths. The golden
 trace-hash suite (`crates/core/tests/golden.rs`) is the tripwire — if an
 intentional engine change alters traces, re-bless with
-`CSIM_BLESS=1 cargo test -p csim-core --test golden` and record *why* in the
-commit message.
+`CSIM_BLESS=1 cargo test -p csim-core --test golden -- --nocapture` and record
+*why* in the commit message. Note the bless **prints** the refreshed table; it
+does not rewrite the file, so paste the new `t_obs`/`trace_hash` values into
+`SCENARIOS` (the plain run must then pass on its own).
+
+The fixtures are generated and committed: `tests/gen/gen_fixtures.py` +
+`tests/gen/gen_cpus.py` write `tests/fixtures/`, and
+`node scripts/build.mjs fixtures` regenerates them into a temp dir and diffs, so
+they cannot drift from their generators unnoticed (a hand-authored fixture —
+`sanity.csx` — is listed as such in the checker). After a format, pin or
+delay-table change: regenerate in place *first*, then re-bless the goldens on
+top.
 
 ## Frontend: develop, test, build
 
@@ -208,10 +219,10 @@ codes, assertions, test-spec files): `docs/autograder.md`.
   `crates/core`, `crates/cli`, `tests`; frontend owns `frontend/`, `crates/app`;
   `DESIGN.md`/`docs/tasks/` are maintainer-owned. See `docs/tasks/README.md`.
 - Gates before committing: the runner does exactly the documented gate —
-  `node scripts/build.mjs check` (backend fmt/clippy/test, then frontend
-  lint/test/build). Equivalently by hand: `cargo fmt --all && cargo clippy
-  --workspace --all-targets -- -D warnings && cargo test --workspace` and, if
-  you touched `frontend/`, `npm run lint && npm run test && npm run build`
+  `node scripts/build.mjs check` (backend fixture drift/fmt/clippy/test, then
+  frontend lint/test/build). Equivalently by hand: `cargo fmt --all && cargo
+  clippy --workspace --all-targets -- -D warnings && cargo test --workspace` and,
+  if you touched `frontend/`, `npm run lint && npm run test && npm run build`
   (+ `test:e2e`).
 - Docs-as-code: semantic decisions get written into the `docs/` specs in the
   same commit as the behavior, not left in comments.

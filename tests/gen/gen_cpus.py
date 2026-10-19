@@ -14,12 +14,34 @@ The pipeline runs the same program to the same architectural state as
 the multicycle; their est_time comparison is the course's lesson
 (CPI ~4.5 vs ~1.x). Pipeline hazards are handled by stalling (no
 forwarding) — the students' first-pipeline shape.
+
+Writes format v3 JSON plus the program image:
+
+    python3 tests/gen/gen_cpus.py            # rewrite tests/fixtures/
+    python3 tests/gen/gen_cpus.py --out DIR  # write somewhere else
+
+`scripts/check-fixtures.mjs` (a CI gate) regenerates into a temp dir and diffs
+against the committed files, so the two cannot drift apart silently.
 """
 
 import json
 import os
+import sys
 
-OUT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+OUT_DEFAULT = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+OUT = OUT_DEFAULT
+
+
+def out_dir():
+    """`--out DIR` regenerates elsewhere (used by the CI drift check)."""
+    argv = sys.argv[1:]
+    if not argv:
+        return OUT_DEFAULT
+    if len(argv) == 2 and argv[0] == "--out":
+        return argv[1]
+    raise SystemExit("usage: gen_cpus.py [--out DIR]")
+
+
 SETTINGS = {"clockHz": 1, "delayTable": "cs2200-74ls-v1"}
 
 PROGRAM = [
@@ -620,6 +642,8 @@ def gen_pipeline5():
 
 
 def main():
+    global OUT
+    OUT = out_dir()
     os.makedirs(OUT, exist_ok=True)
     for name, gen in [("multicycle.csx", gen_multicycle), ("pipeline5.csx", gen_pipeline5)]:
         doc = gen()
