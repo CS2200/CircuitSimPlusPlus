@@ -14,7 +14,14 @@ import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import CanvasMenu, { type CanvasMenuAction } from "./components/CanvasMenu";
 import type { CanvasMenuState } from "./editor/tools";
-import { AppLogoIcon, HistoryIcon, RedoIcon, UndoIcon, WaveIcon } from "./components/icons";
+import {
+  AppLogoIcon,
+  CircuitIcon,
+  HistoryIcon,
+  RedoIcon,
+  UndoIcon,
+  WaveIcon,
+} from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
 
@@ -1138,6 +1145,9 @@ export default function App() {
   }, [historyTarget, toast]);
 
   const openHistory = useCallback(async () => {
+    // The two full views are exclusive: history over a hidden canvas is fine,
+    // history *behind* a waveform is not a state anyone wants to return to.
+    setWaveOpen(false);
     setHistoryOpen(true);
     await refreshHistory();
   }, [refreshHistory]);
@@ -1690,7 +1700,8 @@ export default function App() {
       }
       if (mod && e.altKey && e.key.toLowerCase() === "w") {
         e.preventDefault();
-        openWaveform();
+        if (waveOpen) setWaveOpen(false);
+        else openWaveform();
         return;
       }
       if (e.key === "?") setShowHelp((v) => !v);
@@ -1704,6 +1715,7 @@ export default function App() {
     onSaveAs,
     openHistory,
     openWaveform,
+    waveOpen,
     inspectorCompId,
     doc,
     sheet,
@@ -1774,12 +1786,17 @@ export default function App() {
                   <HistoryIcon />
                 </button>
                 <button
-                  className="icon-btn"
-                  aria-label="Waveform viewer"
-                  title="Waveform viewer (Ctrl+Alt+W) — trace the running sim"
-                  onClick={openWaveform}
+                  className={`icon-btn${waveOpen ? " active" : ""}`}
+                  aria-label={waveOpen ? "Back to the circuit" : "Waveform viewer"}
+                  aria-pressed={waveOpen}
+                  title={
+                    waveOpen
+                      ? "Back to the circuit (Ctrl+Alt+W)"
+                      : "Waveform viewer (Ctrl+Alt+W) — trace the running sim"
+                  }
+                  onClick={() => (waveOpen ? setWaveOpen(false) : openWaveform())}
                 >
-                  <WaveIcon />
+                  {waveOpen ? <CircuitIcon /> : <WaveIcon />}
                 </button>
               </>
             )}

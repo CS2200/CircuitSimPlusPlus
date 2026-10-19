@@ -233,7 +233,19 @@ test("waveform viewer: traces the run and takes the canvas selection", async ({ 
   await page.getByRole("button", { name: "run to" }).click();
   await expect.poll(cycle, { message: "the trace followed the run" }).toBeGreaterThan(atOpen);
 
-  await page.getByRole("button", { name: "Close" }).click();
+  // The header button is the toggle: while the viewer is up it offers the way
+  // back, and clicking it closes the view — no reaching for the bar's Close.
+  const back = page.getByRole("button", { name: "Back to the circuit" });
+  await expect(back).toBeVisible();
+  await expect(back).toHaveAttribute("aria-pressed", "true");
+  await back.click();
   await expect(page.locator(".wave-view")).toHaveCount(0);
   await expect(page.locator("canvas.circuit-canvas")).toBeVisible();
+  // …and the same button is the viewer again.
+  const again = page.getByRole("button", { name: "Waveform viewer" });
+  await expect(again).toBeVisible();
+  await again.click();
+  await expect(page.locator(".wave-view")).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.locator(".wave-view")).toHaveCount(0);
 });

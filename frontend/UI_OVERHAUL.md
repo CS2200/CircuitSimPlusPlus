@@ -2244,3 +2244,19 @@ newest cycle at the right edge like a scope. Wheel zooms at the cursor, dragging
 constructs it, and the old `BreakpointPeer` converts to a probe. Setting one from a value in the
 trace is the natural next step — which is why `bugs.md` always triaged "waveform viewer" and
 "debugging with breakpoints" as one item.
+
+Two follow-ups from the first look at it (§89):
+
+- **The header button is a toggle, not just a door.** Opening the viewer swaps the waveform glyph
+  for a circuit one and the button becomes the way back (`aria-pressed`, "Back to the circuit");
+  `Ctrl+Alt+W` toggles as well, and the two full views are mutually exclusive — opening version
+  history closes the trace rather than stacking two overlays. The bar's own `Close` stays: the
+  toggle is the fast path, the button is the discoverable one.
+- **The panel is filled, and the space that cannot be filled says what it is.** `Fit` sizes to the
+  whole width, so a short run is not a sliver at the left with dead space beside it — the fit had
+  been computed from the size the panel had _before_ the view replaced the canvas, which is exactly
+  how it ended up huddled on one side. Rows grow into the panel down to a floor of 22px and up to
+  64px, so two signals are not a stripe at the top of a tall window; and when there are fewer
+  signals than rows, the band below the last lane is a ruled line plus one line of help ("no more
+  signals — select a wire or part on the canvas, then Add selection"). Empty space under a trace
+  is _expected_ in a scope, but it should not read as data that failed to draw.

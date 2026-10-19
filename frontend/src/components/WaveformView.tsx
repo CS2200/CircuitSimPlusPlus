@@ -30,7 +30,10 @@ import type { WireValue } from "../ipc/types";
  * colour in the trace as it is on the schematic (§35).
  */
 
+/** Minimum row height; rows grow into the panel (see `laneH`). */
 const LANE_H = 22;
+/** Ceiling for that growth: generous enough to read, not a stretched ruler. */
+const LANE_H_MAX = 64;
 const GUTTER = 196;
 const PAD_TOP = 8;
 const AXIS_H = 18;
@@ -67,6 +70,8 @@ export default function WaveformView({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [cursor, setCursor] = useState<{ cycle: number; y: number } | null>(null);
   const [size, setSize] = useState({ w: 800, h: 400 });
+  /** True once the user has zoomed or panned by hand, so Fit stops re-applying. */
+  const [manual, setManual] = useState(false);
   const themeRef = useRef<Theme | null>(null);
 
   // Redraw on every applied frame (the store bumps ≤ once per frame while
@@ -115,20 +120,29 @@ export default function WaveformView({
     return out;
   }, [rows, expanded, sim.waves, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Fit the whole recorded run into the canvas. */
+  /**
+   * Fit the whole recorded run into the canvas — the *whole* width, so a short
+   * trace is not a sliver at the left with dead space beside it. The ceiling is
+   * generous (a shallow run is readable zoomed in, and Follow keeps the live
+   * edge pinned when it matters).
+   */
   const fit = useCallback(() => {
     if (span === null) return;
-    const width = size.w - GUTTER;
+    const width = Math.max(64, size.w - GUTTER);
     const cycles = Math.max(1, span.last - span.first + 1);
-    setPxPerCycle(Math.max(0.5, Math.min(80, width / cycles)));
-    setOrigin(Math.max(0, span.first));
-  }, [span, size.w]);
+    const px = Math.max(0.25, Math.min(400, width / cycles));
+    setPxPerCycle(px);
+    setOrigin(follow ? span.last - width / px : Math.max(0, span.first));
+    setManual(false);
+  }, [span, size.w, follow]);
 
+  // Re-fit while the user has not taken over: the panel's real width only
+  // arrives after the view replaces the canvas, and a fit computed from the
+  // stale size is what leaves a trace huddled on one side.
   useEffect(() => {
-    fit();
-    // Fit once when the trace first has a span, then leave the user in charge.
+    if (!manual) fit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [span === null]);
+  }, [size.w, span?.last, span?.first, manual]);
 
   // Follow the live edge while the sim runs (a scope's right-anchored view).
   useEffect(() => {
@@ -136,6 +150,16 @@ export default function WaveformView({
     const width = size.w - GUTTER;
     setOrigin(span.last - width / pxPerCycle);
   }, [follow, span, pxPerCycle, size.w]);
+
+  /**
+   * Lane height: a scope's constant row would leave two signals as a sliver at
+   * the top of a full-height panel, so the rows grow into the space (bounded —
+   * a 40px lane is already generous for one bit).
+   */
+  const laneH = Math.max(
+    LANE_H,
+    Math.min(LANE_H_MAX, Math.floor((size.h - AXIS_H - PAD_TOP) / Math.max(1, drawRows.length))),
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -152,7 +176,6 @@ export default function WaveformView({
     ctx.fillRect(0, 0, size.w, size.h);
 
     const laneW = size.w - GUTTER;
-    const laneH = LANE_H;
     const x = (cycle: number) => GUTTER + (cycle - origin) * pxPerCycle;
     const visibleTo = origin + laneW / pxPerCycle;
     const first = Math.max(0, Math.floor(origin));
@@ -174,9 +197,11 @@ export default function WaveformView({
       ctx.moveTo(Math.round(gx) + 0.5, 0);
       ctx.lineTo(Math.round(gx) + 0.5, size.h - AXIS_H);
       ctx.stroke();
-      ctx.fillStyle = theme.textDim;
-      ctx.textAlign = "center";
-      ctx.fillText(String(c), gx, size.h - AXIS_H / 2);
+      if (gx < size.w - 14) {
+        ctx.fillStyle = theme.textDim;
+        ctx.textAlign = "center";
+        ctx.fillText(String(c), gx, size.h - AXIS_H / 2);
+      }
     }
 
     // Lanes.
@@ -261,6 +286,27 @@ export default function WaveformView({
       ctx.globalAlpha = 1;
     });
 
+    // End of the signal list: the space below is not missing data, it is the
+    // rest of the panel.  Turn it into the one instruction that matters.
+    const lastLaneBottom = PAD_TOP + drawRows.length * laneH;
+    if (size.h - lastLaneBottom - AXIS_H > 70) {
+      ctx.strokeStyle = theme.panelBorder;
+      ctx.globalAlpha = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(GUTTER, lastLaneBottom + 0.5);
+      ctx.lineTo(size.w, lastLaneBottom + 0.5);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = theme.textDim;
+      ctx.textAlign = "left";
+      ctx.fillText(
+        "no more signals — select a wire or part on the canvas, then Add selection",
+        GUTTER + 8,
+        lastLaneBottom + 24,
+      );
+      ctx.textAlign = "center";
+    }
+
     // Cursor, over everything.
     if (cursor !== null) {
       const cx = Math.round(x(cursor.cycle)) + 0.5;
@@ -291,7 +337,7 @@ export default function WaveformView({
       if (s === null) return null;
       return row.bit === undefined ? s : { val: extractBit(s.val, row.bit) };
     }
-  }, [drawRows, size, pxPerCycle, origin, cursor, sim.waves, version, span]);
+  }, [drawRows, size, pxPerCycle, origin, cursor, sim.waves, version, span, laneH]);
 
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -303,6 +349,7 @@ export default function WaveformView({
       setPxPerCycle(next);
       setOrigin(cycleAt - (cx - GUTTER) / next);
       setFollow(false);
+      setManual(true);
     },
     [origin, pxPerCycle],
   );
@@ -344,10 +391,22 @@ export default function WaveformView({
         </span>
         <span className="wave-bar-spacer" />
         <span className="wave-bar-text">cycle {current}</span>
-        <button className="secondary" onClick={() => setPxPerCycle((p) => Math.max(0.25, p / 1.5))}>
+        <button
+          className="secondary"
+          onClick={() => {
+            setPxPerCycle((p) => Math.max(0.25, p / 1.5));
+            setManual(true);
+          }}
+        >
           −
         </button>
-        <button className="secondary" onClick={() => setPxPerCycle((p) => Math.min(200, p * 1.5))}>
+        <button
+          className="secondary"
+          onClick={() => {
+            setPxPerCycle((p) => Math.min(400, p * 1.5));
+            setManual(true);
+          }}
+        >
           +
         </button>
         <button className="secondary" onClick={fit}>
@@ -389,7 +448,7 @@ export default function WaveformView({
             // Double-click a label to expand/collapse a bus, or drop the row.
             const rect = e.currentTarget.getBoundingClientRect();
             const y = e.clientY - rect.top;
-            const i = Math.floor((y - PAD_TOP) / LANE_H);
+            const i = Math.floor((y - PAD_TOP) / laneH);
             const row = drawRows[i];
             if (row === undefined || row.bit !== undefined) return;
             const bits = valueBits(

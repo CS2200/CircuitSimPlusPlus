@@ -84,12 +84,21 @@ export function HistoryIcon() {
   );
 }
 
-/** Waveform viewer (UI_OVERHAUL §89): a two-bit step trace. */
+/** Waveform viewer (UI_OVERHAUL §89): a square wave, not a clock face. */
 export function WaveIcon() {
   return (
     <Svg>
-      <path d="M2.5 8.5h3v-4h5v4h5" />
-      <path d="M2.5 14.5h5v-3h4v3h4" />
+      <path d="M2.5 14h3V6h4v8h4V6h3.5" />
+    </Svg>
+  );
+}
+
+/** Back to the circuit — the viewer's toggle leaves this in its place. */
+export function CircuitIcon() {
+  return (
+    <Svg>
+      <rect x="6.5" y="6.5" width="7" height="7" rx="1.2" />
+      <path d="M8.5 6.5V3.5M11.5 6.5V3.5M8.5 13.5v3M11.5 13.5v3M6.5 8.5H3.5M6.5 11.5H3.5M13.5 8.5h3M13.5 11.5h3" />
     </Svg>
   );
 }
