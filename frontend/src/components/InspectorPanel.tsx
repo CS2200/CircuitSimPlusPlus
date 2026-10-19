@@ -7,7 +7,7 @@ import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/
 import { pickHexFile, relativeToCircuit } from "../files";
 import MemContentsDialog from "./MemContentsDialog";
 import NumberPicker from "./NumberPicker";
-import { componentDelayText } from "../editor/delayTable";
+import { componentDelayText, wireDelayText } from "../editor/delayTable";
 import Select from "./Select";
 import { formatRadixValue, parseRadixValue } from "../lib/radix";
 
@@ -46,6 +46,20 @@ const WIRE_COLORS = [
   "#f368a0",
   "#8a8a8a",
 ] as const;
+
+/**
+ * Drawn length of a wire's polyline in grid units (wire delay is per-path,
+ * docs/delay-table.md).
+ */
+function pathLength(points: readonly [number, number][]): number {
+  let len = 0;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const [ax, ay] = points[i];
+    const [bx, by] = points[i + 1];
+    len += Math.hypot(bx - ax, by - ay);
+  }
+  return len;
+}
 
 export default function InspectorPanel({
   doc,
@@ -127,6 +141,9 @@ export default function InspectorPanel({
       : null;
   const wireColor =
     wire !== null && circuit !== undefined ? (circuit.wires[wire.idx]?.color ?? null) : null;
+  /** The wire's drawn path length in grid units — its delay is per-path. */
+  const wireLength =
+    wire !== null && circuit !== undefined ? pathLength(circuit.wires[wire.idx]?.points ?? []) : 0;
 
   if (comp === undefined && wire !== null) {
     const setColor = (color: string | null) => {
@@ -140,6 +157,14 @@ export default function InspectorPanel({
         <div className="inspector-head">
           <span className="inspector-id">Wire</span>
         </div>
+        {/* Wire delay is per PATH (docs/delay-table.md): the drawn length times
+         * the table's per-unit fraction — the design number, like a part's. */}
+        {wireLength > 0 && (
+          <div className="inspector-row">
+            <span>Delay</span>
+            <span className="inspector-file">{wireDelayText(wireLength)}</span>
+          </div>
+        )}
         {wire.info.widths.length > 1 && (
           <p className="inspector-note">
             ⚠ Width mismatch — this wire joins pins of different widths (

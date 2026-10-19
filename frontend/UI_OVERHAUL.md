@@ -1778,3 +1778,12 @@ Two reports from the canvas, both from the same corner of the renderer.
   the abbreviations a body shows, but the shaped-body pass suppressed _every_
   caption. The shape stays — but a bare trapezoid, unlike a NAND's outline, does
   not say which plexer it is. Gates keep the shape-only treatment.
+
+## 69. Follow-up batch BH (2026-10-19): a wire's delay, on the wire
+
+A selected wire now shows its own per-path delay — the drawn length in grid units
+times the published table's per-unit wire fraction (0.1 ns), from the same
+build-time table the part readouts use (docs/delay-table.md, §67). A routed wire
+of 5.5 units reads `≈ 0.6 ns (5.5 units × 0.10 ns)`. Like a part's row, this is
+the **design** number: the transport's `T_obs` and `top_paths` remain what a run
+observed.

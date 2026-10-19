@@ -227,11 +227,14 @@ format bump. *(this round)*
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
   active sheet re-pointed) and its e2e test predate this list.
 - Primitives: transistor / power / ground.
-- Propagation-delay readout: **done for parts** — the Inspector shows the selected
-  part's own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`,
-  read at build time so the numbers cannot drift), e.g. `prop 20 ns · setup 15 ns
-  · hold 5 ns` for a register. A *wire* readout (path length × 0.1 ns/unit) and the
-  animation **pulse-rate slider** are the remainder.
+- ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
+  own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
+  at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold
+  5 ns` for a register), and a selected *wire* shows its per-path delay (drawn
+  length × the table's 0.1 ns/unit). Both are **design** numbers; the transport's
+  `T_obs`/`top_paths` stay the measured ones.
+- Animation **pulse-rate slider**: still open (one constant, `PULSE_MS`, wants a
+  pref + a Settings row + the tracker hand-off).
 
 ---
 
