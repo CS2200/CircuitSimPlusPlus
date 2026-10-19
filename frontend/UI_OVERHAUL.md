@@ -1760,3 +1760,21 @@ The transport's `top_paths`/`T_obs` remain the _measured_ (DTA) quantity, and th
 row deliberately does not try to be a simulation result. A wire's own readout
 (path length × the table's per-unit wire delay) and the animation pulse-rate
 slider are the follow-ups.
+
+## 68. Follow-up batch BG (2026-10-19): exact text at every zoom, and a MUX that says so
+
+Two reports from the canvas, both from the same corner of the renderer.
+
+- **Text is rasterized in DEVICE space at its final pixel size.** The renderer used
+  to set `ctx.font` in _world_ units (≈1px for a body mark) and let the camera
+  transform scale the glyph up. Font metrics are quantized at that ~1px size, so
+  `textBaseline = "middle"` landed a fraction of a _world_ pixel off — invisible
+  zoomed out, multiplied by the zoom when zoomed in, and worse for bigger marks.
+  That is why the adder's `+` measured centred in the committed baseline but
+  ~0.47 units low in a zoomed-in screenshot: "everything's logo is off". The flush
+  loop now reads the live transform, resets it, sizes the font to `size × scale`
+  and places the glyph at the transformed point, so a mark is exact at any zoom.
+- **A plexer's trapezoid carries `MUX` / `DEMUX`.** §17's rule 3 lists them among
+  the abbreviations a body shows, but the shaped-body pass suppressed _every_
+  caption. The shape stays — but a bare trapezoid, unlike a NAND's outline, does
+  not say which plexer it is. Gates keep the shape-only treatment.

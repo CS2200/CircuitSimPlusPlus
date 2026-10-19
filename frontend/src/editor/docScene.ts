@@ -1281,6 +1281,7 @@ export class DocScene {
       // point and draw the body offset from its pins.
       const local = compSize(comp, this.circuits);
       const rot = comp.rot ?? "E";
+      const spec = compSpec(comp.type);
       const cx = layout.rect.x + layout.rect.w / 2;
       const cy = layout.rect.y + layout.rect.h / 2;
       const shape = gateShape(comp.type, cx - local.w / 2, cy - local.h / 2, local.w, local.h);
@@ -1301,7 +1302,19 @@ export class DocScene {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), strokeStyle);
         }
-        // shaped bodies have no caption — a named part shows its name beside it
+        // A plexer's trapezoid says "plexer", not WHICH plexer: the abbreviation
+        // (MUX / DEMUX) belongs on the body, exactly as §17's rule 3 lists it —
+        // the shape is the mark for a NAND, whose outline is unmistakable, but a
+        // bare trapezoid is ambiguous (UI_OVERHAUL §68).
+        if (comp.type === "plexers.mux" || comp.type === "plexers.demux") {
+          const mark = spec.caption(comp.attrs ?? {});
+          renderer.drawText(cx, cy, mark, {
+            color: theme.textDim,
+            size: fitTextSize(mark, local.w, local.h, spec.markSize ?? 1.0),
+            align: "center",
+          });
+        }
+        // other shaped bodies have no caption — a named part shows its name beside it
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
@@ -1330,7 +1343,6 @@ export class DocScene {
               : pinBodyPath(layout.rect, outPin);
         renderer.drawPath(bodyPath, { fill: bodyFill });
         renderer.drawPath(bodyPath, strokeStyle);
-        const spec = compSpec(comp.type);
         // The body ALWAYS shows the type mark: a symbol where the family has
         // one (arith: + − × ÷ = ~ «), otherwise a short abbreviation (REG, RAM,
         // MUX, …). A user-assigned name is drawn ABOVE the part and never

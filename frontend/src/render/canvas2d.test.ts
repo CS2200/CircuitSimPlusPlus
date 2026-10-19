@@ -35,8 +35,22 @@ class FakeCtx {
   readonly fills: string[] = [];
   readonly texts: string[] = [];
   readonly clearedWith: string[] = [];
+  saved: number[][] = [];
   setTransform(...args: number[]): void {
     this.transforms.push(args);
+    this.current = args;
+  }
+  /** The live transform (device pixels per world unit lives in a/d). */
+  current: number[] = [1, 0, 0, 1, 0, 0];
+  getTransform(): { a: number; b: number; c: number; d: number; e: number; f: number } {
+    const [a, b, c, d, e, f] = this.current;
+    return { a, b, c, d, e, f };
+  }
+  save(): void {
+    this.saved.push(this.current);
+  }
+  restore(): void {
+    this.current = this.saved.pop() ?? [1, 0, 0, 1, 0, 0];
   }
   fillRect(): void {
     this.clearedWith.push(this.fillStyle);
@@ -47,8 +61,10 @@ class FakeCtx {
   fill(): void {
     this.fills.push(this.fillStyle);
   }
-  fillText(text: string): void {
+  readonly textCalls: { text: string; font: string; x: number; y: number }[] = [];
+  fillText(text: string, x: number, y: number): void {
     this.texts.push(text);
+    this.textCalls.push({ text, font: this.font, x, y });
   }
 }
 
@@ -75,6 +91,27 @@ const line = (y: number): PathCmd[] => [
 
 const red: StrokeStyle = { stroke: "red", lineWidth: 1 };
 const blue: StrokeStyle = { stroke: "blue", lineWidth: 1 };
+
+describe("text rendering (2026-10-19)", () => {
+  it("rasterizes a glyph in device space at its final pixel size", () => {
+    const { ctx, renderer, view } = setup();
+    renderer.beginFrame(view); // camera scale 16 × dpr 2 = 32 device px per unit
+    renderer.drawText(10, 20, "+", { color: "#fff", size: 1, align: "center" });
+    renderer.endFrame();
+
+    // The font carries the DEVICE size (world size × 32), the glyph lands on the
+    // transformed point, and the camera transform is put back afterwards — the
+    // mark was drawn with a ~1px font before, whose quantized metrics pushed
+    // "middle" off by a zoom-dependent fraction.
+    expect(ctx.textCalls.at(-1)).toEqual({
+      text: "+",
+      font: "32px system-ui, sans-serif",
+      x: 10 * 32 + 800,
+      y: 20 * 32 + 600,
+    });
+    expect(ctx.transforms.at(-1)).toEqual([1, 0, 0, 1, 0, 0]);
+  });
+});
 
 describe("Canvas2DRenderer", () => {
   it("batches paths by style: one stroke pass per color", () => {

@@ -108,13 +108,25 @@ export class Canvas2DRenderer implements Renderer {
       }
     }
     this.ctx.globalAlpha = 1;
+    // Text is rasterized in DEVICE space at its final pixel size. A font set in
+    // world units (~1px for a body mark) has its metrics quantized at that size,
+    // so `textBaseline = "middle"` lands a fraction of a WORLD pixel off — and
+    // the camera then multiplies that by the zoom, which is why marks read
+    // off-centre on a zoomed-in canvas and looked fine zoomed out. Positioning
+    // the glyph at the transformed point with a font sized to the live scale
+    // keeps it exact at every zoom.
+    const t = this.ctx.getTransform();
+    const textScale = Math.hypot(t.a, t.b) || 1;
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     for (const op of this.texts) {
       this.ctx.fillStyle = op.style.color;
-      this.ctx.font = `${op.style.size}px ${op.style.font ?? "system-ui, sans-serif"}`;
+      this.ctx.font = `${op.style.size * textScale}px ${op.style.font ?? "system-ui, sans-serif"}`;
       this.ctx.textAlign = op.style.align ?? "left";
       this.ctx.textBaseline = "middle";
-      this.ctx.fillText(op.text, op.x, op.y);
+      this.ctx.fillText(op.text, t.a * op.x + t.c * op.y + t.e, t.b * op.x + t.d * op.y + t.f);
     }
+    this.ctx.restore();
     this.batches.clear();
     this.texts.length = 0;
   }
