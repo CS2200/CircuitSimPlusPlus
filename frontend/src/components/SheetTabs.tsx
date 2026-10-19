@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 /**
  * Circuit tab strip: one tab per circuit in the file (the top-level sheet
@@ -20,6 +20,7 @@ export default function SheetTabs({
   onCommitRename,
   onCancelRename,
   enterIdx = null,
+  scopeHue = null,
 }: {
   sheets: readonly string[];
   active: number;
@@ -34,6 +35,8 @@ export default function SheetTabs({
   onCancelRename?: () => void;
   /** Sheet index that just appeared — plays its slide-in animation. */
   enterIdx?: number | null;
+  /** Hue of the active sheet's SCOPE when it is a subcircuit (§77), else null. */
+  scopeHue?: number | null;
 }) {
   // Right-click / middle-click menu (UI_OVERHAUL §37): Rename / Delete for that
   // sheet.
@@ -73,6 +76,15 @@ export default function SheetTabs({
               onDoubleClick={() => {
                 if (!editing) onRename(i);
               }}
+              // A subcircuit sheet is a different scope: the active tab carries
+              // that scope's hue (§77), and the attribute lets CSS and tests say
+              // which kind of sheet it is without re-deriving it.
+              data-scope={i === active && scopeHue !== null ? "subcircuit" : undefined}
+              style={
+                i === active && scopeHue !== null
+                  ? ({ "--scope-hue": String(scopeHue) } as CSSProperties)
+                  : undefined
+              }
               // Right-click (or middle-click) opens the Rename / Delete menu.
               // Right-click is the discoverable one; middle-click is kept for
               // muscle memory (it used to be the only way in).

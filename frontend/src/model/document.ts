@@ -383,7 +383,7 @@ export class CircuitDocument {
     verb: string,
   ): void {
     const c = this.circuit(circuitIdx);
-    const components = c.components.map((x) => (ids.has(x.id) ? { ...x, rot: map(x.rot) } : x));
+    const components = c.components.map((x) => (ids.has(x.id) ? rotatedComponent(x, map) : x));
     // Pins rotate about the body center: wires glued to a rotated component
     // must follow (re-anchored + re-stubbed along the new facing). Requires
     // the editor's `pinGeometry` hook; without it, geometry stays untouched.
@@ -922,6 +922,32 @@ export function validateWire(c: CsxCircuit, w: WireInit): void {
  * renumbering survivors' join targets. Pure: returns a new array; entries
  * not affected are shared by reference.
  */
+/**
+ * Rotate one component (UI_OVERHAUL §77).
+ *
+ * A `wiring.pin` also carries its DIRECTION, and the format keeps that in
+ * `attrs.isOutput`: the core derives a subcircuit's interface from it (its
+ * `is_output` flag, not from rotation), and the palette seeds the pairing "faces
+ * west = output, anything else = input". Keeping the two in step is what makes
+ * rotating a port inside a definition move that pin's terminal to the other side
+ * of every instance of the circuit.
+ *
+ * The attribute is kept canonical — an output writes `isOutput: true`, an input
+ * leaves it out, exactly as the palette does — so rotating a pin back and forth
+ * cannot leave a trail of `isOutput: false` for the version diff to report.
+ */
+function rotatedComponent(
+  comp: CsxComponent,
+  map: (rot: CsxComponent["rot"]) => CsxComponent["rot"],
+): CsxComponent {
+  const rot = map(comp.rot);
+  if (comp.type !== "wiring.pin") return { ...comp, rot };
+  const attrs = { ...(comp.attrs ?? {}) };
+  if (rot === "W") attrs.isOutput = true;
+  else delete attrs.isOutput;
+  return { ...comp, rot, attrs };
+}
+
 export function removeWiresCascade(wires: CsxWire[], roots: ReadonlySet<number>): CsxWire[] {
   const removed = new Set(roots);
   let grew = true;

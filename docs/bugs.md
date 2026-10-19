@@ -231,8 +231,18 @@ format bump. _(this round)_
   (a selection also draws the rotate handle, which a read-only preview must not
   offer). Removals are not marked on the canvas — the part is not in that version —
   so they stay in the list. UI_OVERHAUL §76.
-- Subcircuits: always-visible panel, click into an _instance_ vs template,
-  scope colors, resizing, dynamic outer pins from inner pin rotation.
+- Subcircuits. **Done** _(this round)_: **dynamic outer pins** — an instance's
+  terminals are derived from its definition on every sync, so adding, renaming or
+  resizing an inner pin was already live; rotation was the gap (neither layer reads
+  it: the core derives the interface from `attrs.isOutput`, and rotation is only a
+  facing). Rotating a `wiring.pin` now keeps its direction in step with its facing
+  — west = output, else input, the pairing the palette seeds — so a port rotated
+  across west moves to the other side of every instance, canonically (`true` or
+  absent, never `false`). **Scope colours**: a subcircuit sheet is marked as its own
+  scope with a hue per name (active tab, a frame around the canvas, a status-bar
+  chip), so "which scope am I in" is never a guess. UI_OVERHAUL §77.
+  Still open here: an always-visible panel, click-into-an-_instance_ vs the
+  template, and instance sizing.
   **Delete a sheet tab** is already there — the tab's right/middle-click menu
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
   active sheet re-pointed) and its e2e test predate this list.

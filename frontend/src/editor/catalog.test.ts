@@ -230,3 +230,45 @@ describe("subcircuit instance pins", () => {
     expect(compSpec("subcircuit").caption({})).toBe("SUB");
   });
 });
+
+describe("an instance's terminals follow its definition (§77)", () => {
+  const MAIN: CsxCircuit = { name: "main", components: [], wires: [] };
+  const withAlu = (c: CsxCircuit) => [MAIN, c];
+
+  it("a renamed or added inner pin shows up on the instance", () => {
+    expect(
+      compPins({ type: "subcircuit", attrs: { circuit: "alu" } }, CIRCUITS).map((p) => p.name),
+    ).toEqual(["a", "b", "y", "zero"]);
+
+    const edited: CsxCircuit = {
+      ...ALU,
+      components: [
+        ...ALU.components.map((c) => (c.name === "b" ? { ...c, name: "b2" } : c)),
+        pin("carry"),
+      ],
+    };
+    expect(
+      compPins({ type: "subcircuit", attrs: { circuit: "alu" } }, withAlu(edited)).map(
+        (p) => p.name,
+      ),
+    ).toEqual(["a", "b2", "carry", "y", "zero"]);
+  });
+
+  it("a port that crosses west swaps edges on the instance", () => {
+    // The rotation itself pairs rot ↔ isOutput (document.ts, §77); what is checked
+    // here is the consequence on the other side of the hierarchy.
+    const edited: CsxCircuit = {
+      ...ALU,
+      components: ALU.components.map((c) =>
+        c.name === "a"
+          ? { ...c, rot: "W" as const, attrs: { ...(c.attrs ?? {}), isOutput: true } }
+          : c,
+      ),
+    };
+    const a = compPins({ type: "subcircuit", attrs: { circuit: "alu" } }, withAlu(edited)).find(
+      (p) => p.name === "a",
+    );
+    expect(a?.kind).toBe("out");
+    expect(a?.dx).toBe(8); // the right edge, where outputs live
+  });
+});

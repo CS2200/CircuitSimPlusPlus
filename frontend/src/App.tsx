@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 import { PULSE_MS } from "./sim/pulses";
 import AppHeader from "./components/AppHeader";
 import StressCanvas from "./components/StressCanvas";
@@ -58,6 +66,7 @@ import {
   statFile,
 } from "./files";
 import { relativeAge } from "./lib/time";
+import { scopeHue } from "./lib/scope";
 import { DEFAULT_PANEL_WIDTHS, loadPanelWidth, savePanelWidth, type PanelId } from "./panels";
 import {
   loadBoolPref,
@@ -414,6 +423,10 @@ export default function App() {
 
   // Current sheet name (safe while a doc/sheet swap is mid-render).
   const sheetName = doc.circuits[sheet]?.name;
+  // §77: the active sheet's SCOPE. The top level has none; a subcircuit sheet gets
+  // a hue of its own (stable per name) for the tab, the canvas frame and the
+  // status chip, so "which scope am I in" is never a guess.
+  const scope = sheet > 0 && sheetName !== undefined ? scopeHue(sheetName) : null;
 
   // Palette rail groups (UI_OVERHAUL §8): Subcircuits only exists while the
   // document has more than one circuit; if the active group disappears the
@@ -1841,6 +1854,7 @@ export default function App() {
                 onCommitRename={onCommitSheetName}
                 onCancelRename={onCancelSheetName}
                 enterIdx={enteringSheet}
+                scopeHue={scope}
               />
               <div className="editor-wrap">
                 <EditorCanvas
@@ -1862,6 +1876,15 @@ export default function App() {
                   showValues={showValues}
                   showPerf={showPerf}
                 />
+                {/* §77: the scope frame. A subcircuit sheet is a different scope,
+                    and this says so without touching a single drawing. */}
+                {scope !== null && (
+                  <div
+                    className="scope-frame"
+                    style={{ "--scope-hue": String(scope) } as CSSProperties}
+                    aria-hidden="true"
+                  />
+                )}
                 {/* Panel separators: edge overlays (no layout footprint). */}
                 <ResizeHandle
                   panel="palette"
@@ -1951,6 +1974,14 @@ export default function App() {
         )}
       </main>
       <footer className="app-statusbar">
+        {scope !== null && (
+          <span
+            className="statusbar-scope"
+            style={{ "--scope-hue": String(scope) } as CSSProperties}
+          >
+            in {sheetName} — instances follow this definition
+          </span>
+        )}
         {status?.placing && (
           <span>placing {status.placing} — click to drop, R rotate, Esc cancel</span>
         )}

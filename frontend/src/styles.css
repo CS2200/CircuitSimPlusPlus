@@ -3109,3 +3109,23 @@ body {
 .history-diff-list li.diff-removed {
   color: var(--wire-x);
 }
+
+/* ---- Scope marks (UI_OVERHAUL §77) ---- */
+/* A subcircuit sheet is a different scope from the top level: the frame, the tab
+   and the status chip all take that sheet's hue. The frame is an overlay, so the
+   drawing (and every canvas baseline) is untouched. */
+.scope-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px hsl(var(--scope-hue) 65% 55% / 0.5);
+}
+
+.statusbar-scope {
+  color: hsl(var(--scope-hue) 65% 62%);
+  font-weight: 600;
+}
+
+.sheet-tab-wrap[data-scope="subcircuit"] .sheet-tab.active {
+  border-bottom: 2px solid hsl(var(--scope-hue) 65% 55%);
+}

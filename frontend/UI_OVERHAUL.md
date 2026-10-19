@@ -1913,3 +1913,29 @@ The comparison reads as a diff and can leave the app:
   not offer), and **removals are not marked at all**, because the part is not in the
   version being previewed. The canvas marks what it honestly can; the list carries
   the rest.
+
+## 77. Terminals that follow the definition, and a marked scope
+
+**Dynamic outer pins.** An instance's terminals were already re-derived from its
+definition on every sync, so adding, renaming or resizing an inner pin was live.
+Rotation was the gap, and the reason is worth recording: neither layer reads it. The
+core derives a subcircuit's interface from `attrs.isOutput` ("True when this pin is
+an output of its circuit"), the frontend agrees, and rotation is only a facing — so
+rotating a port pin inside a definition changed nothing but the glyph.
+
+Rotation now carries the pairing the palette already seeds (`INPUT` faces east,
+`OUTPUT` faces west): rotating a `wiring.pin` sets `isOutput` from its new facing, so
+a port rotated across west moves to the other side of every instance of that
+circuit. One chokepoint does it — `applyRotation` is the shared op behind R, the
+arrow keys and the floating rotate button — and the canonical form is kept: an
+output writes `isOutput: true` and an input leaves the attribute out, exactly as the
+palette does, so rotating a pin back and forth cannot leave a trail of
+`isOutput: false` for the version diff to report as changes.
+
+**Scope colours.** A subcircuit sheet is a different scope from the top level, and
+now says so: a hue derived from the sheet's _name_ (stable across runs, spread so the
+`sub2`/`sub3` the "+" tab makes do not look alike) colours the active tab, an overlay
+frame around the canvas, and a chip in the status bar. Leaving the definition removes
+all three. The top level deliberately has no scope mark, which is itself information.
+The frame is an overlay rather than a border, so no drawing and no canvas baseline
+moves.
