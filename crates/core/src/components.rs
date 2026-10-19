@@ -799,14 +799,23 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             // N single-bit input lines (in0 = lowest priority) → the binary
             // index of the highest-numbered asserted line, plus `valid`.
             // Named `priority-decoder` per the course's palette wording
-            // (UI_OVERHAUL §54) — behaviorally the standard priority encoder.
+            // (UI_OVERHAUL §54) — behaviorally the standard priority encoder
+            // (DESIGN.md §6).
+            //
+            // `en_in`/`en_out`/`valid` are CircuitSim CE's enable chain: a
+            // stage that is enabled but finds nothing asserts `en_out` for the
+            // next stage, the stage that finds something asserts `valid` and
+            // pulls `en_out` low, and `valid` is CE's "Group Signal"
+            // (UI_OVERHAUL §88).
             let mut c = AttrCheck::new(attrs, &["inputBits"]);
             let lines = c.uint("inputBits", 4, 2, MAX_SELECT_BITS);
             c.finish();
             let mut pins: Vec<PinSig> =
                 (0..lines).map(|i| PinSig::i(format!("in{i}"), 1)).collect();
+            pins.push(PinSig::i("en_in", 1));
             pins.push(PinSig::o("out", index_bits(lines)));
             pins.push(PinSig::o("valid", 1));
+            pins.push(PinSig::o("en_out", 1));
             (pins, c, CompKind::PriorityDecoder { input_bits: lines })
         }
         "arith.adder" => {
@@ -1518,7 +1527,11 @@ mod tests {
     fn priority_decoder_pins() {
         let (p, e) = pins("plexers.priority-decoder", json!({"inputBits": 4}));
         assert!(e.is_empty());
-        assert_eq!(p.unwrap(), vec!["in0", "in1", "in2", "in3", "out", "valid"]);
+        // The input lines, then CircuitSim CE's enable chain (DESIGN.md §6).
+        assert_eq!(
+            p.unwrap(),
+            vec!["in0", "in1", "in2", "in3", "en_in", "out", "valid", "en_out"]
+        );
         // Index width = ceil(log2 n): 3 lines need 2 bits.
         let sigs = pin_sigs(
             "plexers.priority-decoder",
@@ -1528,6 +1541,12 @@ mod tests {
         assert_eq!(get(&sigs, "out").width, 2);
         assert_eq!(get(&sigs, "valid").width, 1);
         assert_eq!(get(&sigs, "in0").width, 1);
+        assert_eq!(get(&sigs, "en_in").width, 1);
+        assert_eq!(get(&sigs, "en_out").width, 1);
+        // `en_in` is the only input on the cascade; `en_out` and `valid` drive.
+        assert_eq!(get(&sigs, "en_in").dir, PinDir::In);
+        assert_eq!(get(&sigs, "en_out").dir, PinDir::Out);
+        assert_eq!(get(&sigs, "valid").dir, PinDir::Out);
         // The 2-line floor rejects a 1-line request.
         let (_, e) = pins("plexers.priority-decoder", json!({"inputBits": 1}));
         assert!(!e.is_empty());

@@ -7,8 +7,11 @@ against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), **203 backend + 381 unit + 77 e2e** tests green. RAM powers
+and RAMs have no `rst` pin), **205 backend + 385 unit + 78 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
+priority decoder gained CircuitSim CE's enable chain (`en_in`/`en_out`, `valid` as CE's
+Group Signal, `out` = `X` when nothing wins) so the class's cascaded encoder — the
+forwarding unit's — is representable; see UI_OVERHAUL §88 and format-v2 §4/§9. The
 committed `.csx` fixtures are gated against their generators in CI
 (`node scripts/build.mjs fixtures`), and the specs were re-audited against the
 code the same day — `DESIGN.md`, `docs/format-v2.md`, `docs/ipc.md`,

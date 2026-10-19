@@ -28,7 +28,8 @@
 //! | gates (incl. not/buffer) | every input |
 //! | controlled buffer | `en` always; `in` only while `en ≠ 0` |
 //! | mux | `sel` always; the selected data input (all of them if `sel` is X) |
-//! | demux / decoder / priority decoder | all inputs |
+//! | demux / decoder | all inputs |
+//! | priority decoder | its input lines, while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means enabled rather than a floating-read halt (DESIGN.md §6) |
 //! | arithmetic | all inputs |
 //! | register (rising edge only) | `en` always; `d` only when `en ≠ 0` |
 //! | RAM | `addr` continuously (async read); `we` at the edge (`din` only when `we ≠ 0`) |
@@ -505,13 +506,34 @@ impl Behavior {
             BehaviorKind::PriorityDecoder { input_bits } => {
                 let n = *input_bits as usize;
                 let lines = &ins[..n];
-                // Every line can affect the index or `valid`, so all consume.
+                let out_bits = index_bits(*input_bits);
+                // CircuitSim CE's enable chain.  A stage answers only while it is
+                // enabled, and pulls `en_out` low so later stages in the cascade stay
+                // quiet; a stage that is enabled but finds nothing raises `en_out` for
+                // the next stage.
+                //
+                // An *unconnected* enable reads `Z`, which is treated as enabled — the
+                // one deliberate divergence from CE, whose enable field simply starts at
+                // 0, so a freshly placed encoder would be dead until something drove it.
+                // A driven 0 still disables, and `X` is conservative.
+                let enabled = match ins[n].bit(0) {
+                    Bit::One | Bit::Z => true,
+                    Bit::Zero => false,
+                    Bit::X => {
+                        return Ok(vec![Value::x(out_bits), Value::x(1), Value::x(1)]);
+                    }
+                };
+                if !enabled {
+                    // Disabled: no index, no group signal, and nothing to pass on.
+                    return Ok(vec![Value::x(out_bits), Value::zero(1), Value::zero(1)]);
+                }
+                // Every line can affect the index or `valid`, so all consume — but only
+                // while the stage is listening, like a mux's selected input.
                 for (i, v) in lines.iter().enumerate() {
                     consume(v, format!("in{i}"))?;
                 }
-                let out_bits = index_bits(*input_bits);
-                // Highest asserted line wins. An X on a line of higher
-                // priority than any known 1 leaves the result unknown.
+                // Highest asserted line wins. An X on a line of higher priority than any
+                // known 1 leaves the result unknown.
                 let mut chosen = None;
                 let mut unknown = false;
                 for i in (0..n).rev() {
@@ -528,14 +550,24 @@ impl Behavior {
                     }
                 }
                 if unknown {
-                    return Ok(vec![Value::x(out_bits), Value::x(1)]);
+                    return Ok(vec![Value::x(out_bits), Value::x(1), Value::x(1)]);
                 }
                 match chosen {
+                    // A hit: the index, `valid` (CE's Group Signal) high, and `en_out`
+                    // low so the rest of the cascade defers to this stage.
                     Some(i) => Ok(vec![
                         Value::from_u64(out_bits, i as u64),
                         Value::from_u64(1, 1),
+                        Value::zero(1),
                     ]),
-                    None => Ok(vec![Value::zero(out_bits), Value::zero(1)]),
+                    // Nothing asserted: no index (X, as in CE — `valid` is how a consumer
+                    // knows), `valid` low, and `en_out` high: "nothing here, ask the next
+                    // stage".
+                    None => Ok(vec![
+                        Value::x(out_bits),
+                        Value::zero(1),
+                        Value::from_u64(1, 1),
+                    ]),
                 }
             }
             BehaviorKind::Adder { bitsize } => {
@@ -1286,32 +1318,100 @@ mod tests {
 
     #[test]
     fn priority_decoder() {
-        // 4 lines → 2-bit index; in3 has the highest priority.
+        // 4 lines → 2-bit index; in3 has the highest priority.  The trailing `k(1, 1)`
+        // is `en_in` (enabled); outputs are `out`, `valid`, `en_out`.
         let p = mk("plexers.priority-decoder", json!({"inputBits": 4}));
-        let only1 = [k(1, 0), k(1, 1), k(1, 0), k(1, 0)];
-        assert_eq!(p.eval(&refs(&only1)).unwrap(), vec![k(2, 1), k(1, 1)]);
+        let only1 = [k(1, 0), k(1, 1), k(1, 0), k(1, 0), k(1, 1)];
+        assert_eq!(
+            p.eval(&refs(&only1)).unwrap(),
+            vec![k(2, 1), k(1, 1), k(1, 0)]
+        );
         // in1 and in3 asserted → in3 wins.
-        let hi = [k(1, 0), k(1, 1), k(1, 0), k(1, 1)];
-        assert_eq!(p.eval(&refs(&hi)).unwrap(), vec![k(2, 3), k(1, 1)]);
-        // Nothing asserted → index 0, valid low.
-        let none = [k(1, 0), k(1, 0), k(1, 0), k(1, 0)];
-        assert_eq!(p.eval(&refs(&none)).unwrap(), vec![k(2, 0), k(1, 0)]);
+        let hi = [k(1, 0), k(1, 1), k(1, 0), k(1, 1), k(1, 1)];
+        assert_eq!(p.eval(&refs(&hi)).unwrap(), vec![k(2, 3), k(1, 1), k(1, 0)]);
+        // Nothing asserted → no index (X, as in CircuitSim CE), valid low, and `en_out`
+        // high: "nothing here, ask the next stage".
+        let none = [k(1, 0), k(1, 0), k(1, 0), k(1, 0), k(1, 1)];
+        assert_eq!(
+            p.eval(&refs(&none)).unwrap(),
+            vec![Value::x(2), k(1, 0), k(1, 1)]
+        );
         // An X above every known 1 leaves the result unknown.
-        let x_hi = [k(1, 1), k(1, 0), k(1, 0), Value::x(1)];
+        let x_hi = [k(1, 1), k(1, 0), k(1, 0), Value::x(1), k(1, 1)];
         assert_eq!(
             p.eval(&refs(&x_hi)).unwrap(),
-            vec![Value::x(2), Value::x(1)]
+            vec![Value::x(2), Value::x(1), Value::x(1)]
         );
         // An X below a higher 1 is masked.
-        let x_lo = [Value::x(1), k(1, 1), k(1, 0), k(1, 0)];
-        assert_eq!(p.eval(&refs(&x_lo)).unwrap(), vec![k(2, 1), k(1, 1)]);
-        // Floating line → halt (all inputs consume).
-        let z = [Value::z(1), k(1, 0), k(1, 0), k(1, 0)];
+        let x_lo = [Value::x(1), k(1, 1), k(1, 0), k(1, 0), k(1, 1)];
+        assert_eq!(
+            p.eval(&refs(&x_lo)).unwrap(),
+            vec![k(2, 1), k(1, 1), k(1, 0)]
+        );
+        // Floating line → halt (the lines consume while enabled).
+        let z = [Value::z(1), k(1, 0), k(1, 0), k(1, 0), k(1, 1)];
         assert_eq!(p.eval(&refs(&z)), Err(FloatingRead::at("in0")));
         // 8 lines → 3-bit index; in7 wins over in0.
         let p8 = mk("plexers.priority-decoder", json!({"inputBits": 8}));
-        let ins8: Vec<Value> = (0..8).map(|i| k(1, u64::from(i == 0 || i == 7))).collect();
-        assert_eq!(p8.eval(&refs(&ins8)).unwrap(), vec![k(3, 7), k(1, 1)]);
+        let mut ins8: Vec<Value> = (0..8).map(|i| k(1, u64::from(i == 0 || i == 7))).collect();
+        ins8.push(k(1, 1));
+        assert_eq!(
+            p8.eval(&refs(&ins8)).unwrap(),
+            vec![k(3, 7), k(1, 1), k(1, 0)]
+        );
+    }
+
+    /// The enable chain of DESIGN.md §6 / UI_OVERHAUL §88: `en_out` is the cascade carry
+    /// (`1` = "nothing found here"), a driven `0` disables the stage, and an *unconnected*
+    /// enable (`Z`) is treated as enabled — the one deliberate divergence from CircuitSim
+    /// CE, whose enable field simply starts low.
+    #[test]
+    fn priority_decoder_enable_chain() {
+        let p = mk("plexers.priority-decoder", json!({"inputBits": 4}));
+        let hit = [k(1, 0), k(1, 0), k(1, 1), k(1, 0)];
+        let silent = [k(1, 0), k(1, 0), k(1, 0), k(1, 0)];
+
+        // A driven 0 disables: no index, no group signal, and nothing passed on.
+        let mut disabled = hit.to_vec();
+        disabled.push(k(1, 0));
+        assert_eq!(
+            p.eval(&refs(&disabled)).unwrap(),
+            vec![Value::x(2), k(1, 0), k(1, 0)]
+        );
+
+        // Disabled, the lines are not consumed, so a floating line is not an error.
+        let mut disabled_z = silent.to_vec();
+        disabled_z.push(k(1, 0));
+        disabled_z[0] = Value::z(1);
+        assert!(p.eval(&refs(&disabled_z)).is_ok());
+
+        // Unconnected enable reads Z → enabled, so a standalone encoder still answers.
+        let mut unconnected = hit.to_vec();
+        unconnected.push(Value::z(1));
+        assert_eq!(
+            p.eval(&refs(&unconnected)).unwrap(),
+            vec![k(2, 2), k(1, 1), k(1, 0)]
+        );
+
+        // An X enable is conservative: the stage might or might not be listening.
+        let mut unknown = hit.to_vec();
+        unknown.push(Value::x(1));
+        assert_eq!(
+            p.eval(&refs(&unknown)).unwrap(),
+            vec![Value::x(2), Value::x(1), Value::x(1)]
+        );
+
+        // Cascade: stage one is silent (`en_out` = 1), stage two sees the hit.
+        let mut first = silent.to_vec();
+        first.push(k(1, 1));
+        let first_out = p.eval(&refs(&first)).unwrap();
+        assert_eq!(first_out[2], k(1, 1));
+        let mut second = hit.to_vec();
+        second.push(first_out[2].clone()); // en_in ← stage one's en_out
+        assert_eq!(
+            p.eval(&refs(&second)).unwrap(),
+            vec![k(2, 2), k(1, 1), k(1, 0)]
+        );
     }
 
     // ---- Arithmetic ----------------------------------------------------

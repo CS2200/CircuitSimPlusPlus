@@ -269,8 +269,12 @@ function plexerSpec(
  * Priority decoder (`plexers.priority-decoder`): N single-bit input lines
  * (in0 = lowest priority) → the binary index of the highest-numbered
  * asserted line (`out`, ⌈log2 N⌉ bits) plus a `valid` flag, on the right
- * edge. Named for the palette wording the course uses (UI_OVERHAUL §54);
+ * edge.  Named for the palette wording the course uses (UI_OVERHAUL §54);
  * behaviorally it is the standard priority encoder.
+ *
+ * The enable chain is CircuitSim CE's (`en_in` on the bottom edge, `en_out`
+ * on the top, UI_OVERHAUL §88): chain `en_out` into the next stage's `en_in`,
+ * the stage that finds something asserts `valid` and drops `en_out`.
  */
 function priorityDecoderSpec(): CompSpec {
   const lines = (attrs: Readonly<Record<string, unknown>>) =>
@@ -295,6 +299,10 @@ function priorityDecoderSpec(): CompSpec {
       }
       pins.push({ name: "out", dx: 4, dy: h / 3, kind: "out", bitsize: outBits });
       pins.push({ name: "valid", dx: 4, dy: (2 * h) / 3, kind: "out", bitsize: 1 });
+      // The cascade: `en_in` enters at the bottom, `en_out` leaves at the top, so
+      // stacking stages routes the chain upward (CircuitSim CE's layout).
+      pins.push({ name: "en_in", dx: 2, dy: h, kind: "in", bitsize: 1 });
+      pins.push({ name: "en_out", dx: 2, dy: 0, kind: "out", bitsize: 1 });
       return pins;
     },
     caption: () => "PRI",

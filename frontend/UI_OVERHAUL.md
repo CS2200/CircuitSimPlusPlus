@@ -2156,3 +2156,44 @@ as line widths do.
 Known gap, flagged not hidden: a junction DOT belonging to a hidden route is still drawn,
 so an imported group with three or more partners shows stray dots along its invisible
 trunk. It needs the dot cache to carry its owning wire; that is the next pass.
+
+## 88. The priority encoder keeps CircuitSim CE's enable chain
+
+The priority decoder was built as a bare encoder: `in0..in{N−1}`, `out`, `valid`. That is
+_not_ the part the class learns. CircuitSim CE's priority encoder is a **cascaded** one, and
+the EC project's forwarding unit is built from it ("a hardware component in CircuitSim that
+can choose priority between stages, resolving all WAW hazards" — _EC Project_, §8.2.4), so a
+converted design had to lose CE's `Enable In` / `Enable Out` wiring on the way in.
+
+Pins now match CE's, additively (no rename, no format version bump — pins are not stored in
+files, so nothing that loaded before fails now):
+
+| pin            | direction | meaning                                                                                                       |
+| -------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
+| `in0..in{N−1}` | in        | the lines; `in0` is the lowest priority                                                                       |
+| `en_in`        | in        | CE's Enable In: this stage only answers while it is enabled                                                   |
+| `out`          | out       | the winner's binary index (⌈log₂N⌉ bits); **`X`, not 0** when there is no winner                              |
+| `valid`        | out       | CE's **Group Signal**: high iff enabled _and_ some line is asserted                                           |
+| `en_out`       | out       | CE's Enable Out: high when this stage is enabled but found nothing, so the next stage in the cascade may look |
+
+The cascade: wire `en_out` of a stage into `en_in` of the next; the first stage that finds
+something asserts its `valid` and drops `en_out`, so every later stage stays quiet. On the
+canvas `en_in` enters at the bottom edge and `en_out` leaves at the top, so stacked stages
+route upward.
+
+Two deliberate choices, both documented in `format-v2.md` §4/§9:
+
+- **An unconnected `en_in` is enabled.** CE's enable field simply starts at 0, so an encoder
+  whose enable is never wired is permanently dead — a trap, and one no one should have to
+  discover. Reading `Z` as "enabled" costs nothing (a driven `0` still disables) and makes a
+  freshly placed part work; `en_in` is therefore the one control pin that does not consume a
+  floating value. `X` stays conservative (`out`/`valid`/`en_out` all `X`).
+- **`out` is `X` when nothing wins**, exactly CE's behaviour. `valid` is how a consumer
+  knows; a zero would be a lie, since index 0 is a real answer.
+
+Everything else is the new engine's four-state policy: an `X` on a line above every known `1`
+leaves the result `X`, and an `X` below a known `1` is masked by it.
+
+Transpiler side: `PriorityEncoderPeer`'s `Enable In`/`Enable Out`/`Group Signal` now map one
+to one onto `en_in`/`en_out`/`valid`, so the two pins that the old→new conversion used to drop
+are carried across instead.

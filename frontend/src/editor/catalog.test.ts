@@ -44,6 +44,25 @@ describe("body marks (UI_OVERHAUL §17)", () => {
     expect(compSpec("plexers.mux").caption({})).toBe("MUX");
     expect(compSpec("plexers.decoder").caption({})).toBe("DEC");
     expect(compSpec("plexers.priority-decoder").caption({})).toBe("PRI");
+    // UI_OVERHAUL §88: the full CircuitSim CE enable chain is on the part.
+    expect(
+      compSpec("plexers.priority-decoder")
+        .pins({})
+        .map((p) => p.name),
+    ).toEqual(["in0", "in1", "in2", "in3", "out", "valid", "en_in", "en_out"]);
+    const eight = compSpec("plexers.priority-decoder").pins({ inputBits: 8 });
+    expect(eight.filter((p) => p.kind === "in").map((p) => p.name)).toEqual([
+      "in0",
+      "in1",
+      "in2",
+      "in3",
+      "in4",
+      "in5",
+      "in6",
+      "in7",
+      "en_in",
+    ]);
+    expect(eight.find((p) => p.name === "out")?.bitsize).toBe(3);
   });
 });
 
