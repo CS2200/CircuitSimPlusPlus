@@ -349,3 +349,39 @@ click-versus-drag split plus per-target actions), the version-history full-viewp
 view with diff highlighting and copy (the structural diff already exists), and the
 subcircuit panel work (always-visible panel, instance-versus-template scope, scope
 colours, resizing, dynamic outer pins).
+
+### The canvas context menu (next round, and now a bounded change)
+
+Right-click currently pans (UI_OVERHAUL §1: right-drag pans, Shift+left-drag pans).
+So the menu opens on a right **click** — press and release with no movement — and
+never on a drag. Facts gathered so it goes in one pass, as the transistor's note
+allowed:
+
+- **The conversion already exists.** `CanvasHost` hands its pointer callbacks a
+  *world* point (`onPointerDown(world: Vec2, info: PointerInfo)`), so the menu can
+  ride the same conversion rather than re-deriving it from the camera. Its name
+  inside `CanvasHost` is the one thing not yet read — find it, add a sibling
+  `onContextMenu?: (world: Vec2) => void`, and call it from the existing pointer
+  release path when `button === 2` and the pointer did not move (the host already
+  tracks that distinction for "click-or-pan").
+- **The menu UI is a pattern to copy, not to invent.** `SheetTabs.tsx` already has
+  the shape: a `menu` state of `{ x, y }`, a `div.sheet-tab-menu` with
+  `role="menu"` + an `aria-label` of "<thing> actions", `role="menuitem"` buttons
+  that close the menu before acting, a `menuRef` + outside-click dismissal, and
+  Escape handling. `.menu-item` styles exist in `styles.css`. Screen coordinates
+  are right for it (it is an HTML overlay).
+- **The actions already exist on the tools machine**: `deleteSelection()`, `cut()`,
+  `copy()`, `paste()`, `rotateSelection(ccw)`, `faceSelection(rot)`. A sensible
+  first cut: on a component (single selection) — Cut / Copy / Rotate CW / Rotate
+  CCW / Delete; on a wire — Delete (a wire is not copyable; a narrowed segment
+  means "Delete this leg"); on empty space — Paste, disabled when the clipboard is
+  empty.
+- **Resolving the target**: pick at the world point (`scene.pick` — the same
+  picker that decides what a left click means, so a right click on a junction
+  picks what a left click would), then either select that target (so the action
+  applies to it) or act on the current selection — selecting is friendlier and
+  reuses the highlight the user already understands.
+- **Tests**: an e2e that right-clicks a gate and asserts the menu's items, that a
+  right *drag* still pans and opens nothing, and that Cut/Delete from the menu
+  change the document; a unit test is optional here since the actions themselves
+  are already covered.
