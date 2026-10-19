@@ -540,6 +540,7 @@ dependencies = [
 name = "csim-app"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "csim-core",
  "serde",
  "serde_json",

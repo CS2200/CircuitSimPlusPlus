@@ -98,6 +98,23 @@ fn load_circuit(
     Ok(result)
 }
 
+/// Write an exported canvas image (`data:image/png;base64,…`) to `path`.
+///
+/// The canvas lives in the webview, so the bytes arrive as a data URL; the
+/// shell owns the filesystem, exactly like `save_circuit` (§U6).
+#[tauri::command]
+fn save_image(path: String, data_url: String) -> Result<(), String> {
+    use base64::Engine as _;
+    let encoded = data_url
+        .split_once(',')
+        .map(|(_, b)| b)
+        .unwrap_or(&data_url);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|e| format!("bad image data: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("could not write {path}: {e}"))
+}
+
 #[tauri::command]
 fn save_circuit(
     state: State<SimState>,
@@ -433,6 +450,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_circuit,
             save_circuit,
+            save_image,
             sim_play,
             sim_pause,
             sim_step_tick,

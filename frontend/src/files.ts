@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "./lib/env";
 
 const CSX_FILTERS = [{ name: "CircuitSim++ circuit", extensions: ["csx"] }];
+const PNG_FILTERS = [{ name: "PNG image", extensions: ["png"] }];
 
 export { isTauri };
 
@@ -212,6 +213,28 @@ export async function saveTextFile(
     }
   }
   downloadTextFile(name, text);
+  return true;
+}
+
+/**
+ * Export the canvas (a `data:image/png;base64,…` URL) to the user: a real file
+ * in the shell, a download in the browser. Returns false when the user cancels
+ * the save dialog.
+ */
+export async function saveImageFile(name: string, dataUrl: string): Promise<boolean> {
+  const fileName = `${name.replace(/\.png$/i, "")}.png`;
+  if (!isTauri()) {
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = fileName;
+    a.click();
+    return true;
+  }
+  const sel = await dialogSave({ defaultPath: fileName, filters: PNG_FILTERS });
+  const picked = typeof sel === "string" ? sel.trim() : "";
+  if (picked === "") return false; // cancelled — never write a blank path
+  const path = /\.png$/i.test(picked) ? picked : `${picked}.png`;
+  await invoke("save_image", { path, dataUrl });
   return true;
 }
 

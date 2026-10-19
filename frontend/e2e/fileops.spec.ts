@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -414,4 +414,24 @@ test("Sheet tabs: middle-click offers Rename and Delete", async ({ page }) => {
     .getByRole("menuitem", { name: "Delete" })
     .click();
   await expect(page.getByRole("tab", { name: "sub1" })).toHaveCount(0);
+});
+
+test("File → Export view as PNG… downloads the canvas as a real PNG", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/?simdemo=1");
+  await page.getByRole("button", { name: "File", exact: true }).click();
+
+  const download = page.waitForEvent("download");
+  await page.getByRole("menuitem", { name: "Export view as PNG…" }).click();
+  const file = await download;
+  // Named after the document, so an export can sit beside its `.csx`.
+  expect(file.suggestedFilename()).toMatch(/-view\.png$/);
+
+  // …and it really is a PNG: the 8-byte signature, then the IHDR chunk.
+  const saved = testInfo.outputPath("view.png");
+  await file.saveAs(saved);
+  const bytes = readFileSync(saved);
+  expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  expect(bytes.subarray(12, 16).toString("latin1")).toBe("IHDR");
 });

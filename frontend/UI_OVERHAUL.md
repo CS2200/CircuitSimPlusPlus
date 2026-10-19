@@ -1730,3 +1730,18 @@ unnecessary segment removes the entire wire").
   route edit before it.
 - The narrowed segment is drawn in the accent colour, so what the next Delete
   would take is never a guess.
+
+## 66. Follow-up batch BE (2026-10-19): export the canvas as a PNG
+
+`File → Export view as PNG…` writes the canvas exactly as it is drawn — the
+renderer owns the pixels, so the `<canvas>` element is asked for a
+`data:image/png` URL and the file plumbing delivers it: a real file through the
+shell, a download in the browser. It is named `<document>-view.png`, so an export
+can live beside the `.csx` it came from, and the name is written as a file on the
+shell side by a `save_image` command that decodes the data URL (the webview has
+the bytes; the shell owns the filesystem, like `save_circuit`).
+
+Scope: the **current view** — the export is what is on screen, at the canvas's
+own resolution (device-scaled). Exporting the whole circuit (fit the view to the
+content, render one frame, restore) is a deliberate follow-up: it needs a frame
+handshake with the animation loop, not a screenshot.

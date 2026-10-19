@@ -184,7 +184,12 @@ other width uses, and the address pick sizes the memory too (`depth =
 gone. Defaults derive from `depth`, so nothing existing changed; additive, so no
 format bump. *(this round)*
 
-- Export the canvas/circuit as an image.
+- ~~Export the canvas/circuit as an image~~ *(done this round)*: File → **Export
+  view as PNG…** writes what the canvas is showing — a real file through the
+  shell (`save_image`, which decodes the data URL), a download in the browser —
+  named `<document>-view.png` so it can sit beside its `.csx`. The pixels are the
+  renderer's, so the canvas element is the source; the export is the *current
+  view* (fit-the-whole-circuit export is a follow-up).
 - Right-click context-menu overhaul.
 - Version history: full-viewport view (no overlay), diff highlighting + copy.
 - Subcircuits: always-visible panel, click into an *instance* vs template,

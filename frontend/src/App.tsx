@@ -47,6 +47,7 @@ import {
   isTauri,
   openCircuitFile,
   pickSavePath,
+  saveImageFile,
   readFileText,
   renameCircuitFile,
   saveTextFile,
@@ -699,6 +700,23 @@ export default function App() {
   }, [saveNow]);
 
   /**
+   * Export what the canvas is showing (UI_OVERHAUL §66). The renderer owns the
+   * pixels, so the canvas element is asked for a PNG and the file plumbing
+   * delivers it — a real file in the shell, a download in the browser. The name
+   * gets a `-view` suffix so it can sit beside the `.csx` it came from.
+   */
+  const exportCanvasPng = useCallback(async () => {
+    const canvas = document.querySelector<HTMLCanvasElement>("canvas.circuit-canvas");
+    if (canvas === null) return;
+    try {
+      const ok = await saveImageFile(`${doc.name}-view`, canvas.toDataURL("image/png"));
+      if (ok) toast(`Exported ${doc.name}-view.png`);
+    } catch (err) {
+      toast(`Export failed: ${String(err)}`);
+    }
+  }, [doc, toast]);
+
+  /**
    * The close guard (2026-10-19). A *clean* close must never need recovery after
    * the fact, so an unsaved document is resolved before the window goes: Save
    * (a Save As when it has never been named), Don't save, or Cancel. Resolves
@@ -1293,6 +1311,7 @@ export default function App() {
           { kind: "sep" },
           { label: "Save", shortcut: "Ctrl+S", onSelect: onSave },
           { label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveAs },
+          { label: "Export view as PNG…", onSelect: () => void exportCanvasPng() },
           { label: "Reload from disk", onSelect: () => void reloadFromDisk() },
           { kind: "sep" },
           { label: "Version history…", shortcut: "Ctrl+Alt+H", onSelect: () => void openHistory() },
