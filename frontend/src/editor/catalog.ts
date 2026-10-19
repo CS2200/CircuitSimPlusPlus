@@ -407,14 +407,39 @@ function subcircuitTarget(
   return typeof name === "string" ? circuits.find((c) => c.name === name) : undefined;
 }
 
-function subcircuitHeight(
+/** Largest box an instance may ask for, in grid units (the engine checks the same). */
+const SUB_MAX = 400;
+
+/**
+ * An explicit box dimension: nonsense or out-of-range falls back to the derived
+ * size, and a legal-but-too-small value is clamped UP to `min` rather than refused
+ * (UI_OVERHAUL §79 — the user asked for a small box, so they get the smallest one
+ * the pins allow).
+ */
+function boxSize(value: unknown, min: number, dflt: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return dflt;
+  const v = Math.round(value);
+  if (v <= 0 || v > SUB_MAX) return dflt;
+  return Math.max(min, v);
+}
+
+/**
+ * The instance's box: the pins' own size unless the instance carries `width` /
+ * `height` (UI_OVERHAUL §79). The pins sit at `(i+1)·h/(n+1)`, so an explicit
+ * height may shrink a tall default but never below `n + 1` — one grid unit apart —
+ * and the default stays the generous `2·n` the catalog always derived.
+ */
+export function subcircuitSize(
   attrs: Readonly<Record<string, unknown>>,
   circuits: readonly CsxCircuit[],
-): number {
+): { w: number; h: number } {
   const target = subcircuitTarget(attrs, circuits);
-  if (target === undefined) return SUB_MIN_H;
-  const { inputs, outputs } = circuitInterface(target);
-  return Math.max(SUB_MIN_H, 2 * Math.max(inputs.length, outputs.length));
+  const iface = target === undefined ? null : circuitInterface(target);
+  const pins = iface === null ? 0 : Math.max(iface.inputs.length, iface.outputs.length);
+  return {
+    w: boxSize(attrs["width"], SUB_W, SUB_W),
+    h: boxSize(attrs["height"], Math.max(SUB_MIN_H, pins + 1), Math.max(SUB_MIN_H, 2 * pins)),
+  };
 }
 
 /**
@@ -430,7 +455,7 @@ export function subcircuitPins(
   const target = subcircuitTarget(attrs, circuits);
   if (target === undefined) return [];
   const { inputs, outputs } = circuitInterface(target);
-  const h = subcircuitHeight(attrs, circuits);
+  const { w, h } = subcircuitSize(attrs, circuits);
   const pins: PinSpec[] = [];
   inputs.forEach((p, i) => {
     pins.push({
@@ -444,7 +469,7 @@ export function subcircuitPins(
   outputs.forEach((p, i) => {
     pins.push({
       name: p.name ?? "",
-      dx: SUB_W,
+      dx: w,
       dy: ((i + 1) * h) / (outputs.length + 1),
       kind: "out",
       bitsize: bitsOf(p.attrs ?? {}),
@@ -1197,7 +1222,21 @@ function baseFields(type: string): AttrField[] {
         { ...BITSIZE_FIELD, label: "Data Bits" },
       ];
     case "subcircuit":
-      return [{ key: "circuit", label: "Circuit", kind: "select", group: "Options", options: [] }];
+      // Its box (UI_OVERHAUL §79): the same one-click width pickers everything
+      // else uses. Leaving them alone means "derive from the pins", which is what
+      // every pre-§79 file does; choosing one makes the size explicit.
+      return [
+        { key: "circuit", label: "Circuit", kind: "select", group: "Options", options: [] },
+        { key: "width", label: "Width", kind: "picker", min: SUB_W, max: SUB_MAX, group: "Width" },
+        {
+          key: "height",
+          label: "Height",
+          kind: "picker",
+          min: SUB_MIN_H,
+          max: SUB_MAX,
+          group: "Width",
+        },
+      ];
     case "io.hexdisplay":
       return [HEX_BITSIZE_FIELD];
     case "io.button":
@@ -1227,7 +1266,7 @@ export function compSize(
   circuits?: readonly CsxCircuit[],
 ): { w: number; h: number } {
   if (comp.type === "subcircuit" && circuits !== undefined) {
-    return { w: SUB_W, h: subcircuitHeight(comp.attrs ?? {}, circuits) };
+    return subcircuitSize(comp.attrs ?? {}, circuits);
   }
   const spec = compSpec(comp.type);
   const attrs = comp.attrs ?? {};

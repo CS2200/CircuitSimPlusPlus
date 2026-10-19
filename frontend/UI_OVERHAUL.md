@@ -1953,3 +1953,28 @@ already work that way.
 The geometry is pinned by a shape test rather than a screenshot, for the same reason
 the power/ground glyphs are: no baselined circuit contains one, and a transistor is
 too small at the baseline zoom for a pixel test to say anything useful about it.
+
+## 79. An instance box that carries its own size
+
+An instance's box was always derived: width 8, and height `2 ×` the larger pin count
+(minimum 4), so a wide interface got a tall box whether or not that suited the
+sheet. An instance may now carry `width`/`height` in grid units — offered as the
+same one-click Width pickers every other dimension uses — with the derivation
+still the default, which is what every existing file means (additive attrs, no
+version bump).
+
+Two rules, both checked rather than asserted in prose:
+
+- **The pins are never crowded.** They sit at `(i+1)·h/(n+1)`, so the height _floor_
+  for an explicit choice is what keeps them a grid unit apart — `max(4, n+1)` — not
+  the roomy `2·n` the default gives. Asking for something shorter gets the shortest
+  legal box.
+- **Nonsense falls back.** A string, `0`, a negative number or anything past the
+  400-unit cap gives the derived box rather than a broken layout, and a wider box
+  moves the output pins to its new right edge.
+
+The engine has to allow the attributes or a sized instance would not load — the
+core's `AttrCheck` is what rejects unknown attrs — so `width`/`height` are in the
+subcircuit's allowed set and range-checked like any other numeric attr. That split is
+the existing one: the engine checks what it can see (`1..=400`), and the editor
+clamps to the interface's floor, which needs the document to resolve.

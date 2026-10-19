@@ -65,7 +65,7 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     // The register shows its stored value, so it carries a base chooser (§57).
     expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
     expect(keys("io.button")).toEqual(["bitsize"]);
-    expect(keys("subcircuit")).toEqual(["circuit"]);
+    expect(keys("subcircuit")).toEqual(["circuit", "width", "height"]);
   });
 
   it("a memory offers both widths as one-click picks, never a dropdown", () => {
@@ -270,5 +270,46 @@ describe("an instance's terminals follow its definition (§77)", () => {
     );
     expect(a?.kind).toBe("out");
     expect(a?.dx).toBe(8); // the right edge, where outputs live
+  });
+});
+
+describe("an instance box that carries its own size (§79)", () => {
+  const box = (attrs: Record<string, unknown>, circuits: readonly CsxCircuit[] = CIRCUITS) =>
+    compSize({ type: "subcircuit", attrs }, circuits);
+
+  const TALL: CsxCircuit = {
+    name: "tall",
+    components: [pin("a"), pin("b"), pin("c"), pin("d"), pin("q", { isOutput: true })],
+    wires: [],
+  };
+
+  it("derives the box from the pins when nothing is set", () => {
+    expect(box({ circuit: "alu" })).toEqual({ w: 8, h: 4 }); // 2 + 2 pins → minimum
+    expect(box({ circuit: "tall" }, [TALL])).toEqual({ w: 8, h: 8 }); // 4 pins → 2 × 4
+  });
+
+  it("takes an explicit width and height", () => {
+    expect(box({ circuit: "alu", width: 14, height: 10 })).toEqual({ w: 14, h: 10 });
+  });
+
+  it("never crowds the pins: the floor is one grid unit apart, not the roomy default", () => {
+    // 4 pins on the longer side sit at (i+1)·h/5, so h = 5 is the tightest legal box.
+    expect(box({ circuit: "tall", height: 3 }, [TALL]).h).toBe(5);
+    expect(box({ circuit: "alu", width: 2 }).w).toBe(8); // below the minimum width
+  });
+
+  it("falls back to the derived box for nonsense or out-of-range values", () => {
+    expect(box({ circuit: "tall", height: 9000 }, [TALL]).h).toBe(8);
+    expect(box({ circuit: "tall", height: "big" }, [TALL]).h).toBe(8);
+    expect(box({ circuit: "tall", height: -2 }, [TALL]).h).toBe(8);
+  });
+
+  it("moves the output pins to the new right edge", () => {
+    const pins = compPins({ type: "subcircuit", attrs: { circuit: "alu", width: 14 } }, CIRCUITS);
+    expect(pins.filter((p) => p.kind === "out").every((p) => p.dx === 14)).toBe(true);
+    expect(pins.filter((p) => p.kind === "in").every((p) => p.dx === 0)).toBe(true);
+    // …and a taller box spreads them further down it.
+    const tall = compPins({ type: "subcircuit", attrs: { circuit: "alu", height: 12 } }, CIRCUITS);
+    expect(tall.filter((p) => p.kind === "in").map((p) => p.dy)).toEqual([4, 8]);
   });
 });

@@ -1061,7 +1061,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "subcircuit" => {
-            let mut c = AttrCheck::new(attrs, &["circuit"]);
+            let mut c = AttrCheck::new(attrs, &["circuit", "width", "height"]);
             let circuit = match attrs.get("circuit") {
                 Some(Json::String(s)) => s.clone(),
                 other => {
@@ -1075,6 +1075,13 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     String::new()
                 }
             };
+            // An instance may carry its own box size (UI_OVERHAUL §79). Unset is
+            // the normal case — the editor derives the box from the pins — so the
+            // engine's part is only to allow the names and range-check them; the
+            // clamp to what the pins need lives in the editor, which can resolve
+            // the referenced circuit.
+            let _width = c.uint("width", 0, 1, 400);
+            let _height = c.uint("height", 0, 1, 400);
             c.finish();
             // Pins come from the referenced circuit's pin components;
             // callers with document context resolve them.
@@ -1356,6 +1363,28 @@ mod tests {
                 json!({ "bitsize": 8, "depth": 16, "addrBits": 12 })
             ),
             expect(&[("addr", 12), ("out", 8)])
+        );
+    }
+
+    #[test]
+    fn subcircuit_box_size_attrs_are_checked() {
+        // Unset is the ordinary case: the box is derived from the pins.
+        let (_, e) = pins("subcircuit", json!({"circuit": "alu"}));
+        assert!(e.is_empty(), "{:?}", e);
+
+        // An explicit size loads (UI_OVERHAUL §79), and is range-checked.
+        let (_, e) = pins(
+            "subcircuit",
+            json!({"circuit": "alu", "width": 12, "height": 9}),
+        );
+        assert!(e.is_empty(), "{:?}", e);
+
+        let (_, e) = pins("subcircuit", json!({"circuit": "alu", "height": 0}));
+        assert_eq!(e.len(), 1);
+        assert!(
+            e[0].message.contains("attr 'height' = 0 out of range"),
+            "{:?}",
+            e[0]
         );
     }
 

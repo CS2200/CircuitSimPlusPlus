@@ -241,11 +241,14 @@ format bump. _(this round)_
   absent, never `false`). **Scope colours**: a subcircuit sheet is marked as its own
   scope with a hue per name (active tab, a frame around the canvas, a status-bar
   chip), so "which scope am I in" is never a guess. UI_OVERHAUL §77.
-  Still open here: an always-visible panel, click-into-an-_instance_ vs the
-  template, and instance sizing.
-  **Delete a sheet tab** is already there — the tab's right/middle-click menu
-  (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
-  active sheet re-pointed) and its e2e test predate this list.
+  **Instance sizing** _(this round)_: an instance may carry `width`/`height` in
+  grid units (additive attrs, no version bump — the engine gained the names and a
+  range check); unset still means "derive from the pins", an explicit height may
+  shrink a tall default but never below one grid unit between pins, and nonsense
+  falls back to the derived box. UI_OVERHAUL §79.
+  Still open here: an always-visible panel, and click-into-an-_instance_ vs the
+  template.
+
 - Primitives: **power, ground and the transistor** — all done. Power and ground
   (`wiring.power` / `wiring.ground`): fixed 1-bit sources with no attrs, additive so
   no format bump; a rake and a bar glyph (UI_OVERHAUL §71–72, pinned by a shape
