@@ -228,61 +228,77 @@ export class WaveformRecorder {
 
 /**
  * The x-axis: a fractional cycle.  Cycle `N` starts at `x = N` and ends at
- * `N + 1`, so the axis is measured in cycles (the model the course reasons in)
- * while events inside one are placed by their real time.
+ * `N + 1` — **by construction**, not by a global scale factor, so a cycle's
+ * boundaries sit at whole numbers and never move as the run grows.  That is what
+ * makes the trace keep its shape: new cycles extend it, they do not squeeze it.
+ *
+ * An event inside a cycle is placed by its own cycle's *observed* length (the
+ * next cycle's start minus this one's), which needs no assumed clock rate and is
+ * exactly right for the cycle it belongs to.  The newest, still-open cycle has
+ * no successor yet, so it borrows the running median length; when it closes, only
+ * that one cycle's events settle into their final place — the rest of the trace
+ * is untouched.
+ *
+ * A core that sends no `at` at all degenerates to whole cycles (`hasTime`), and a
+ * signal that moves twice in one cycle then aliases: that is a limitation of such
+ * a core, not of the viewer.
  */
 export class Timebase {
-  private readonly firstT: number;
-  private readonly firstCycle: number;
-  private readonly lastT: number;
-  private readonly period: number;
+  private readonly medianDuration: number;
 
   constructor(
     private readonly starts: ReadonlyMap<number, number>,
     readonly hasTime: boolean,
   ) {
-    let first = Number.POSITIVE_INFINITY;
-    let firstCycle = 0;
-    let last = Number.NEGATIVE_INFINITY;
-    const cycles: number[] = [];
-    for (const [cycle, t] of starts) {
-      if (t < first) {
-        first = t;
-        firstCycle = cycle;
-      }
-      if (t > last) last = t;
-      cycles.push(cycle);
-    }
-    cycles.sort((a, b) => a - b);
-    this.firstT = Number.isFinite(first) ? first : 0;
-    this.firstCycle = Number.isFinite(first) ? firstCycle : 0;
-    this.lastT = Number.isFinite(last) ? last : 0;
-    // The period is *derived*: the median gap between cycle starts, so a gap in
-    // the data (a cycle where nothing moved) does not skew it.
     const gaps: number[] = [];
+    const cycles = [...starts.keys()].sort((a, b) => a - b);
     for (let i = 1; i < cycles.length; i++) {
-      const g = (starts.get(cycles[i]) ?? 0) - (starts.get(cycles[i - 1]) ?? 0);
-      if (g > 0) gaps.push(g / (cycles[i] - cycles[i - 1]));
+      const span = cycles[i] - cycles[i - 1];
+      const gap = (starts.get(cycles[i]) ?? 0) - (starts.get(cycles[i - 1]) ?? 0);
+      if (span > 0 && gap > 0) gaps.push(gap / span);
     }
     gaps.sort((a, b) => a - b);
-    const median = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : 0;
-    this.period = median > 0 ? median : Math.max(1, this.lastT - this.firstT);
+    // The fallback for a cycle with no successor: the observed lengths' **lower**
+    // median.  Lower, because the odd cycle is almost always the first one — a
+    // full batch lands at t=0 while the first tick's settle is later, so cycle 0
+    // is genuinely longer — and an over-estimate would push the live cycle's
+    // events right where an under-estimate only shortens an unfinished cycle.
+    this.medianDuration = gaps.length > 0 ? gaps[Math.floor((gaps.length - 1) / 2)] : 0;
   }
 
-  /** Fractional-cycle position of an event. */
-  x(t: number, cycle: number): number {
-    if (!this.hasTime) return cycle;
-    const start = this.cycleStart(cycle);
-    return cycle + (t - start) / this.period;
+  /** The observed length of `cycle`, or the running estimate for the open one. */
+  duration(cycle: number): number {
+    const a = this.starts.get(cycle);
+    const b = this.starts.get(cycle + 1);
+    if (a !== undefined && b !== undefined && b > a) return b - a;
+    return this.medianDuration > 0 ? this.medianDuration : 1;
   }
 
   /** First event time seen in `cycle` — the cycle's own start, as observed. */
   cycleStart(cycle: number): number {
     const known = this.starts.get(cycle);
     if (known !== undefined) return known;
-    // No event in that cycle: place it by extrapolating from the first one, so
-    // the axis stays linear across a gap.
-    return this.firstT + (cycle - this.firstCycle) * this.period;
+    let c = cycle;
+    let t: number | undefined = known;
+    while (t === undefined && c > -1000) {
+      c--;
+      t = this.starts.get(c);
+    }
+    if (t === undefined) return 0;
+    let acc = t;
+    for (let k = c; k < cycle; k++) acc += this.duration(k);
+    return acc;
+  }
+
+  /**
+   * Fractional-cycle position of an event.  Clamped inside its cycle, so x stays
+   * monotonic even if an engine stamps a time past the cycle's observed end.
+   */
+  x(t: number, cycle: number): number {
+    if (!this.hasTime) return cycle;
+    const dur = this.duration(cycle);
+    const frac = (t - this.cycleStart(cycle)) / dur;
+    return cycle + Math.min(0.999, Math.max(0, frac));
   }
 }
 

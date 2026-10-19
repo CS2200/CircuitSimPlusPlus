@@ -153,13 +153,24 @@ export default function WaveformView({
     setManual(false);
   }, [span, size.w, follow]);
 
-  // Re-fit while the user has not taken over: the panel's real width only
-  // arrives after the view replaces the canvas, and a fit computed from the
-  // stale size is what leaves a trace huddled on one side.
+  /**
+   * Fit **once** — when the trace first has something to show, or when the panel
+   * is resized — and never again for a growing run.  Re-fitting on every new
+   * sample is what made the trace condense cycle by cycle and the old cycles
+   * creep leftwards: the scope model is a fixed width with the window sliding
+   * (Follow), or an explicit Fit.
+   */
+  const fitted = useRef(false);
+  const fittedWidth = useRef(0);
   useEffect(() => {
-    if (!manual) fit();
+    if (manual || span === null) return;
+    if (!fitted.current || fittedWidth.current !== size.w) {
+      fit();
+      fitted.current = true;
+      fittedWidth.current = size.w;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, span?.last, span?.first, manual]);
+  }, [span, size.w, manual]);
 
   // Follow the live edge while the sim runs (a scope's right-anchored view).
   useEffect(() => {
@@ -254,26 +265,33 @@ export default function WaveformView({
         ctx.fillText(text, GUTTER - 12 - ctx.measureText(text).width, mid);
       }
 
-      // The trace: hold the level, then drop/raise at each change.
+      // The trace: hold the level, then a VERTICAL edge to the next one.
+      // Without that edge the levels read as disconnected dashes — which is
+      // exactly how a student would misread a clock.
       const segs = stepSegments(placed, first, last);
-      let plotted = false;
+      let prevY: number | null = null;
       for (const seg of segs) {
         const x0 = Math.max(GUTTER, x(seg.from));
-        const x1 = Math.min(size.w, x(seg.to));
-        if (x1 <= x0) continue;
+        let x1 = Math.min(size.w, x(seg.to));
+        if (x1 < x0) continue;
+        // A state change is at least a pixel wide: at a zoom where a clock's half
+        // cycle is sub-pixel, dropping it would show a flat line instead of a
+        // toggle.  One pixel of "something happened here" is the honest picture.
+        if (x1 - x0 < 1) x1 = Math.min(size.w, x0 + 1);
         const state = wireValueState(seg.val);
         const y = state === "high" ? high : state === "low" || state === "disconnected" ? low : mid;
         ctx.strokeStyle = row.bit !== undefined ? theme.text : theme.wire[state];
         ctx.lineWidth = state === "high" || state === "low" ? 1.6 : 1.2;
         ctx.beginPath();
-        if (plotted) {
-          // Vertical transition from the previous level to this one.
-          ctx.moveTo(x0 + 0.5, y);
+        if (prevY !== null && prevY !== y) {
+          ctx.moveTo(Math.round(x0) + 0.5, prevY);
+          ctx.lineTo(Math.round(x0) + 0.5, y);
         } else {
           ctx.moveTo(x0, y);
         }
         ctx.lineTo(x1, y);
         ctx.stroke();
+        prevY = y;
         if (seg.contended === true) {
           ctx.strokeStyle = theme.violation;
           ctx.lineWidth = 1;
@@ -283,14 +301,13 @@ export default function WaveformView({
           ctx.stroke();
         }
         // Bus value as text, when the segment is wide enough to read it.
-        if (row.bit === undefined && seg.val !== undefined) {
+        if (row.bit === undefined && x1 - x0 > 24) {
           const text = waveText(seg.val, Math.max(1, bitsOf(seg.val)));
           if (x1 - x0 > ctx.measureText(text).width + 8 && text !== "0" && text !== "1") {
             ctx.fillStyle = theme.textDim;
             ctx.fillText(text, x0 + 4, mid - 6);
           }
         }
-        plotted = true;
       }
       if (placed.length === 0) {
         ctx.fillStyle = theme.textDim;

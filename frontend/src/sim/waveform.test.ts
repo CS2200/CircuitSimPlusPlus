@@ -89,16 +89,90 @@ describe("WaveformRecorder: every event, not every cycle", () => {
     ]);
   });
 
-  it("derives the cycle period from the data rather than assuming one", () => {
+  it("places each cycle by its own observed length, so widths stay put", () => {
     const r = new WaveformRecorder();
-    // A 200ns period, one event per cycle.
+    // Four cycles, each 200ns, one event each.
     for (let c = 0; c < 4; c++) r.recordBatch(batch(c, [[1, hex(c), c * 200]]));
     const tb = r.timebase();
     expect(tb.x(0, 0)).toBe(0);
     expect(tb.x(200, 1)).toBe(1);
-    expect(tb.x(100, 1)).toBe(0.5);
+    expect(tb.x(300, 1)).toBe(1.5); // halfway through cycle 1 (200..400)
     expect(r.lastCycle).toBe(3);
     expect(r.timeSpan).toEqual({ firstT: 0, firstCycle: 0, lastT: 600, lastCycle: 3 });
+  });
+
+  it("keeps an odd cycle's own width instead of rescaling the trace", () => {
+    // The mock's first cycle really is longer: the full batch lands at t=0 while
+    // the first tick's settle is at t=70, so cycle 0 runs 0..120 and cycle 1
+    // 120..220.  Each cycle is one axis unit regardless — so cycle 0 shows a
+    // longer low period, and nothing that follows is squeezed.
+    const r = new WaveformRecorder();
+    r.recordBatch(
+      batch(0, [
+        [1, hex(0, 1), 0],
+        [1, hex(1, 1), 70],
+      ]),
+    );
+    r.recordBatch(
+      batch(1, [
+        [1, hex(0, 1), 120],
+        [1, hex(1, 1), 170],
+      ]),
+    );
+    r.recordBatch(
+      batch(2, [
+        [1, hex(0, 1), 220],
+        [1, hex(1, 1), 270],
+      ]),
+    );
+    const tb = r.timebase();
+    expect(projectSamples(r.samples(1), tb).map((p) => Math.round(p.x * 1e4) / 1e4)).toEqual([
+      0, 0.5833, 1, 1.5, 2, 2.5,
+    ]);
+    // Cycle boundaries are whole numbers and stay there as more arrive.
+    expect(tb.x(120, 1)).toBe(1);
+    expect(tb.x(320, 3)).toBe(3);
+  });
+
+  it("does not move a cycle boundary when later cycles arrive", () => {
+    // The property the scope model rests on: a cycle's edges are whole numbers,
+    // so a growing run extends the trace instead of rescaling it.
+    const r = new WaveformRecorder();
+    r.recordBatch(
+      batch(0, [
+        [1, hex(0, 1), 0],
+        [1, hex(1, 1), 50],
+      ]),
+    );
+    r.recordBatch(
+      batch(1, [
+        [1, hex(0, 1), 100],
+        [1, hex(1, 1), 150],
+      ]),
+    );
+    const before = projectSamples(r.samples(1), r.timebase()).map((p) => p.x);
+    for (let c = 2; c < 20; c++) {
+      r.recordBatch(
+        batch(c, [
+          [1, hex(0, 1), c * 100],
+          [1, hex(1, 1), c * 100 + 50],
+        ]),
+      );
+    }
+    const after = projectSamples(r.samples(1), r.timebase()).map((p) => p.x);
+    expect(after.slice(0, before.length)).toEqual(before);
+    // …and every cycle still occupies exactly one unit.
+    expect(after[after.length - 1]).toBe(19.5);
+  });
+
+  it("keeps x inside its cycle even if the engine stamps past the end", () => {
+    const r = new WaveformRecorder();
+    r.recordBatch(batch(0, [[1, hex(0), 0]]));
+    r.recordBatch(batch(1, [[1, hex(1), 100]]));
+    const tb = r.timebase();
+    // An event stamped late must not land in the next cycle — x stays monotonic.
+    expect(tb.x(150, 1)).toBeLessThanOrEqual(1.999);
+    expect(tb.x(150, 1)).toBeGreaterThan(1);
   });
 
   it("falls back to whole cycles when the core sends no `at`", () => {

@@ -2222,14 +2222,24 @@ which rises and falls inside _every_ cycle — collapsed into a flat line. Sampl
 by `at`, and only a value _change_ is stored (a held value costs nothing), so a clock is a
 square wave half a cycle wide.
 
-**The axis is a fractional cycle.** `x = cycle + (t − cycleStart) / period`, so the axis is
-still _measured in cycles_ (the model the course reasons in) while the edges inside one are
-placed by their real time. The period is **derived from the data** — the median gap between
-observed cycle starts, so a gap where nothing moved does not skew it — rather than assuming a
-clock rate. A core that sends no `at` degenerates to whole cycles (`hasTime` reports which case
-you are in), and there a fast toggle aliases: that is a limitation of such a core, not of the
-viewer. Working in unit steps at the start also _showed_ the aliasing, which is why it was
-caught.
+**The axis is a fractional cycle, and each cycle is exactly one unit wide _by construction_.**
+`x = cycle + (t − start) / duration`, where `duration` is that cycle's own observed length (the
+next cycle's start minus this one's) — so cycle boundaries sit at whole numbers and **never move
+as the run grows**: a growing run _extends_ the trace instead of rescaling it. The still-open
+newest cycle has no successor to measure against yet, so it borrows the lower median observed
+length, and when it closes only that one cycle's events settle — everything before it is already
+final. Clamping the fraction keeps `x` monotonic even if an engine stamps a time past a cycle's
+observed end.
+
+**The view transform is the user's, not the data's.** It is fitted **once** (when the trace first
+has something to show, or on a panel resize) and afterwards changed only by an explicit `Fit`, a
+zoom button or a drag. An earlier version re-fitted whenever `span.last` moved — which is every
+cycle — so the trace condensed a little more with each new entry while `Follow` pinned the live
+edge, and the whole history crept leftwards. The scope model is a _fixed width with a sliding
+window_: `Follow` slides, `Fit` re-frames, nothing else moves it.
+
+A core that sends no `at` degenerates to whole cycles (`hasTime` reports which case you are in),
+and there a fast toggle aliases: that is a limitation of such a core, not of the viewer.
 
 Recording is bounded (`WAVE_SAMPLE_CAP` per net, `WAVE_TOTAL_CAP` overall, oldest-first) and a
 net that lost history is marked, so the view can show `…` instead of lying about the past.
@@ -2294,3 +2304,10 @@ Follow-ups after using it on a real circuit (§89):
   wire — and the clock is the first signal anyone looks at, and the one whose aliasing exposed
   the bug above. A fresh trace now opens with the named parts **plus every clock in the sheet**,
   resolved through the wire on its `out` pin and labelled with the part's name or `clk`.
+- **Edges are drawn.** The first renderer drew each held level as its own horizontal line and
+  never a vertical between them, so a clock read as a row of disconnected dashes — precisely the
+  reading a student must not make. A segment now carries the vertical edge from the previous
+  level, and a segment narrower than one pixel is widened to one rather than dropped: at a zoom
+  where a half cycle is sub-pixel, one pixel of "something happened here" beats a flat line. Both
+  were visible only once the axis stopped rescaling, which is the lesson: the aliasing and the
+  rescaling were hiding each other.
