@@ -454,3 +454,31 @@ allowed:
   right _drag_ still pans and opens nothing, and that Cut/Delete from the menu
   change the document; a unit test is optional here since the actions themselves
   are already covered.
+
+## RAM powers on unknown (2026-10-19)
+
+Real RAM has no defined power-on contents, so the engine no longer assumes zero: the
+one place that decided it (`init_words`) now fills an image's _missing_ words with `X`,
+and the browser mock mirrors it word for word (its image parsers report how many words
+they defined; `memRead` answers an X mask for the rest). The engine's read paths already
+did the right thing for an `X` address and for a past-end address, and a write with
+`we = X` already stored `X`. An image or a write makes a word defined, explicitly
+including a zero. Normative statement: docs/format-v2.md §9; also DESIGN.md §4.1,
+UI_OVERHAUL §82.
+
+**Question for the Head TA — registers.** RAM now powers on `X`; registers still power on
+`0`. The same argument applies to them (a real flip-flop's power-on value is
+indeterminate), but a register has no image to initialize it from, so there are two
+ways to go:
+
+1. **Registers start `X` too** — realistic, and every stored value in a circuit becomes
+   the designer's responsibility. Cost: circuits that rely on a register starting at 0
+   (a counter's first cycle, say) now show `X` until something loads it.
+2. **An explicit initial-value attribute** on `mem.register` — a small additive format
+   change; explicit and teachable ("this register starts at 0 because I said so"), and it
+   keeps a circuit's power-on state readable from the file.
+
+Recommendation: (1), on the same reasoning as RAM — but how much of a circuit's
+internal state a student should have to explain is a course-wide call, not a
+simulator's. Either way the change is one line where the state is created, plus the same
+test updates.

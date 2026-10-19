@@ -115,6 +115,18 @@ const STANDALONE_LAYOUT: BehaviorLayout = {
   bufferComp: MOCK_COMP.buffer,
 };
 
+/** A 32-bit unknown: an uninitialized memory word (§9). */
+function x32(): WireValue {
+  return { v: "00000000", x: "ffffffff", z: "00000000" };
+}
+
+/** Every word from `defined` to `depth` — the ones a memory image did not set. */
+function undefinedFrom(defined: number, depth: number): Set<number> {
+  const out = new Set<number>();
+  for (let a = defined; a < depth; a++) out.add(a);
+  return out;
+}
+
 /** A 1-bit floating value (generic-mode nets are never driven). */
 const Z_BIT: WireValue = { v: "0", x: "0", z: "1" };
 
@@ -168,7 +180,13 @@ export class MockCore implements CoreApi {
   /** Doc-mode memories by name (standalone mode uses `imem` only). */
   private mems = new Map<string, Uint32Array>();
   /** Autoload images applied at load (= engine reset semantics, §5.2). */
-  private autoloads = new Map<string, Uint32Array>();
+  private autoloads = new Map<string, { image: Uint32Array; defined: number }>();
+  /**
+   * Words with no defined value (docs/format-v2.md §9): reads of these answer X, as the
+   * engine does. An image word or a write makes one defined — including an explicit 0.
+   */
+  private memUndef = new Map<string, Set<number>>();
+  private imemUndef = new Set<number>(Array.from({ length: IMEM_WORDS }, (_, i) => i));
   private readonly snapshots = new Map<string, string>();
   /** Last emitted value per net — diffs are computed against this. */
   private nets = new Map<number, WireValue>();
@@ -202,7 +220,9 @@ export class MockCore implements CoreApi {
     this.clk = false;
     this.busForced = null;
     this.imem.fill(0);
+    this.imemUndef = new Set<number>(Array.from({ length: IMEM_WORDS }, (_, i) => i));
     this.mems.clear();
+    this.memUndef.clear();
     this.autoloads.clear();
 
     const doc = tryParseCsx(src.bytes);
@@ -217,9 +237,10 @@ export class MockCore implements CoreApi {
       for (const comp of circuit.components) {
         if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
           const depth = Math.min(4096, numAttr(comp.attrs, "depth", IMEM_WORDS));
-          const image = mockMemoryImage(comp.attrs, depth);
-          this.mems.set(comp.name, new Uint32Array(image));
-          this.autoloads.set(comp.name, image);
+          const parsed = mockMemoryImage(comp.attrs, depth);
+          this.mems.set(comp.name, parsed.image);
+          this.memUndef.set(comp.name, undefinedFrom(parsed.defined, depth));
+          this.autoloads.set(comp.name, parsed);
         }
       }
       if (circuit.name === MOCK_DEMO_CIRCUIT) {
@@ -353,12 +374,13 @@ export class MockCore implements CoreApi {
 
   async memRead(name: string, addr: number, len: number): Promise<WireValue[]> {
     const mem = this.namedMem(name);
+    const undef = this.undefFor(name);
     return Array.from({ length: len }, (_, i) => {
       const a = addr + i;
       if (a < 0 || a >= mem.length) {
         throw new Error(`mock mem_read: ${name} address ${a} out of range`);
       }
-      return u32(mem[a]);
+      return undef?.has(a) === true ? x32() : u32(mem[a]);
     });
   }
 
@@ -370,7 +392,14 @@ export class MockCore implements CoreApi {
         throw new Error(`mock mem_write: ${name} address ${a} out of range`);
       }
       mem[a] = valueToU32(val);
+      this.undefFor(name)?.delete(a); // written: defined now, even if it is a 0
     });
+  }
+
+  /** The undefined-word set for a memory, mirroring `namedMem`'s resolution. */
+  private undefFor(name: string): Set<number> | undefined {
+    if (this.mems.has(name)) return this.memUndef.get(name);
+    return name === "imem" ? this.imemUndef : undefined;
   }
 
   private namedMem(name: string): Uint32Array {
@@ -403,6 +432,7 @@ export class MockCore implements CoreApi {
     this.pc = s.pc;
     this.clk = s.clk;
     this.imem.set(s.imem);
+    this.imemUndef.clear(); // a snapshot's words are values, not unknowns
     this.emitFullState(); // repaint the restored state
     this.emitStatus();
   }
@@ -415,8 +445,10 @@ export class MockCore implements CoreApi {
     this.clk = false;
     this.busForced = null;
     this.imem.fill(0);
-    for (const [name, image] of this.autoloads) {
-      this.mems.set(name, new Uint32Array(image));
+    this.imemUndef = new Set<number>(Array.from({ length: IMEM_WORDS }, (_, i) => i));
+    for (const [name, seeded] of this.autoloads) {
+      this.mems.set(name, new Uint32Array(seeded.image));
+      this.memUndef.set(name, undefinedFrom(seeded.defined, seeded.image.length));
     }
     this.emitFullState(); // reset repaints: fresh full batch
     this.emitStatus();
@@ -612,8 +644,13 @@ function numAttr(attrs: Record<string, unknown> | undefined, key: string, dflt: 
  * of the form `hex:0a ff 3-00` embeds the image inline (rle-hex-v1: hex
  * words and count-value runs). Any other path yields an empty image.
  */
-function mockAutoloadImage(autoload: unknown, depth: number): Uint32Array {
-  if (typeof autoload !== "string" || !autoload.startsWith("hex:")) return new Uint32Array(depth);
+function mockAutoloadImage(
+  autoload: unknown,
+  depth: number,
+): { image: Uint32Array; defined: number } {
+  if (typeof autoload !== "string" || !autoload.startsWith("hex:")) {
+    return { image: new Uint32Array(depth), defined: 0 };
+  }
   return mockRleHexImage(autoload.slice(4), depth);
 }
 
@@ -627,14 +664,15 @@ function mockAutoloadImage(autoload: unknown, depth: number): Uint32Array {
 function mockMemoryImage(
   attrs: Readonly<Record<string, unknown>> | undefined,
   depth: number,
-): Uint32Array {
+): { image: Uint32Array; defined: number } {
   const embedded = attrs?.contents;
   if (typeof embedded === "string") return mockRleHexImage(embedded, depth);
   return mockAutoloadImage(attrs?.autoload, depth);
 }
 
-/** rle-hex-v1 words/runs into a zero-padded image (format-v2 §7). */
-function mockRleHexImage(text: string, depth: number): Uint32Array {
+/** rle-hex-v1 words/runs into a zero-padded image (format-v2 §7), plus how many
+ *  words it actually defined — the rest are unknown (§9). */
+function mockRleHexImage(text: string, depth: number): { image: Uint32Array; defined: number } {
   const image = new Uint32Array(depth);
   let addr = 0;
   for (const tok of text.trim().split(/\s+/)) {
@@ -647,7 +685,7 @@ function mockRleHexImage(text: string, depth: number): Uint32Array {
       if (addr < depth) image[addr++] = Number(BigInt(`0x${tok}`));
     }
   }
-  return image;
+  return { image, defined: Math.min(addr, depth) };
 }
 
 /** Watch-addressable components (named, of the four contract kinds). */

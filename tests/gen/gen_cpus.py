@@ -268,9 +268,15 @@ def gen_multicycle():
     state = ctx.reg(name="ustate", bitsize=4)  # always enabled
 
     # -- memories -----------------------------------------------------------
+    # RAM/ROM power on UNKNOWN (docs/format-v2.md §9): a word no image defines is X.
+    # The image therefore covers the whole instruction space — the program, plus an
+    # explicit zero tail (fetching past the program used to read an implicit 0).
     imem = c.add("mem.rom", name="imem", bitsize=32, depth=256,
-                 autoload="program.hex", contents=PROGRAM_HEX)
-    dmem = c.add("mem.ram", name="dmem", bitsize=32, depth=256)
+                 autoload="program.hex",
+                 contents=f"{PROGRAM_HEX} {256 - len(PROGRAM_HEX.split())}-0")
+    # The data memory is a zeroed .bss, declared rather than assumed: this program
+    # expects zeroed data, and an uninitialized word is X now (§9).
+    dmem = c.add("mem.ram", name="dmem", bitsize=32, depth=256, contents="256-0")
     pc_lo = low_bits(ctx, pc, "q", 8)
     c.wire(pc_lo, "lo", imem, "addr")
     c.wire(imem, "out", ir, "d")
@@ -445,8 +451,12 @@ def gen_pipeline5():
     c.wire(pc, "q", pc_plus1, "a")
     c.wire(ctx.const(1, 32), "out", pc_plus1, "b")
     c.wire(ctx.zero, "out", pc_plus1, "cin")
+    # RAM/ROM power on UNKNOWN (docs/format-v2.md §9): a word no image defines is X.
+    # The image therefore covers the whole instruction space — the program, plus an
+    # explicit zero tail (fetching past the program used to read an implicit 0).
     imem = c.add("mem.rom", name="imem", bitsize=32, depth=256,
-                 autoload="program.hex", contents=PROGRAM_HEX)
+                 autoload="program.hex",
+                 contents=f"{PROGRAM_HEX} {256 - len(PROGRAM_HEX.split())}-0")
     pc_lo = low_bits(ctx, pc, "q", 8)
     c.wire(pc_lo, "lo", imem, "addr")
 
@@ -528,7 +538,9 @@ def gen_pipeline5():
     c.wire(idex_rd, "q", exmem_rd, "d")
 
     # ---- MEM ------------------------------------------------------------------
-    dmem = c.add("mem.ram", name="dmem", bitsize=32, depth=256)
+    # The data memory is a zeroed .bss, declared rather than assumed: this program
+    # expects zeroed data, and an uninitialized word is X now (§9).
+    dmem = c.add("mem.ram", name="dmem", bitsize=32, depth=256, contents="256-0")
     ao_lo = low_bits(ctx, exmem_alu, "q", 8)
     c.wire(ao_lo, "lo", dmem, "addr")
     c.wire(ctx.clk, "out", dmem, "clk")

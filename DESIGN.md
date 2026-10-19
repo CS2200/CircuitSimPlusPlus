@@ -4,7 +4,8 @@
 
 **Changelog v0.4 → v1.0-draft (integration amendments, ratified after the parallel build)**
 
-*IPC contract (now normative in docs/ipc.md, v1.2):*
+_IPC contract (now normative in docs/ipc.md, v1.2):_
+
 - `timing_update.violations` is a structured list `{circuit, comp_id, kind, detail}[]` (was count-only; count = length). Report keeps a `timing_violations` count field per §8.2.
 - `net_diffs.changes[]` gains optional `at` (ns since run start) - true propagation animation.
 - `NetDiffs.full`: the one initial full-state batch after load/resume/reset — the documented exception to "diffs only."
@@ -12,9 +13,10 @@
 - CompId on the wire = document-order index within the referenced circuit (never post-flatten); hierarchical designs attribute via `circuit` fields; `sim_halted.details` is machine-parseable (`comp <id> pin "<name>": …`).
 - Tick = one clock half-period. `top_paths` entries carry `{circuit, comps, delay_ns}`; `NamedComponent` gains `circuit`; hierarchical memory addressing is `instance/…/name`.
 
-*Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/delay-table.md, docs/autograder.md):*
+_Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/delay-table.md, docs/autograder.md):_
+
 - Resource caps: bitsize ≤ 32; gate inputs ≤ 32; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
-- Power-on state = 0 for registers/RAM (deterministic, not X); combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
+- Power-on state: **RAM powers on `X`** — an uninitialized word is unknown, and a read of it propagates `X` like any other unknown value (docs/format-v2.md §9) — while **registers still power on 0** (legacy compatibility; under review, see docs/bugs.md). Deterministic either way: `X` is as reproducible as `0`. Combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
 - Divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
 - The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters never).
 - `clock_half_period_ns` engine parameter (CLI default 1000 ns).
@@ -25,7 +27,7 @@
 - `wiring.controlled-buffer` added to the component registry (required by §4.1 tri-state; omitted from the original list).
 - Gate pins are named `in0..inN`/`out` (the §5.2 sketch's `a`/`b` was illustrative).
 
-*Deferred:* **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, draw-wires-first, delete-component-keep-wires). Proposed by the frontend build; needs schema + editor op + engine semantics. Not scheduled.
+_Deferred:_ **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, draw-wires-first, delete-component-keep-wires). Proposed by the frontend build; needs schema + editor op + engine semantics. Not scheduled.
 
 **Changelog since v1.0-draft**
 
@@ -39,27 +41,27 @@
 
 **Changelog v0.3 → v0.4**
 
-| Change | Driver |
-|---|---|
+| Change                                                                                                                                         | Driver             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | Delay model resolved: **hybrid — transport delay on wires, inertial delay on gates, clk→Q + setup/hold on registers** (matches the curriculum) | Team decision (D1) |
-| Extension resolved: `.csx` | Team decision (D4) |
-| Delay table gains wire-delay and hold-time entries | Consequence of D1 |
+| Extension resolved: `.csx`                                                                                                                     | Team decision (D4) |
+| Delay table gains wire-delay and hold-time entries                                                                                             | Consequence of D1  |
 
 **Changelog v0.2 → v0.3**
 
-| Change | Driver |
-|---|---|
+| Change                                                                                                                                                                                     | Driver                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Grading timing metric is **DTA** (the delay-aware engine measures observed per-cycle settle times during the grading run); STA demoted to an optional, clearly-labeled informational field | Team: microcode ROMs and multi-use buses make STA's structural worst case full of unreachable paths — confusing to students; the course test suite exercises every instruction and every branch predict/mispredict case |
-| Floating-input semantics: **consuming** a floating value halts the simulation with an error ("electrically, it shouldn't float") | Team decision |
-| Transport vs inertial delay explained (§4.3); transport remains the recommended default | Team question |
-| Clock/reset pins: **not hidden** — resolved | Team decision |
-| Distribution: unsigned DMG/zip with documented Gatekeeper/SmartScreen workarounds | Team: too broke to sign |
-| Provenance journal: deferred post-MVP; doubles as undo-history data (reads as an editing aid, not surveillance); forgery acknowledged — deterrent-grade only | Team decision |
-| Delay table: approach resolved — 74LS-era TTL datasheet typicals (period-authentic for the course's 70s–90s material); concrete values TBD by staff | Team decision |
-| Colorblind support: palettes stay swappable; dedicated accessibility pass deferred (no colorblind students this semester) | Team decision |
-| §7.0 added: Web-vs-Native renderer comparison (now that the renderer is custom either way) | Team question |
-| Appendix B.3 added: v0.1 net-centric proposal vs. adopted wire-centric model | Team request |
-| Milestones: event-driven engine pulled into M0 (grading depends on it); M4 becomes visualization-only | Consequence of DTA |
+| Floating-input semantics: **consuming** a floating value halts the simulation with an error ("electrically, it shouldn't float")                                                           | Team decision                                                                                                                                                                                                           |
+| Transport vs inertial delay explained (§4.3); transport remains the recommended default                                                                                                    | Team question                                                                                                                                                                                                           |
+| Clock/reset pins: **not hidden** — resolved                                                                                                                                                | Team decision                                                                                                                                                                                                           |
+| Distribution: unsigned DMG/zip with documented Gatekeeper/SmartScreen workarounds                                                                                                          | Team: too broke to sign                                                                                                                                                                                                 |
+| Provenance journal: deferred post-MVP; doubles as undo-history data (reads as an editing aid, not surveillance); forgery acknowledged — deterrent-grade only                               | Team decision                                                                                                                                                                                                           |
+| Delay table: approach resolved — 74LS-era TTL datasheet typicals (period-authentic for the course's 70s–90s material); concrete values TBD by staff                                        | Team decision                                                                                                                                                                                                           |
+| Colorblind support: palettes stay swappable; dedicated accessibility pass deferred (no colorblind students this semester)                                                                  | Team decision                                                                                                                                                                                                           |
+| §7.0 added: Web-vs-Native renderer comparison (now that the renderer is custom either way)                                                                                                 | Team question                                                                                                                                                                                                           |
+| Appendix B.3 added: v0.1 net-centric proposal vs. adopted wire-centric model                                                                                                               | Team request                                                                                                                                                                                                            |
+| Milestones: event-driven engine pulled into M0 (grading depends on it); M4 becomes visualization-only                                                                                      | Consequence of DTA                                                                                                                                                                                                      |
 
 (v0.1→v0.2: wire-centric format; tunnels/named nets removed; legacy converter dropped; multi-clock dropped; counter dropped; autoload-on-every-reset; WASM rejected; BSD licensing confirmed; DLS appendix.)
 
@@ -73,7 +75,7 @@ Pain points, ranked by how much they hurt:
 
 - **Autograder economics.** Gradescope runs on ~2 GB RAM instances. A real EC-project submission (14 subcircuits, 3,443 components) loads and simulates slowly under the JVM. A Rust core fixes this directly.
 - **Unfair grading metric.** Cycle-count-only grading let trivial 2-stage pipelines out-score genuine 5-stage pipelines. The autograder must factor in clock-cycle length so scores reflect real processor speed (§4.4, §8).
-- **UX friction.** Reset wipes RAM → multi-click reload of the program every time. Wiring/overlap confusion. No visibility into *why* a wire is wrong.
+- **UX friction.** Reset wipes RAM → multi-click reload of the program every time. Wiring/overlap confusion. No visibility into _why_ a wire is wrong.
 - **Aesthetics.** We want Sebastian Lague's Digital-Logic-Sim look — smooth, colorful, state-revealing wires — but with real gate symbols and our course's component set.
 
 Clean-sheet rewrite. The old codebase is reference reading only; no code or files are ported (course circuits will be rebuilt by hand).
@@ -84,15 +86,15 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 
 ### 2.1 Goals
 
-| # | Goal | Success criterion |
-|---|------|-------------------|
-| G1 | Fast, small simulation core in Rust | EC-project-scale circuit (~3.4k components) loads < 250 ms; course-scale programs (tens of thousands of cycles) grade in seconds in a 2 GB container; RSS < 256 MB |
-| G2 | Headless autograder with a **timing-fair metric** | Deterministic CLI: load circuit, preload multiple named memories, run N cycles on the delay-aware engine, assert state, measure observed timing, emit JSON report with `cycles`, `T_obs`, `est_time = cycles × T_obs`, speedup |
-| G3 | Graph-based file format, "copper-first" | Wires are explicit edges between pins (explicit junctions, no geometric inference, no named nets/tunnels); netlist derived by union-find at load |
-| G4 | Pretty, modern desktop UI | Tauri + React; canvas-rendered; 60 FPS with ~5k visible wires on low-end iGPUs; DLS-style state-colored wires with real gate symbols |
-| G5 | Propagation-delay awareness | Delay-aware event-driven engine powers both the teaching visualization **and** the autograder's timing measurement — what you see is what you're graded on |
-| G6 | Student QoL | RAM autoload-from-file on every reset; probes; clear error visualization (contention, floating, oscillation); named memories/registers accessible to autograder |
-| G7 | Rolling delivery | Update nudge from GitHub Releases so an early MVP can ship and improve continuously |
+| #   | Goal                                              | Success criterion                                                                                                                                                                                                              |
+| --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| G1  | Fast, small simulation core in Rust               | EC-project-scale circuit (~3.4k components) loads < 250 ms; course-scale programs (tens of thousands of cycles) grade in seconds in a 2 GB container; RSS < 256 MB                                                             |
+| G2  | Headless autograder with a **timing-fair metric** | Deterministic CLI: load circuit, preload multiple named memories, run N cycles on the delay-aware engine, assert state, measure observed timing, emit JSON report with `cycles`, `T_obs`, `est_time = cycles × T_obs`, speedup |
+| G3  | Graph-based file format, "copper-first"           | Wires are explicit edges between pins (explicit junctions, no geometric inference, no named nets/tunnels); netlist derived by union-find at load                                                                               |
+| G4  | Pretty, modern desktop UI                         | Tauri + React; canvas-rendered; 60 FPS with ~5k visible wires on low-end iGPUs; DLS-style state-colored wires with real gate symbols                                                                                           |
+| G5  | Propagation-delay awareness                       | Delay-aware event-driven engine powers both the teaching visualization **and** the autograder's timing measurement — what you see is what you're graded on                                                                     |
+| G6  | Student QoL                                       | RAM autoload-from-file on every reset; probes; clear error visualization (contention, floating, oscillation); named memories/registers accessible to autograder                                                                |
+| G7  | Rolling delivery                                  | Update nudge from GitHub Releases so an early MVP can ship and improve continuously                                                                                                                                            |
 
 ### 2.2 Non-Goals (v1)
 
@@ -139,7 +141,7 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 └─────────────────────────────────────────────┘
 ```
 
-**Hard architectural rule:** `csim-core` depends on nothing UI- or platform-specific. This is what guarantees the interactive app and the Gradescope autograder are *behaviorally identical by construction* — same engine, same semantics, same results. (That, not web ambitions, is the reason for core purity.)
+**Hard architectural rule:** `csim-core` depends on nothing UI- or platform-specific. This is what guarantees the interactive app and the Gradescope autograder are _behaviorally identical by construction_ — same engine, same semantics, same results. (That, not web ambitions, is the reason for core purity.)
 
 ```
 Cargo.toml            # workspace
@@ -162,7 +164,7 @@ tests/
 Each bit on a net: `0`, `1`, `X` (unknown/error), `Z` (undriven/floating).
 
 - **Contention** (two enabled drivers disagree) → `X`, wire highlighted as shorted in the UI. (Contrast: DLS picks a random winner — fine for demos, unacceptable for grading.)
-- **Floating** (no enabled driver) → `Z`, rendered distinctly (a bus idling between transactions is normal and displays as `Z`). But **consuming** a floating value is an electrical bug, so it is a *simulation-halting error*: if a `Z` reaches any gate input, or a register's D input at a clock edge while enabled, or a RAM/ROM port during an access, the simulation stops, the error names the component and pin, and the UI highlights it. Autograder: distinct exit code. (Resolved D3. Watch-item: if idle-bus false positives prove annoying in practice, a later pull-up/pull-down component is the escape hatch — see §13.)
+- **Floating** (no enabled driver) → `Z`, rendered distinctly (a bus idling between transactions is normal and displays as `Z`). But **consuming** a floating value is an electrical bug, so it is a _simulation-halting error_: if a `Z` reaches any gate input, or a register's D input at a clock edge while enabled, or a RAM/ROM port during an access, the simulation stops, the error names the component and pin, and the UI highlights it. Autograder: distinct exit code. (Resolved D3. Watch-item: if idle-bus false positives prove annoying in practice, a later pull-up/pull-down component is the escape hatch — see §13.)
 - Tri-state exists because `ControlledBuffer` buses are central to this course; `Z` must mean something.
 
 ### 4.2 One engine: delay-aware only
@@ -170,7 +172,7 @@ Each bit on a net: `0`, `1`, `X` (unknown/error), `Z` (undriven/floating).
 Earlier drafts shipped a second, **zero-delay** engine — a levelized "evaluate
 every component each cycle" fast path, selected by `settings.delayModel`. It
 was **removed**. In practice the event-driven delay-aware engine (§4.3) is
-*faster* on real designs, because it only does work where a value actually
+_faster_ on real designs, because it only does work where a value actually
 changes, while the zero-delay engine re-evaluated the entire circuit every
 cycle whether or not anything was static. The delay-aware engine is also what
 grading and the timing instrument already use, so one engine means one set of
@@ -185,12 +187,12 @@ Event-driven: components and wires have delays from the published delay table (�
 
 **The delay model (resolved D1): the physically-motivated hybrid the curriculum already teaches** — transport on wires, inertial on gates, timed registers:
 
-- **Wires — transport delay.** A wire is a pure delay line: every transition at one end is reproduced at the other end `d_wire` later, however narrow the pulse. `d_wire` scales with wire length via a table constant (kept small; set to 0 for a pure gate-delay model). This is what makes signals visibly *travel* along wires in the UI.
+- **Wires — transport delay.** A wire is a pure delay line: every transition at one end is reproduced at the other end `d_wire` later, however narrow the pulse. `d_wire` scales with wire length via a table constant (kept small; set to 0 for a pure gate-delay model). This is what makes signals visibly _travel_ along wires in the UI.
 - **Gates — inertial delay.** A gate's inputs must hold a new value for ≥ its `t_pd` before the output commits; an input pulse narrower than `t_pd` is swallowed (the pending output event is cancelled if the input reverts first). Sub-delay glitches get filtered — as in real silicon, and as taught in the curriculum. (Implementation: per-gate pending-event bookkeeping; recompute + reschedule on each input event.)
-- **Registers — clock-to-Q + setup/hold.** On a clock edge, D is sampled; Q updates `clk→Q` later — a register written this cycle is not stable at its output until `clk→Q` after the edge. The engine also *detects* setup/hold violations (D changed within `t_setup` before the edge or within `t_hold` after) and reports them as **warnings**, counted in the UI and the autograder report (`timing_violations`), without corrupting state: the latch still happens, deterministically. (Modeling metastability as `X` is a possible post-MVP refinement; v1 keeps behavior benign and flags the lesson. The autograder can enforce strictness with `--assert "violations == 0"`.)
+- **Registers — clock-to-Q + setup/hold.** On a clock edge, D is sampled; Q updates `clk→Q` later — a register written this cycle is not stable at its output until `clk→Q` after the edge. The engine also _detects_ setup/hold violations (D changed within `t_setup` before the edge or within `t_hold` after) and reports them as **warnings**, counted in the UI and the autograder report (`timing_violations`), without corrupting state: the latch still happens, deterministically. (Modeling metastability as `X` is a possible post-MVP refinement; v1 keeps behavior benign and flags the lesson. The autograder can enforce strictness with `--assert "violations == 0"`.)
 - **RAM/ROM** — reads settle after the table's access time; writes obey the same edge + setup discipline as registers.
 
-(The two textbook flavors, for reference: *transport* passes every transition shifted by `d`; *inertial* filters pulses narrower than `d`. We use each where hardware uses it.)
+(The two textbook flavors, for reference: _transport_ passes every transition shifted by `d`; _inertial_ filters pulses narrower than `d`. We use each where hardware uses it.)
 
 ### 4.4 Timing measurement: DTA (grading) + STA (informational only)
 
@@ -199,8 +201,8 @@ Event-driven: components and wires have delays from the published delay table (�
 **Decision (resolved D11): Dynamic Timing Analysis.**
 
 - The grading run executes on the **delay-aware engine** (§4.3) using the published delay table. For each clock cycle, the engine records that cycle's **settle time**: the timestamp of the last input change at any register/memory input, measured from cycle start. `T_obs` = maximum settle time over the whole run. Metric: `est_time = cycles × T_obs`; speedup vs. the course baseline processor's `est_time`.
-- **Why DTA over STA (static/worst-case), per the team:** students implement microcode in ROMs and reuse buses in patterns their control unit never actually exercises (double-back-to-back, indirect stores, …). STA would report and highlight structurally-possible paths the microcode can never sensitize — misleading grades *and* confused students. The course test suite already exercises every instruction and every branch predict/mispredict combination, giving DTA effective coverage for this ISA.
-- **Residual caveat (documented, accepted):** DTA is only as good as the suite — a path never sensitized scores *optimistically* (favors the student). Mitigations: the comprehensive suite; and the report may optionally include `T_sta` (STA worst-case, computed in linear time, clearly labeled "structural bound — may include paths your design never uses") as an informational field for TAs eyeballing anomalies. UI path-highlighting uses **observed** (DTA) paths by default; STA paths only on explicit request.
+- **Why DTA over STA (static/worst-case), per the team:** students implement microcode in ROMs and reuse buses in patterns their control unit never actually exercises (double-back-to-back, indirect stores, …). STA would report and highlight structurally-possible paths the microcode can never sensitize — misleading grades _and_ confused students. The course test suite already exercises every instruction and every branch predict/mispredict combination, giving DTA effective coverage for this ISA.
+- **Residual caveat (documented, accepted):** DTA is only as good as the suite — a path never sensitized scores _optimistically_ (favors the student). Mitigations: the comprehensive suite; and the report may optionally include `T_sta` (STA worst-case, computed in linear time, clearly labeled "structural bound — may include paths your design never uses") as an informational field for TAs eyeballing anomalies. UI path-highlighting uses **observed** (DTA) paths by default; STA paths only on explicit request.
 - **Determinism:** the event engine's tie-breaking is fixed (§4.6), so DTA results are exactly reproducible — same file, same program, same `T_obs`, every run, every platform.
 - **Performance reality check:** course programs are small — baseline cycle counts: POW 8,129 / FIB 32,312 / TwoSum 12,314. Even at ~10⁴ events/cycle that's ~10⁸–10⁹ events total: seconds in Rust on the target container. (The team's memoize/parallelize idea stays in the back pocket if future workloads grow; not needed at course scale.)
 - **A 2-stage pipeline now loses honestly:** its single long register-to-register path is exercised on essentially every cycle, so `T_obs` reflects it immediately.
@@ -230,7 +232,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
 ### 5.1 Design principles
 
 1. **Copper-first.** Students draw wires; wires are what gets saved. No named nets, no tunnels — connectivity you can't see doesn't exist. (Pedagogy: at the end of the day it's all copper and silicon. Also: tunnel labels are visual clutter, and aesthetics is a first-class goal.)
-2. **Still a true graph.** Each wire is an explicit edge between two endpoints; an endpoint is a component pin *or* an explicit junction onto a segment of another wire. Unlike legacy `.sim`, no connectivity is ever guessed from coordinates.
+2. **Still a true graph.** Each wire is an explicit edge between two endpoints; an endpoint is a component pin _or_ an explicit junction onto a segment of another wire. Unlike legacy `.sim`, no connectivity is ever guessed from coordinates.
 3. **Nets are derived, not stored.** At load (and incrementally in the editor), union-find over wire endpoints/junctions yields nets in O(n·α(n)). Nets get internal IDs (`n0…nk`) used by the engine and the UI diff-stream — never exposed to students. Net-extent hover-highlight (the feature that makes untangled wiring navigable without tunnels) is therefore still trivial. (See Appendix B.3 for why this model beat the net-centric alternative.)
 4. **Human-readable, diff-friendly JSON:** canonical serialization (2-space indent, sorted keys, stable IDs) so student circuits live happily in git.
 5. **Versioned from day one:** `format` + `version`; breaking changes ship with a migration.
@@ -244,7 +246,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1,
-    "delayTable": "cs2200-74ls-v1"    // published cost table (§4.4)
+    "delayTable": "cs2200-74ls-v1", // published cost table (§4.4)
   },
   "circuits": [
     {
@@ -255,45 +257,53 @@ Single global clock domain. A `clock` component places a clock source; multiple 
           "type": "gate.and",
           "pos": [15, 10],
           "rot": "E",
-          "name": "",                 // optional; REQUIRED on autograder-exposed parts
-          "attrs": { "bitsize": 32 }
+          "name": "", // optional; REQUIRED on autograder-exposed parts
+          "attrs": { "bitsize": 32 },
           // pins have no connectivity fields at all — wires own connectivity
         },
         {
           "id": "c88",
           "type": "mem.ram",
           "pos": [40, 20],
-          "name": "imem",             // autograder-visible
+          "name": "imem", // autograder-visible
           "attrs": {
             "bitsize": 32,
             "depth": 65536,
-            "autoload": "program.hex",  // file image loaded at startup AND on every reset
-            "contents": "0000 4-0001 ..." // optional embedded RLE-hex (legacy-compatible encoding)
-          }
+            "autoload": "program.hex", // file image loaded at startup AND on every reset
+            "contents": "0000 4-0001 ...", // optional embedded RLE-hex (legacy-compatible encoding)
+          },
         },
         {
           "id": "c90",
           "type": "subcircuit",
           "pos": [60, 10],
-          "attrs": { "circuit": "alu" }
+          "attrs": { "circuit": "alu" },
           // pins come from the alu circuit's pin components, referenced by
           // wires below — explicit, never positional-by-coordinates
-        }
+        },
       ],
       "wires": [
         {
           "a": { "comp": "c17", "pin": "out" },
           "b": { "comp": "c88", "pin": "addr" },
-          "points": [[18, 11], [30, 11], [30, 21], [38, 21]]   // drawn path; rounded at render
+          "points": [
+            [18, 11],
+            [30, 11],
+            [30, 21],
+            [38, 21],
+          ], // drawn path; rounded at render
         },
         {
           "a": { "comp": "c21", "pin": "out" },
-          "b": { "join": { "wire": 0, "segment": 1 } },        // junction onto wire 0
-          "points": [[24, 5], [24, 11]]
-        }
-      ]
-    }
-  ]
+          "b": { "join": { "wire": 0, "segment": 1 } }, // junction onto wire 0
+          "points": [
+            [24, 5],
+            [24, 11],
+          ],
+        },
+      ],
+    },
+  ],
 }
 ```
 
@@ -314,15 +324,15 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 
 ## 6. Component Library (v1)
 
-| Category | Components |
-|---|---|
-| Gates | `and or xor not buffer nand nor xnor` — configurable input count (2..32); the De Morgan "bubbled" variants are separate parts, not a per-input setting |
-| Wiring | `pin` (subcircuit I/O; bitsize; value display mode: unsigned/signed/hex), `constant`, `clock` (mirrors the global clock), `splitter` (arbitrary bit mapping — the bus plumbing), `probe` (named value display; autograder-readable) |
-| Plexers | `mux`, `demux`, `decoder`, `priority-decoder` |
-| Arithmetic | `adder`, `subtractor`, `multiplier`, `divider`, `comparator`, `negator`, `shifter`, `bit-extender` |
-| Memory | `register`, `ram`, `rom` — RAM/ROM expose `name`, `autoload`, embedded `contents`, and an address width independent of the word count (`addrBits`, derived from `depth` unless set) |
-| Hierarchy | `subcircuit` (pins referenced by name from wires) |
-| I/O (UI-only) | button, LED, hex display, text annotation (`misc.text`) — inert headless |
+| Category      | Components                                                                                                                                                                                                                          |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gates         | `and or xor not buffer nand nor xnor` — configurable input count (2..32); the De Morgan "bubbled" variants are separate parts, not a per-input setting                                                                              |
+| Wiring        | `pin` (subcircuit I/O; bitsize; value display mode: unsigned/signed/hex), `constant`, `clock` (mirrors the global clock), `splitter` (arbitrary bit mapping — the bus plumbing), `probe` (named value display; autograder-readable) |
+| Plexers       | `mux`, `demux`, `decoder`, `priority-decoder`                                                                                                                                                                                       |
+| Arithmetic    | `adder`, `subtractor`, `multiplier`, `divider`, `comparator`, `negator`, `shifter`, `bit-extender`                                                                                                                                  |
+| Memory        | `register`, `ram`, `rom` — RAM/ROM expose `name`, `autoload`, embedded `contents`, and an address width independent of the word count (`addrBits`, derived from `depth` unless set)                                                 |
+| Hierarchy     | `subcircuit` (pins referenced by name from wires)                                                                                                                                                                                   |
+| I/O (UI-only) | button, LED, hex display, text annotation (`misc.text`) — inert headless                                                                                                                                                            |
 
 Deliberately **excluded**: tunnels, named wires, `counter` (register + adder is the lesson), any "black-box convenience" parts that hide the underlying logic from students.
 
@@ -336,26 +346,26 @@ Deliberately **excluded**: tunnels, named wires, `counter` (register + adder is 
 
 Now that we know the circuit canvas is a custom renderer either way, the honest trade-off:
 
-| | **Web (Tauri + React + Canvas2D)** — chosen | **Native Rust (egui / wgpu)** |
-|---|---|---|
-| Circuit renderer itself | Custom Canvas2D — a few hundred lines, batched vector paths | Custom egui/wgpu paint — *same* few hundred lines; renderer is the cheap part in both worlds |
-| Everything *around* the canvas (menus, palette, dialogs, probe panel, themes, animations) | HTML/CSS — the fastest known path to "very, very pretty"; trivial gradients, transitions, layout; this is where 90% of UI polish effort lives | Hand-built widgets; no CSS; every pretty detail is custom code; egui is functional, not beautiful, out of the box |
-| Iteration speed | Hot reload; huge ecosystem; easy to vibe-code | Rust compile cycles; small ecosystem for fancy UI |
-| Sim ↔ UI boundary | Serialized diff-stream (a few KB/frame — measured design, §7.1) | Zero-copy, in-process |
-| Platform risk | Webview fragmentation (WebKitGTK / WebView2 / WKWebView) → CI on all three from M2; Gradescope never touches a webview | No webview; one language end-to-end; smaller binary |
-| Team fit | Matches stated goal: "use CSS/JS/HTML, easy to vibe code" | Rejected in v0.1 for exactly that reason |
+|                                                                                           | **Web (Tauri + React + Canvas2D)** — chosen                                                                                                   | **Native Rust (egui / wgpu)**                                                                                     |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Circuit renderer itself                                                                   | Custom Canvas2D — a few hundred lines, batched vector paths                                                                                   | Custom egui/wgpu paint — _same_ few hundred lines; renderer is the cheap part in both worlds                      |
+| Everything _around_ the canvas (menus, palette, dialogs, probe panel, themes, animations) | HTML/CSS — the fastest known path to "very, very pretty"; trivial gradients, transitions, layout; this is where 90% of UI polish effort lives | Hand-built widgets; no CSS; every pretty detail is custom code; egui is functional, not beautiful, out of the box |
+| Iteration speed                                                                           | Hot reload; huge ecosystem; easy to vibe-code                                                                                                 | Rust compile cycles; small ecosystem for fancy UI                                                                 |
+| Sim ↔ UI boundary                                                                         | Serialized diff-stream (a few KB/frame — measured design, §7.1)                                                                               | Zero-copy, in-process                                                                                             |
+| Platform risk                                                                             | Webview fragmentation (WebKitGTK / WebView2 / WKWebView) → CI on all three from M2; Gradescope never touches a webview                        | No webview; one language end-to-end; smaller binary                                                               |
+| Team fit                                                                                  | Matches stated goal: "use CSS/JS/HTML, easy to vibe code"                                                                                     | Rejected in v0.1 for exactly that reason                                                                          |
 
 **Verdict: stay with Tauri + React + custom Canvas2D.** The renderer costs the same either way; web tech wins decisively on the chrome, which is where the aesthetic goal lives. And because `csim-core` is UI-agnostic, the decision is reversible without touching the engine.
 
 ### 7.1 Stack & rendering
 
 - **Stack:** Tauri 2, React 18+, TypeScript, Vite.
-- **Circuit canvas: hand-rolled Canvas 2D inside one React component.** On `react-canvas` specifically: **no** — the Flipboard `react-canvas` library has been unmaintained for years; the maintained scene-graph equivalents (react-konva) keep a per-node retained tree, which is overhead we don't need when a frame is 5k+ batched wire paths. A custom renderer with a spatial index for hit-testing is *less* code than fighting a scene graph and gives exact control over batching, zoom-dependent detail, and state-color pass ordering. (DLS reaches the same conclusion: immediate-mode drawing via its own SebVis layer.) React owns the chrome. If Canvas2D ever profiles insufficient, the renderer hides behind an interface and PixiJS/WebGL slots in locally.
+- **Circuit canvas: hand-rolled Canvas 2D inside one React component.** On `react-canvas` specifically: **no** — the Flipboard `react-canvas` library has been unmaintained for years; the maintained scene-graph equivalents (react-konva) keep a per-node retained tree, which is overhead we don't need when a frame is 5k+ batched wire paths. A custom renderer with a spatial index for hit-testing is _less_ code than fighting a scene graph and gives exact control over batching, zoom-dependent detail, and state-color pass ordering. (DLS reaches the same conclusion: immediate-mode drawing via its own SebVis layer.) React owns the chrome. If Canvas2D ever profiles insufficient, the renderer hides behind an interface and PixiJS/WebGL slots in locally.
 - **Theming:** CSS custom properties; dark and light themes; **one themeable bus colour** (per-net rainbow hues read as noise on a busy datapath; a wire's own `color` still wins). Palettes are data, not code, so a dedicated colorblind-accessibility pass later is a theme drop-in, not a refactor (deferred — no colorblind students this semester; resolved D8).
 - **Wire rendering (the DLS look, App. B):** quadratic-Bézier-rounded corners, per-state colors (low / high / `X` error / `Z` floating / disconnected), thickness option ∝ bitsize, hover = brighten + net-extent highlight (the no-tunnels navigability feature).
 - **Editing:** drag-and-drop palette; click-drag wire routing with placeable bends; junction on drop-onto-wire; drag components with wires attached; copy/paste; multi-select; undo/redo; probe value display modes (unsigned/signed/hex).
 - **Simulation control:** play/pause/step-tick/step-cycle, speed slider (time compression), run-to-cycle-N, watch panel of named probes/registers, savestate/restore.
-- **Clock pins: shown, not hidden (resolved D2).** De-emphasized visually; one-click "connect to global clock." Hiding invites magic; showing teaches synchronous design. There are no *reset* pins: resetting is the session's job (§8, `sim_reset`).
+- **Clock pins: shown, not hidden (resolved D2).** De-emphasized visually; one-click "connect to global clock." Hiding invites magic; showing teaches synchronous design. There are no _reset_ pins: resetting is the session's job (§8, `sim_reset`).
 
 ### 7.2 IPC & streaming
 
@@ -436,17 +446,17 @@ Honest scoping: **none of this is proof; all of it is cheap evidence + deterrenc
 
 ## 12. Alternatives Considered
 
-| Alternative | Verdict | Rationale |
-|---|---|---|
-| Optimize/patch the Java CircuitSim | **Rejected** | JVM footprint/startup on 2 GB graders is the core complaint; weekend-built codebase; clean rewrite wins. Kept as behavior reference only. |
-| Fork Logisim-evolution / Digital | **Rejected** | Same JVM problem; deep-fork cost; not the aesthetic target. |
-| Electron instead of Tauri | **Rejected** | Bundles Chromium (~hundreds of MB idle) — against the small/fast goal. Accepted Tauri risk: webview fragmentation → CI on all three OSes from M2; Gradescope never touches a webview. |
-| Native Rust UI (egui / wgpu / Slint) | **Rejected for v1** | Full comparison in §7.0: renderer costs the same either way; web chrome wins on beauty-per-effort; core stays UI-agnostic so it's reversible. |
-| Browser-only app (core → WASM) | **Rejected** | Team decision: desktop-only by design — students install and use real software. |
-| `react-canvas` for the canvas | **Rejected** | Unmaintained for years. Scene-graph alternatives (react-konva) add per-node overhead with no win at 5k+ wires. Hand-rolled Canvas2D + spatial index. |
-| Keep legacy `.sim` format / write a converter | **Rejected** | Geometric connectivity inference is the root of the wiring pain; course circuits are rebuilt by hand; legacy spec kept as Appendix A reference only. |
-| Net-centric format (pins name net IDs) | **Rejected** | Requires named-net bookkeeping students can't see; wire-centric (DLS-proven) matches copper-first pedagogy; nets derived by union-find instead. Full comparison: Appendix B.3. |
-| STA as the grading metric | **Rejected** | Structural worst case counts microcode/bus paths students never sensitize — misleading grades, confused students. DTA primary; STA kept as optional informational field (§4.4). |
+| Alternative                                   | Verdict             | Rationale                                                                                                                                                                             |
+| --------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Optimize/patch the Java CircuitSim            | **Rejected**        | JVM footprint/startup on 2 GB graders is the core complaint; weekend-built codebase; clean rewrite wins. Kept as behavior reference only.                                             |
+| Fork Logisim-evolution / Digital              | **Rejected**        | Same JVM problem; deep-fork cost; not the aesthetic target.                                                                                                                           |
+| Electron instead of Tauri                     | **Rejected**        | Bundles Chromium (~hundreds of MB idle) — against the small/fast goal. Accepted Tauri risk: webview fragmentation → CI on all three OSes from M2; Gradescope never touches a webview. |
+| Native Rust UI (egui / wgpu / Slint)          | **Rejected for v1** | Full comparison in §7.0: renderer costs the same either way; web chrome wins on beauty-per-effort; core stays UI-agnostic so it's reversible.                                         |
+| Browser-only app (core → WASM)                | **Rejected**        | Team decision: desktop-only by design — students install and use real software.                                                                                                       |
+| `react-canvas` for the canvas                 | **Rejected**        | Unmaintained for years. Scene-graph alternatives (react-konva) add per-node overhead with no win at 5k+ wires. Hand-rolled Canvas2D + spatial index.                                  |
+| Keep legacy `.sim` format / write a converter | **Rejected**        | Geometric connectivity inference is the root of the wiring pain; course circuits are rebuilt by hand; legacy spec kept as Appendix A reference only.                                  |
+| Net-centric format (pins name net IDs)        | **Rejected**        | Requires named-net bookkeeping students can't see; wire-centric (DLS-proven) matches copper-first pedagogy; nets derived by union-find instead. Full comparison: Appendix B.3.        |
+| STA as the grading metric                     | **Rejected**        | Structural worst case counts microcode/bus paths students never sensitize — misleading grades, confused students. DTA primary; STA kept as optional informational field (§4.4).       |
 
 ---
 
@@ -467,15 +477,15 @@ Honest scoping: **none of this is proof; all of it is cheap evidence + deterrenc
 
 ## 14. Milestones
 
-| Phase | Deliverable | Depends on |
-|---|---|---|
-| **M0** Foundations | Cargo workspace; format JSON Schema; value model; union-find netlist builder; flatten/levelize; cycle detection; **delay-aware event engine (inertial gates + transport wires + timed registers)**; STA (informational); **draft 74LS delay table**; unit tests | — |
-| **M1** Autograder | `csim-cli`: run/load/assert/**DTA timing**/report; snapshot/resume; musl build; Gradescope Docker image | M0 |
-| **M2** Desktop shell | Tauri app; canvas editor (palette, wire routing w/ bends & junctions, pan/zoom, select, undo); diff-streamed sim controls | M0 |
-| **M3** Library + visuals | All §6 components; gate shapes; DLS-style wire rendering; error highlighting (contention/floating/oscillation); probe watch panel | M2 |
-| **M4** Timing visualization | Propagation animation (signals visibly traveling wires); **observed-critical-path highlight in UI (from DTA)**; setup/hold violation markers | M0 (parallel with M2/M3) |
-| **M5** Polish & ship | RAM autoload UI, savestates, themes, update-nudge, unsigned installers + workaround docs, perf hardening | M3 |
-| **Post-MVP** | Integrity tooling (similarity runner + provenance-journal-as-undo-history); colorblind accessibility pass; optional metastability-as-`X` modeling | — |
+| Phase                       | Deliverable                                                                                                                                                                                                                                                     | Depends on               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **M0** Foundations          | Cargo workspace; format JSON Schema; value model; union-find netlist builder; flatten/levelize; cycle detection; **delay-aware event engine (inertial gates + transport wires + timed registers)**; STA (informational); **draft 74LS delay table**; unit tests | —                        |
+| **M1** Autograder           | `csim-cli`: run/load/assert/**DTA timing**/report; snapshot/resume; musl build; Gradescope Docker image                                                                                                                                                         | M0                       |
+| **M2** Desktop shell        | Tauri app; canvas editor (palette, wire routing w/ bends & junctions, pan/zoom, select, undo); diff-streamed sim controls                                                                                                                                       | M0                       |
+| **M3** Library + visuals    | All §6 components; gate shapes; DLS-style wire rendering; error highlighting (contention/floating/oscillation); probe watch panel                                                                                                                               | M2                       |
+| **M4** Timing visualization | Propagation animation (signals visibly traveling wires); **observed-critical-path highlight in UI (from DTA)**; setup/hold violation markers                                                                                                                    | M0 (parallel with M2/M3) |
+| **M5** Polish & ship        | RAM autoload UI, savestates, themes, update-nudge, unsigned installers + workaround docs, perf hardening                                                                                                                                                        | M3                       |
+| **Post-MVP**                | Integrity tooling (similarity runner + provenance-journal-as-undo-history); colorblind accessibility pass; optional metastability-as-`X` modeling                                                                                                               | —                        |
 
 MVP for limited student pilot = M0–M3. Performance-project readiness = + M5. M4 any time after M0.
 
@@ -485,20 +495,20 @@ MVP for limited student pilot = M0–M3. Performance-project readiness = + M5. M
 
 ## 15. Open Decisions
 
-| # | Question | Recommendation | Status |
-|---|---|---|---|
-| D1 | Delay model | **Hybrid: transport wires + inertial gates + register clk→Q/setup/hold (§4.3) — resolved (team; matches curriculum)** | ✅ resolved |
-| D2 | Hide clock pins? | **No — resolved (team)**; de-emphasize + auto-connect. The `rst` inputs themselves were removed in format v4 — reset is `sim_reset`. | ✅ resolved |
-| D3 | Floating input semantics | **Halt-on-consume — resolved (team)**; watch-item §13.5 | ✅ resolved |
-| D4 | Extension | **`.csx` — resolved (team)** | ✅ resolved |
-| D7 | Tunnels? | **No tunnels, no named nets — resolved (team)** | ✅ resolved |
-| D8 | Wire palette | **One themeable bus colour + per-state wire colours; accessibility pass later — resolved (team)** | ✅ resolved |
-| D9 | Legacy `revisionSignatures` | **Dropped — resolved (team)** | ✅ resolved |
-| D10 | Name/licensing | **Resolved** — BSD-licensed original, 2110 permission granted; keep attribution | ✅ resolved |
-| D11 | Grading timing metric | **DTA primary; STA informational-only — resolved (team)** | ✅ resolved |
-| D12 | Provenance journal | **Deferred post-MVP; doubles as undo history — resolved (team)** | ✅ resolved |
-| D13 | Delay-table values | Approach resolved: 74LS typicals; concrete values TBD by staff before M0 ends | approach ✅ / values open |
-| D14 | Code signing | **Unsigned + workaround docs — resolved (team)** | ✅ resolved |
+| #   | Question                    | Recommendation                                                                                                                       | Status                    |
+| --- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| D1  | Delay model                 | **Hybrid: transport wires + inertial gates + register clk→Q/setup/hold (§4.3) — resolved (team; matches curriculum)**                | ✅ resolved               |
+| D2  | Hide clock pins?            | **No — resolved (team)**; de-emphasize + auto-connect. The `rst` inputs themselves were removed in format v4 — reset is `sim_reset`. | ✅ resolved               |
+| D3  | Floating input semantics    | **Halt-on-consume — resolved (team)**; watch-item §13.5                                                                              | ✅ resolved               |
+| D4  | Extension                   | **`.csx` — resolved (team)**                                                                                                         | ✅ resolved               |
+| D7  | Tunnels?                    | **No tunnels, no named nets — resolved (team)**                                                                                      | ✅ resolved               |
+| D8  | Wire palette                | **One themeable bus colour + per-state wire colours; accessibility pass later — resolved (team)**                                    | ✅ resolved               |
+| D9  | Legacy `revisionSignatures` | **Dropped — resolved (team)**                                                                                                        | ✅ resolved               |
+| D10 | Name/licensing              | **Resolved** — BSD-licensed original, 2110 permission granted; keep attribution                                                      | ✅ resolved               |
+| D11 | Grading timing metric       | **DTA primary; STA informational-only — resolved (team)**                                                                            | ✅ resolved               |
+| D12 | Provenance journal          | **Deferred post-MVP; doubles as undo history — resolved (team)**                                                                     | ✅ resolved               |
+| D13 | Delay-table values          | Approach resolved: 74LS typicals; concrete values TBD by staff before M0 ends                                                        | approach ✅ / values open |
+| D14 | Code signing                | **Unsigned + workaround docs — resolved (team)**                                                                                     | ✅ resolved               |
 
 **All decisions resolved.** Only D13's concrete delay-table numbers remain, and they block nothing — the engine ships with the draft 74LS values and the table is data, not code.
 
@@ -531,20 +541,20 @@ DLS (Unity/C#, builds on itch.io) — what its source actually does:
 
 ### B.2 Explicitly not adopted
 
-- **The simulator core.** DLS *deliberately* injects randomness: conflicting inputs on a pin "choose randomly," and every ~100 frames it randomly reorders not-yet-ready chips "to allow variety in the outcomes of race conditions" (SR-latch-style). Charming for a demo; disqualifying for an autograder. We do fixed tie-breaking and `X` on contention (§4.1, §4.6).
+- **The simulator core.** DLS _deliberately_ injects randomness: conflicting inputs on a pin "choose randomly," and every ~100 frames it randomly reorders not-yet-ready chips "to allow variety in the outcomes of race conditions" (SR-latch-style). Charming for a demo; disqualifying for an autograder. We do fixed tie-breaking and `X` on contention (§4.1, §4.6).
 - Recursive per-chip evaluation without flattening or levelization — doesn't scale to 3.4k-component processors; we flatten + levelize (§4.2).
 - Block-style chips instead of gate symbols — by prior team decision we use real gate shapes.
 
 ### B.3 The v0.1 proposal (net-centric) vs. DLS's model (wire-centric) — how they differ
 
-| | **Net-centric (v0.1 proposal — rejected)** | **Wire-centric (DLS — adopted, §5)** |
-|---|---|---|
-| Stored truth | Nets are first-class objects with IDs; each pin names its net ID; nets carry route geometry | Wires are first-class edges; each wire's endpoints are pin addresses or explicit junctions onto another wire's segment; wires carry their own polylines |
-| Nets | Stored, named — an invisible abstraction students must trust | **Derived** at load by union-find over wire endpoints; internal IDs only; students never see them |
-| Fan-out | One net, many pins | Multiple edges from one source pin — visually identical, structurally explicit |
-| Edit semantics | Deleting one drawn segment forces geometric re-analysis: did the net split? which pins move to the new net? Net IDs churn as nets merge/split | Deleting a wire deletes an edge (plus its junction dependents). No re-inference, no ID churn |
-| Netlist build | Map lookup | Union-find — O(n·α(n)), trivial |
-| Net-extent hover highlight | Trivial | Equally trivial (union-find result is cached in the editor) |
-| Fit to "copper-first" pedagogy | Poor — connectivity exists in an invisible table | Exact — what's drawn is what's saved is what's simulated |
+|                                | **Net-centric (v0.1 proposal — rejected)**                                                                                                    | **Wire-centric (DLS — adopted, §5)**                                                                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stored truth                   | Nets are first-class objects with IDs; each pin names its net ID; nets carry route geometry                                                   | Wires are first-class edges; each wire's endpoints are pin addresses or explicit junctions onto another wire's segment; wires carry their own polylines |
+| Nets                           | Stored, named — an invisible abstraction students must trust                                                                                  | **Derived** at load by union-find over wire endpoints; internal IDs only; students never see them                                                       |
+| Fan-out                        | One net, many pins                                                                                                                            | Multiple edges from one source pin — visually identical, structurally explicit                                                                          |
+| Edit semantics                 | Deleting one drawn segment forces geometric re-analysis: did the net split? which pins move to the new net? Net IDs churn as nets merge/split | Deleting a wire deletes an edge (plus its junction dependents). No re-inference, no ID churn                                                            |
+| Netlist build                  | Map lookup                                                                                                                                    | Union-find — O(n·α(n)), trivial                                                                                                                         |
+| Net-extent hover highlight     | Trivial                                                                                                                                       | Equally trivial (union-find result is cached in the editor)                                                                                             |
+| Fit to "copper-first" pedagogy | Poor — connectivity exists in an invisible table                                                                                              | Exact — what's drawn is what's saved is what's simulated                                                                                                |
 
 Both reduce to the same net graph internally, so the simulation engine is identical either way; the difference is entirely in the student-facing model and edit invariants. Wire-centric won on pedagogy (nothing invisible), edit simplicity, and being proven in the exact aesthetic we're targeting.

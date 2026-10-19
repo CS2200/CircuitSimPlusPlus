@@ -163,11 +163,13 @@ describe("mock core: memory autoload (U6)", () => {
     expect(words.map((w) => Number(BigInt(`0x${w.v}`)))).toEqual([1, 2]);
   });
 
-  it("a plain (non-inline-hex) path yields an empty image", async () => {
+  it("a plain (non-inline-hex) path leaves every word unknown (§9)", async () => {
     const core = createMockCore();
     await core.api.loadCircuit({ bytes: bytesOf(docWithAutoload("program.hex").toJson()) });
     const words = await core.api.memRead("imem", 0, 4);
-    expect(words.every((w) => w.v === "00000000")).toBe(true);
+    // The mock reaches no filesystem, so no image lands — and a word nothing
+    // initialized is X, not zero.
+    expect(words.every((w) => w.x === "ffffffff")).toBe(true);
   });
 });
 

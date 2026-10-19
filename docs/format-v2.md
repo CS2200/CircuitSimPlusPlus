@@ -5,7 +5,7 @@
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
-in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
+in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 ## 1. Identity, versioning, extension
 
@@ -24,10 +24,10 @@ in `DESIGN.md` is a *sketch*; this document is the *normative* realization.
   "version": 4,
   "name": "LC-5200 Datapath",
   "settings": {
-    "clockHz": 1,                     // UI clock speed at load time
-    "delayTable": "cs2200-74ls-v1"    // published, versioned delay table (§4.4, docs/delay-table.md); unknown name = load error
+    "clockHz": 1, // UI clock speed at load time
+    "delayTable": "cs2200-74ls-v1", // published, versioned delay table (§4.4, docs/delay-table.md); unknown name = load error
   },
-  "circuits": [ /* ... */ ]
+  "circuits": [/* ... */],
 }
 ```
 
@@ -56,8 +56,8 @@ Circuit names are unique within a document. One circuit is conventionally `"main
 ```jsonc
 {
   "name": "alu",
-  "components": [ /* ... */ ],
-  "wires": [ /* ... */ ]
+  "components": [/* ... */],
+  "wires": [/* ... */],
 }
 ```
 
@@ -65,13 +65,13 @@ Circuit names are unique within a document. One circuit is conventionally `"main
 
 ```jsonc
 {
-  "id": "c17",                 // author-assigned, unique within the circuit
-  "type": "gate.and",          // type string, see §4
-  "pos": [15, 10],             // grid coordinates of the origin
-  "rot": "E",                  // "N" | "E" | "S" | "W" (default "E")
-  "name": "",                  // optional; REQUIRED on autograder-exposed parts and on wiring.pin
-  "namePos": "N",              // optional label side; "N" | "E" | "S" | "W" (absent = UI default)
-  "attrs": { /* per-type, see §4 */ }
+  "id": "c17", // author-assigned, unique within the circuit
+  "type": "gate.and", // type string, see §4
+  "pos": [15, 10], // grid coordinates of the origin
+  "rot": "E", // "N" | "E" | "S" | "W" (default "E")
+  "name": "", // optional; REQUIRED on autograder-exposed parts and on wiring.pin
+  "namePos": "N", // optional label side; "N" | "E" | "S" | "W" (absent = UI default)
+  "attrs": {/* per-type, see §4 */},
 }
 ```
 
@@ -88,10 +88,14 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
 
 ```jsonc
 {
-  "a": { "comp": "c17", "pin": "out" },              // pin endpoint
-  "b": { "join": { "wire": 0, "segment": 1 } },       // junction endpoint
-  "points": [[18, 11], [30, 11], [30, 21]],           // drawn polyline, a → b
-  "color": "#ff0000"                                  // optional cosmetic stroke (§6)
+  "a": { "comp": "c17", "pin": "out" }, // pin endpoint
+  "b": { "join": { "wire": 0, "segment": 1 } }, // junction endpoint
+  "points": [
+    [18, 11],
+    [30, 11],
+    [30, 21],
+  ], // drawn polyline, a → b
+  "color": "#ff0000", // optional cosmetic stroke (§6)
 }
 ```
 
@@ -136,36 +140,36 @@ present, else the first circuit in `circuits`.
 Type strings are pinned by `docs/tasks/README.md` §4. There is **no per-instance
 delay attribute**: timing is unit-wide, from the published delay table (§6).
 
-| Type | Pins | Attrs (defaults) |
-|---|---|---|
-| `gate.not`, `gate.buffer` | `in`, `out` | `bitsize` (1) |
-| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out` | `bitsize` (1), `inputs` (2; 2..=32) |
-| `wiring.controlled-buffer` ⚠️¹ | `in`, `en`, `out` | `bitsize` (1) |
-| `wiring.pin` | `pin` | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
-| `wiring.transistor` | `in`, `gate`, `out` | `bitsize` (1) — a pass gate: the `in` value while `gate` is 1, `Z` while it is 0, `X` while it is unknown (a floating `gate` halts naming `gate`) |
-| `wiring.power` / `wiring.ground` | `out` | *none* — a fixed 1-bit `1` / `0` source (UI_OVERHAUL §71); the same behaviour kind as `wiring.constant`, so a stray attr is an unknown-attr error |
-| `wiring.constant` | `out` | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only |
-| `wiring.clock` | `out` | — |
-| `wiring.splitter` | `bus` + one per `splits` key | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1 |
-| `wiring.probe` | `in` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
-| `plexers.mux` | `in0`..`in{2^sel−1}`, `sel`, `out` | `bitsize` (1), `selectBits` (1; 1..=8) |
-| `plexers.demux` | `in`, `sel`, `out0`..`out{2^sel−1}` | `bitsize` (1), `selectBits` (1) |
-| `plexers.decoder` | `in`, `out0`..`out{2^in−1}` | `inputBits` (2; 1..=8) |
-| `plexers.priority-decoder` | `in0`..`in{N−1}`, `out` (⌈log₂N⌉ bits), `valid` | `inputBits` (4; 2..=8). Highest-numbered asserted input line → its binary index on `out`; `valid` high iff any input is asserted |
-| `arith.adder` | `a`, `b`, `cin`, `out`, `cout` | `bitsize` (1) |
-| `arith.subtractor` | `a`, `b`, `bin`, `out`, `bout` | `bitsize` (1) |
-| `arith.multiplier` | `a`, `b`, `out` (out = 2×bitsize) | `bitsize` (1) |
-| `arith.divider` | `a`, `b`, `quot`, `rem` | `bitsize` (1) |
-| `arith.comparator` | `a`, `b`, `lt`, `eq`, `gt` | `bitsize` (1) |
-| `arith.negator` | `in`, `out` | `bitsize` (1) |
-| `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr") |
-| `arith.bit-extender` | `in`, `out` | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign") |
-| `mem.register` | `d`, `clk`, `en`, `q` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
-| `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
-| `mem.rom` | `addr`, `out` | same as `mem.ram` |
-| `subcircuit` | from target circuit's named pins | `circuit` (required) |
-| `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength) |
-| `misc.text` | — (no pins) | `text` ("") — free-form annotation; `color` ("" = theme text, else `#rrggbb`); `font` ("sans" \| "serif" \| "mono") |
+| Type                                      | Pins                                            | Attrs (defaults)                                                                                                                                                                            |
+| ----------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gate.not`, `gate.buffer`                 | `in`, `out`                                     | `bitsize` (1)                                                                                                                                                                               |
+| `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out`                    | `bitsize` (1), `inputs` (2; 2..=32)                                                                                                                                                         |
+| `wiring.controlled-buffer` ⚠️¹            | `in`, `en`, `out`                               | `bitsize` (1)                                                                                                                                                                               |
+| `wiring.pin`                              | `pin`                                           | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                               |
+| `wiring.transistor`                       | `in`, `gate`, `out`                             | `bitsize` (1) — a pass gate: the `in` value while `gate` is 1, `Z` while it is 0, `X` while it is unknown (a floating `gate` halts naming `gate`)                                           |
+| `wiring.power` / `wiring.ground`          | `out`                                           | _none_ — a fixed 1-bit `1` / `0` source (UI_OVERHAUL §71); the same behaviour kind as `wiring.constant`, so a stray attr is an unknown-attr error                                           |
+| `wiring.constant`                         | `out`                                           | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only                                                                             |
+| `wiring.clock`                            | `out`                                           | —                                                                                                                                                                                           |
+| `wiring.splitter`                         | `bus` + one per `splits` key                    | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1     |
+| `wiring.probe`                            | `in`                                            | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                   |
+| `plexers.mux`                             | `in0`..`in{2^sel−1}`, `sel`, `out`              | `bitsize` (1), `selectBits` (1; 1..=8)                                                                                                                                                      |
+| `plexers.demux`                           | `in`, `sel`, `out0`..`out{2^sel−1}`             | `bitsize` (1), `selectBits` (1)                                                                                                                                                             |
+| `plexers.decoder`                         | `in`, `out0`..`out{2^in−1}`                     | `inputBits` (2; 1..=8)                                                                                                                                                                      |
+| `plexers.priority-decoder`                | `in0`..`in{N−1}`, `out` (⌈log₂N⌉ bits), `valid` | `inputBits` (4; 2..=8). Highest-numbered asserted input line → its binary index on `out`; `valid` high iff any input is asserted                                                            |
+| `arith.adder`                             | `a`, `b`, `cin`, `out`, `cout`                  | `bitsize` (1)                                                                                                                                                                               |
+| `arith.subtractor`                        | `a`, `b`, `bin`, `out`, `bout`                  | `bitsize` (1)                                                                                                                                                                               |
+| `arith.multiplier`                        | `a`, `b`, `out` (out = 2×bitsize)               | `bitsize` (1)                                                                                                                                                                               |
+| `arith.divider`                           | `a`, `b`, `quot`, `rem`                         | `bitsize` (1)                                                                                                                                                                               |
+| `arith.comparator`                        | `a`, `b`, `lt`, `eq`, `gt`                      | `bitsize` (1)                                                                                                                                                                               |
+| `arith.negator`                           | `in`, `out`                                     | `bitsize` (1)                                                                                                                                                                               |
+| `arith.shifter`                           | `in`, `amt`, `out`                              | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr")                                                                                                                               |
+| `arith.bit-extender`                      | `in`, `out`                                     | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign")                                                                                                                           |
+| `mem.register`                            | `d`, `clk`, `en`, `q`                           | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                   |
+| `mem.ram`                                 | `addr`, `din`, `dout`, `we`, `clk`              | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
+| `mem.rom`                                 | `addr`, `out`                                   | same as `mem.ram`                                                                                                                                                                           |
+| `subcircuit`                              | from target circuit's named pins                | `circuit` (required)                                                                                                                                                                        |
+| `io.button`, `io.led`, `io.hexdisplay`    | `out` / `in` / `in`                             | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength)                               |
+| `misc.text`                               | — (no pins)                                     | `text` ("") — free-form annotation; `color` ("" = theme text, else `#rrggbb`); `font` ("sans" \| "serif" \| "mono")                                                                         |
 
 ⚠️¹ `wiring.controlled-buffer` is required by BACKEND.md B4 ("controlled buffer (tri-state)")
 and §4.1's tri-state semantics but is absent from the pinned registry list in
@@ -205,7 +209,7 @@ Machine-written files use exactly one byte layout:
 
 - 2-space indent; object keys sorted (recursively); array order preserved (`components`,
   `wires`, `points`, …); every field always emitted (defaults are explicit, e.g. `"name":
-  ""`, `"points": []`); single trailing newline. The one exception is the
+""`, `"points": []`); single trailing newline. The one exception is the
   optional cosmetic `wire.color` (§2): omitted when unset so uncolored files
   stay byte-identical.
 
@@ -250,8 +254,15 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
 
 **Values and state initialization.**
 
-- Four-state logic per DESIGN.md §4.1. Registers and RAM **power on at 0** (not `X`;
-  contents/autoload aside) — matches legacy CircuitSim and keeps grading deterministic.
+- Four-state logic per DESIGN.md §4.1. **RAM powers on `X`**: a word that no
+  `contents`/autoload image defines, and that no write has touched, reads `X`. Real RAM
+  has no defined power-on contents, so a program that reads storage it never initialized
+  must see that rather than a zero — assuming zero is not a decision a simulator should
+  make on the student's behalf. Anything an image or a write _does_ define is defined,
+  explicitly including a zero (`2-2a 00` and a written 0 are zeros, not unknowns).
+  Grading stays deterministic: `X` is as reproducible as `0`, and what is now visible is
+  the value a student needs to see. **Registers still power on at 0** — a legacy
+  compatibility choice under review (docs/bugs.md carries the question for the Head TA).
 - A register has **no reset input**: it latches `d` on a rising edge while `en` is asserted and
   holds otherwise. A circuit restarts through the session (`sim_reset`), not through a pin.
 - Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
@@ -263,7 +274,7 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   depth needs address a **window** of the memory — the rest is loaded but unreachable;
   more bits leave the extra addresses on the past-end path below. A write with `X` in the
   address is dropped (target unknown). The **editor** does not express a window: picking an
-  address width there sets `depth = 2^addrBits` (a memory's size *is* its address space, so
+  address width there sets `depth = 2^addrBits` (a memory's size _is_ its address space, so
   there is no word-count field), and an embedded image longer than the new size is trimmed
   to fit. The format keeps both attributes independent for hand-authored and autograder
   files that need the extra storage.
@@ -273,23 +284,23 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   data value when all data inputs are equal, else `X`.
 
 **The floating-consume table (§4.1, D3).** Consuming a floating (`Z`) value is a
-simulation-halting error naming the component and pin. What counts as *consuming*:
+simulation-halting error naming the component and pin. What counts as _consuming_:
 
-| Component | Consumes |
-|---|---|
-| gates (incl. not/buffer) | every input |
-| controlled buffer | `en` always; `in` only while `en ≠ 0` |
-| mux | `sel` always; the selected data input (all of them if `sel` is `X`) |
-| demux / decoder | all inputs |
-| arithmetic | all inputs |
-| register (rising edge only) | `en` always; `d` only when `en ≠ 0` |
-| RAM | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
-| ROM | `addr` continuously |
-| pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal |
-| splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
+| Component                       | Consumes                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| gates (incl. not/buffer)        | every input                                                                         |
+| controlled buffer               | `en` always; `in` only while `en ≠ 0`                                               |
+| mux                             | `sel` always; the selected data input (all of them if `sel` is `X`)                 |
+| demux / decoder                 | all inputs                                                                          |
+| arithmetic                      | all inputs                                                                          |
+| register (rising edge only)     | `en` always; `d` only when `en ≠ 0`                                                 |
+| RAM                             | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
+| ROM                             | `addr` continuously                                                                 |
+| pin / probe / LED / hex display | **nothing** — they _observe_; an idle bus displaying as `Z` is legal                |
+| splitter                        | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer         |
 
 When a control input is `X` (mux select, buffer enable, register enable, RAM
-write-enable), behaviors consume *conservatively* — any input that could affect the output.
+write-enable), behaviors consume _conservatively_ — any input that could affect the output.
 The engine enforces register/RAM edge rules immediately and combinational rules via a
 per-consumer cycle-close sweep (a pin that consumes still seeing a never-driven `Z` view
 halts; driven-then-idle tri-state buses and in-flight arrivals in overclocked designs never

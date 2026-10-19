@@ -224,9 +224,12 @@ enum BehaviorKind {
 }
 
 /// Initialize memory words from an optional embedded `rle-hex-v1` image;
-/// missing words are zero. Never panics: post-validation a malformed
-/// image is impossible, and oversized words are masked (validation flags
-/// them first — see components.rs's contents check).
+/// **missing words are `X`** (docs/format-v2.md §9): real RAM has no defined
+/// power-on contents, so a word no image defines and no write touches is
+/// unknown. Anything the image does define is defined, explicitly including a
+/// zero. Never panics: post-validation a malformed image is impossible, and
+/// oversized words are masked (validation flags them first — see components.rs's
+/// contents check).
 fn init_words(bitsize: u32, depth: u32, contents: &Option<String>) -> Vec<Value> {
     let mut words = Vec::with_capacity(depth as usize);
     if let Some(image) = contents {
@@ -245,7 +248,7 @@ fn init_words(bitsize: u32, depth: u32, contents: &Option<String>) -> Vec<Value>
             }
         }
     }
-    words.resize(depth as usize, Value::zero(bitsize));
+    words.resize(depth as usize, Value::x(bitsize));
     words
 }
 
@@ -1596,11 +1599,12 @@ mod tests {
     fn ram_write_read_and_floating_rules() {
         let mut ram = mk("mem.ram", json!({"bitsize": 8, "depth": 16}));
         assert!(ram.is_clocked());
-        // Powers on zeroed; async read follows addr.
+        // Powers on UNKNOWN (docs/format-v2.md §9): an unwritten word reads X, and
+        // the write below is what makes it defined.
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
                 .unwrap(),
-            vec![k(8, 0)]
+            vec![Value::x(8)]
         );
         // Write 77 @ 5 on the edge (ins order: addr, din, we, clk).
         ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1)]))
@@ -1680,7 +1684,8 @@ mod tests {
         assert_eq!(ram.memory_word(0), Some(k(8, 0x2a)));
         assert_eq!(ram.memory_word(1), Some(k(8, 0x2a)));
         assert_eq!(ram.memory_word(2), Some(k(8, 0x7f)));
-        assert_eq!(ram.memory_word(3), Some(k(8, 0)));
+        // The image ("2-2a 7f") defines words 0..2; word 3 is unknown, not zero.
+        assert_eq!(ram.memory_word(3), Some(Value::x(8)));
         // ROM reads via eval; autograder word access works the same.
         let rom = mk(
             "mem.rom",

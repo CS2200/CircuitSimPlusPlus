@@ -83,7 +83,9 @@ describe("mock core (U9)", () => {
       const res = await mock.api.loadCircuit({ bytes: new TextEncoder().encode(csx) });
       expect(res.ok).toBe(true);
       const words = await mock.api.memRead("ram0", 0, 4);
-      expect(words.map((w) => parseInt(w.v, 16))).toEqual([0x2a, 0x2a, 0x7f, 0]);
+      expect(words.slice(0, 3).map((w) => parseInt(w.v, 16))).toEqual([0x2a, 0x2a, 0x7f]);
+      // Word 3 is past the image: unknown, not zero (docs/format-v2.md §9).
+      expect(words[3].x).toBe("ffffffff");
     });
     it("emits an initial full-state batch so the UI can paint (v1.1: full: true)", () => {
       expect(diffs).toHaveLength(1);

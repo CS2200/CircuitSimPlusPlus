@@ -1547,7 +1547,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("csim-b9-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.hex");
-        std::fs::write(&path, "0 0 2a 7-0\n").unwrap(); // word 2 = 0x2a
+        // The image covers every word the assertions touch. An uninitialized word is
+        // `X` now (docs/format-v2.md §9), so "word 15 is 0" has to be stated rather than
+        // assumed — before this, a short image left zeros behind it.
+        std::fs::write(&path, "0 0 2a 13-0\n").unwrap(); // word 2 = 0x2a, then zeros
         let mut cfg = cfg3();
         cfg.loads = vec![("dmem".into(), LoadSource::File(path.clone()))];
         cfg.assertions = vec![

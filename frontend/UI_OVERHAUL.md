@@ -2029,3 +2029,26 @@ branch dragged away from a parent that stays put still has to end up on that par
 The invariant "every join endpoint lies on its parent's segment" is asserted across
 three different moved sets in the unit tests, which is what keeps the two halves
 honest.
+
+## 82. RAM powers on unknown
+
+Uninitialized RAM reads `X`, not `0` (docs/format-v2.md §9 is the normative statement).
+Real RAM has no defined power-on contents, and assuming zero hid the bug class this
+course exists to teach: reading storage you never initialized.
+
+The engine was already of this opinion in every other place it mattered — an `X` address
+and a past-end address both read `X`, and a write with `we = X` stores `X` — so the
+change is the one line in `init_words` that padded a memory image's missing words with
+zeros. Anything an image or a write defines is defined, explicitly including a zero, and
+a short autoload image leaves the rest of the address space unknown rather than zeroed.
+
+An unknown word propagates like any other `X` (divide-by-zero, an `X` mux select): it is
+_not_ a floating (`Z`) value, so it does not halt the simulation — it shows up on the
+wires and outputs, which is where a student needs to see it. The browser mock carries the
+same semantics, because a second implementation with different rules is the kind of
+divergence that turns into a confusing bug report later.
+
+**Still to do (next round): the UI affordance.** The memory dialog should say what an
+unset word now means and offer **Fill with 0s**, since "no image" now means "all unknown"
+and the common case (a lab that wants a zeroed memory) deserves one click. Registers
+still power on `0`; that decision is with the Head TA (docs/bugs.md).
