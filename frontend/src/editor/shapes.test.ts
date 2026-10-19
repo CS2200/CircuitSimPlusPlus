@@ -28,3 +28,27 @@ describe("power / ground glyphs", () => {
     expect(gateShape("wiring.constant", 0, 0, 3, 2)).toBeNull();
   });
 });
+
+describe("transistor glyph (UI_OVERHAUL §78)", () => {
+  it("draws a symbol inside the rect, with the channel broken in three", () => {
+    const shape = gateShape("wiring.transistor", 0, 0, 3, 2);
+    expect(shape).not.toBeNull();
+    for (const cmd of shape!.body) {
+      if (cmd.t === "Z") continue;
+      expect(cmd.x).toBeGreaterThanOrEqual(0);
+      expect(cmd.x).toBeLessThanOrEqual(3);
+      expect(cmd.y).toBeGreaterThanOrEqual(0);
+      expect(cmd.y).toBeLessThanOrEqual(2);
+    }
+    // The gate plate is a full-height line; the channel is three shorter ones, so
+    // the symbol is recognisable as a MOSFET rather than a box.
+    const moves = shape!.body.filter((c) => c.t === "M").length;
+    expect(moves).toBeGreaterThanOrEqual(7);
+    expect(shape!.body.length).toBeGreaterThan(moves);
+  });
+
+  it("is no longer a box family", () => {
+    expect(gateShape("wiring.transistor", 0, 0, 3, 2)).not.toBeNull();
+    expect(gateShape("mem.register", 0, 0, 3, 2)).toBeNull();
+  });
+});

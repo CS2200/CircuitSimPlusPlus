@@ -94,6 +94,11 @@ test("wire section: color swatch (no manual width)", async ({ page }) => {
   await expect(page.locator(".inspector-id")).toHaveText("Wire");
   // A wire has no manual width control — its width is inferred from its parts.
   await expect(page.locator('.bitsize-grid[aria-label="Width (bits)"]')).toHaveCount(0);
+  // Its design delay is per drawn path (docs/delay-table.md): the row exists and
+  // carries a number (the exact format is the table's business).
+  const delayRow = page.locator(".inspector-row").filter({ hasText: "Delay" });
+  await expect(delayRow).toBeVisible();
+  await expect(delayRow).toContainText(/[0-9]/);
 
   // Color: a swatch sets the wire's own color (format-v2 §2 `color`).
   await page.getByRole("button", { name: "Wire color #40dc82" }).click();

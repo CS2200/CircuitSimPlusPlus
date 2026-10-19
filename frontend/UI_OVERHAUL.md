@@ -1939,3 +1939,17 @@ frame around the canvas, and a chip in the status bar. Leaving the definition re
 all three. The top level deliberately has no scope mark, which is itself information.
 The frame is an overlay rather than a border, so no drawing and no canvas baseline
 moves.
+
+## 78. A MOSFET for the transistor
+
+`wiring.transistor` draws a symbol now instead of a plain box: a gate lead and its
+plate on the left, the channel broken into three segments beside it (enhancement
+mode), and the drain/source leads leaving the channel for the body's edges. It is
+drawn inside the catalog's body rect, so it picks, routes, rotates and reports
+exactly as before — only the drawing changes. Returning a `gateShape` also means it
+draws its symbol _instead of_ a rect, which is the schematic look; power and ground
+already work that way.
+
+The geometry is pinned by a shape test rather than a screenshot, for the same reason
+the power/ground glyphs are: no baselined circuit contains one, and a transistor is
+too small at the baseline zoom for a pixel test to say anything useful about it.

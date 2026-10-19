@@ -246,13 +246,13 @@ format bump. _(this round)_
   **Delete a sheet tab** is already there — the tab's right/middle-click menu
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
   active sheet re-pointed) and its e2e test predate this list.
-- Primitives: **power, ground and the transistor done** (`wiring.transistor`: a
-  pass gate that halts naming `gate`, UI_OVERHAUL §73 — drawn as a box for now, a
-  transistor symbol is a follow-up). Power and ground: (`wiring.power` / `wiring.ground` — fixed
-  1-bit sources with no attrs, additive so no format bump; UI_OVERHAUL §71). A
-  **transistor** (a gate-driven switch: `in`/`gate`/`out`) still needs a behaviour
-  kind (and a sink kind in the delay engine for its halt message to name `gate`,
-  not `en`). Bar/rake glyphs landed (UI_OVERHAUL §72, pinned by a shape test).
+- Primitives: **power, ground and the transistor** — all done. Power and ground
+  (`wiring.power` / `wiring.ground`): fixed 1-bit sources with no attrs, additive so
+  no format bump; a rake and a bar glyph (UI_OVERHAUL §71–72, pinned by a shape
+  test). The transistor (`wiring.transistor`, a gate-driven pass gate with
+  `in`/`gate`/`out`) is its own `CompKind`/`BehaviorKind` pair, so a halt names
+  `gate` rather than `en` (§73), and it draws a MOSFET symbol now instead of a box
+  (§78, also pinned by a shape test).
 - ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
   own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
   at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold

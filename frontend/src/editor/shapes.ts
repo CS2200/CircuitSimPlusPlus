@@ -321,6 +321,31 @@ export function gateShape(
         extra: [],
         outBubble: null,
       };
+    case "wiring.transistor":
+      // A MOSFET (UI_OVERHAUL §78): a gate lead and its plate on the left, the
+      // channel broken into three segments beside it (enhancement mode), and the
+      // drain/source leads leaving the channel for the body's edges. Drawn inside
+      // the catalog's rect, so nothing about picking or routing changes.
+      return {
+        body: [
+          { t: "M", x, y: y + h * 0.5 },
+          { t: "L", x: x + w * 0.32, y: y + h * 0.5 },
+          { t: "M", x: x + w * 0.32, y: y + h * 0.16 },
+          { t: "L", x: x + w * 0.32, y: y + h * 0.84 },
+          { t: "M", x: x + w * 0.46, y: y + h * 0.16 },
+          { t: "L", x: x + w * 0.46, y: y + h * 0.38 },
+          { t: "M", x: x + w * 0.46, y: y + h * 0.42 },
+          { t: "L", x: x + w * 0.46, y: y + h * 0.58 },
+          { t: "M", x: x + w * 0.46, y: y + h * 0.62 },
+          { t: "L", x: x + w * 0.46, y: y + h * 0.84 },
+          { t: "M", x: x + w * 0.46, y: y + h * 0.24 },
+          { t: "L", x: x + w, y: y + h * 0.24 },
+          { t: "M", x: x + w * 0.46, y: y + h * 0.76 },
+          { t: "L", x: x + w, y: y + h * 0.76 },
+        ],
+        extra: [],
+        outBubble: null,
+      };
     case "plexers.mux":
       return { body: trapPath(x, y, w, h, true), extra: [], outBubble: null };
     case "plexers.demux":
