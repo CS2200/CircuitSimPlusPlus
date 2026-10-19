@@ -144,6 +144,28 @@ function placementBodyPos(
   return { x: Math.round(p.pos.x - w / 2), y: Math.round(p.pos.y - h / 2) };
 }
 
+/**
+ * Canvas context menu state (UI_OVERHAUL §75): what a right-click on the canvas
+ * offers. The machine REPORTS it (the host renders the menu and routes the
+ * chosen command back through the public ones below), so it is plain data.
+ */
+export interface CanvasMenuState {
+  /** Viewport position of the press — where the overlay goes. */
+  x: number;
+  y: number;
+  /** What the pointer was over (the menu's title and item set). */
+  on: "component" | "wire" | "canvas";
+  /** The part type under the pointer, for the title (null off a part). */
+  compType: string | null;
+  /** How many components / wires the commands would act on. */
+  components: number;
+  wires: number;
+  /** A single wire segment is narrowed: Delete shortens the wire (§65). */
+  segment: boolean;
+  /** A paste is possible (the clipboard holds components). */
+  clipboard: boolean;
+}
+
 export class ToolMachine {
   private drag: DragState = { kind: "idle" };
   private wiring: WiringState | null = null;
@@ -179,6 +201,8 @@ export class ToolMachine {
   onTick?: () => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
   onOpenSubcircuit?: (circuit: string) => void;
+  /** A right-click opened the canvas context menu (§75). */
+  onCanvasMenu?: (menu: CanvasMenuState) => void;
   /**
    * A momentary push button held down (`down` true) or released (`down` false):
    * drives its `out` pin while pressed (UI decision).
@@ -229,12 +253,54 @@ export class ToolMachine {
     if (any) this.changed();
   }
 
+  /**
+   * Right-click with nothing in progress (UI_OVERHAUL §75): pick what is under
+   * the pointer, make it the thing the menu acts on, and hand the host the state
+   * it needs to render that menu.
+   *
+   * The BODY wins over a wire it happens to overlap (bodies are drawn on top),
+   * and this is the idle-hover pick rather than the press pick, so right-clicking
+   * a part never reads it as the wire crossing it. A part or wire under the
+   * pointer that is not already selected BECOMES the selection, so the menu acts
+   * on exactly what the user sees highlighted (and the Inspector follows);
+   * right-clicking inside a multi-selection leaves the whole thing alone.
+   */
+  private openContextMenu(world: Vec2, info: PointerInfo): void {
+    this.cancel(); // a fresh gesture dismisses the wire-info card
+    const comp = this.scene.pickComponent(world);
+    const wire = comp === null ? this.scene.pickWire(world) : null;
+    let on: CanvasMenuState["on"] = "canvas";
+    let compType: string | null = null;
+    if (comp !== null) {
+      on = "component";
+      if (!this.selection.hasComponent(comp.compId)) this.selection.set([comp.compId], []);
+      compType =
+        this.doc.circuit(this.circuitIdx()).components.find((c) => c.id === comp.compId)?.type ??
+        null;
+    } else if (wire !== null) {
+      on = "wire";
+      if (!this.selection.hasWire(wire.wireIdx)) this.selection.set([], [wire.wireIdx]);
+    }
+    this.onCanvasMenu?.({
+      x: info.clientX,
+      y: info.clientY,
+      on,
+      compType,
+      components: this.selection.components.size,
+      wires: this.selection.wires.size,
+      segment: this.selection.segment !== null,
+      clipboard: this.clipboard !== null && this.clipboard.components.length > 0,
+    });
+    this.changed();
+  }
+
   // ---- pointer input ----
 
   down(world: Vec2, info: PointerInfo): void {
     if (info.button === 2) {
-      // Idle right-click on a subcircuit instance opens its definition;
-      // otherwise right-click is the universal cancel.
+      // Idle right-click on a subcircuit instance opens its definition.
+      // Otherwise right-click is the universal cancel — and, with nothing in
+      // progress to cancel, it opens the canvas context menu (§75).
       if (this.placing === null && this.wiring === null && this.drag.kind === "idle") {
         const hit = this.scene.pickComponent(world);
         if (hit !== null) {
@@ -247,6 +313,8 @@ export class ToolMachine {
             return;
           }
         }
+        this.openContextMenu(world, info);
+        return;
       }
       this.cancel();
       return;

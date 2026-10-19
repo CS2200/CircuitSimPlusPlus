@@ -3,7 +3,7 @@ import { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { PointerInfo } from "../components/CanvasHost";
 import { DocScene } from "./docScene";
-import { copySelection, manhattanRoute, ToolMachine } from "./tools";
+import { copySelection, manhattanRoute, ToolMachine, type CanvasMenuState } from "./tools";
 
 const PI = (over: Partial<PointerInfo> = {}): PointerInfo => ({
   button: 0,
@@ -11,6 +11,8 @@ const PI = (over: Partial<PointerInfo> = {}): PointerInfo => ({
   shiftKey: false,
   ctrlKey: false,
   altKey: false,
+  clientX: 0,
+  clientY: 0,
   ...over,
 });
 
@@ -657,5 +659,86 @@ describe("delete / copy / paste / rotate", () => {
     expect(doc.circuit(0).components[0].rot).toBe("W");
     doc.undo();
     expect(doc.circuit(0).components[0].rot).toBe("S");
+  });
+});
+
+describe("context menu (§75)", () => {
+  it("right-clicking a part selects it and reports the component menu", () => {
+    const { tool, sel } = setup();
+    const seen: CanvasMenuState[] = [];
+    tool.onCanvasMenu = (m) => seen.push(m);
+    tool.down({ x: 12, y: 11 }, PI({ button: 2, clientX: 40, clientY: 55 }));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      x: 40,
+      y: 55,
+      on: "component",
+      compType: "gate.and",
+      components: 1,
+      wires: 0,
+      segment: false,
+      clipboard: false,
+    });
+    expect(sel.components.size).toBe(1); // the part became the selection
+    expect(sel.segment).toBeNull();
+  });
+
+  it("right-clicking bare canvas keeps the selection and reports the clipboard", () => {
+    const { tool, sel } = setup();
+    const seen: CanvasMenuState[] = [];
+    tool.onCanvasMenu = (m) => seen.push(m);
+    tool.down({ x: 12, y: 11 }, PI());
+    tool.up(PI());
+    tool.copy(); // the clipboard now holds the AND
+    tool.down({ x: 60, y: 40 }, PI({ button: 2 }));
+    expect(seen.at(-1)).toMatchObject({ on: "canvas", components: 1, clipboard: true });
+    expect(sel.components.size).toBe(1); // a click off the part keeps it selected
+  });
+
+  it("right-clicking inside a multi-selection keeps all of it", () => {
+    const { doc, sel, tool } = setup();
+    sel.set(
+      doc.circuit(0).components.map((c) => c.id),
+      [],
+    );
+    const seen: CanvasMenuState[] = [];
+    tool.onCanvasMenu = (m) => seen.push(m);
+    tool.down({ x: 12, y: 11 }, PI({ button: 2 })); // the AND, already selected
+    expect(seen.at(-1)).toMatchObject({ on: "component", components: 2 });
+    expect(sel.components.size).toBe(2);
+  });
+
+  it("a right-click that cancels a gesture opens no menu", () => {
+    const { tool } = setup();
+    let calls = 0;
+    tool.onCanvasMenu = () => calls++;
+    tool.startPlacing("gate.or");
+    tool.down({ x: 30, y: 20 }, PI({ button: 2 }));
+    expect(calls).toBe(0);
+    expect(tool.placingType).toBeNull();
+  });
+
+  it("right-clicking a wire offers the wire menu", () => {
+    const { doc, scene, sel, tool } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI()); // and.out
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI()); // not.in
+    tool.up(PI());
+    const wire = doc.circuit(0).wires[0];
+    // Anywhere ON the route but clear of the bodies: let the scene's own picker
+    // find such a point, since the route's shape is the router's business.
+    const probe = wire.points
+      .slice(0, -1)
+      .map(([x, y], i) => ({
+        x: (x + wire.points[i + 1][0]) / 2,
+        y: (y + wire.points[i + 1][1]) / 2,
+      }))
+      .find((p) => scene.pickComponent(p) === null && scene.pickWire(p) !== null);
+    if (probe === undefined) throw new Error("no clear point on the route to probe");
+    const seen: CanvasMenuState[] = [];
+    tool.onCanvasMenu = (m) => seen.push(m);
+    tool.down(probe, PI({ button: 2 }));
+    expect(seen.at(-1)).toMatchObject({ on: "wire", components: 0, wires: 1, segment: false });
+    expect([...sel.wires]).toEqual([0]); // the wire became the selection
   });
 });

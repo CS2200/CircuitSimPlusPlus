@@ -18,7 +18,8 @@ import { gridStepFor } from "../editor/docScene";
  * disambiguated by a small movement threshold: a press that never moves is
  * delivered to the scene as a click (synthesized down(+up) for Shift+left,
  * down for right), a press that moves pans the camera instead — so
- * right-click cancel/subcircuit-jump and Shift+click keep their meaning.
+ * right-click cancel / subcircuit-jump / context-menu and Shift+click keep
+ * their meaning.
  * Zoom: wheel (anchored at cursor).
  *
  * React never re-renders on the 60 FPS path — camera/viewport/sim-adjacent
@@ -31,6 +32,13 @@ export interface PointerInfo {
   shiftKey: boolean;
   ctrlKey: boolean;
   altKey: boolean;
+  /**
+   * The pointer's VIEWPORT position (UI_OVERHAUL §75) — screen coordinates, not
+   * the world point beside it, so an HTML overlay (the canvas context menu) can
+   * sit where the press happened without a second copy of the camera transform.
+   */
+  clientX: number;
+  clientY: number;
 }
 
 export interface CanvasHostProps {
@@ -412,6 +420,8 @@ export default function CanvasHost({
     shiftKey: e.shiftKey,
     ctrlKey: e.ctrlKey,
     altKey: e.altKey,
+    clientX: e.clientX,
+    clientY: e.clientY,
   });
 
   return (

@@ -4,6 +4,8 @@ import AppHeader from "./components/AppHeader";
 import StressCanvas from "./components/StressCanvas";
 import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
+import CanvasMenu, { type CanvasMenuAction } from "./components/CanvasMenu";
+import type { CanvasMenuState } from "./editor/tools";
 import { AppLogoIcon, HistoryIcon, RedoIcon, UndoIcon } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
@@ -160,6 +162,7 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
       ["Drag empty space", "box select (Ctrl/Shift adds)"],
       ["Inspector (right dock)", "edit the selection — applies live"],
       ["Right-click a subcircuit", "jump to its definition tab"],
+      ["Right-click the canvas", "act on the part / wire under the pointer"],
       ["Del / Backspace", "delete the selection"],
     ],
   },
@@ -294,6 +297,46 @@ export default function App() {
   const [filePath, setFilePath] = useState<string | null>(null);
   // Current sheet (circuit) index — subcircuits live on their own sheets.
   const [sheet, setSheet] = useState(0);
+
+  /**
+   * Canvas context menu (UI_OVERHAUL §75). The editor reports what a right-click
+   * landed on (and makes that the selection); App renders the menu and routes the
+   * pick back through the editor's public commands. Clicking away, Escape, or
+   * choosing an item dismisses it — the same rules as the sheet-tab menu.
+   */
+  const [canvasMenu, setCanvasMenu] = useState<CanvasMenuState | null>(null);
+  const closeCanvasMenu = useCallback(() => setCanvasMenu(null), []);
+  useEffect(() => {
+    if (canvasMenu === null) return;
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".canvas-menu") !== null) return;
+      setCanvasMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCanvasMenu(null);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [canvasMenu]);
+  // The state names sheet-local ids, so switching sheets closes the menu.
+  useEffect(() => closeCanvasMenu(), [sheet, closeCanvasMenu]);
+
+  /** Run one context-menu item through the editor's public commands (§75). */
+  const onCanvasMenuAction = useCallback((action: CanvasMenuAction) => {
+    const ed = editorRef.current;
+    if (ed === null) return;
+    if (action === "cut") ed.cut();
+    else if (action === "copy") ed.copy();
+    else if (action === "paste") ed.paste();
+    else if (action === "delete") ed.deleteSelection();
+    else if (action === "rotate-cw") ed.rotate(false);
+    else if (action === "rotate-ccw") ed.rotate(true);
+    else ed.selectAll();
+  }, []);
 
   // ---- autosave plumbing (the scheduler itself is created further down) ----
   // Refs mirror the mutable state its host reads at flush time, so the
@@ -1801,6 +1844,7 @@ export default function App() {
                   onStatus={onStatus}
                   onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
+                  onCanvasMenu={setCanvasMenu}
                   onNotify={toast}
                   sim={sim}
                   pathIds={pathIds}
@@ -1913,6 +1957,9 @@ export default function App() {
           </button>
         ))}
       </div>
+      {canvasMenu !== null && (
+        <CanvasMenu menu={canvasMenu} onAction={onCanvasMenuAction} onClose={closeCanvasMenu} />
+      )}
       {showAbout && <AboutCard onClose={() => setShowAbout(false)} />}
       {settingsOpen && (
         <SettingsDialog

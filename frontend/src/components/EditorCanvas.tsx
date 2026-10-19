@@ -13,7 +13,7 @@ import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
 import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docScene";
-import { ToolMachine } from "../editor/tools";
+import { ToolMachine, type CanvasMenuState } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
 import { PULSE_MS, PulseTracker } from "../sim/pulses";
@@ -61,7 +61,8 @@ export interface EditorHandle {
   cancel(): void;
   undo(): void;
   redo(): void;
-  rotate(): void;
+  /** Rotate the selection (or the placement ghost) a quarter turn; ccw reverses. */
+  rotate(ccw?: boolean): void;
   deleteSelection(): void;
   copy(): void;
   cut(): void;
@@ -80,6 +81,8 @@ export default forwardRef<
     onEditComponent?: (compId: string, focusField?: string) => void;
     /** Right-click a subcircuit instance: jump to its definition tab. */
     onOpenSubcircuit?: (circuit: string) => void;
+    /** A right-click on the canvas opened the context menu (§75). */
+    onCanvasMenu?: (menu: CanvasMenuState) => void;
     /** User-facing messages (toasts). */
     onNotify?: (message: string) => void;
     /** Sim session (U5): wire state overlay + halt marker. */
@@ -107,6 +110,7 @@ export default forwardRef<
     onStatus,
     onEditComponent,
     onOpenSubcircuit,
+    onCanvasMenu,
     onNotify,
     sim,
     pathIds,
@@ -150,11 +154,13 @@ export default forwardRef<
   useEffect(() => {
     tool.onEditComponent = onEditComponent;
     tool.onOpenSubcircuit = onOpenSubcircuit;
+    tool.onCanvasMenu = onCanvasMenu;
     return () => {
       tool.onEditComponent = undefined;
       tool.onOpenSubcircuit = undefined;
+      tool.onCanvasMenu = undefined;
     };
-  }, [tool, onEditComponent, onOpenSubcircuit]);
+  }, [tool, onEditComponent, onOpenSubcircuit, onCanvasMenu]);
 
   // Shift+click a clock ticks the sim once (UI_OVERHAUL §47): load on demand
   // like the transport's Ctrl+J, then step.
@@ -415,8 +421,8 @@ export default forwardRef<
         doc.redo();
         bump();
       },
-      rotate: () => {
-        tool.rotateSelection();
+      rotate: (ccw = false) => {
+        tool.rotateSelection(ccw);
         bump();
       },
       deleteSelection: () => {

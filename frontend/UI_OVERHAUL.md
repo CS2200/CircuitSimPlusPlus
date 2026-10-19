@@ -1856,3 +1856,32 @@ would re-serialize the table into every `timing_update`. What is genuinely obser
 is the path (`TimingPath.delay_ns`), which the UI already received for the canvas
 highlight. `topPathDelay()` reads that same `top_paths[0]`, and App passes it only
 for a part that is on the path.
+
+## 75. The canvas context menu
+
+Right-click used to mean exactly two things on the canvas — cancel whatever gesture
+is in progress, and jump to a subcircuit instance's definition — and both survive,
+now deliberately rather than by accident. What is new is the third case: with
+nothing in progress and no instance under the pointer, a right **click** (press and
+release with no movement — the same gate that keeps right-**drag** panning) opens a
+menu for whatever is under the pointer.
+
+- **A part**: Cut / Copy / Rotate right / Rotate left / Delete.
+- **A wire**: Delete wire — "Delete segment" once the selection is narrowed to one
+  leg, which is the same command `Del` runs.
+- **Bare canvas**: Paste (disabled while the clipboard is empty) and Select all.
+
+Right-clicking a part or wire that is not already selected makes it the selection
+first, so the menu acts on exactly what the user sees highlighted and the Inspector
+follows it; right-clicking inside a multi-selection keeps the whole selection, and
+the header says how many parts are involved. The item set is keyed off what was
+_pointed at_, not off the selection, so a right-click on bare canvas never offers to
+edit a part selected elsewhere on the sheet. Because a right-click on an instance
+already jumps to its definition, the menu offers no "Open definition" duplicate.
+
+The menu is an HTML overlay in screen coordinates, which is why `PointerInfo` grew
+`clientX`/`clientY`: the world point alone cannot place it, and re-deriving the
+camera transform outside `CanvasHost` would make the same mapping have two sources
+of truth. `ToolMachine` reports the menu as plain state (`CanvasMenuState`) through
+`onCanvasMenu`; App renders `CanvasMenu` and routes the pick back through the
+editor's existing public commands, so the actions themselves invent nothing new.

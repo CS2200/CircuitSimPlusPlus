@@ -1,10 +1,10 @@
 # CircuitSim++ — Bug & Task Backlog
 
-*Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
+_Triaged 2026-10-18 against `master` @ `5deed81`. **Phase 1 (P0) landed @
 `0462adf`; P1 and P2 since** — two P2 items were clarified 2026-10-19 (wire
 segment deletion, one Clear) and are open below. The trial tester's raw list was verified item-by-item
 against the code; already-fixed, by-design, and out-of-scope entries live in the
-appendices so the active list stays honest.*
+appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
 and RAMs have no `rst` pin), 200 backend + 343 unit + 64 e2e tests green. The
@@ -22,13 +22,13 @@ frontend planning docs, and the source comments that restated them.
 ## Latest round — done (2026-10-19)
 
 - **Text annotations load again.** `misc.text` had no behavior, and the builder
-  treats a missing behavior as a hard load error — so *placing a text label made
-  the document unloadable*. It now has an inert `BehaviorKind::Text` (no pins, no
+  treats a missing behavior as a hard load error — so _placing a text label made
+  the document unloadable_. It now has an inert `BehaviorKind::Text` (no pins, no
   evaluation), with a delay-engine test that loads a document containing one and
-  runs it. *(commit `c42533f`)*
+  runs it. _(commit `c42533f`)_
 - **Settings spacing.** The 24-hour clock toggle sat directly under the accent
   swatches with only its bottom margin; `.accent-row + .settings-toggle` now
-  carries top spacing. *(commit `c42533f`)*
+  carries top spacing. _(commit `c42533f`)_
 - **The `rst` pin is gone, format-wide** — the item the previous two attempts
   reverted. `mem.register` is `d, clk, en, q` and `mem.ram` is
   `addr, din, dout, we, clk` in engine, format, fixtures, tests, frontend and
@@ -36,17 +36,17 @@ frontend planning docs, and the source comments that restated them.
   a canvas button wired into every register's reset was how a circuit restarted.
   Both replacements exist now — memory autoload on load/reset, and the
   transport's **reset** (Ctrl+R) — so the pin was dead weight, and a reset trace
-  across a schematic hid what the clock was doing. *(commit `72b8473`)*
-- **…and that break is migrated, not just declared** *(this round)*: the format
+  across a schematic hid what the clock was doing. _(commit `72b8473`)_
+- **…and that break is migrated, not just declared** _(this round)_: the format
   is now **v4** (`FORMAT_VERSION`), with a v3 → v4 migration that drops wiring to
-  the retired pins — including wires *junctioned onto* a dropped wire, the
+  the retired pins — including wires _junctioned onto_ a dropped wire, the
   fan-out shape a shared reset produced — and renumbers the surviving `join`
   targets. The steps chain, so a v2 file (which also predates v3 but used `rst`
   too) is walked v2 → v3 → v4 in one load. A circuit saved by the tester before
   this change still opens. The frontend mirrors the chain, and the fixtures were
   regenerated at v4 with a golden test asserting they never lag the version
   (otherwise the suite would quietly test the migration path instead of today's
-  parser). *(this round)*
+  parser). _(this round)_
 
 ---
 
@@ -54,30 +54,30 @@ frontend planning docs, and the source comments that restated them.
 
 - **#1/#2 Pin names now match the engine.** The editor's adder carry was
   `c_in`/`c_out` (the core knows `cin`/`cout`) and the decoder's select was a
-  1-bit `sel` (the core knows a bus `in`); wires on those pins were *rejected at
-  load*, so carries and decoders could not be wired at all. Editor now mirrors
+  1-bit `sel` (the core knows a bus `in`); wires on those pins were _rejected at
+  load_, so carries and decoders could not be wired at all. Editor now mirrors
   the engine registry (format-v2 §4): `cin`/`cout`, subtractor `bin`/`bout`,
   divider `quot`/`rem`, decoder `in` (`inputBits` wide), and `sel`/`amt` carry
-  their real widths. Guarded by unit tests. *(commit `da11b5b`)*
+  their real widths. Guarded by unit tests. _(commit `da11b5b`)_
 - **#3 Editing no longer reboots the sim.** The live re-sync compared the
   document revision, so dragging a part or bending a wire reloaded a fresh
   power-on — clocked state cleared and the cycle counter jumped to 0. `isStale`
   now compares a **netlist fingerprint**, so only an edit the core cares about
-  reloads. *(commit `bf41341`)*
+  reloads. _(commit `bf41341`)_
 - **#3(b) The clock no longer "lights up" on an edit.** An unwired clock fell
   back to `cycle % 2` for its body fill; a reload put the cycle at 0 → painted
   HIGH (dark green). The fallback now only fires after a rising edge, so an idle
-  clock draws its neutral wave. *(commit `bf41341`)*
+  clock draws its neutral wave. _(commit `bf41341`)_
 - **#5 Intermittent execution (reload race) fixed.** Overlapping loads could
   both apply their initial diff batches; loads are now serialized so the newest
-  resets and loads last. *(commit `bf41341`)*
+  resets and loads last. _(commit `bf41341`)_
 - **#4 `Ctrl+J` force-stops the clock** before stepping (a step while playing
-  was a no-op), matching the transport's "tick" button. *(commit `0462adf`)*
+  was a no-op), matching the transport's "tick" button. _(commit `0462adf`)_
 - **#6 Probe rotates.** A N/S probe was drawn with an east-facing body offset
-  from its swapped rect; it now rotates like the gate shapes. *(commit
-  `0462adf`)*
+  from its swapped rect; it now rotates like the gate shapes. _(commit
+  `0462adf`)_
 - **#11 Long pin names ellipsize** (subcircuit instance labels) so they cannot
-  spill across the box. *(commit `0462adf`)*
+  spill across the box. _(commit `0462adf`)_
 
 ---
 
@@ -85,26 +85,27 @@ frontend planning docs, and the source comments that restated them.
 
 All four actionable items landed; the last is a format decision.
 
-- **Probe width auto-match on connect** *(commit `9ba29da`)*: a wire landing on a
+- **Probe width auto-match on connect** _(commit `9ba29da`)_: a wire landing on a
   probe's `in` sets its `bitsize` from the driver.
-- **Explicit unnamed-pin warning** *(commit `32db2f0`)*: the Inspector says why
+- **Explicit unnamed-pin warning** _(commit `32db2f0`)_: the Inspector says why
   an unnamed `wiring.pin` stops the file loading.
-- **Register readout with an open `q`** *(commit `471a911`)*: a test settled that
+- **Register readout with an open `q`** _(commit `471a911`)_: a test settled that
   the engine was never at fault (`632f6e3`), so the fix was to get the engine's
   stored state to the UI. IPC **v1.2** adds `NamedComponent.value_net` — the
   engine nets every pin, so the readout works with the output unwired. That also
   repaired the Watch panel's RAM/ROM entry (it looked for a `q`, which RAMs do
   not have) and lets a subcircuit component be watched.
-- **Real short-circuit alerts** *(commit `0b6035c`)*: `HaltReason::Contention` is
+- **Real short-circuit alerts** _(commit `0b6035c`)_: `HaltReason::Contention` is
   never emitted and DESIGN.md §4.1 wants `X` plus a shorted-wire highlight, so
   there was no alert at all. IPC **v1.2** adds `NetChange.contended`, set only
   when a net's `X` is a genuine driver fight; the sim bar now says
-  *"⚠ Short circuit — N nets driven both high and low…"*.
+  _"⚠ Short circuit — N nets driven both high and low…"_.
 
 ### Decided: pin names stay lowercase (no rename)
+
 The tester asked to capitalize pin names (`AMOUNT`, `CARRY_IN`, …). Decision
 (2026-10-18): **leave them alone.** Ordinary pins are not labelled on the canvas
-(they are dots), so the change is almost entirely a *format* change — pin names
+(they are dots), so the change is almost entirely a _format_ change — pin names
 are wire-endpoint keys in `.csx`, and the fixtures and autograder use them
 (`amt`, `cin`, …). Revisit only if the tester asks again and it turns out to
 matter; it would need a format-version bump plus fixture/demo/golden
@@ -114,13 +115,13 @@ regeneration.
 
 ## P2 — UX polish
 
-**Done:** the cycle input is typed (`cycle #`, no steppers) *(70f6eb4)*; the
+**Done:** the cycle input is typed (`cycle #`, no steppers) _(70f6eb4)_; the
 **wiring hint** sits in the status bar and timestamps have a **12-/24-hour**
-preference *(93c93ea)*; a **bottom zoom slider** on the canvas *(6227196)*; palette
-tooltips name the part *(70f6eb4)*; sheet-tab right-click → Rename *(70f6eb4)*;
-Reload-from-Disk confirms first *(70f6eb4)*; the `named` history pill is gone
-*(70f6eb4)*; the header light/dark toggle is gone — Settings is the single path
-*(e7aaff3)*; **saving with validation errors** — the engine now writes the draft
+preference _(93c93ea)_; a **bottom zoom slider** on the canvas _(6227196)_; palette
+tooltips name the part _(70f6eb4)_; sheet-tab right-click → Rename _(70f6eb4)_;
+Reload-from-Disk confirms first _(70f6eb4)_; the `named` history pill is gone
+_(70f6eb4)_; the header light/dark toggle is gone — Settings is the single path
+_(e7aaff3)_; **saving with validation errors** — the engine now writes the draft
 and returns the problems as warnings, and the toast says so and points at
 Version history; only an unparseable document is still refused; the save
 indicator reads **"Saved"** / **"Saving changes"** instead of
@@ -128,44 +129,44 @@ indicator reads **"Saved"** / **"Saving changes"** instead of
 
 **Resolved from the ambiguous list (2026-10-19, human-confirmed):**
 
-- **"Simplify the reset label"** *was* the reset pin: the memory parts have no
+- **"Simplify the reset label"** _was_ the reset pin: the memory parts have no
   reset input at all any more (format v4 — see the latest round above), so there
-  is no label to simplify. Done, not parked. *(72b8473)*
+  is no label to simplify. Done, not parked. _(72b8473)_
 - **Light-mode history colours** were reconciled by the dynamic contrast helper
-  (`readableOn`, *(3fcf504)*): an authored colour that would wash out against the
+  (`readableOn`, _(3fcf504)_): an authored colour that would wash out against the
   light background falls back to the theme's text colour. The drawer's previews
   render through the same `DocScene`, so they inherit it.
 - **"Text element load-failed bug"** was real after all and is fixed — `misc.text`
-  had no behavior, so placing one made the document unloadable *(c42533f)*.
+  had no behavior, so placing one made the document unloadable _(c42533f)_.
   Removed from Appendix A.
 
 **New tester feedback (fixed this round):** a memory's `addr` pin was as wide as
 its DATA (a fresh RAM drew a 1-bit address while the core indexed 256 words, so a
-correct 8-bit address looked like a mismatch) *(028ffc7)*; a constant's readout
-now scales with its bit width (`0x5` → `0x05`) *(028ffc7)*; a wired-up part's
-unconnected INPUTS blink red *(a4a7291)*; and a RAM/ROM previews the word at its
-address *(8879681)*.
+correct 8-bit address looked like a mismatch) _(028ffc7)_; a constant's readout
+now scales with its bit width (`0x5` → `0x05`) _(028ffc7)_; a wired-up part's
+unconnected INPUTS blink red _(a4a7291)_; and a RAM/ROM previews the word at its
+address _(8879681)_.
 
 **Reported 2026-10-19 (maintainer, from the canvas):**
 
 - **A MUX/DEMUX carries no mark.** UI_OVERHAUL §17 rule 3 lists `MUX`/`DEMUX`
   among the abbreviations a body shows, but `docScene` suppresses the caption
-  for *shaped* bodies ("shaped bodies have no caption", §24's pass) — and a
+  for _shaped_ bodies ("shaped bodies have no caption", §24's pass) — and a
   trapezoid is far less self-evident than a NAND gate, which is why the note
   exists. Evidence: the committed demo baseline draws the mux as a bare
   trapezoid. Fix: keep the suppression for gates and draw the abbreviation on
   plexer trapezoids (and re-bless the visual baselines).
-- **Body marks read as "off"** — *diagnosed* (screenshot + measurement). At the
+- **Body marks read as "off"** — _diagnosed_ (screenshot + measurement). At the
   maintainer's zoom the adder's `+` sits ~0.47 world units below its box centre
   and ~0.22 left; in the committed demo baseline (default zoom) the same `+`
   measures centred. So it is **zoom-dependent**, which rules out the layout: the
   mark is drawn at `layout.rect`'s centre (`docScene.ts:1284`) with
   `textBaseline = "middle"` (`render/canvas2d.ts:115`).
 
-  **Cause:** the renderer sets `ctx.font = \`${size}px …\`` where `size` is in
-  *world* units (≈1 for a mark) and relies on the camera transform to scale the
+  **Cause:** the renderer sets `ctx.font = \`${size}px …\``where`size` is in
+  _world_ units (≈1 for a mark) and relies on the camera transform to scale the
   glyph up (~60× when zoomed in). Font metrics are quantized at that ~1px size,
-  so "middle" is off by a fraction of a *world* pixel — invisible when zoomed out,
+  so "middle" is off by a fraction of a _world_ pixel — invisible when zoomed out,
   and multiplied by the zoom when zoomed in. Bigger marks and closer zooms make
   it worse, which is exactly "everything's logo is off".
 
@@ -177,27 +178,28 @@ address *(8879681)*.
 
 **Clarified 2026-10-19 (real, being worked):**
 
-- **"Recover unsaved work" was the wrong half of the mechanic** *(maintainer,
-  fixed this round)*: it offered recovery after *clean* closes too. The app now
+- **"Recover unsaved work" was the wrong half of the mechanic** _(maintainer,
+  fixed this round)_: it offered recovery after _clean_ closes too. The app now
   asks when the window is closed — **Save / Don't save / Cancel** — and any
   resolved decision ends the recovery copy, so the launch dialog means "the last
-  session ended without closing" (a crash). *(this round)*
+  session ended without closing" (a crash). _(this round)_
 
-- ~~**Wire segment deletion is all-or-nothing**~~ *(fixed this round)*: a second
+- ~~**Wire segment deletion is all-or-nothing**~~ _(fixed this round)_: a second
   click narrows the selection to the piece under the cursor — a branch wire
   hanging off the trunk at that segment, or the segment itself — so Delete takes
   only that. A branch survives its trunk; a segment delete drops the bend the
   wire turns at (shortening it), and a wire with no bends is just that segment,
-  so it goes entirely. Junction dependents follow the new geometry. *(this
-  round)*
+  so it goes entirely. Junction dependents follow the new geometry. _(this
+  round)_
 - **One Clear, inside the memory editor.** The Inspector's `Clear` (it drops the
   `autoload` file reference) is unnecessary beside the editor's `Clear all`; the
   editor is the single place to clear, and `Clear all` takes the autoload file
-  with it so the capability is not lost. *(this round)*
+  with it so the capability is not lost. _(this round)_
 
 **Left (optional; maintainer's call):**
-- **Wires**: a *per-wire* colour palette, if identity colours are wanted back.
-  The default is one bus colour with no net-id dependency *(66f46e0)*, and a
+
+- **Wires**: a _per-wire_ colour palette, if identity colours are wanted back.
+  The default is one bus colour with no net-id dependency _(66f46e0)_, and a
   wire's own `attrs.color` already wins.
 - **"Tidy tab / timing-readout alignment"** — no repro was ever supplied; fold
   into the P3 tab/context-menu work if it turns up again.
@@ -211,17 +213,17 @@ address *(8879681)*.
 other width uses, and the address pick sizes the memory too (`depth =
 2^addrBits`, trimming an over-long image) — the free-text **Words** field is
 gone. Defaults derive from `depth`, so nothing existing changed; additive, so no
-format bump. *(this round)*
+format bump. _(this round)_
 
-- ~~Export the canvas/circuit as an image~~ *(done this round)*: File → **Export
+- ~~Export the canvas/circuit as an image~~ _(done this round)_: File → **Export
   view as PNG…** writes what the canvas is showing — a real file through the
   shell (`save_image`, which decodes the data URL), a download in the browser —
   named `<document>-view.png` so it can sit beside its `.csx`. The pixels are the
-  renderer's, so the canvas element is the source; the export is the *current
-  view* (fit-the-whole-circuit export is a follow-up).
+  renderer's, so the canvas element is the source; the export is the _current
+  view_ (fit-the-whole-circuit export is a follow-up).
 - Right-click context-menu overhaul.
 - Version history: full-viewport view (no overlay), diff highlighting + copy.
-- Subcircuits: always-visible panel, click into an *instance* vs template,
+- Subcircuits: always-visible panel, click into an _instance_ vs template,
   scope colors, resizing, dynamic outer pins from inner pin rotation.
   **Delete a sheet tab** is already there — the tab's right/middle-click menu
   (`Rename…` / `Delete`, guarded against deleting a sheet with parts, with the
@@ -236,7 +238,7 @@ format bump. *(this round)*
 - ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
   own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
   at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold
-  5 ns` for a register), and a selected *wire* shows its per-path delay (drawn
+5 ns` for a register), and a selected _wire_ shows its per-path delay (drawn
   length × the table's 0.1 ns/unit). Both are **design** numbers; the transport's
   `T_obs`/`top_paths` stay the measured ones.
 - ~~Animation pulse-rate slider~~ **done**: Settings → Canvas has a **Pulse speed**
@@ -271,13 +273,13 @@ format bump. *(this round)*
   these out of scope for now (probes + inspection cover the need); revisit only
   if requested.
 - **"Remove 'Named' bubble"** — read as the history `named` badge, which is gone
-  *(70f6eb4)*; recorded in the P2 list.
+  _(70f6eb4)_; recorded in the P2 list.
 - **"Reposition 'Restore Version' tab to the far right"** — this meant the
-  *History* tab's "Restore this version" / "Back to current" bar, which sat
+  _History_ tab's "Restore this version" / "Back to current" bar, which sat
   misaligned at the top; fixed by unrelated work.
 - **"Make cycle counting continuous"** — fixed by the same netlist-fingerprint
   work as Phase 1's edit fix (`bf41341`): geometry-only edits no longer reset the
-  counter. A *topology* change still reboots the engine, by design — surviving
+  counter. A _topology_ change still reboots the engine, by design — surviving
   even that would need a `startCycle` in the load contract.
 - **"Polish application logo"** — subjective, not actionable.
 - **"Support floating-point resistors"** — there is no resistor part, and a
@@ -309,7 +311,7 @@ every exhaustive `CompKind` match the new variant breaks; that is the loop.
 
 ### The measured per-part delay — RESOLVED, and the contract change was not needed
 
-**Outcome (2026-10-19):** the Inspector now shows the *observed* settle time beside
+**Outcome (2026-10-19):** the Inspector now shows the _observed_ settle time beside
 the design cost, but the contract was left alone — see below for why, because the
 reason is the interesting part.
 
@@ -317,7 +319,7 @@ A commit in the delay engine is scheduled as `Fire { comp, gen }` at
 `input_arrival + t_pd` (inertial, `delay.rs`). So a part's **observed delay is its
 table delay by construction** — an IPC `delays` field would re-serialize the
 published table into every `timing_update` for a number the Inspector already
-shows. What *is* genuinely observed is the **path** (`TimingPath { circuit, comps,
+shows. What _is_ genuinely observed is the **path** (`TimingPath { circuit, comps,
 delay_ns }`), which the frontend already receives for the canvas highlight. The UI
 therefore reads that: `topPathDelay()` (+ `topPathIds`) with the same contract v1.1
 sheet filter, shown for a selected part that is on the path (UI_OVERHAUL §74).
@@ -338,7 +340,7 @@ rather than only on the path. The original sketch, for reference:
   after each run/pause. `docs/ipc.md` gains a v1.3 stanza; `api.rs` and `types.ts`
   the field. Strictly additive, so nothing existing changes meaning.
 - **UI:** the Inspector's Delay row grows a second half — `Design 10 ns · Observed
-  12.4 ns` — and shows the design number alone until a run has produced one.
+12.4 ns` — and shows the design number alone until a run has produced one.
 - **Tests:** engine (recorded, deterministic), the contract shape, the store merge,
   the Inspector display, and an e2e (run, select a gate, expect "Observed").
 
@@ -350,7 +352,33 @@ view with diff highlighting and copy (the structural diff already exists), and t
 subcircuit panel work (always-visible panel, instance-versus-template scope, scope
 colours, resizing, dynamic outer pins).
 
-### The canvas context menu (next round, and now a bounded change)
+### The canvas context menu — DONE (2026-10-19)
+
+Shipped in the round after this note, essentially as written. What the note got
+right: the menu rides CanvasHost's existing click-vs-drag gate (`pendingRef`), so a
+right **drag** still pans and opens nothing, and it is a plain HTML overlay — which
+is why SCREEN coordinates are the right thing to put in it. What it got wrong: the
+world point was never the problem. `PointerInfo` simply had no viewport position, so
+it grew `clientX`/`clientY` (filled in one place, `infoOf`).
+
+Being explicit about right-click paid off. There are three cases now, and only the
+last is new:
+
+- a gesture in progress → cancel (unchanged; still pinned by pan.spec.ts),
+- idle over a subcircuit instance → jump to its definition (unchanged; still pinned
+  by fileops.spec.ts),
+- otherwise idle → the menu, on a part / wire / bare canvas.
+
+Because the jump keeps its one-click meaning, the menu deliberately offers **no**
+"Open definition" item — right-clicking the instance already _is_ that command, so
+an item would be a worse duplicate. The item set is keyed off what was pointed at,
+not off the current selection, so right-clicking bare canvas never offers to edit a
+part selected elsewhere; the commands themselves still act on the whole selection,
+which is why a right-click inside a multi-selection keeps it.
+
+Actions dispatch through the editor's existing public commands (no new command
+surface), tests are five unit tests plus `e2e/contextmenu.spec.ts`, and the original
+sketch below is kept for the record:
 
 Right-click currently pans (UI_OVERHAUL §1: right-drag pans, Shift+left-drag pans).
 So the menu opens on a right **click** — press and release with no movement — and
@@ -358,7 +386,7 @@ never on a drag. Facts gathered so it goes in one pass, as the transistor's note
 allowed:
 
 - **The conversion already exists.** `CanvasHost` hands its pointer callbacks a
-  *world* point (`onPointerDown(world: Vec2, info: PointerInfo)`), so the menu can
+  _world_ point (`onPointerDown(world: Vec2, info: PointerInfo)`), so the menu can
   ride the same conversion rather than re-deriving it from the camera. Its name
   inside `CanvasHost` is the one thing not yet read — find it, add a sibling
   `onContextMenu?: (world: Vec2) => void`, and call it from the existing pointer
@@ -382,6 +410,6 @@ allowed:
   applies to it) or act on the current selection — selecting is friendlier and
   reuses the highlight the user already understands.
 - **Tests**: an e2e that right-clicks a gate and asserts the menu's items, that a
-  right *drag* still pans and opens nothing, and that Cut/Delete from the menu
+  right _drag_ still pans and opens nothing, and that Cut/Delete from the menu
   change the document; a unit test is optional here since the actions themselves
   are already covered.
