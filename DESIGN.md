@@ -320,7 +320,7 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 | Wiring | `pin` (subcircuit I/O; bitsize; value display mode: unsigned/signed/hex), `constant`, `clock` (mirrors the global clock), `splitter` (arbitrary bit mapping — the bus plumbing), `probe` (named value display; autograder-readable) |
 | Plexers | `mux`, `demux`, `decoder`, `priority-decoder` |
 | Arithmetic | `adder`, `subtractor`, `multiplier`, `divider`, `comparator`, `negator`, `shifter`, `bit-extender` |
-| Memory | `register`, `ram`, `rom` — RAM/ROM expose `name`, `autoload`, embedded `contents` |
+| Memory | `register`, `ram`, `rom` — RAM/ROM expose `name`, `autoload`, embedded `contents`, and an address width independent of the word count (`addrBits`, derived from `depth` unless set) |
 | Hierarchy | `subcircuit` (pins referenced by name from wires) |
 | I/O (UI-only) | button, LED, hex display, text annotation (`misc.text`) — inert headless |
 

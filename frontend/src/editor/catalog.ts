@@ -73,6 +73,19 @@ const DEFAULT_MEM_DEPTH = 256;
  * screen had nothing to do with the address space.
  */
 export function memAddrBits(attrs: Readonly<Record<string, unknown>>): number {
+  // `addrBits` decouples the address width from the address SPACE (format-v2
+  // §4/§9): an explicit width wins, in both directions — fewer bits address a
+  // window of the memory, more leave the extra addresses reading X. Absent, the
+  // width follows `depth`.
+  const explicit = attrs["addrBits"];
+  if (
+    typeof explicit === "number" &&
+    Number.isInteger(explicit) &&
+    explicit >= 1 &&
+    explicit <= 32
+  ) {
+    return explicit; // in range: the engine takes it as written (components.rs)
+  }
   const depth = Math.max(1, Math.floor(numAttr(attrs, "depth", DEFAULT_MEM_DEPTH)));
   return Math.max(1, 32 - Math.clz32(depth - 1));
 }
@@ -1110,6 +1123,17 @@ function baseFields(type: string): AttrField[] {
           min: 1,
           max: 1_048_576,
           placeholder: "256",
+          group: "Width",
+        },
+        {
+          // `addr` is `ceil(log2 depth)` wide by default. Unset = auto, so a
+          // default memory writes no `addrBits` at all; setting it writes one.
+          key: "addrBits",
+          label: "Address bits",
+          kind: "number",
+          min: 1,
+          max: 32,
+          placeholder: "auto",
           group: "Width",
         },
       ];

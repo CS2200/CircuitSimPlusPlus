@@ -6,6 +6,7 @@ import {
   compSpec,
   defaultAttrs,
   editableAttrs,
+  memAddrBits,
   typeDisplayName,
 } from "./catalog";
 import type { CsxCircuit } from "../model/csx";
@@ -58,11 +59,25 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("wiring.splitter")).toEqual(["splits"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
-    expect(keys("mem.ram")).toEqual(["bitsize", "depth"]);
+    expect(keys("mem.ram")).toEqual(["bitsize", "depth", "addrBits"]);
     // The register shows its stored value, so it carries a base chooser (§57).
     expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
     expect(keys("io.button")).toEqual(["bitsize"]);
     expect(keys("subcircuit")).toEqual(["circuit"]);
+  });
+
+  it("a memory's address width follows depth, unless addrBits says otherwise", () => {
+    // Engine-identical rule (components.rs's `addr_width`): 256 words → 8 bits.
+    expect(memAddrBits({ depth: 256 })).toBe(8);
+    expect(memAddrBits({})).toBe(8); // the 256-word default
+    // Explicit wins, both directions: a window, or room for X past the end.
+    expect(memAddrBits({ depth: 256, addrBits: 4 })).toBe(4);
+    expect(memAddrBits({ depth: 16, addrBits: 12 })).toBe(12);
+    // Out of range falls back to the derived width, exactly as the engine
+    // does (it reports the attr and uses the default, so the file still fails
+    // to load — the UI just must not draw a width the core will never use).
+    expect(memAddrBits({ depth: 256, addrBits: 0 })).toBe(8);
+    expect(memAddrBits({ depth: 256, addrBits: 99 })).toBe(8);
   });
 
   it("names a type in plain words for the Inspector header (§57)", () => {

@@ -909,9 +909,17 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.ram" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "depth", "autoload", "contents"]);
+            let mut c = AttrCheck::new(
+                attrs,
+                &["bitsize", "depth", "addrBits", "autoload", "contents"],
+            );
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
+            // The `addr` pin is as wide as the address SPACE by default;
+            // `addrBits` decouples it from `depth` (format-v2 §4/§9): fewer
+            // bits address a window of the memory, more bits leave the extra
+            // addresses reading X (behavior.rs's past-end path).
+            let addr_bits = c.uint("addrBits", addr_width(depth), 1, MAX_BITSIZE);
             let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
             c.finish();
@@ -939,7 +947,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             }
             (
                 vec![
-                    PinSig::i("addr", addr_width(depth)),
+                    PinSig::i("addr", addr_bits),
                     PinSig::i("din", b),
                     PinSig::o("dout", b),
                     PinSig::i("we", 1),
@@ -955,9 +963,13 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "mem.rom" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "depth", "autoload", "contents"]);
+            let mut c = AttrCheck::new(
+                attrs,
+                &["bitsize", "depth", "addrBits", "autoload", "contents"],
+            );
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
+            let addr_bits = c.uint("addrBits", addr_width(depth), 1, MAX_BITSIZE);
             let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
             c.finish();
@@ -984,7 +996,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 }
             }
             (
-                vec![PinSig::i("addr", addr_width(depth)), PinSig::o("out", b)],
+                vec![PinSig::i("addr", addr_bits), PinSig::o("out", b)],
                 c,
                 CompKind::Rom {
                     bitsize: b,
@@ -1274,6 +1286,23 @@ mod tests {
                 ("clk", 1),
             ])
         );
+        // …and `addrBits` decouples the address width from `depth` in both
+        // directions: fewer bits reach a window of the memory, more bits leave
+        // the extra addresses reading X (the past-end path).
+        assert_eq!(
+            names_widths(
+                "mem.ram",
+                json!({ "bitsize": 8, "depth": 256, "addrBits": 4 })
+            ),
+            expect(&[("addr", 4), ("din", 8), ("dout", 8), ("we", 1), ("clk", 1)])
+        );
+        assert_eq!(
+            names_widths(
+                "mem.rom",
+                json!({ "bitsize": 8, "depth": 16, "addrBits": 12 })
+            ),
+            expect(&[("addr", 12), ("out", 8)])
+        );
     }
 
     #[test]
@@ -1289,6 +1318,18 @@ mod tests {
         let (_, e) = pins("gate.and", json!({"bitszize": 8}));
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("unknown attr"));
+
+        // A memory's address width is a bit width like any other (1..=32).
+        let (_, e) = pins("mem.ram", json!({"addrBits": 33}));
+        assert_eq!(e.len(), 1);
+        assert!(
+            e[0].message.contains("attr 'addrBits' = 33 out of range"),
+            "{:?}",
+            e[0]
+        );
+        let (_, e) = pins("mem.ram", json!({"addrBits": 0}));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("out of range"), "{:?}", e[0]);
 
         // Timing is unit-wide (from the delay table), never a per-instance
         // attr — `delay` is now an unknown attr.

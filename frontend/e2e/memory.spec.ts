@@ -161,3 +161,15 @@ test("Inspector memory: one Clear — it lives in the editor, and it empties the
   expect(imemAttrs(await doc(page))?.contents).toBeFalsy();
   await expect(page.locator(".inspector-mem-contents")).toContainText("0 words");
 });
+
+test("Inspector memory: the address width is independent of the word count", async ({ page }) => {
+  await page.goto("/?simdemo=1");
+  await selectImem(page); // 32-bit, 256 words — an 8-bit address by default
+
+  // Auto: a default memory carries no `addrBits` at all.
+  expect(imemAttrs(await doc(page))?.addrBits).toBeUndefined();
+
+  // An explicit width is written as given (here: a 16-word window of 256).
+  await page.getByRole("spinbutton", { name: "Address bits" }).fill("4");
+  expect(imemAttrs(await doc(page))?.addrBits).toBe(4);
+});

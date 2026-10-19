@@ -159,7 +159,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `arith.shifter` | `in`, `amt`, `out` | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr") |
 | `arith.bit-extender` | `in`, `out` | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign") |
 | `mem.register` | `d`, `clk`, `en`, `q` | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only |
-| `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
+| `mem.ram` | `addr`, `din`, `dout`, `we`, `clk` | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
 | `mem.rom` | `addr`, `out` | same as `mem.ram` |
 | `subcircuit` | from target circuit's named pins | `circuit` (required) |
 | `io.button`, `io.led`, `io.hexdisplay` | `out` / `in` / `in` | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength) |
@@ -255,10 +255,14 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
 - Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
   deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
   carry values but never originate them.
-- RAM `depth` must be a power of two (validation), so the `addr` pin's width exactly covers
-  `0..depth`. The defensive past-end path (reads `X`, writes drop) remains for the
-  `depth = 1` corner and the lenient post-validation path. A write with `X` in the address
-  is dropped (target unknown).
+- RAM `depth` must be a power of two (validation), and its `addr` pin is
+  `ceil(log2 depth)` wide by default; `addrBits` overrides that (`mem.rom` too), so the
+  address width belongs to the design rather than to the word count. Fewer bits than the
+  depth needs address a **window** of the memory — the rest is loaded but unreachable;
+  more bits leave the extra addresses on the past-end path below. A write with `X` in the
+  address is dropped (target unknown).
+- The defensive past-end path (reads `X`, writes drop) covers the `depth = 1` corner, an
+  over-wide `addrBits`, and the lenient post-validation path.
 - Divide by zero yields quotient and remainder `X`. A mux with an `X` select outputs the
   data value when all data inputs are equal, else `X`.
 

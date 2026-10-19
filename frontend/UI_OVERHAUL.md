@@ -1662,3 +1662,19 @@ one made the whole document unloadable.
 **Acceptance:** frontend lint / 342 unit / build green, e2e 64 passed; the canvas
 baselines were re-blessed (a pin dot departed) and verified deterministic across
 two consecutive runs.
+
+## 63. Follow-up batch BB (2026-10-19): a memory's address width, and one Clear
+
+- **A memory's address width is yours.** `addr` was always `ceil(log2 depth)`
+  wide, which made a deliberately narrow address — a 4-bit address reaching a
+  16-word window of a 256-word memory — impossible to draw, and an address space
+  larger than the word count inexpressible. The Inspector now offers **Address
+  bits** (`addrBits`, format-v2 §4): unset = auto (the derived width, and a
+  default memory writes no attr at all), set = exactly that width. Fewer bits
+  address a window, more leave the extra addresses reading `X`. Additive, so no
+  format-version bump; the engine test and the catalog unit test pin the same
+  rule (`components.rs::addr_width`).
+- **One Clear per memory.** The Inspector's bare `Clear` (it dropped the
+  `autoload` file reference) is gone; `Clear all` inside `Edit hex…` clears both
+  the embedded image and the autoload file, and the dialog says so before Apply.
+  See §58's action line, §62 for the pin/theme retirements above.
