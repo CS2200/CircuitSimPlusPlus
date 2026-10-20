@@ -8,7 +8,7 @@ import {
   memPreviewWord,
   pickWireLabelAt,
   readableOn,
-  tunnelTagAnchors,
+  tunnelTagSites,
   valueTextAtWidth,
 } from "./docScene";
 
@@ -190,31 +190,46 @@ describe("tunnel labels (UI_OVERHAUL §87)", () => {
   });
 
   it("plants a tag at each PIN endpoint only, and none at a junction", () => {
-    expect(tunnelTagAnchors(wire({ name: "T" }))).toEqual([
-      { x: 0, y: 0 },
-      { x: 4, y: 0 },
+    // The wire runs east out of `a` and west into `b`, so `a`'s tag points south
+    // (at the wire, from its left) and `b`'s points north (UI_OVERHAUL §91).
+    expect(tunnelTagSites(wire({ name: "T" }))).toEqual([
+      { at: { x: 0, y: 0 }, dir: "S" },
+      { at: { x: 4, y: 0 }, dir: "N" },
     ]);
     // A join end is a junction, not a place a tunnel was drawn.
-    expect(tunnelTagAnchors(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
-      { x: 0, y: 0 },
+    expect(tunnelTagSites(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
+      { at: { x: 0, y: 0 }, dir: "S" },
     ]);
     // Unnamed: no tag at all, and a wire with no points yet has nowhere to put one.
-    expect(tunnelTagAnchors(wire({}))).toEqual([]);
-    expect(tunnelTagAnchors(wire({ name: "T", points: [] }))).toEqual([]);
+    expect(tunnelTagSites(wire({}))).toEqual([]);
+    expect(tunnelTagSites(wire({ name: "T", points: [] }))).toEqual([]);
+  });
+
+  it("reorients with the wire: a vertical tunnel's tags point sideways", () => {
+    // This wire runs north out of `a` (at the bottom) and south into `b` (at the top).
+    const vertical = wire({
+      name: "T",
+      points: [
+        [0, 4],
+        [0, 0],
+      ],
+    });
+    expect(tunnelTagSites(vertical).map((s) => s.dir)).toEqual(["E", "W"]);
   });
 
   it("hits the tag, not the route, so a hidden tunnel stays clickable", () => {
     const wires = [wire({ name: "T" })];
-    // In the body of the tag over endpoint a, and over endpoint b.
+    // In the body of the tag at endpoint a (which points south, so it hangs above),
+    // and in the one at endpoint b (which points north, so it hangs below).
     expect(pickWireLabelAt(wires, { x: 0.1, y: -0.8 })).toMatchObject({
       wireIdx: 0,
       label: true,
     });
-    expect(pickWireLabelAt(wires, { x: 3.9, y: -1.0 })?.wireIdx).toBe(0);
+    expect(pickWireLabelAt(wires, { x: 3.9, y: 1.0 })?.wireIdx).toBe(0);
     // Between the two tags: nothing there but the hidden route.
     expect(pickWireLabelAt(wires, { x: 2, y: -0.9 })).toBeNull();
-    // Below a tag is the wire itself, not the tag: the tip points at the pin,
-    // and a pointer's slack does not reach far past it.
+    // On the far side of the wire end from the tag is the wire, not the tag: the
+    // point touches the end, and a pointer's slack does not reach past it.
     expect(pickWireLabelAt(wires, { x: 0, y: 0.6 })).toBeNull();
     // A plain wire has no tag to hit.
     expect(pickWireLabelAt([wire({})], { x: 0.1, y: -0.8 })).toBeNull();

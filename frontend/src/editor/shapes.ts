@@ -201,30 +201,110 @@ export function probePath(x: number, y: number, w: number, h: number): PathCmd[]
 export const TAG_H = 1.2;
 export const TAG_TIP = 0.45;
 
+/** Which way a tag's point aims — the four shapes CircuitSim CE's `TunnelPeer` draws. */
+export type TagDir = "N" | "S" | "E" | "W";
+
+/**
+ * A tag's outline in its own frame: the point at the origin, aiming `dir`, with the
+ * body on the far side of the point.
+ *
+ * The body stays **landscape** in all four cases — its width is the name's, its
+ * height the tag's — which is the whole of CircuitSim CE's `TunnelPeer`: it keeps
+ * the label flat and horizontal, and moves the *point* to another edge (the top or
+ * bottom of a wide body, the left or right end of one). Rotating the body instead
+ * would stand a short name up in a tall box, which is not what the old tool shows.
+ */
+function tagOutline(dir: TagDir, w: number, h: number): Vec2[] {
+  const hw = w / 2;
+  const hh = h / 2;
+  const tip = TAG_TIP;
+  switch (dir) {
+    case "S":
+      return [
+        { x: 0, y: 0 },
+        { x: hw, y: -tip },
+        { x: hw, y: -tip - h },
+        { x: -hw, y: -tip - h },
+        { x: -hw, y: -tip },
+        { x: 0, y: 0 },
+      ];
+    case "N":
+      return [
+        { x: 0, y: 0 },
+        { x: hw, y: tip },
+        { x: hw, y: tip + h },
+        { x: -hw, y: tip + h },
+        { x: -hw, y: tip },
+        { x: 0, y: 0 },
+      ];
+    case "W":
+      return [
+        { x: 0, y: 0 },
+        { x: tip, y: -hh },
+        { x: tip + w, y: -hh },
+        { x: tip + w, y: hh },
+        { x: tip, y: hh },
+        { x: 0, y: 0 },
+      ];
+    case "E":
+      return [
+        { x: 0, y: 0 },
+        { x: -tip, y: -hh },
+        { x: -tip - w, y: -hh },
+        { x: -tip - w, y: hh },
+        { x: -tip, y: hh },
+        { x: 0, y: 0 },
+      ];
+  }
+}
+
+/** The outline above, moved to `at` in world space. */
+function tagWorld(at: Vec2, dir: TagDir, w: number, h: number): Vec2[] {
+  return tagOutline(dir, w, h).map((p) => ({ x: at.x + p.x, y: at.y + p.y }));
+}
+
 /**
  * A tunnel tag (UI_OVERHAUL §91): the marker an old-format schematic's `Tunnel`
  * component left at the place it connected, and the handle a hidden route offers.
  *
- * A pennant, pointed at the wire end it names — the shape CircuitSim CE's
+ * A pennant, its point on the wire end it names — the shape CircuitSim CE's
  * `TunnelPeer` draws, and the reason this reads as a label *attached* to the wire
- * rather than one floating above the drawing. `cx`/`tipY` are the wire end; the
- * body hangs above it (rounded, like every other body in this app) and the tip
- * stops just short of the pin so the pin stays visible.
+ * rather than one floating above the drawing. `at` is that wire end and `dir` is the
+ * direction the point aims; the body hangs to the side of it (see `tagOutline`).
  */
-export function tunnelTagPath(cx: number, tipY: number, w: number, h = TAG_H): PathCmd[] {
-  const half = w / 2;
-  const bottom = tipY - TAG_TIP;
-  return roundedPath(
-    [
-      { x: cx, y: tipY },
-      { x: cx + half, y: bottom },
-      { x: cx + half, y: bottom - h },
-      { x: cx - half, y: bottom - h },
-      { x: cx - half, y: bottom },
-      { x: cx, y: tipY },
-    ],
-    0.12,
-  );
+export function tunnelTagPath(at: Vec2, dir: TagDir, w: number, h = TAG_H): PathCmd[] {
+  return roundedPath(tagWorld(at, dir, w, h), 0.12);
+}
+
+/** The tag's extent in world units — body and point — for hit testing (§91). */
+export function tunnelTagBox(
+  at: Vec2,
+  dir: TagDir,
+  w: number,
+  h = TAG_H,
+): { x: number; y: number; w: number; h: number } {
+  const pts = tagWorld(at, dir, w, h);
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/** Where a tag's label goes: the middle of its body (never rotated — CE draws it flat). */
+export function tunnelTagTextAt(at: Vec2, dir: TagDir, w: number, h = TAG_H): Vec2 {
+  const hw = w / 2;
+  const hh = h / 2;
+  switch (dir) {
+    case "S":
+      return { x: at.x, y: at.y - TAG_TIP - hh };
+    case "N":
+      return { x: at.x, y: at.y + TAG_TIP + hh };
+    case "W":
+      return { x: at.x + TAG_TIP + hw, y: at.y };
+    case "E":
+      return { x: at.x - TAG_TIP - hw, y: at.y };
+  }
 }
 
 /**

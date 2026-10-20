@@ -26,14 +26,15 @@ import { compLayout, type CompLayout } from "./layout";
 import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
 import {
   BUBBLE_R,
-  TAG_H,
-  TAG_TIP,
   chipPath,
   circlePath,
   gateShape,
   probePath,
   rotatePath,
+  tunnelTagBox,
   tunnelTagPath,
+  tunnelTagTextAt,
+  type TagDir,
 } from "./shapes";
 
 /**
@@ -609,6 +610,16 @@ export function gridStepFor(scale: number, minPx = 14): number {
 /** Dash pattern for a revealed tunnel route and its guides (world units, §87). */
 const TUNNEL_DASH: readonly number[] = [0.55, 0.45];
 
+/** A tunnel tag's site: the wire end its point touches, and the way that point aims. */
+export interface TagSite {
+  at: Vec2;
+  /**
+   * Which way the point aims: **at the wire**, from 90° clockwise of the wire's own
+   * direction — i.e. the tag hangs to the left of its wire (UI_OVERHAUL §91).
+   */
+  dir: TagDir;
+}
+
 /**
  * Where a tunnel's tags plant (UI_OVERHAUL §91): one at each **pin** endpoint — the
  * sites an imported old-format schematic had its `Tunnel` markers, and the only
@@ -616,17 +627,51 @@ const TUNNEL_DASH: readonly number[] = [0.55, 0.45];
  * none: a junction is not a place a tunnel was drawn. Pure; endpoints are read from
  * the drawn polyline, so a wire with no points yet (a legal, hand-authored straight
  * line) has no tag until it is routed.
+ *
+ * The four orientations come from the wire (CircuitSim CE stored the same choice as
+ * the tunnel's `Direction` property, because its tunnel was a part you placed; here
+ * the geometry already says it) — see `tagDirAt`.
  */
-export function tunnelTagAnchors(w: CsxWire): Vec2[] {
+export function tunnelTagSites(w: CsxWire): TagSite[] {
   const name = w.name ?? "";
   if (name === "" || w.points.length < 2) return [];
-  const out: Vec2[] = [];
-  if (isPinEndpoint(w.a)) out.push({ x: w.points[0][0], y: w.points[0][1] });
+  const out: TagSite[] = [];
+  if (isPinEndpoint(w.a)) out.push({ at: p2v(w.points[0]), dir: tagDirAt(w.points, 0) });
   if (isPinEndpoint(w.b)) {
-    const last = w.points[w.points.length - 1];
-    out.push({ x: last[0], y: last[1] });
+    const last = w.points.length - 1;
+    out.push({ at: p2v(w.points[last]), dir: tagDirAt(w.points, last) });
   }
   return out;
+}
+
+/**
+ * The way a tag's point aims at wire end `i`.
+ *
+ * The wire leaves the pin in some direction (`out`); the tag hangs **to the left of
+ * its wire**, so its point aims at the wire from 90° clockwise of `out`. All four
+ * shapes are reachable, the choice is read off the drawing, and the tag spends no
+ * wire length — which matters, because a converted schematic's tunnel wires are
+ * often only a few grid units long.
+ *
+ * CircuitSim CE draws its tunnel's body in the wire's own half-plane instead, which
+ * works there because a tunnel *is* a part with empty space behind it. Here the wire
+ * end is a pin of the part it connects, so that side is the part — the tag would sit
+ * on top of the readouts it exists to explain.
+ *
+ * A routed wire is Manhattan, so the dominant axis wins; a zero-length first segment
+ * is skipped, and a wire with no usable segment keeps the plain south-pointing tag.
+ */
+function tagDirAt(points: readonly [number, number][], i: number): TagDir {
+  const step = i === 0 ? 1 : -1;
+  for (let j = i; j + step >= 0 && j + step < points.length; j += step) {
+    const dx = points[j + step][0] - points[j][0];
+    const dy = points[j + step][1] - points[j][1];
+    if (dx === 0 && dy === 0) continue;
+    // `out` is the direction the wire leaves the pin (screen axes: +y is down).
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? "S" : "N"; // out E -> point S; out W -> point N
+    return dy > 0 ? "W" : "E"; // out S -> point W; out N -> point E
+  }
+  return "S";
 }
 
 /** Text size inside a tag, and the padding around it (world units, §91). */
@@ -664,13 +709,12 @@ export function pickWireLabelAt(
     const name = w.name ?? "";
     if (name === "") continue;
     const box = tagWidthOf === undefined ? tagWidth(name) : tagWidthOf(name);
-    const halfW = box / 2 + tol * 0.4;
-    for (const anchor of tunnelTagAnchors(w)) {
-      if (Math.abs(world.x - anchor.x) > halfW) continue;
-      // The tag hangs ABOVE its anchor with the tip pointing down at it, so the
-      // pickable band is the body plus a little slack either side of the tip.
-      if (world.y > anchor.y + tol) continue;
-      if (world.y < anchor.y - TAG_TIP - TAG_H - tol) continue;
+    const slack = tol * 0.5;
+    for (const site of tunnelTagSites(w)) {
+      // The whole pennant is the target — body and point — whichever way it aims.
+      const r = tunnelTagBox(site.at, site.dir, box);
+      if (world.x < r.x - slack || world.x > r.x + r.w + slack) continue;
+      if (world.y < r.y - slack || world.y > r.y + r.h + slack) continue;
       // `segment: 0` is meaningless for a tag — the click path selects the whole
       // wire — and `label` is what tells the hover pass this is the tag, not the
       // route (UI_OVERHAUL §91).
@@ -678,7 +722,7 @@ export function pickWireLabelAt(
         kind: "wire",
         wireIdx: i,
         segment: 0,
-        point: { x: anchor.x, y: anchor.y },
+        point: site.at,
         label: true,
       };
     }
@@ -2006,13 +2050,14 @@ export class DocScene {
       const w =
         this.tagWidths.get(name) ?? tagWidth(name, (t) => renderer.measureText(t, TAG_TEXT));
       this.tagWidths.set(name, w);
-      for (const anchor of tunnelTagAnchors(wire)) {
-        renderer.drawPath(tunnelTagPath(anchor.x, anchor.y, w), {
+      for (const site of tunnelTagSites(wire)) {
+        renderer.drawPath(tunnelTagPath(site.at, site.dir, w), {
           fill: strong ? "rgba(91,141,239,0.22)" : theme.panel,
           stroke: lit ? theme.accent : theme.panelBorder,
           lineWidth: lit ? 0.12 : 0.08,
         });
-        renderer.drawText(anchor.x, anchor.y - TAG_TIP - TAG_H / 2, name, {
+        const text = tunnelTagTextAt(site.at, site.dir, w);
+        renderer.drawText(text.x, text.y, name, {
           color: lit ? theme.accent : theme.textDim,
           size: TAG_TEXT,
           align: "center",

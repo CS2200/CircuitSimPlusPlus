@@ -2419,10 +2419,24 @@ the only thing you can hover without wondering what you are hovering.
 
 So the marker is a tag now.
 
-- **A pennant, pointed at the wire end it names.** CircuitSim CE's `TunnelPeer` shape, so it reads
-  as a label attached to the wire rather than a word floating above the drawing. Rounded, like
-  every other body in this app, and the tip stops just short of the pin so the pin stays visible
-  under it.
+- **A pennant, its point ON the wire end it names.** CircuitSim CE's `TunnelPeer` shape, so it
+  reads as a label attached to the wire rather than a word floating above the drawing. Rounded,
+  like every other body in this app.
+- **Oriented by its wire, in CE's four shapes.** CE stores this as the tunnel's `Direction`
+  property — EAST/WEST/NORTH/SOUTH — and draws a flat, wide body with its point on that edge. Here
+  the wire already says it: the point aims at the wire from 90° clockwise of the direction the
+  wire leaves the pin, so **the tag hangs to the left of its own wire** and a converted sheet
+  reads consistently. All four shapes are reachable, they are read off the drawing rather than
+  typed in, and the tag spends none of the wire's length — which matters, because a converted
+  tunnel wire is often only a few grid units long.
+  The body stays **landscape** whichever way the point aims: CE writes four polygons rather than
+  one rotated four ways, and the point moves to another edge of the same wide chip. Rotating the
+  body instead would stand a short name up in a tall box — which is what the first cut of this
+  did, and what the screenshot caught.
+  One deliberate difference from CE's geometry: a CE tunnel is a _part_ with empty canvas behind
+  it, so its body lies in the half-plane opposite its wire. Here the wire end is a **pin of the
+  part it connects**, so that side is the part itself — a tag there would sit on top of the very
+  readouts it exists to explain.
 - **Sized to its name.** `Renderer` gained `measureText` (world units, measured through the same
   font the flush rasterizes at the live scale), and the scene caches the answer per name: one name
   is drawn at every site it has, and the pick has to agree with what was drawn. A tag you can see
@@ -2437,6 +2451,10 @@ never had: pointing at a tag reveals the route (dashed, exactly as selection doe
 following an invisible line. Clicking does what clicking a label always did — selects the wire,
 revealing the route _and_ drawing the straight guides to each namesake (§87's "where it should
 go") — and the tags stay lit while it is selected. Hover is the preview; click is the state.
+
+The four orientations were verified on a **converted** schematic (`cpu.sim`: 1083 named wires,
+every end of which has a direction — 75% of them vertical, so most tags there are the sideways
+shapes) rather than on a hand-drawn example, because that is the case this feature exists for.
 
 What is deliberately unchanged: a plain wire is still **not** a hover target (only the tag
 answers — §55's and §87's "idle wire hover does nothing"), a junction end still gets no tag, and
