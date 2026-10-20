@@ -2332,3 +2332,19 @@ Follow-ups after using it on a real circuit (§89):
 - **The cursor is dropped when the app loses focus**, and it is not drawn outside the lane area: a
   `mouseleave` does not fire when the window goes away, so a stale readout used to sit at a cycle
   the mouse was nowhere near, drawing a rule through the signal labels.
+- **The trace is bounded by the recorded domain.** Nothing before cycle 0 and nothing past the last
+  recorded cycle is shown: those times were never probed, so exposing them invites reading an empty
+  stretch as "nothing happened here". One clamp on `origin` covers panning, zooming, Follow and the
+  scrollbar alike; the gridlines stop at the last cycle; the trace stops rather than holding its
+  final value to the right edge; and the band past it is shaded as _unrecorded_ rather than left
+  looking like idle time. The cursor readout and the cursor rule obey the same bound.
+- **A horizontal scrollbar sits under the waves.** The track is the whole recorded run and the thumb
+  is the visible window, so a zoomed-in view says at a glance how much there is either side (and
+  that there is any at all). Dragging the thumb pans, clicking the track jumps, and both drop
+  Follow. It is a DOM element rather than canvas chrome, because the canvas scrolls vertically for
+  tall traces and the bar must stay put.
+- **The name column is opaque, with a divider.** It is drawn as its own pane (`theme.panel`) before
+  the gridlines and the traces, so the names read as the fixed layer above the waves. A translucent
+  gutter made it ambiguous whether the labels sat over the trace or beside it; a canvas has no
+  backdrop blur to reach for, and an opaque pane says the same thing more cheaply. Row rules still
+  cross it, which is what keeps a name aligned to its row at a glance.

@@ -161,7 +161,7 @@ export default function WaveformView({
     const cycles = Math.max(1, span.last - span.first + 1);
     const px = Math.max(0.25, Math.min(400, width / cycles));
     setPxPerCycle(px);
-    setOrigin(follow ? span.last - width / px : Math.max(0, span.first));
+    setOrigin(follow ? span.last - width / px : 0);
     setManual(false);
   }, [span, size.w, follow]);
 
@@ -208,6 +208,20 @@ export default function WaveformView({
    */
   const contentH = Math.max(size.h, PAD_TOP + drawRows.length * laneH + AXIS_H);
 
+  /**
+   * The recorded domain is `[0, last]` — nothing outside it was ever probed, so
+   * nothing outside it is shown.  `origin` is clamped into it from one place, so
+   * panning, zooming, Follow and the scrollbar cannot leave the data.
+   */
+  const domainLast = span?.last ?? 0;
+  const laneWidth = Math.max(64, size.w - GUTTER);
+  const visibleCycles = laneWidth / pxPerCycle;
+  const maxOrigin = Math.max(0, domainLast - visibleCycles);
+  useEffect(() => {
+    // React bails out when the value is unchanged, so this is free per render.
+    setOrigin((o) => Math.min(Math.max(0, o), maxOrigin));
+  }, [maxOrigin]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
@@ -228,6 +242,22 @@ export default function WaveformView({
     const first = Math.max(0, Math.floor(origin));
     const last = Math.ceil(visibleTo);
 
+    /** Where the recorded data ends on screen: nothing is drawn past it. */
+    const dataRight = span === null ? size.w : Math.min(size.w, x(span.last));
+
+    // The name column is its own pane: an opaque backdrop, so it reads as the
+    // fixed layer above the waves rather than as a translucent part of them.
+    ctx.fillStyle = theme.panel;
+    ctx.fillRect(0, 0, GUTTER, contentH);
+    // …and the space past the last recorded cycle is marked as unrecorded rather
+    // than left looking like a stretch of time in which nothing happened.
+    if (dataRight < size.w) {
+      ctx.fillStyle = theme.panel;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(dataRight, 0, size.w - dataRight, contentH);
+      ctx.globalAlpha = 1;
+    }
+
     // Cycle gridlines: a step that keeps labels readable at any zoom.
     const target = 90;
     const stepCandidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
@@ -236,7 +266,8 @@ export default function WaveformView({
       stepCandidates[stepCandidates.length - 1];
     ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textBaseline = "middle";
-    for (let c = Math.ceil(first / gridStep) * gridStep; c <= last; c += gridStep) {
+    const lastCycle = span === null ? last : Math.min(last, Math.floor(span.last));
+    for (let c = Math.ceil(first / gridStep) * gridStep; c <= lastCycle; c += gridStep) {
       const gx = x(c);
       ctx.strokeStyle = theme.grid;
       ctx.lineWidth = 1;
@@ -300,12 +331,13 @@ export default function WaveformView({
       let prevText: string | null = null;
       for (const seg of segs) {
         const x0 = Math.max(GUTTER, x(seg.from));
-        let x1 = Math.min(size.w, x(seg.to));
+        if (x0 >= dataRight) continue;
+        let x1 = Math.min(dataRight, x(seg.to));
         if (x1 < x0) continue;
         // A state change is at least a pixel wide: at a zoom where a clock's half
         // cycle is sub-pixel, dropping it would show a flat line instead of a
         // toggle.  One pixel of "something happened here" is the honest picture.
-        if (x1 - x0 < 1) x1 = Math.min(size.w, x0 + 1);
+        if (x1 - x0 < 1) x1 = Math.min(dataRight, x0 + 1);
         const state = wireValueState(seg.val);
         const known = state === "high" || state === "low";
         const y = busRow
@@ -411,7 +443,13 @@ export default function WaveformView({
     // behind outside it (the app lost focus with the mouse away) would draw a
     // rule through the signal labels.
     const cursorX = cursor === null ? null : Math.round(x(cursor.cycle)) + 0.5;
-    if (cursor !== null && cursorX !== null && cursorX >= GUTTER && cursorX <= size.w - 1) {
+    if (
+      cursor !== null &&
+      cursor.cycle <= domainLast &&
+      cursorX !== null &&
+      cursorX >= GUTTER &&
+      cursorX <= Math.min(size.w - 1, dataRight)
+    ) {
       const cx = cursorX;
       ctx.strokeStyle = theme.accent;
       ctx.lineWidth = 1;
@@ -481,6 +519,57 @@ export default function WaveformView({
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
   }, []);
+
+  /**
+   * The horizontal scrollbar: the whole recorded domain at a glance, with the
+   * visible window as its thumb.  Without it a zoomed-in view gives no clue how
+   * much run there is to the left or right, or that there is any.
+   */
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const scrub = useRef<{ x: number; origin: number } | null>(null);
+  const domain = Math.max(1e-6, domainLast);
+  const thumbWidth = Math.min(1, visibleCycles / domain);
+  const thumbLeft = Math.min(1 - thumbWidth, Math.max(0, origin / domain));
+
+  const onThumbDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.stopPropagation();
+      scrub.current = { x: e.clientX, origin };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setFollow(false);
+      setManual(true);
+    },
+    [origin],
+  );
+  const onThumbMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = scrub.current;
+      const track = trackRef.current;
+      if (d === null || track === null) return;
+      const width = track.getBoundingClientRect().width;
+      if (width <= 0) return;
+      setOrigin(d.origin + ((e.clientX - d.x) / width) * domainLast);
+    },
+    [domainLast],
+  );
+  const onThumbUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    scrub.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, []);
+  /** A click on the track centres the window there. */
+  const onTrackDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const frac = (e.clientX - rect.left) / rect.width;
+      setOrigin(frac * domainLast - visibleCycles / 2);
+      setFollow(false);
+      setManual(true);
+    },
+    [domainLast, visibleCycles],
+  );
 
   const onMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -602,6 +691,21 @@ export default function WaveformView({
               });
             }
           }}
+        />
+      </div>
+      <div
+        className="wave-scrollbar"
+        ref={trackRef}
+        title="The whole recorded run — drag the window, or click to jump"
+        onPointerDown={onTrackDown}
+      >
+        <div
+          className="wave-scrollbar-thumb"
+          style={{ left: `${thumbLeft * 100}%`, width: `${thumbWidth * 100}%` }}
+          onPointerDown={onThumbDown}
+          onPointerMove={onThumbMove}
+          onPointerUp={onThumbUp}
+          onPointerCancel={onThumbUp}
         />
       </div>
     </div>

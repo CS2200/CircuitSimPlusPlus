@@ -3261,3 +3261,32 @@ body {
   text-align: center;
   pointer-events: none;
 }
+
+/* The waveform's horizontal scrollbar (UI_OVERHAUL §89): the recorded domain,
+   with the visible window as its thumb. */
+.wave-scrollbar {
+  position: relative;
+  flex: none;
+  height: 12px;
+  margin: 0 0 0 0;
+  background: var(--panel);
+  border-top: 1px solid var(--panel-border);
+  cursor: pointer;
+}
+
+.wave-scrollbar-thumb {
+  position: absolute;
+  top: 1px;
+  height: 9px;
+  min-width: 12px;
+  border-radius: 4px;
+  background: var(--text-dim);
+  opacity: 0.55;
+  cursor: grab;
+}
+
+.wave-scrollbar-thumb:hover,
+.wave-scrollbar-thumb:active {
+  opacity: 0.9;
+  cursor: grabbing;
+}

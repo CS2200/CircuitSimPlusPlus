@@ -233,6 +233,27 @@ test("waveform viewer: traces the run and takes the canvas selection", async ({ 
   await page.getByRole("button", { name: "run to" }).click();
   await expect.poll(cycle, { message: "the trace followed the run" }).toBeGreaterThan(atOpen);
 
+  // The scrollbar shows the whole recorded run with the visible window as its
+  // thumb; clicking the track moves the window (and drops Follow).
+  const thumb = page.locator(".wave-scrollbar-thumb");
+  await expect(thumb).toBeVisible();
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole("button", { name: "+", exact: true }).click();
+  }
+  const thumbStyle = async (): Promise<{ left: number; width: number }> =>
+    thumb.evaluate((el) => {
+      const s = (el as HTMLElement).style;
+      return { left: Number.parseFloat(s.left), width: Number.parseFloat(s.width) };
+    });
+  expect((await thumbStyle()).width).toBeLessThan(90);
+  const thumbBefore = (await thumbStyle()).left;
+  const track = await page.locator(".wave-scrollbar").boundingBox();
+  if (track === null) throw new Error("no scrollbar track");
+  await page.mouse.click(track.x + track.width * 0.1, track.y + track.height / 2);
+  await expect
+    .poll(async () => (await thumbStyle()).left, { message: "the track click moved the window" })
+    .toBeLessThan(thumbBefore);
+
   // The header button is the toggle: while the viewer is up it offers the way
   // back, and clicking it closes the view — no reaching for the bar's Close.
   const back = page.getByRole("button", { name: "Back to the circuit" });
