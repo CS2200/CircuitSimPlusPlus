@@ -19,6 +19,8 @@ import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { wireValueState } from "../lib/value";
+import { radixText } from "../lib/radix";
+import { breakpointCondition } from "../lib/breakpoint";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
 import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
@@ -300,21 +302,6 @@ function drawSevenSeg(
     );
   }
   renderer.flush();
-}
-
-/**
- * A constant's readout: its stored value in the configured radix, PADDED to the
- * pin's width — so widening a pin to 8 bits shows two hex digits where 4 bits
- * showed one. It used to echo the stored string verbatim, so a wider pin looked
- * identical (the tester expected the text to grow with the bit size).
- */
-export function constantText(hex: string, radix: unknown, bits: number): string {
-  const n = Number.parseInt(hex, 16);
-  if (!Number.isFinite(n)) return hex;
-  const w = Math.min(32, Math.max(1, bits));
-  if (radix === "bin") return `0b${n.toString(2).padStart(w, "0")}`;
-  if (radix === "dec") return String(n);
-  return `0x${n.toString(16).toUpperCase().padStart(hexWidthFor(w), "0")}`;
 }
 
 /**
@@ -1477,11 +1464,7 @@ export class DocScene {
         let valuePin: string | null = null;
         if (comp.type === "wiring.constant" && comp.attrs?.value !== undefined) {
           const outPin = layout.pins.find((p) => p.name === "out");
-          valueText = constantText(
-            String(comp.attrs.value),
-            comp.attrs.radix,
-            outPin?.bitsize ?? 1,
-          );
+          valueText = radixText(String(comp.attrs.value), comp.attrs.radix, outPin?.bitsize ?? 1);
         } else if (sim !== undefined && showValues) {
           const pinName = VALUE_PIN[comp.type];
           if (pinName !== undefined) {
@@ -1703,6 +1686,22 @@ export class DocScene {
         } else if (comp.type === "wiring.probe" && valueText === null) {
           // The probe shows only its value; with nothing to read it stays bare
           // (the pointed shape already says "probe", UI_OVERHAUL §36).
+        } else if (comp.type === "debug.breakpoint") {
+          // A breakpoint reads out the condition it stops on, under its mark
+          // (UI_OVERHAUL §90). Both lines are needed: the part is a plain box, so
+          // unlike the probe's pointed shape there is nothing else saying what it
+          // is — and unlike a constant's readout, this value is a *comparison*
+          // rather than something the part carries.
+          const lines = [caption, breakpointCondition(comp.attrs)];
+          lines.forEach((lineText, i) => {
+            const fit = fitValueLine(lineText, layout.rect.w, layout.rect.h, 0.85);
+            if (!fit.full) this.truncated.set(comp.id, lineText);
+            renderer.drawText(cx, cy + (i === 0 ? -0.55 : 0.55), fit.text, {
+              color: i === 0 ? theme.textDim : theme.text,
+              size: fit.size,
+              align: "center",
+            });
+          });
         } else if (isMemory) {
           // RAM/ROM drew its stacked Addr/Data lines above.
         } else if (valueText !== null && !isMemory) {

@@ -49,6 +49,7 @@ const GLYPHS: Readonly<Record<string, string>> = {
   "wiring.constant": "1",
   "io.hexdisplay": "8",
   "misc.text": "T",
+  "debug.breakpoint": "BP",
 };
 
 /** Outward stub direction for a pin (edge inferred from its position). */
@@ -275,6 +276,7 @@ const GROUP_GLYPHS: Readonly<Record<string, string>> = {
   Arithmetic: "arith.adder",
   Memory: "mem.ram",
   "I/O": "io.led",
+  Debugging: "debug.breakpoint",
   Subcircuits: "subcircuit",
 };
 

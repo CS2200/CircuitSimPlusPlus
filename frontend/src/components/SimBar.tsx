@@ -46,6 +46,8 @@ export default function SimBar({
   const [cmdError, setCmdError] = useState<string | null>(null);
   const hz = Math.round(10 ** (hzExp / 10));
   const running = s.status?.running ?? false;
+  /** Paused at a breakpoint — a stop, but not a failure (docs/ipc.md §3). */
+  const paused = s.halted?.reason === "breakpoint";
 
   const guard = (p: Promise<void>) => p.catch((e: unknown) => setCmdError(String(e)));
 
@@ -209,12 +211,21 @@ export default function SimBar({
         s.loadErrors.length > 0 ||
         cmdError !== null ||
         s.contendedNets.size > 0) && (
-        <div className="sim-banner" role="alert">
-          {s.halted !== null && (
-            <span>
-              ⛔ Halted at cycle {s.halted.cycle} — {s.halted.reason}: {s.halted.details}
-            </span>
-          )}
+        <div className={`sim-banner${paused ? " breakpoint" : ""}`} role="alert">
+          {s.halted !== null &&
+            (paused ? (
+              // A breakpoint is not a failure (docs/ipc.md §3): the run stopped
+              // where it was asked to and the transport stays armed, so the
+              // banner says what to do next rather than what went wrong.
+              <span className="sim-breakpoint">
+                ⏸ Breakpoint at cycle {s.halted.cycle} — {haltMessage(s.halted.details)}. Step or
+                run to continue.
+              </span>
+            ) : (
+              <span>
+                ⛔ Halted at cycle {s.halted.cycle} — {s.halted.reason}: {s.halted.details}
+              </span>
+            ))}
           {s.loadErrors.length > 0 && (
             <span>
               ⛔ Load failed ({s.loadErrors.length} {s.loadErrors.length === 1 ? "error" : "errors"}
@@ -233,4 +244,13 @@ export default function SimBar({
       )}
     </>
   );
+}
+
+/**
+ * A halt's message without the contract's `comp <id> pin "<pin>": ` prefix
+ * (docs/ipc.md §5). The banner is a sentence, and the part it names is already
+ * ringed on the canvas — the one place the id belongs is the console.
+ */
+function haltMessage(details: string): string {
+  return details.replace(/^comp \d+ pin "[^"]*":\s*/, "");
 }

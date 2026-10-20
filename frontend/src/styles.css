@@ -2797,6 +2797,14 @@ body {
   font-weight: 600;
 }
 
+/* Paused at a breakpoint (UI_OVERHAUL §90): the run stopped, but nothing is
+ * wrong — amber like the violation markers rather than the halt red, so a
+ * deliberate stop does not read as a fault. */
+.sim-banner.breakpoint {
+  background: color-mix(in srgb, var(--violation) 14%, var(--panel));
+  border-bottom-color: var(--violation);
+}
+
 /* Watch panel (U5/U6) — lives inside the right dock's Watch tab. */
 .watch-panel {
   display: flex;
@@ -3235,6 +3243,14 @@ body {
 
 .wave-bar-spacer {
   flex: 1;
+}
+
+/* Where the run stopped (UI_OVERHAUL §90): the banner says why, the trace says
+ * where — this says both, in the trace's own bar. Amber for a breakpoint (a
+ * stop, not a fault), halt red for a real halt. */
+.wave-bar-halted {
+  color: var(--wire-x);
+  font-weight: 600;
 }
 
 .wave-canvas-wrap {

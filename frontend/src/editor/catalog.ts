@@ -379,6 +379,9 @@ export function defaultAttrs(type: string): Record<string, unknown> | undefined 
   if (type === "wiring.constant") return { value: "0" };
   // An annotation is born with visible text so it can be grabbed and edited.
   if (type === "misc.text") return { text: "Text" };
+  // A breakpoint's condition is written out too, so the body says what it is
+  // watching for from the moment it is placed (`= 0x05`, format-v2 §4's default).
+  if (type === "debug.breakpoint") return { value: "0" };
   return undefined;
 }
 
@@ -583,6 +586,21 @@ const REGISTRY: Record<string, CompSpec> = {
     "PROBE",
   ),
   "wiring.splitter": splitterSpec(),
+
+  // Debugging (UI_OVERHAUL §90): a watcher, not a part of the logic. `in` is the
+  // watched value and `en` gates the watch — the old tool's BreakpointPeer
+  // DATA/ENABLE pair. Two left-edge pins on a 3×2 box, like the probe: the body
+  // reads out the condition (`= 0x05`, docScene) instead of the mark alone.
+  "debug.breakpoint": boxSpec(
+    3,
+    2,
+    [
+      { name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BUS_WIDTH },
+      { name: "en", dx: 0, dy: 1.5, kind: "in" },
+    ],
+    "BP",
+    { label: "Breakpoint" },
+  ),
 
   // Plexers (pin sets scale with the select width: n = 2^select data lines)
   "plexers.mux": plexerSpec("MUX", "mux"),
@@ -816,6 +834,7 @@ const TYPE_NAMES: Readonly<Record<string, string>> = {
   "io.hexdisplay": "Hex Display",
   subcircuit: "Subcircuit",
   "misc.text": "Text",
+  "debug.breakpoint": "Breakpoint",
 };
 
 /** Full human name for a component type (falls back to the raw type string). */
@@ -902,6 +921,12 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   {
     group: "Misc",
     items: [{ type: "misc.text", label: "TEXT" }],
+  },
+  {
+    // Its own section, like CircuitSim CE's "Debugging": a breakpoint is not a
+    // building block, it is a way to stop the run and look (UI_OVERHAUL §90).
+    group: "Debugging",
+    items: [{ type: "debug.breakpoint" }],
   },
 ];
 
@@ -1168,6 +1193,22 @@ function baseFields(type: string): AttrField[] {
       ];
     case "wiring.probe":
       return [BITSIZE_FIELD, RADIX_FIELD];
+    case "debug.breakpoint":
+      // The same two knobs as a constant's readout — how wide the watched value
+      // is, and how it reads — plus the value itself, edited in whichever radix
+      // is selected, so you never have to think in hex unless you pick hex
+      // (UI_OVERHAUL §55/§90).
+      return [
+        BITSIZE_FIELD,
+        {
+          key: "value",
+          label: "Stop when",
+          kind: "radix-value",
+          placeholder: "0",
+          group: "Options",
+        },
+        RADIX_FIELD,
+      ];
     case "plexers.mux":
     case "plexers.demux":
       return [

@@ -181,6 +181,7 @@ describe("compLayout", () => {
       "plexers.priority-decoder",
       "arith.adder",
       "arith.shifter",
+      "debug.breakpoint",
       "mem.register",
       "mem.ram",
       "mem.rom",

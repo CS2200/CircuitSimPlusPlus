@@ -44,6 +44,24 @@ describe("body marks (UI_OVERHAUL §17)", () => {
     expect(compSpec("plexers.mux").caption({})).toBe("MUX");
     expect(compSpec("plexers.decoder").caption({})).toBe("DEC");
     expect(compSpec("plexers.priority-decoder").caption({})).toBe("PRI");
+    // A breakpoint keeps its mark on the body and shows what it watches under
+    // it (docScene draws the condition; §90), so the mark is just "BP".
+    expect(compSpec("debug.breakpoint").caption({})).toBe("BP");
+    // `in` first: the engine identifies the watched pin by slot, and `en` gates
+    // the watch (format-v2 §4) — the old tool's DATA/ENABLE pair.
+    expect(
+      compSpec("debug.breakpoint")
+        .pins({ bitsize: 8 })
+        .map((p) => [p.name, p.kind, p.bitsize ?? 1]),
+    ).toEqual([
+      ["in", "in", 8],
+      ["en", "in", 1],
+    ]);
+    expect(
+      compSpec("debug.breakpoint")
+        .pins({})
+        .find((p) => p.name === "in")?.bitsize,
+    ).toBe(1);
     // UI_OVERHAUL §88: the full CircuitSim CE enable chain is on the part.
     expect(
       compSpec("plexers.priority-decoder")
@@ -79,6 +97,9 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("plexers.priority-decoder")).toEqual(["inputBits"]);
     expect(keys("wiring.probe")).toEqual(["bitsize", "radix"]);
     expect(keys("wiring.splitter")).toEqual(["splits"]);
+    // A breakpoint's value is edited in the chosen radix, exactly like a
+    // constant's (§55), and `radix` is display-only on both (§90).
+    expect(keys("debug.breakpoint")).toEqual(["bitsize", "value", "radix"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
     expect(keys("mem.ram")).toEqual(["addrBits", "bitsize"]);
@@ -135,6 +156,7 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
   it("names a type in plain words for the Inspector header (§57)", () => {
     expect(typeDisplayName("plexers.mux")).toBe("Multiplexer");
     expect(typeDisplayName("mem.register")).toBe("Register");
+    expect(typeDisplayName("debug.breakpoint")).toBe("Breakpoint");
     expect(typeDisplayName("unknown.thing")).toBe("unknown.thing");
   });
 
@@ -148,6 +170,9 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
       splits: { b0: [0], b1: [1], b2: [2], b3: [3] },
     });
     expect(defaultAttrs("gate.and")).toBeUndefined();
+    // A breakpoint is placed watching for 0 on a one-bit line — the format's
+    // defaults, written out so the body's readout is never blank (§90).
+    expect(defaultAttrs("debug.breakpoint")).toEqual({ value: "0" });
     // A placed-with-defaults splitter is valid geometry (bus width 4).
     const pins = compPins({ type: "wiring.splitter", attrs: defaultAttrs("wiring.splitter") });
     expect(pins.find((p) => p.name === "bus")?.bitsize).toBe(4);

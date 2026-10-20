@@ -26,6 +26,9 @@ describe("power / ground glyphs", () => {
   it("leaves box families alone (they draw their own rect)", () => {
     expect(gateShape("gate.and", 0, 0, 5, 3)).not.toBeNull(); // gates are shaped
     expect(gateShape("wiring.constant", 0, 0, 3, 2)).toBeNull();
+    // A breakpoint is a box too: its mark and its condition are body text
+    // (docScene §90), not a silhouette.
+    expect(gateShape("debug.breakpoint", 0, 0, 3, 2)).toBeNull();
   });
 });
 

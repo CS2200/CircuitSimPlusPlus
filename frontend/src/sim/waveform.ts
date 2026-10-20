@@ -32,6 +32,7 @@
 
 import type { NetId, NetDiffs, NamedComponent, WireValue } from "../ipc/types";
 import { wireValueState } from "../lib/value";
+import { breakpointCondition } from "../lib/breakpoint";
 
 /** One value, in effect from `t` until the next sample. */
 export interface WaveSample {
@@ -571,4 +572,51 @@ export function clockSignals(opts: {
       bits: 1,
     };
   });
+}
+
+/**
+ * Breakpoints on the sheet being traced (UI_OVERHAUL §90): each watched net →
+ * the conditions that stop on it (`= 0x05`). A list, not one string: nothing
+ * stops a student putting two breakpoints on one signal (watch 0 here, watch 5
+ * there), and the trace must not quietly show only one of them.
+ *
+ * Resolved the same way as every other trace signal — through the document wire
+ * that reaches the part's `in` pin and the engine's `net_map` — so the trace
+ * marks the breakpoints the *schematic* has. The engine has nothing to tell us
+ * here: a breakpoint changes behavior in the run, but *which* signals are
+ * watched is a property of the drawing, and it is the same drawing the trace is
+ * being read against.
+ */
+export function breakpointWatches(opts: {
+  wires: readonly { a: unknown; b: unknown }[];
+  wireToNet: ReadonlyMap<number, NetId>;
+  components: readonly {
+    id: string;
+    type: string;
+    attrs?: Readonly<Record<string, unknown>>;
+  }[];
+}): Map<NetId, string[]> {
+  const watches = new Map<NetId, string[]>();
+  const byId = new Map(
+    opts.components.filter((c) => c.type === "debug.breakpoint").map((c) => [c.id, c]),
+  );
+  if (byId.size === 0) return watches;
+  opts.wires.forEach((wire, idx) => {
+    for (const ep of [wire.a, wire.b]) {
+      if (typeof ep !== "object" || ep === null || !("comp" in ep) || !("pin" in ep)) continue;
+      const { comp, pin } = ep as { comp: string; pin: string };
+      // Only the DATA pin watches a net; `en` is a control input (format-v2 §4
+      // keeps the old tool's DATA/ENABLE pair, and only DATA is watched).
+      if (pin !== "in") continue;
+      const bp = byId.get(comp);
+      if (bp === undefined) continue;
+      const net = opts.wireToNet.get(idx);
+      if (net === undefined) continue;
+      const list = watches.get(net);
+      const cond = breakpointCondition(bp.attrs);
+      if (list === undefined) watches.set(net, [cond]);
+      else if (!list.includes(cond)) list.push(cond);
+    }
+  });
+  return watches;
 }

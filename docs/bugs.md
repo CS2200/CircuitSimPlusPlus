@@ -7,7 +7,7 @@ against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
 **Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), **205 backend + 417 unit + 79 e2e** tests green. RAM powers
+and RAMs have no `rst` pin), **213 backend + 427 unit + 80 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
 priority decoder gained CircuitSim CE's enable chain (`en_in`/`en_out`, `valid` as CE's
 Group Signal, `out` = `X` when nothing wins) so the class's cascaded encoder — the
@@ -322,11 +322,13 @@ format bump. _(this round)_
   existing `net_diffs` stream, recording before the per-frame merge so no cycle is dropped.
   No engine or IPC change was needed. Signals default to the named parts and take the canvas
   selection; the axis is cycles.
-- **Debugging tab with breakpoints** — still open, and now has a home. `HaltReason::Breakpoint`
-  exists in `api.rs` but nothing constructs it, and the halting component the old
-  `BreakpointPeer` mapped to was never built (that part converts to a probe). The natural next
-  step is to set a breakpoint from a value in the waveform viewer, which is why the two were
-  triaged together.
+- **Debugging tab with breakpoints** — **done** (UI_OVERHAUL §90): `debug.breakpoint` is the old
+  `BreakpointPeer`'s DATA/ENABLE pair, so the transpiler's probe substitution is gone; CE's rule
+  is kept exactly (`in` *becomes* `value`, `en` arms on anything but a driven `0`), and the halt
+  is the engine's one **non-sticky** stop — the trap that made a breakpoint component useless
+  before, since every other halt is terminal until a reload. The trace marks each watched signal
+  with its condition and draws a dashed rule at the cycle the run stopped at. Still open: setting
+  one *from* a value in the trace, which is a document edit (undoable) rather than a session one.
 - **"Remove 'Named' bubble"** — read as the history `named` badge, which is gone
   _(70f6eb4)_; recorded in the P2 list.
 - **"Reposition 'Restore Version' tab to the far right"** — this meant the

@@ -30,6 +30,12 @@ import type { WireValue } from "../ipc/types";
  * bus.  The axis is **cycles** — the model the course reasons in — and the
  * colours are the canvas's own (`theme.wire[state]`), so a signal is the same
  * colour in the trace as it is on the schematic (§35).
+ *
+ * Breakpoints are the trace's other half (§90): a watched signal carries a ring
+ * and the condition it stops on in the name column, and a run that stopped draws
+ * a dashed rule at the cycle it stopped in.  Both come from the *document*
+ * (`sim/waveform.ts`'s `breakpointWatches`), not from the engine, so the trace
+ * marks what the schematic says — the same source as every other row here.
  */
 
 /** Minimum row height; rows grow into the panel (see `laneH`). */
@@ -51,6 +57,7 @@ export default function WaveformView({
   sim,
   defaults,
   picked,
+  watches,
   circuitLabel,
   onClose,
   onNotify,
@@ -60,6 +67,8 @@ export default function WaveformView({
   defaults: WaveSignal[];
   /** Signals the canvas selection resolves to right now (App resolves them). */
   picked: WaveSignal[];
+  /** Breakpoints on this sheet: net → the conditions that stop on it (§90). */
+  watches: ReadonlyMap<number, readonly string[]>;
   circuitLabel: string;
   onClose: () => void;
   onNotify?: (message: string) => void;
@@ -95,6 +104,12 @@ export default function WaveformView({
       last: tb.x(ts.lastT, ts.lastCycle),
     };
   }, [tb, sim.waves, version]);
+  /**
+   * Where the run stopped, if it did (§90).  Read straight off the store, like
+   * the recorder: a halt is one more fact about the run the trace is showing,
+   * and the trace is the only place that can put it at a *cycle*.
+   */
+  const halted = sim.store.halted;
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -302,13 +317,39 @@ export default function WaveformView({
           : (row.signal.bits ?? Math.max(1, bitsOf(latest ?? { v: "0", x: "0", z: "0" })));
       const busRow = row.bit === undefined && isBus(row.signal, latest);
 
-      // Gutter: label + the value under the cursor.
+      // Gutter: label, a breakpoint marker when this signal is watched, and the
+      // value under the cursor.
       const atCursor = cursor === null ? null : rowValueAt(row, placed, cursor.cycle);
+      const watch = watches.get(row.signal.net);
+      // Two breakpoints on one signal read as `= 0x0 · = 0x5`: the ring is one
+      // either way, because it is one fact — this signal can stop the run.
+      const watchText = watch === undefined ? undefined : watch.join(" · ");
 
       ctx.fillStyle = row.bit !== undefined ? theme.textDim : theme.text;
       const indent = row.bit !== undefined ? 12 : 0;
       const label = row.bit !== undefined ? `[${row.bit}]` : row.signal.label;
-      ctx.fillText(clip(label, 17), 6 + indent, mid);
+      // A watched row spends its name-column room on the condition: which signal
+      // is the question the column already answers, and what it stops on is the
+      // one the trace is open to ask (§90).
+      const labelText = clip(label, watchText === undefined ? 17 : 11);
+      ctx.fillText(labelText, 6 + indent, mid);
+      if (watchText !== undefined) {
+        // A ring in the halt colour — the same one the canvas rings a stopped
+        // part with, so "this can stop the run" reads the same in both views.
+        const wx = 6 + indent + ctx.measureText(labelText).width + 8;
+        ctx.strokeStyle = theme.wire.x;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(wx, mid, 3.2, 0, Math.PI * 2);
+        ctx.stroke();
+        // The condition, in whatever room the cursor's value readout leaves
+        // (that value is right-aligned, so it claims its width first).
+        const valueW =
+          atCursor === null ? 0 : ctx.measureText(waveText(atCursor.val, rowBits)).width + 8;
+        const room = Math.max(2, Math.floor((GUTTER - 14 - valueW - wx - 7) / 6.3));
+        ctx.fillStyle = theme.wire.x;
+        ctx.fillText(clip(watchText, room), wx + 7, mid);
+      }
       if (atCursor !== null) {
         ctx.fillStyle = theme.textDim;
         const text = waveText(atCursor.val, rowBits);
@@ -439,6 +480,25 @@ export default function WaveformView({
       ctx.textAlign = "center";
     }
 
+    // Where the run stopped (§90): a dashed rule at the halting cycle, so the
+    // one thing the banner cannot say — *where* in the run — is visible in the
+    // trace. Dashed, because the cursor rules solid and the two are different
+    // things: that one is where your pointer is, this one is where the sim is.
+    if (halted !== null && halted.cycle <= domainLast) {
+      const hx = Math.round(x(halted.cycle)) + 0.5;
+      if (hx >= GUTTER && hx <= dataRight) {
+        ctx.save();
+        ctx.strokeStyle = theme.wire.x;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(hx, 0);
+        ctx.lineTo(hx, contentH - AXIS_H);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // Cursor, over everything — but only inside the lane area: a cursor left
     // behind outside it (the app lost focus with the mouse away) would draw a
     // rule through the signal labels.
@@ -474,7 +534,21 @@ export default function WaveformView({
       if (s === null) return null;
       return row.bit === undefined ? s : { val: extractBit(s.val, row.bit) };
     }
-  }, [drawRows, size, contentH, pxPerCycle, origin, cursor, sim.waves, tb, version, span, laneH]);
+  }, [
+    drawRows,
+    size,
+    contentH,
+    pxPerCycle,
+    origin,
+    cursor,
+    sim.waves,
+    tb,
+    version,
+    span,
+    laneH,
+    watches,
+    halted,
+  ]);
 
   const onWheel = useCallback(
     (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -612,6 +686,12 @@ export default function WaveformView({
           {drawRows.length === 1 ? "" : "s"}
         </span>
         <span className="wave-bar-spacer" />
+        {halted !== null && (
+          <span className="wave-bar-text wave-bar-halted" title={halted.details}>
+            {halted.reason === "breakpoint" ? "⏸ breakpoint" : `⛔ ${halted.reason}`} at cycle{" "}
+            {halted.cycle}
+          </span>
+        )}
         <span className="wave-bar-text">cycle {current}</span>
         <button
           className="secondary"

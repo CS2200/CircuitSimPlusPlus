@@ -160,6 +160,29 @@ describe("wiring", () => {
     expect(attrsOf(probe)?.bitsize).toBe(32); // the probe matched it
   });
 
+  it("a breakpoint adopts the width of what it watches (§90)", () => {
+    const { doc, sync, attrsOf, connect } = bareTool();
+    doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [10, 10],
+      attrs: { value: "1", bitsize: 8 },
+    });
+    const bp = doc.addComponent(0, {
+      type: "debug.breakpoint",
+      pos: [20, 10],
+      attrs: { value: "0" },
+    });
+    sync();
+
+    // The constant's `out` pin (x=13, y=11) → the breakpoint's `in` (x=20, y=10.5).
+    connect({ x: 13, y: 11 }, { x: 20, y: 10.5 });
+
+    // Watching a bus while declaring one bit would be the width mismatch the
+    // watcher exists to avoid; the condition's own value is untouched.
+    expect(attrsOf(bp)?.bitsize).toBe(8);
+    expect(attrsOf(bp)?.value).toBe("0");
+  });
+
   it("a 1-bit source leaves a probe's default width alone", () => {
     const { doc, sync, attrsOf, connect } = bareTool();
     doc.addComponent(0, { type: "wiring.constant", pos: [10, 10], attrs: { value: "1" } });

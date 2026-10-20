@@ -4,6 +4,7 @@ import type { NamedComponent, NetDiffs, WireValue } from "../ipc/types";
 import {
   WAVE_SAMPLE_CAP,
   WaveformRecorder,
+  breakpointWatches,
   clockSignals,
   isBus,
   bitLaneIndices,
@@ -392,6 +393,83 @@ describe("defaultSignals", () => {
       ["pc", 32],
       ["din", 8],
     ]);
+  });
+});
+
+describe("breakpointWatches (UI_OVERHAUL §90)", () => {
+  const bp = (id: string, attrs: Record<string, unknown>) => ({
+    id,
+    type: "debug.breakpoint",
+    attrs,
+  });
+  const wireToNet = new Map([
+    [0, 7],
+    [1, 8],
+    // A second part wired to the *same* net as wire 0 (below).
+    [2, 7],
+  ]);
+  const wires = [
+    { a: { comp: "g", pin: "out" }, b: { comp: "bp", pin: "in" } },
+    { a: { comp: "g", pin: "out" }, b: { comp: "bp", pin: "en" } },
+    { a: { comp: "g", pin: "out" }, b: { comp: "bp2", pin: "in" } },
+  ];
+
+  it("maps the net on the `in` pin to its condition", () => {
+    const w = breakpointWatches({
+      wires,
+      wireToNet,
+      components: [bp("bp", { bitsize: 8, value: "a5" })],
+    });
+    expect([...w.entries()]).toEqual([[7, ["= 0xA5"]]]);
+  });
+
+  it("never mistakes `en` for a watch", () => {
+    // Only wire 1 carries the `en` gate here, so nothing is watched.
+    const w = breakpointWatches({
+      wires: [wires[1]],
+      wireToNet,
+      components: [bp("bp", {})],
+    });
+    expect(w.size).toBe(0);
+  });
+
+  it("keeps every breakpoint on one signal", () => {
+    // Two parts watching one net: both conditions are kept, in wire order, so
+    // the trace can show both rather than silently picking one.
+    const w = breakpointWatches({
+      wires,
+      wireToNet,
+      components: [bp("bp", { value: "0" }), bp("bp2", { bitsize: 8, value: "a5" })],
+    });
+    expect(w.get(7)).toEqual(["= 0x0", "= 0xA5"]);
+  });
+
+  it("has nothing to say about a circuit without breakpoints", () => {
+    expect(
+      breakpointWatches({ wires, wireToNet, components: [{ id: "g", type: "gate.not" }] }).size,
+    ).toBe(0);
+  });
+
+  it("skips junction endpoints and unwired pins alike", () => {
+    // A junction carries no pin, so a wire between two junctions can never be a
+    // breakpoint's `in` — it is plumbing, not a connection to a part.
+    const junctions = [
+      { a: { join: { wire: 0, segment: 0 } }, b: { join: { wire: 1, segment: 0 } } },
+    ];
+    expect(
+      breakpointWatches({ wires: junctions, wireToNet, components: [bp("bp", {})] }).size,
+    ).toBe(0);
+    // …and an unwired `in` has no net to mark.
+    expect(breakpointWatches({ wires: [], wireToNet, components: [bp("bp", {})] }).size).toBe(0);
+  });
+
+  it("reads the condition in the configured radix, like the canvas does", () => {
+    const w = breakpointWatches({
+      wires,
+      wireToNet,
+      components: [bp("bp", { bitsize: 8, value: "5", radix: "dec" })],
+    });
+    expect(w.get(7)).toEqual(["= 5"]);
   });
 });
 

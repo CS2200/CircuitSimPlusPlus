@@ -45,7 +45,13 @@ import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
 import { historyStore, type HistoryUsage, type VersionMeta } from "./model/versionStore";
-import { clockSignals, defaultSignals, pickedSignals, type WaveSignal } from "./sim/waveform";
+import {
+  breakpointWatches,
+  clockSignals,
+  defaultSignals,
+  pickedSignals,
+  type WaveSignal,
+} from "./sim/waveform";
 import { diffDocuments, highlightIds } from "./model/versionDiff";
 import {
   PALETTE,
@@ -623,6 +629,24 @@ export default function App() {
     ];
     // simVersion keeps the net map fresh across a reload.
   }, [doc, sheet, sim.store.named, sim.store.wireToNet, simVersion, bitsOfNamed]);
+
+  /**
+   * Breakpoints on the sheet being traced (§90): each watched net and the
+   * condition it stops on.  Resolved document-level, like every other signal the
+   * viewer shows, so the trace marks what the schematic says rather than what
+   * the engine happens to name.
+   */
+  const waveWatches = useMemo<ReadonlyMap<number, readonly string[]>>(() => {
+    const circuit = doc.circuits[sheet];
+    const wireToNet = sim.store.wireToNet;
+    if (circuit === undefined || wireToNet === null) return new Map();
+    return breakpointWatches({
+      wires: circuit.wires,
+      wireToNet,
+      components: circuit.components,
+    });
+    // simVersion keeps the net map fresh across a reload.
+  }, [doc, sheet, sim.store.wireToNet, simVersion]);
 
   const openWaveform = useCallback(() => {
     if (!sim.store.loaded) {
@@ -2088,6 +2112,7 @@ export default function App() {
             sim={sim}
             defaults={waveDefaults}
             picked={wavePicked}
+            watches={waveWatches}
             circuitLabel={doc.circuits[sheet]?.name ?? ""}
             onClose={() => setWaveOpen(false)}
             onNotify={toast}

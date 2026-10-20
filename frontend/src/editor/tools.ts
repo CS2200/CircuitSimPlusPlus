@@ -716,7 +716,11 @@ export class ToolMachine {
     const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
     const target = hit?.type === "subcircuit" ? hit.attrs?.circuit : undefined;
     if (typeof target === "string" && target !== "") this.onOpenSubcircuit?.(target);
-    else this.onEditComponent?.(comp.compId, hit?.type === "wiring.constant" ? "value" : undefined);
+    else {
+      const focus =
+        hit?.type === "wiring.constant" || hit?.type === "debug.breakpoint" ? "value" : undefined;
+      this.onEditComponent?.(comp.compId, focus);
+    }
     this.changed();
   }
 
@@ -996,6 +1000,10 @@ export class ToolMachine {
    * whatever it is attached to — instead of leaving the user to set `bitsize`
    * by hand and then flagging a width mismatch on a part that has no business
    * having an opinion. A junction endpoint carries no width, so it is skipped.
+   *
+   * A **breakpoint** is the same kind of part (UI_OVERHAUL §90): it watches
+   * `in`, and watching a bus while declaring one bit would be a width mismatch
+   * on the one pin whose whole job is to mirror its driver.
    */
   private matchProbeWidth(a: CsxEndpoint, b: CsxEndpoint): void {
     if (!isPinEndpoint(a) || !isPinEndpoint(b)) return;
@@ -1007,7 +1015,8 @@ export class ToolMachine {
       if (probeEnd.pin !== "in") continue;
       const probe = comps.find((c) => c.id === probeEnd.comp);
       const driver = comps.find((c) => c.id === otherEnd.comp);
-      if (probe?.type !== "wiring.probe" || driver === undefined) continue;
+      const watcher = probe?.type === "wiring.probe" || probe?.type === "debug.breakpoint";
+      if (!watcher || driver === undefined) continue;
       const width = compPins(driver, this.doc.circuits).find(
         (p) => p.name === otherEnd.pin,
       )?.bitsize;

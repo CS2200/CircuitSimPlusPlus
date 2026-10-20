@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { CsxWire } from "../model/csx";
 import {
   clockLevelOf,
-  constantText,
   danglingPins,
   ellipsize,
   fitValueLine,
@@ -152,30 +151,6 @@ describe("memPreviewWord", () => {
 
   it("masks the word to the memory's data width", () => {
     expect(memPreviewWord("1ff", 0, 4)).toBe(0x0f);
-  });
-});
-
-/**
- * A constant's readout grows with its pin's width (`0x5` → `0x05`), so changing
- * the bit size is visible on the canvas.
- */
-describe("constantText", () => {
-  it("pads hex to the pin's width, so a wider pin shows more characters", () => {
-    expect(constantText("5", "hex", 4)).toBe("0x5");
-    expect(constantText("5", "hex", 8)).toBe("0x05");
-    expect(constantText("5", "hex", 32)).toBe("0x00000005");
-    // The stored string's own padding is irrelevant — the width rules.
-    expect(constantText("0a", "hex", 4)).toBe("0xA");
-  });
-
-  it("pads binary to the exact bit count", () => {
-    expect(constantText("5", "bin", 8)).toBe("0b00000101");
-    expect(constantText("1", "bin", 2)).toBe("0b01");
-  });
-
-  it("leaves decimal unpadded (a number has no fixed digit count)", () => {
-    expect(constantText("5", "dec", 8)).toBe("5");
-    expect(constantText("ff", "dec", 8)).toBe("255");
   });
 });
 

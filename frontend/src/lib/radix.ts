@@ -4,6 +4,27 @@
  * value is read and typed the same way wherever it is edited.
  */
 
+import { hexWidthFor } from "./rleHex";
+
+/**
+ * A stored value read out on a part's body: the configured radix, PADDED to the
+ * part's width — so widening a pin to 8 bits shows two hex digits where 4 bits
+ * showed one. It used to echo the stored string verbatim, so a wider pin looked
+ * identical (the tester expected the text to grow with the bit size). This lives
+ * here beside {@link formatRadixValue} because more than the canvas reads it now:
+ * a breakpoint's condition reads the same on its body and in the trace's name
+ * column (UI_OVERHAUL §90), exactly as `lib/value.ts` keeps a value's *colour* the
+ * same in both places (§35).
+ */
+export function radixText(hex: string, radix: unknown, bits: number): string {
+  const n = Number.parseInt(hex, 16);
+  if (!Number.isFinite(n)) return hex;
+  const w = Math.min(32, Math.max(1, bits));
+  if (radix === "bin") return `0b${n.toString(2).padStart(w, "0")}`;
+  if (radix === "dec") return String(n);
+  return `0x${n.toString(16).toUpperCase().padStart(hexWidthFor(w), "0")}`;
+}
+
 /** Render a stored hex value in `radix` for display (no 0x/0b prefix). */
 export function formatRadixValue(hex: string, radix: string, bits: number): string {
   const n = Number.parseInt(hex === "" ? "0" : hex, 16);

@@ -360,6 +360,38 @@ test("constant: radix display + double-click jumps into the value", async ({ pag
   expect(c?.attrs?.value).toBe("1");
 });
 
+test("breakpoint: places from Debugging and edits its condition", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-group="Debugging"]').click();
+  await page.getByRole("button", { name: "Breakpoint", exact: true }).click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".inspector-id")).toBeVisible();
+
+  const placed = () =>
+    doc(page).then((d) => d.circuits[0].components.find((c) => c.type === "debug.breakpoint"));
+  expect(await placed()).toBeTruthy();
+  // Placed watching for 0 on a one-bit line — the format's defaults, so the
+  // body can say what it stops on from the first click (§90).
+  expect((await placed())?.attrs).toEqual({ value: "0" });
+
+  // The condition is edited in whichever radix is selected, exactly like a
+  // constant's value (§55): decimal in, dec + the digit stored (§90).
+  await page.getByRole("radio", { name: "Dec", exact: true }).click();
+  await page.getByLabel("Stop when").fill("1");
+  await page.getByLabel("Stop when").press("Enter");
+  expect((await placed())?.attrs?.radix).toBe("dec");
+  expect((await placed())?.attrs?.value).toBe("1");
+
+  // A value the watched line cannot hold is not committed — the same rule the
+  // engine enforces at load (format-v2 §4), so a 1-bit breakpoint stays at 1
+  // rather than storing a value the file would be rejected for (§90).
+  await page.getByLabel("Stop when").fill("5");
+  await page.getByLabel("Stop when").press("Enter");
+  expect((await placed())?.attrs?.value).toBe("1");
+});
+
 test("priority decoder: places from Plexers and edits its line count", async ({ page }) => {
   await page.goto("/");
   await page.locator('[data-group="Plexers"]').click();

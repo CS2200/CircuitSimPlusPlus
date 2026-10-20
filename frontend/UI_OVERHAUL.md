@@ -2264,10 +2264,13 @@ dock, and the viewer takes the area. The sim transport is **not** hidden — `Si
 header — so you can step, run to a cycle or play while the trace is open, and _Follow_ keeps the
 newest cycle at the right edge like a scope. Wheel zooms at the cursor, dragging the canvas pans.
 
-**What is still open.** Breakpoints. `HaltReason::Breakpoint` exists in `api.rs` but nothing
-constructs it, and the old `BreakpointPeer` converts to a probe. Setting one from a value in the
-trace is the natural next step — which is why `bugs.md` always triaged "waveform viewer" and
-"debugging with breakpoints" as one item.
+**Breakpoints** used to be what was still open here: `HaltReason::Breakpoint` existed in `api.rs`
+with nothing to construct it, and the old `BreakpointPeer` converted to a probe. Both are now
+§90 — a breakpoint is a part, its halt is the engine's one non-sticky stop, and the trace marks
+what is watched and where the run stopped. The remaining idea, setting a breakpoint _from_ a
+value in the trace ("stop when this signal is 5", clicked on the value), is still open: it is an
+edit to the document rather than to the session, so it wants an undoable edit from the viewer;
+the part is four clicks to place meanwhile.
 
 Two follow-ups from the first look at it (§89):
 
@@ -2348,3 +2351,58 @@ Follow-ups after using it on a real circuit (§89):
   gutter made it ambiguous whether the labels sat over the trace or beside it; a canvas has no
   backdrop blur to reach for, and an opaque pane says the same thing more cheaply. Row rules still
   cross it, which is what keeps a name aligned to its row at a glance.
+
+## 90. Breakpoints: a part that stops the run, and a trace that shows it
+
+`docs/bugs.md` triaged "waveform viewer" and "debugging with breakpoints" as one item from the
+start, and it was right to: `HaltReason::Breakpoint` has been in `api.rs` since the contract was
+written, with nothing in either the engine or the UI able to construct one. The old tool had the
+part that was missing — CircuitSim CE's `BreakpointPeer` (DATA + ENABLE, a `value` property, a
+halt when the data _becomes_ it) — so the new tool gets the same part rather than a substitute,
+and the transpiler's `BreakpointPeer → wiring.probe` compromise goes away with it.
+
+**The part.** `debug.breakpoint`: `in` carries the watched value at `bitsize`, `en` gates the
+watch, and the body reads the condition out under its mark (`BP` on one line, `= 0x05` on the
+next — the probe's shape is not there to say what this is, so the mark is). It gets its own
+section on the palette rail, **Debugging**, which is CE's category and the honest one: a
+breakpoint is not a block you compute with, it is a way to stop the run and look. `value` and
+`radix` are edited exactly like a constant's value (§55), and the watched **width is adopted**
+from whatever lands on `in` — the rule a probe already had. Declaring one bit and watching a bus
+would be the width mismatch a watcher must never have.
+
+**The semantics are CE's**, taken from `Breakpoint.valueChanged` and written out in
+`format-v2.md` §9 rather than reinvented:
+
+- The trigger is an **arrival**. Holding the watched value is not a hit, so stepping past a
+  breakpoint that has fired means stepping forward. This is what makes "continue" mean anything,
+  and it is why the part keeps CE's whole shape instead of becoming a simpler level detector.
+- The **enable** arms on anything but a driven `0` (CE's rule to the letter), so an unconnected
+  `en` still watches — the plain "break on this signal" case needs no wiring at all.
+- It never fires on the **power-on settle**. Every net comes up somewhere, so firing on a net
+  merely _being_ the watched value would stop every breakpoint on a line that idles low at cycle
+  0 — noise, not a breakpoint.
+
+**The halt is not sticky**, which is the one engine change this needed. Every other halt is
+terminal because the design it reports is broken — or the budget is gone — so `run` and friends
+made them the engine's sticky state. A breakpoint is the opposite: the design is fine and the
+user asked for the pause. `record_halt` reports it and leaves the sticky slot empty, so the next
+step or run continues from exactly there; the session needed no change at all. In the banner it
+reads in amber rather than halt red — `⏸ Breakpoint at cycle 9 — watched value 0x2 arrived. Step
+or run to continue.` — with the part's id stripped, because the banner is a sentence and the
+canvas is already ringing the part.
+
+**The trace** is the other half. A viewer that cannot answer "what am I watching, and where did
+it stop?" is missing what it is for: the name column carries a ring in the halt colour plus the
+condition (`pc ○ = 0x2`), two breakpoints on one signal show both joined, and a run that stopped
+draws a **dashed rule** at the halting cycle with the bar naming it (`⏸ breakpoint at cycle 9`).
+Dashed, because a solid accent rule is already the cursor: that one is where your pointer is,
+this one is where the sim is. Both come from the **document** — `sim/waveform.ts`'s
+`breakpointWatches` walks the wire on each part's `in` pin to the engine's net — the same source
+as every other row in the trace, so no new IPC and no engine plumbing, and it follows the sheet
+you are on rather than the root sheet the engine names.
+
+**Where the two meet is the point.** Set one up: place the part, wire `in` to the signal you care
+about, open the trace — the row that can stop the run is already marked with what it waits for.
+Hit one: the run pauses, the canvas rings the part (`haltHighlight` reads the same contract
+prefix as any attributable halt), the banner says what arrived, and the trace has a rule at that
+exact cycle. That last part is the whole reason the two features were one item.
