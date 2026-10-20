@@ -133,25 +133,26 @@ test("a named wire hides its route, and its label brings it back", async ({ page
   expect(named.name).toBe("BUS_A");
   await expect.poll(hash).not.toBe(plain);
 
-  // The label is the handle: click one grid unit above the out pin and the wire comes
-  // back — selected again, route revealed — proving a hidden route stays reachable.
+  // The tag is the handle: it lies along the wire east of the out pin (its point is on
+  // the pin), so click there and the wire comes back — selected again, route revealed
+  // — proving a hidden route stays reachable.
   const hidden = await hash();
-  await clickWorld(page, 5, 1.5 - 0.9);
+  await clickWorld(page, 6.5, 1.5);
   await expect(
     page.locator(".inspector-row").filter({ hasText: "Name" }).locator("input"),
   ).toHaveValue("BUS_A");
   await expect.poll(hash).not.toBe(hidden);
 
-  // §91: the label is now a TAG, and hovering it is its own gesture — a preview of
-  // the tunnel (route + both ends lit) that deselects nothing. The route itself
-  // still answers to nothing, which is §87's "idle wire hover does nothing"; the
-  // tag is the one place a hidden wire responds.
+  // §91: the marker is a TAG, and hovering it is its own gesture — a preview of the
+  // tunnel (route + both ends lit) that deselects nothing. The route itself still
+  // answers to nothing, which is §87's "idle wire hover does nothing"; the tag is the
+  // one place a hidden wire responds.
   await clickWorld(page, 40, 40); // deselect: the route hides again
   const cursorAt = async (wx: number, wy: number): Promise<string> => {
     const p = await world(page, wx, wy);
     await page.mouse.move(p.x, p.y);
     return page.locator("canvas.circuit-canvas").evaluate((el) => getComputedStyle(el).cursor);
   };
-  expect(await cursorAt(5, 0.6)).toBe("pointer"); // on the tag
-  expect(await cursorAt(7.5, 0.6)).not.toBe("pointer"); // above the route: no tag, no target
+  expect(await cursorAt(6.5, 1.5)).toBe("pointer"); // in the tag's body
+  expect(await cursorAt(7.5, 3.2)).not.toBe("pointer"); // clear of the tag and the route
 });

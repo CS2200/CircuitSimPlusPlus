@@ -190,22 +190,23 @@ describe("tunnel labels (UI_OVERHAUL §87)", () => {
   });
 
   it("plants a tag at each PIN endpoint only, and none at a junction", () => {
-    // The wire runs east out of `a` and west into `b`, so `a`'s tag points south
-    // (at the wire, from its left) and `b`'s points north (UI_OVERHAUL §91).
+    // The wire runs east out of `a` and west into `b`, so each tag points back down
+    // the wire at its own pin: west at `a`, east at `b`, both lying along the wire
+    // (UI_OVERHAUL §91).
     expect(tunnelTagSites(wire({ name: "T" }))).toEqual([
-      { at: { x: 0, y: 0 }, dir: "S" },
-      { at: { x: 4, y: 0 }, dir: "N" },
+      { at: { x: 0, y: 0 }, dir: "W" },
+      { at: { x: 4, y: 0 }, dir: "E" },
     ]);
     // A join end is a junction, not a place a tunnel was drawn.
     expect(tunnelTagSites(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
-      { at: { x: 0, y: 0 }, dir: "S" },
+      { at: { x: 0, y: 0 }, dir: "W" },
     ]);
     // Unnamed: no tag at all, and a wire with no points yet has nowhere to put one.
     expect(tunnelTagSites(wire({}))).toEqual([]);
     expect(tunnelTagSites(wire({ name: "T", points: [] }))).toEqual([]);
   });
 
-  it("reorients with the wire: a vertical tunnel's tags point sideways", () => {
+  it("reorients with the wire: a vertical tunnel's tags point up and down", () => {
     // This wire runs north out of `a` (at the bottom) and south into `b` (at the top).
     const vertical = wire({
       name: "T",
@@ -214,34 +215,54 @@ describe("tunnel labels (UI_OVERHAUL §87)", () => {
         [0, 0],
       ],
     });
-    expect(tunnelTagSites(vertical).map((s) => s.dir)).toEqual(["E", "W"]);
+    expect(tunnelTagSites(vertical).map((s) => s.dir)).toEqual(["S", "N"]);
+  });
+
+  it("orients by the pin's facing when the caller knows it", () => {
+    // A pin facing east: the body hangs east of it in every case, whatever the wire
+    // does — which is what keeps a converted spoke (whose copper may run inward,
+    // through the part) from putting its tag on top of the part.
+    const facing = (): "E" => "E";
+    expect(tunnelTagSites(wire({ name: "T" }), facing).map((s) => s.dir)).toEqual(["W", "W"]);
+    // The same pin, with the wire drawn inward instead: still west, still outside.
+    const inward = wire({
+      name: "T",
+      points: [
+        [0, 0],
+        [-4, 0],
+      ],
+    });
+    expect(tunnelTagSites(inward, facing).map((s) => s.dir)).toEqual(["W", "W"]);
+    // Without a facing, the wire decides (the hand-drawn case).
+    expect(tunnelTagSites(inward).map((s) => s.dir)).toEqual(["E", "W"]);
   });
 
   it("hits the tag, not the route, so a hidden tunnel stays clickable", () => {
     const wires = [wire({ name: "T" })];
-    // In the body of the tag at endpoint a (which points south, so it hangs above),
-    // and in the one at endpoint b (which points north, so it hangs below).
-    expect(pickWireLabelAt(wires, { x: 0.1, y: -0.8 })).toMatchObject({
+    // The body of the tag at `a` lies east along the wire (its point is on the pin),
+    // and the one at `b` lies west along it.
+    expect(pickWireLabelAt(wires, { x: 1.0, y: 0.1 })).toMatchObject({
       wireIdx: 0,
       label: true,
     });
-    expect(pickWireLabelAt(wires, { x: 3.9, y: 1.0 })?.wireIdx).toBe(0);
-    // Between the two tags: nothing there but the hidden route.
-    expect(pickWireLabelAt(wires, { x: 2, y: -0.9 })).toBeNull();
-    // On the far side of the wire end from the tag is the wire, not the tag: the
-    // point touches the end, and a pointer's slack does not reach past it.
-    expect(pickWireLabelAt(wires, { x: 0, y: 0.6 })).toBeNull();
+    expect(pickWireLabelAt(wires, { x: 3.0, y: 0 })?.wireIdx).toBe(0);
+    // Clear of both tags and of the route below them: nothing.
+    expect(pickWireLabelAt(wires, { x: 2, y: 2 })).toBeNull();
     // A plain wire has no tag to hit.
-    expect(pickWireLabelAt([wire({})], { x: 0.1, y: -0.8 })).toBeNull();
+    expect(pickWireLabelAt([wire({})], { x: 1.0, y: 0.1 })).toBeNull();
   });
 
   it("sizes the box from the measured name when it can measure", () => {
-    const wires = [wire({ name: "T" })];
+    // One tag only (the far end is a junction), so the two boxes cannot cover the
+    // middle between them.
+    const wires = [wire({ name: "T", b: { join: { wire: 0, segment: 1 } } })];
     // A caller with real metrics (the scene uses `Renderer.measureText`) hands the
     // box its width: a wide name is then clickable as far out as it is drawn.
     const wide = (): number => 4;
-    expect(pickWireLabelAt(wires, { x: 1.6, y: -0.8 }, undefined, wide)?.wireIdx).toBe(0);
+    expect(pickWireLabelAt(wires, { x: 2.6, y: 0 }, undefined, { tagWidthOf: wide })?.wireIdx).toBe(
+      0,
+    );
     // Without metrics the estimate rules, and the same point is outside the tag.
-    expect(pickWireLabelAt(wires, { x: 1.6, y: -0.8 })).toBeNull();
+    expect(pickWireLabelAt(wires, { x: 2.6, y: 0 })).toBeNull();
   });
 });

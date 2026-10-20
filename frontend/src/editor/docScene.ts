@@ -614,8 +614,9 @@ const TUNNEL_DASH: readonly number[] = [0.55, 0.45];
 export interface TagSite {
   at: Vec2;
   /**
-   * Which way the point aims: **at the wire**, from 90° clockwise of the wire's own
-   * direction — i.e. the tag hangs to the left of its wire (UI_OVERHAUL §91).
+   * Which way the point aims: **back along the wire, at the pin it names** — so the
+   * tag lies on its own wire, just outside the part, and points at the connection
+   * (UI_OVERHAUL §91).
    */
   dir: TagDir;
 }
@@ -632,46 +633,90 @@ export interface TagSite {
  * the tunnel's `Direction` property, because its tunnel was a part you placed; here
  * the geometry already says it) — see `tagDirAt`.
  */
-export function tunnelTagSites(w: CsxWire): TagSite[] {
+/**
+ * Where a tunnel's tags plant (UI_OVERHAUL §91): one at each **pin** endpoint — the
+ * sites an imported old-format schematic had its `Tunnel` markers, and the only
+ * visible handle a route that is otherwise hidden can offer. A join endpoint gets
+ * none: a junction is not a place a tunnel was drawn. Pure; endpoints are read from
+ * the drawn polyline, so a wire with no points yet (a legal, hand-authored straight
+ * line) has no tag until it is routed.
+ *
+ * `outwardOf` says which way a pin faces, away from its part's body. It is what the
+ * orientation is really about (see `tagDirAt`), and the scene has it from the layout;
+ * without it the wire's own direction stands in.
+ */
+export function tunnelTagSites(
+  w: CsxWire,
+  outwardOf?: (comp: string, pin: string) => TagDir | undefined,
+): TagSite[] {
   const name = w.name ?? "";
   if (name === "" || w.points.length < 2) return [];
   const out: TagSite[] = [];
-  if (isPinEndpoint(w.a)) out.push({ at: p2v(w.points[0]), dir: tagDirAt(w.points, 0) });
-  if (isPinEndpoint(w.b)) {
-    const last = w.points.length - 1;
-    out.push({ at: p2v(w.points[last]), dir: tagDirAt(w.points, last) });
-  }
+  const site = (i: number, ep: CsxWire["a"]): TagSite => {
+    const facing =
+      outwardOf !== undefined && isPinEndpoint(ep) ? outwardOf(ep.comp, ep.pin) : undefined;
+    return {
+      at: p2v(w.points[i]),
+      dir: tagDirAt(w.points, i, facing),
+    };
+  };
+  if (isPinEndpoint(w.a)) out.push(site(0, w.a));
+  if (isPinEndpoint(w.b)) out.push(site(w.points.length - 1, w.b));
   return out;
 }
 
 /**
  * The way a tag's point aims at wire end `i`.
  *
- * The wire leaves the pin in some direction (`out`); the tag hangs **to the left of
- * its wire**, so its point aims at the wire from 90° clockwise of `out`. All four
- * shapes are reachable, the choice is read off the drawing, and the tag spends no
- * wire length — which matters, because a converted schematic's tunnel wires are
- * often only a few grid units long.
+ * The point aims **at the part the pin belongs to**, so the tag's body hangs outside
+ * it, pointing at the connection. `facing` is the pin's outward direction when the
+ * caller knows it, and that is the whole story: a tag on a pin facing east hangs with
+ * its body to the east of the pin and its point aimed west at it, whichever way the
+ * wire happens to leave. It also means the orientation is a property of the *pin*, so
+ * bending a wire's first segment does not flip its tag.
  *
- * CircuitSim CE draws its tunnel's body in the wire's own half-plane instead, which
- * works there because a tunnel *is* a part with empty space behind it. Here the wire
- * end is a pin of the part it connects, so that side is the part — the tag would sit
- * on top of the readouts it exists to explain.
+ * CE stores the same choice as the tunnel's `Direction`, and this is the closest a pin
+ * can come to it. Two placements do not work here, both learned by looking:
  *
- * A routed wire is Manhattan, so the dominant axis wins; a zero-length first segment
- * is skipped, and a wire with no usable segment keeps the plain south-pointing tag.
+ * - CE's own geometry puts the body in the half-plane *behind* the point, which is
+ *   fine for a tunnel because a tunnel is a part with empty canvas behind it. A wire
+ *   end here is a pin of the part it connects, so that side is the part: the body
+ *   would sit on top of the readouts the tag exists to explain.
+ * - Deriving the direction from the wire alone (this feature's first cut): it puts the
+ *   tag *beside* a wire that leaves its pin inward — which converted copper does, since
+ *   a spoke follows the old wire route — and "beside an inward wire" is inside the part.
+ *
+ * Falling back to the wire (no `facing`): the point aims back along the wire at its own
+ * pin, which is right whenever the wire leaves outward, i.e. on anything hand-drawn.
+ * A routed wire is Manhattan, so the dominant axis wins; a zero-length first segment is
+ * skipped; and a wire with no usable segment keeps the plain south-pointing tag.
  */
-function tagDirAt(points: readonly [number, number][], i: number): TagDir {
+function tagDirAt(points: readonly [number, number][], i: number, facing?: TagDir): TagDir {
+  if (facing !== undefined) return tagOpposite(facing);
   const step = i === 0 ? 1 : -1;
   for (let j = i; j + step >= 0 && j + step < points.length; j += step) {
     const dx = points[j + step][0] - points[j][0];
     const dy = points[j + step][1] - points[j][1];
     if (dx === 0 && dy === 0) continue;
     // `out` is the direction the wire leaves the pin (screen axes: +y is down).
-    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? "S" : "N"; // out E -> point S; out W -> point N
-    return dy > 0 ? "W" : "E"; // out S -> point W; out N -> point E
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? "W" : "E"; // out E -> point W; out W -> point E
+    return dy > 0 ? "N" : "S"; // out S -> point N; out N -> point S
   }
   return "S";
+}
+
+/** The direction that faces back the other way. */
+function tagOpposite(dir: TagDir): TagDir {
+  switch (dir) {
+    case "N":
+      return "S";
+    case "S":
+      return "N";
+    case "E":
+      return "W";
+    case "W":
+      return "E";
+  }
 }
 
 /** Text size inside a tag, and the padding around it (world units, §91). */
@@ -702,15 +747,20 @@ export function pickWireLabelAt(
   wires: readonly CsxWire[],
   world: Vec2,
   tol = PICK_TOL,
-  tagWidthOf?: (name: string) => number,
+  opts: {
+    /** The drawn box width for a name (the scene caches what it measured). */
+    tagWidthOf?: (name: string) => number;
+    /** Which way a pin faces (see `tunnelTagSites`). */
+    outwardOf?: (comp: string, pin: string) => TagDir | undefined;
+  } = {},
 ): WireHit | null {
   for (let i = 0; i < wires.length; i++) {
     const w = wires[i];
     const name = w.name ?? "";
     if (name === "") continue;
-    const box = tagWidthOf === undefined ? tagWidth(name) : tagWidthOf(name);
+    const box = opts.tagWidthOf === undefined ? tagWidth(name) : opts.tagWidthOf(name);
     const slack = tol * 0.5;
-    for (const site of tunnelTagSites(w)) {
+    for (const site of tunnelTagSites(w, opts.outwardOf)) {
       // The whole pennant is the target — body and point — whichever way it aims.
       const r = tunnelTagBox(site.at, site.dir, box);
       if (world.x < r.x - slack || world.x > r.x + r.w + slack) continue;
@@ -905,12 +955,36 @@ export class DocScene {
     // Widths come from what the last frame measured; the estimate covers a name
     // that has not been drawn yet (a wire named through the Inspector and
     // clicked before the next frame).
-    return pickWireLabelAt(
-      this.wires,
-      world,
-      tol,
-      (name) => this.tagWidths.get(name) ?? tagWidth(name),
-    );
+    return pickWireLabelAt(this.wires, world, tol, {
+      // Widths come from what the last frame measured; the estimate covers a name
+      // that has not been drawn yet (a wire named through the Inspector and
+      // clicked before the next frame).
+      tagWidthOf: (name) => this.tagWidths.get(name) ?? tagWidth(name),
+      outwardOf: (comp, pin) => this.outwardOf(comp, pin),
+    });
+  }
+
+  /**
+   * Which way a pin faces, away from its part's body (UI_OVERHAUL §91): the edge of
+   * its body rect that the pin sits on. This is what a tunnel tag orients itself by,
+   * so a tag pointed at a pin's outward side never lands on the part — whatever
+   * direction the wire leaves in, and whichever way the wire's copper runs.
+   *
+   * The *edge* decides rather than the whole offset from the centre: on a wide part, a
+   * pin on the bottom edge near a corner is further left than it is down, and a
+   * "dominant axis" reading would face it west.
+   */
+  outwardOf(compId: string, pin: string): TagDir | undefined {
+    const layout = this.layouts.get(compId);
+    const p = layout?.pins.find((x) => x.name === pin);
+    if (layout === undefined || p === undefined) return undefined;
+    const { x, y, w, h } = layout.rect;
+    const on = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+    if (on(p.x, x + w)) return "E";
+    if (on(p.x, x)) return "W";
+    if (on(p.y, y + h)) return "S";
+    if (on(p.y, y)) return "N";
+    return undefined;
   }
 
   /** Topmost component body under the point (for dragging/selecting). */
@@ -2050,7 +2124,7 @@ export class DocScene {
       const w =
         this.tagWidths.get(name) ?? tagWidth(name, (t) => renderer.measureText(t, TAG_TEXT));
       this.tagWidths.set(name, w);
-      for (const site of tunnelTagSites(wire)) {
+      for (const site of tunnelTagSites(wire, (c, p) => this.outwardOf(c, p))) {
         renderer.drawPath(tunnelTagPath(site.at, site.dir, w), {
           fill: strong ? "rgba(91,141,239,0.22)" : theme.panel,
           stroke: lit ? theme.accent : theme.panelBorder,
