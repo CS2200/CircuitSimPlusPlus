@@ -484,6 +484,23 @@ describe("hover + info + double-click", () => {
     expect(tool.overlay().hoverHit).toMatchObject({ kind: "pin", pin: "out" });
   });
 
+  it("hovering a tunnel tag targets the wire it names (UI_OVERHAUL §91)", () => {
+    const { doc, tool, sync } = setup();
+    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    doc.setWireName(0, 0, "BUS_A");
+    sync();
+
+    // The tag hangs above the wire's pin end (15, 11.5) — that is the handle.
+    tool.hover({ x: 15, y: 10.6 });
+    expect(tool.overlay().hoverHit).toMatchObject({ kind: "wire", wireIdx: 0, label: true });
+    // The route itself is still not a hover target: only the tag is.
+    tool.hover({ x: 17, y: 11.3 });
+    expect(tool.overlay().hoverHit).toBeNull();
+  });
+
   it("shift+click a wire shows its info card; any click dismisses it", () => {
     const { tool } = setup();
     tool.down({ x: 15, y: 11.5 }, PI());

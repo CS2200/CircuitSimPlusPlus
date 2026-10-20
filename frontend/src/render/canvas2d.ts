@@ -114,6 +114,23 @@ export class Canvas2DRenderer implements Renderer {
     this.stats.texts++;
   }
 
+  /**
+   * Text width in world units (UI_OVERHAUL §91). Measured the way the flush
+   * rasterizes: in device space with a font sized to the live scale, then
+   * divided back out — so the world-unit answer is the same one the glyphs are
+   * laid out with, at every zoom.
+   */
+  measureText(text: string, size: number, font?: string): number {
+    const t = this.ctx.getTransform();
+    const scale = Math.hypot(t.a, t.b) || 1;
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.font = `${size * scale}px ${font ?? "system-ui, sans-serif"}`;
+    const w = this.ctx.measureText(text).width / scale;
+    this.ctx.restore();
+    return w;
+  }
+
   flush(): void {
     for (const { style, path } of this.batches.values()) {
       this.ctx.globalAlpha = style.alpha ?? 1;

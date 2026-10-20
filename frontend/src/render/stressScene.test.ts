@@ -29,6 +29,10 @@ class RecordingRenderer implements Renderer {
     void [x, y, text, style];
     this.texts++;
   }
+  /** A plausible stand-in for a real font (the app's estimate, 0.62 em/char). */
+  measureText(text: string, size: number): number {
+    return text.length * size * 0.62;
+  }
   drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void {
     void dash;
     if (cmds.length > 0) {

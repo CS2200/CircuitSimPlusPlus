@@ -24,7 +24,17 @@ import { breakpointCondition } from "../lib/breakpoint";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
 import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
-import { BUBBLE_R, chipPath, circlePath, gateShape, probePath, rotatePath } from "./shapes";
+import {
+  BUBBLE_R,
+  TAG_H,
+  TAG_TIP,
+  chipPath,
+  circlePath,
+  gateShape,
+  probePath,
+  rotatePath,
+  tunnelTagPath,
+} from "./shapes";
 
 /**
  * DocScene (FRONTEND.md U3): draws a CircuitDocument circuit and answers
@@ -504,7 +514,14 @@ function pointAlong(points: [number, number][], t: number): Vec2 {
 }
 
 export type PinHit = { kind: "pin"; compId: string; pin: string; pos: Vec2 };
-export type WireHit = { kind: "wire"; wireIdx: number; segment: number; point: Vec2 };
+export type WireHit = {
+  kind: "wire";
+  wireIdx: number;
+  segment: number;
+  point: Vec2;
+  /** Set when a tunnel **tag** was the target rather than the route (UI_OVERHAUL §91). */
+  label?: true;
+};
 export type CompHit = { kind: "component"; compId: string };
 export type Hit = PinHit | WireHit | CompHit;
 
@@ -593,42 +610,77 @@ export function gridStepFor(scale: number, minPx = 14): number {
 const TUNNEL_DASH: readonly number[] = [0.55, 0.45];
 
 /**
- * Where a named wire's labels sit (UI_OVERHAUL §87): one grid unit ABOVE each PIN
- * endpoint — the sites an imported old-format schematic had its `Tunnel` markers, and
- * the only visible handle a route that is otherwise hidden can offer. A join endpoint
- * gets none: a junction is not a place a tunnel was drawn. Pure; endpoints are read
- * from the drawn polyline, so a wire with no points yet (a legal, hand-authored
- * straight line) has no label until it is routed.
+ * Where a tunnel's tags plant (UI_OVERHAUL §91): one at each **pin** endpoint — the
+ * sites an imported old-format schematic had its `Tunnel` markers, and the only
+ * visible handle a route that is otherwise hidden can offer. A join endpoint gets
+ * none: a junction is not a place a tunnel was drawn. Pure; endpoints are read from
+ * the drawn polyline, so a wire with no points yet (a legal, hand-authored straight
+ * line) has no tag until it is routed.
  */
-export function wireLabelSpots(w: CsxWire): Vec2[] {
+export function tunnelTagAnchors(w: CsxWire): Vec2[] {
   const name = w.name ?? "";
   if (name === "" || w.points.length < 2) return [];
   const out: Vec2[] = [];
-  if (isPinEndpoint(w.a)) out.push({ x: w.points[0][0], y: w.points[0][1] - 0.9 });
+  if (isPinEndpoint(w.a)) out.push({ x: w.points[0][0], y: w.points[0][1] });
   if (isPinEndpoint(w.b)) {
     const last = w.points[w.points.length - 1];
-    out.push({ x: last[0], y: last[1] - 0.9 });
+    out.push({ x: last[0], y: last[1] });
   }
   return out;
 }
 
-/** The label hit test (UI_OVERHAUL §87) — the click target for a hidden route. Pure. */
+/** Text size inside a tag, and the padding around it (world units, §91). */
+export const TAG_TEXT = 0.7;
+const TAG_PAD = 0.45;
+/** Floor width: a one-character name still has to read as a tag, not a dot. */
+const TAG_MIN_W = 1.3;
+
+/**
+ * A tag's width for a name. `measure` measures the **text** through the live
+ * renderer (`Renderer.measureText`), so the box fits the glyphs the flush will
+ * draw; without it (a pure caller, or a test) the app's own 0.62 em/char estimate
+ * is used, which is the factor the rest of the canvas fits text with.
+ */
+export function tagWidth(name: string, measure?: (text: string) => number): number {
+  const text = measure === undefined ? name.length * TAG_TEXT * 0.62 : measure(name);
+  return Math.max(TAG_MIN_W, text + 2 * TAG_PAD);
+}
+
+/**
+ * The tag hit test (UI_OVERHAUL §87/§91) — the click target for a hidden route.
+ * The box is the drawn pennant: the body above the wire end, its tip on it, plus
+ * the pointer's own slack. `tagWidthOf` is the **drawn box width** for a name when
+ * the caller knows it (the scene caches what the renderer measured, so the box you
+ * can see is the box you can click); a pure caller gets the estimate. Pure.
+ */
 export function pickWireLabelAt(
   wires: readonly CsxWire[],
   world: Vec2,
   tol = PICK_TOL,
+  tagWidthOf?: (name: string) => number,
 ): WireHit | null {
   for (let i = 0; i < wires.length; i++) {
     const w = wires[i];
     const name = w.name ?? "";
     if (name === "") continue;
-    // The label is text drawn centred on its spot: approximate its width from the
-    // character count rather than measuring (the size is fixed).
-    const halfW = 0.18 * name.length + tol * 0.5;
-    for (const spot of wireLabelSpots(w)) {
-      if (Math.abs(world.x - spot.x) > halfW) continue;
-      if (Math.abs(world.y - spot.y) > tol) continue;
-      return { kind: "wire", wireIdx: i, segment: 0, point: { x: spot.x, y: spot.y } };
+    const box = tagWidthOf === undefined ? tagWidth(name) : tagWidthOf(name);
+    const halfW = box / 2 + tol * 0.4;
+    for (const anchor of tunnelTagAnchors(w)) {
+      if (Math.abs(world.x - anchor.x) > halfW) continue;
+      // The tag hangs ABOVE its anchor with the tip pointing down at it, so the
+      // pickable band is the body plus a little slack either side of the tip.
+      if (world.y > anchor.y + tol) continue;
+      if (world.y < anchor.y - TAG_TIP - TAG_H - tol) continue;
+      // `segment: 0` is meaningless for a tag — the click path selects the whole
+      // wire — and `label` is what tells the hover pass this is the tag, not the
+      // route (UI_OVERHAUL §91).
+      return {
+        kind: "wire",
+        wireIdx: i,
+        segment: 0,
+        point: { x: anchor.x, y: anchor.y },
+        label: true,
+      };
     }
   }
   return null;
@@ -681,6 +733,13 @@ export class DocScene {
    * with an ellipsis this frame (UI_OVERHAUL §56); hover reveals it.
    */
   private truncated = new Map<string, string>();
+  /**
+   * Measured tunnel-tag width per name (UI_OVERHAUL §91). Kept across frames
+   * because one name is drawn at every site it has, and because the *pick* has to
+   * agree with the box that was drawn — a tag you can see but cannot click is a
+   * bug, and so is one you can click but cannot see.
+   */
+  private tagWidths = new Map<string, number>();
   private nets: NetDerivation = { nets: [], wireToNet: new Map(), pinToNet: new Map(), errors: [] };
   bounds: Rect = { x: 0, y: 0, w: 100, h: 60 };
 
@@ -693,6 +752,7 @@ export class DocScene {
     const c = doc.circuit(circuitIdx);
     this.components = c.components;
     this.wires = c.wires;
+    this.tagWidths.clear();
     this.layouts = new Map(c.components.map((x) => [x.id, compLayout(x, this.circuits)]));
     // Spatial index first: crossing hops for the wire paths need it.
     this.wireIndex = new UniformGrid(CELL);
@@ -796,9 +856,17 @@ export class DocScene {
     return best === null ? null : { kind: "wire", ...best };
   }
 
-  /** A named wire's label under the point (UI_OVERHAUL §87): the hidden route's handle. */
+  /** A named wire's tag under the point (UI_OVERHAUL §87/§91): the hidden route's handle. */
   pickWireLabel(world: Vec2, tol = PICK_TOL): WireHit | null {
-    return pickWireLabelAt(this.wires, world, tol);
+    // Widths come from what the last frame measured; the estimate covers a name
+    // that has not been drawn yet (a wire named through the Inspector and
+    // clicked before the next frame).
+    return pickWireLabelAt(
+      this.wires,
+      world,
+      tol,
+      (name) => this.tagWidths.get(name) ?? tagWidth(name),
+    );
   }
 
   /** Topmost component body under the point (for dragging/selecting). */
@@ -1049,14 +1117,30 @@ export class DocScene {
     // WEIGHT and position instead. Idle wires are a dull tint of that colour,
     // not grey (UI_OVERHAUL §35). A wire's own `color` attr overrides both.
     const wireIds = this.wireIndex.queryRect(visible);
+    // Tunnels under inspection (UI_OVERHAUL §91): the wire whose TAG is under the
+    // pointer — its route must not be hidden by the pass below — and the names it
+    // lights, which is every tag of the same tunnel. Computed here because the
+    // hiding happens here.
+    const hoveredTag =
+      overlay.hoverHit?.kind === "wire" && overlay.hoverHit.label === true
+        ? overlay.hoverHit.wireIdx
+        : null;
+    const inspected = new Set<number>(selection.wires);
+    if (hoveredTag !== null) inspected.add(hoveredTag);
+    const litNames = new Set<string>();
+    for (const i of inspected) {
+      const nm = this.wires[i]?.name ?? "";
+      if (nm !== "") litNames.add(nm);
+    }
     for (const i of wireIds) {
       const selected = selection.hasWire(i);
       const wire = this.wires[i];
       const name = wire?.name ?? "";
       // A tunnel's route is HIDDEN (UI_OVERHAUL §87) unless you are inspecting it: it
       // is a wire you drew across the plane, so showing it always would undo the reason
-      // tunnels exist. The label below is the visible handle.
-      const revealed = selected || overlay.wireInfo?.wireIdx === i;
+      // tunnels exist. The tag drawn in the overlay is the visible handle, and the
+      // pointer over it (§91) reveals the route here.
+      const revealed = selected || overlay.wireInfo?.wireIdx === i || hoveredTag === i;
       if (name !== "" && !revealed) continue;
       const custom = this.wires[i]?.color ?? null;
       const bits = Math.max(1, this.wireBits[i]);
@@ -1120,16 +1204,9 @@ export class DocScene {
           lineWidth: selected ? width * 1.25 : width,
         });
       }
-      // Every named wire shows its label, hidden route or not: this is the marker.
-      if (name !== "" && wire !== undefined) {
-        for (const spot of wireLabelSpots(wire)) {
-          renderer.drawText(spot.x, spot.y, name, {
-            color: theme.textDim,
-            size: 0.7,
-            align: "center",
-          });
-        }
-      }
+      // Every named wire's TAG is drawn in the overlay pass below (UI_OVERHAUL
+      // §91): it belongs over the parts, and it is the marker this hidden route
+      // leaves behind.
       // The narrowed piece (UI_OVERHAUL §65): the second click picks ONE drawn
       // segment, so show exactly which one Delete would take.
       const piece = selection.segment;
@@ -1913,6 +1990,36 @@ export class DocScene {
         }
       }
     }
+
+    // Tunnel tags (UI_OVERHAUL §91). Drawn here, over the parts, because a tag is a
+    // marker ON the drawing rather than part of it — CircuitSim CE drew its `Tunnel`
+    // component on top for the same reason. A tag names a wire end (the route itself
+    // is hidden, §87); every tag sharing a lit name lights up together, so *showing
+    // the tunnel* means seeing both ends at once rather than following an invisible
+    // line. `inspected` is the hovered or selected tunnel, `litNames` its namesakes.
+    for (const i of wireIds) {
+      const wire = this.wires[i];
+      const name = wire?.name ?? "";
+      if (name === "" || wire === undefined) continue;
+      const strong = inspected.has(i);
+      const lit = strong || litNames.has(name);
+      const w =
+        this.tagWidths.get(name) ?? tagWidth(name, (t) => renderer.measureText(t, TAG_TEXT));
+      this.tagWidths.set(name, w);
+      for (const anchor of tunnelTagAnchors(wire)) {
+        renderer.drawPath(tunnelTagPath(anchor.x, anchor.y, w), {
+          fill: strong ? "rgba(91,141,239,0.22)" : theme.panel,
+          stroke: lit ? theme.accent : theme.panelBorder,
+          lineWidth: lit ? 0.12 : 0.08,
+        });
+        renderer.drawText(anchor.x, anchor.y - TAG_TIP - TAG_H / 2, name, {
+          color: lit ? theme.accent : theme.textDim,
+          size: TAG_TEXT,
+          align: "center",
+        });
+      }
+    }
+    renderer.flush();
 
     // Tool ghosts.
     if (overlay.wireInProgress !== null && overlay.wireInProgress.length >= 2) {

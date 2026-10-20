@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateShape } from "./shapes";
+import { TAG_H, TAG_TIP, gateShape, tunnelTagPath } from "./shapes";
 
 /**
  * Power / ground glyphs (UI_OVERHAUL §72): a rake and a bar, drawn inside the
@@ -29,6 +29,33 @@ describe("power / ground glyphs", () => {
     // A breakpoint is a box too: its mark and its condition are body text
     // (docScene §90), not a silhouette.
     expect(gateShape("debug.breakpoint", 0, 0, 3, 2)).toBeNull();
+  });
+});
+
+describe("tunnel tag (UI_OVERHAUL §91)", () => {
+  it("hangs above its anchor and points down at it", () => {
+    const path = tunnelTagPath(5, 10, 3);
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (const cmd of path) {
+      if (cmd.t === "Z" || cmd.t === "Q") continue;
+      minY = Math.min(minY, cmd.y);
+      maxY = Math.max(maxY, cmd.y);
+      minX = Math.min(minX, cmd.x);
+      maxX = Math.max(maxX, cmd.x);
+    }
+    // The tag never reaches below the wire end, and its tip IS the wire end.
+    expect(maxY).toBe(10);
+    expect(minY).toBeCloseTo(10 - TAG_TIP - TAG_H, 6);
+    // Centred on the anchor, no wider than its body.
+    expect(minX).toBeGreaterThanOrEqual(5 - 1.5);
+    expect(maxX).toBeLessThanOrEqual(5 + 1.5);
+    // A tag whose text is wider grows sideways, not downwards.
+    const wide = tunnelTagPath(5, 10, 6);
+    const wideX = wide.filter((c) => c.t !== "Z").map((c) => (c.t === "Q" ? c.cx : c.x));
+    expect(Math.min(...wideX)).toBeCloseTo(2, 6);
   });
 });
 

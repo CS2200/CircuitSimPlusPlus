@@ -8,8 +8,8 @@ import {
   memPreviewWord,
   pickWireLabelAt,
   readableOn,
+  tunnelTagAnchors,
   valueTextAtWidth,
-  wireLabelSpots,
 } from "./docScene";
 
 /**
@@ -189,29 +189,44 @@ describe("tunnel labels (UI_OVERHAUL §87)", () => {
     ...over,
   });
 
-  it("places a label above each PIN endpoint only, and none at a junction", () => {
-    expect(wireLabelSpots(wire({ name: "T" }))).toEqual([
-      { x: 0, y: -0.9 },
-      { x: 4, y: -0.9 },
+  it("plants a tag at each PIN endpoint only, and none at a junction", () => {
+    expect(tunnelTagAnchors(wire({ name: "T" }))).toEqual([
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
     ]);
     // A join end is a junction, not a place a tunnel was drawn.
-    expect(wireLabelSpots(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
-      { x: 0, y: -0.9 },
+    expect(tunnelTagAnchors(wire({ name: "T", b: { join: { wire: 0, segment: 1 } } }))).toEqual([
+      { x: 0, y: 0 },
     ]);
-    // Unnamed: no label at all, and a wire with no points yet has nowhere to put one.
-    expect(wireLabelSpots(wire({}))).toEqual([]);
-    expect(wireLabelSpots(wire({ name: "T", points: [] }))).toEqual([]);
+    // Unnamed: no tag at all, and a wire with no points yet has nowhere to put one.
+    expect(tunnelTagAnchors(wire({}))).toEqual([]);
+    expect(tunnelTagAnchors(wire({ name: "T", points: [] }))).toEqual([]);
   });
 
-  it("hits the label, not the route, so a hidden tunnel stays clickable", () => {
+  it("hits the tag, not the route, so a hidden tunnel stays clickable", () => {
     const wires = [wire({ name: "T" })];
-    // On the label above endpoint a.
-    expect(pickWireLabelAt(wires, { x: 0.1, y: -0.8 })?.wireIdx).toBe(0);
-    // On the label above endpoint b.
+    // In the body of the tag over endpoint a, and over endpoint b.
+    expect(pickWireLabelAt(wires, { x: 0.1, y: -0.8 })).toMatchObject({
+      wireIdx: 0,
+      label: true,
+    });
     expect(pickWireLabelAt(wires, { x: 3.9, y: -1.0 })?.wireIdx).toBe(0);
-    // Far from either label.
+    // Between the two tags: nothing there but the hidden route.
     expect(pickWireLabelAt(wires, { x: 2, y: -0.9 })).toBeNull();
-    // A plain wire has no label to hit.
+    // Below a tag is the wire itself, not the tag: the tip points at the pin,
+    // and a pointer's slack does not reach far past it.
+    expect(pickWireLabelAt(wires, { x: 0, y: 0.6 })).toBeNull();
+    // A plain wire has no tag to hit.
     expect(pickWireLabelAt([wire({})], { x: 0.1, y: -0.8 })).toBeNull();
+  });
+
+  it("sizes the box from the measured name when it can measure", () => {
+    const wires = [wire({ name: "T" })];
+    // A caller with real metrics (the scene uses `Renderer.measureText`) hands the
+    // box its width: a wide name is then clickable as far out as it is drawn.
+    const wide = (): number => 4;
+    expect(pickWireLabelAt(wires, { x: 1.6, y: -0.8 }, undefined, wide)?.wireIdx).toBe(0);
+    // Without metrics the estimate rules, and the same point is outside the tag.
+    expect(pickWireLabelAt(wires, { x: 1.6, y: -0.8 })).toBeNull();
   });
 });

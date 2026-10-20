@@ -268,7 +268,10 @@ export class ToolMachine {
   private openContextMenu(world: Vec2, info: PointerInfo): void {
     this.cancel(); // a fresh gesture dismisses the wire-info card
     const comp = this.scene.pickComponent(world);
-    const wire = comp === null ? this.scene.pickWire(world) : null;
+    // A tunnel's TAG is the wire's handle (§91): right-clicking one acts on that
+    // wire, exactly as left-clicking it does.
+    const wire =
+      comp === null ? (this.scene.pickWireLabel(world) ?? this.scene.pickWire(world)) : null;
     let on: CanvasMenuState["on"] = "canvas";
     let compType: string | null = null;
     if (comp !== null) {
@@ -668,7 +671,9 @@ export class ToolMachine {
     if (this.wiring !== null) return "target";
     if (this.scene.pickPin(world) !== null) return "pin";
     if (this.scene.pickWireCorner(world) !== null) return "bend";
-    if (this.scene.pickWire(world) !== null) return "wire";
+    // A tunnel tag is a wire's handle (§91): the wire's own cursor.
+    if (this.scene.pickWire(world) !== null || this.scene.pickWireLabel(world) !== null)
+      return "wire";
     return "none";
   }
 
@@ -686,13 +691,17 @@ export class ToolMachine {
       this.changed();
     }
     // While wiring, pins + wires are live targets (junction preview); idle
-    // hover is pins first (net-extent highlight) then component bodies (so
-    // violation markers can show their detail card) — hovering a wire
-    // still does nothing.
+    // hover is pins first (net-extent highlight), then a tunnel TAG (§91 — it is
+    // the visible marker, and it sits over the invisible body edge it names, so it
+    // must win there), then component bodies (so violation markers can show their
+    // detail card) — hovering a plain wire still does nothing.
     const hit =
       this.wiring !== null
         ? this.scene.pick(world)
-        : (this.scene.pickPin(world) ?? this.scene.pickComponent(world) ?? null);
+        : (this.scene.pickPin(world) ??
+          this.scene.pickWireLabel(world) ??
+          this.scene.pickComponent(world) ??
+          null);
     if (JSON.stringify(hit ?? null) !== JSON.stringify(this.hoverHit ?? null)) {
       this.hoverHit = hit;
       this.changed();

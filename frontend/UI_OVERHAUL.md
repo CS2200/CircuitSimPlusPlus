@@ -2132,13 +2132,14 @@ idea needed no engine work.
 - **A named wire's route is not drawn** — polyline, selection halo and all — unless the
   wire is selected or its value card is up. The halo goes too: it is a solid band, and a
   solid band under a hidden route is just the route again.
-- **Its label is drawn** one grid unit above each **pin** endpoint, always. That is the
-  marker, and a join endpoint gets none, because a junction is not a place a tunnel was
-  drawn. It is why an imported old schematic _looks_ like the old schematic: every
-  former `Tunnel` site shows its name.
-- **The label is a pick target of its own**, tested before pins and bodies, so a hidden
+- **Its tag is drawn** at each **pin** endpoint, always (§91 turned the plain text into
+  the old tool's pennant tag). That is the marker, and a join endpoint gets none, because a
+  junction is not a place a tunnel was drawn. It is why an imported old schematic _looks_
+  like the old schematic: every former `Tunnel` site shows its name.
+- **The tag is a pick target of its own**, tested before pins and bodies, so a hidden
   route stays selectable — click the label, then reshape the revealed route with the
-  ordinary bend-drag. No new interaction state.
+  ordinary bend-drag. No new interaction state. Hovering it _previews_ the same reveal
+  without selecting (§91).
 - **Selecting reveals the route dashed**, plus a faint straight dashed **guide** to every
   other wire sharing its name: "where it should go". For a properly joined pair the guide
   is short and the two coincide; for a namesake pair that is _not_ joined it draws a
@@ -2406,3 +2407,38 @@ about, open the trace — the row that can stop the run is already marked with w
 Hit one: the run pauses, the canvas rings the part (`haltHighlight` reads the same contract
 prefix as any attributable halt), the banner says what arrived, and the trace has a rule at that
 exact cycle. That last part is the whole reason the two features were one item.
+
+## 91. The tunnel tag
+
+§87 made a tunnel's _name_ its marker: plain text one grid unit above each pin end. That works,
+and it is nearly invisible — which was the point — but it is not what the old tool showed. CE
+drew a **Tunnel** component here: a tag with a point on it, and that is what anyone who learned
+the old tool looks for. The difference matters beyond nostalgia: a floating word reads as
+leftover text, while a tag pinned to a wire reads as _something attached to it_ — which is also
+the only thing you can hover without wondering what you are hovering.
+
+So the marker is a tag now.
+
+- **A pennant, pointed at the wire end it names.** CircuitSim CE's `TunnelPeer` shape, so it reads
+  as a label attached to the wire rather than a word floating above the drawing. Rounded, like
+  every other body in this app, and the tip stops just short of the pin so the pin stays visible
+  under it.
+- **Sized to its name.** `Renderer` gained `measureText` (world units, measured through the same
+  font the flush rasterizes at the live scale), and the scene caches the answer per name: one name
+  is drawn at every site it has, and the pick has to agree with what was drawn. A tag you can see
+  but cannot click is a bug, and so is one you can click but cannot see.
+- **Always visible**, in the panel colour with the theme's border: a chip on the drawing rather
+  than a hole in it. Drawn in the **overlay** pass, over the parts — a marker is a marker, and CE
+  drew its Tunnel component on top for the same reason.
+
+**Hovering shows the tunnel**, which is the gesture a hidden route needs and the one the old tool
+never had: pointing at a tag reveals the route (dashed, exactly as selection does) and lights
+**every tag of the same name** at once, so both ends of the tunnel are in front of you without
+following an invisible line. Clicking does what clicking a label always did — selects the wire,
+revealing the route _and_ drawing the straight guides to each namesake (§87's "where it should
+go") — and the tags stay lit while it is selected. Hover is the preview; click is the state.
+
+What is deliberately unchanged: a plain wire is still **not** a hover target (only the tag
+answers — §55's and §87's "idle wire hover does nothing"), a junction end still gets no tag, and
+the route is still the connection. A tag is a label _on_ a wire, not a component that connects by
+name; nothing about the netlist or the engine moved for this.

@@ -141,4 +141,17 @@ test("a named wire hides its route, and its label brings it back", async ({ page
     page.locator(".inspector-row").filter({ hasText: "Name" }).locator("input"),
   ).toHaveValue("BUS_A");
   await expect.poll(hash).not.toBe(hidden);
+
+  // §91: the label is now a TAG, and hovering it is its own gesture — a preview of
+  // the tunnel (route + both ends lit) that deselects nothing. The route itself
+  // still answers to nothing, which is §87's "idle wire hover does nothing"; the
+  // tag is the one place a hidden wire responds.
+  await clickWorld(page, 40, 40); // deselect: the route hides again
+  const cursorAt = async (wx: number, wy: number): Promise<string> => {
+    const p = await world(page, wx, wy);
+    await page.mouse.move(p.x, p.y);
+    return page.locator("canvas.circuit-canvas").evaluate((el) => getComputedStyle(el).cursor);
+  };
+  expect(await cursorAt(5, 0.6)).toBe("pointer"); // on the tag
+  expect(await cursorAt(7.5, 0.6)).not.toBe("pointer"); // above the route: no tag, no target
 });

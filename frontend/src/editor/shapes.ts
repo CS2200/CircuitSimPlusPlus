@@ -196,6 +196,38 @@ export function probePath(x: number, y: number, w: number, h: number): PathCmd[]
 }
 
 /**
+ * Body height and tip length of a tunnel tag (world units, UI_OVERHAUL §91).
+ */
+export const TAG_H = 1.2;
+export const TAG_TIP = 0.45;
+
+/**
+ * A tunnel tag (UI_OVERHAUL §91): the marker an old-format schematic's `Tunnel`
+ * component left at the place it connected, and the handle a hidden route offers.
+ *
+ * A pennant, pointed at the wire end it names — the shape CircuitSim CE's
+ * `TunnelPeer` draws, and the reason this reads as a label *attached* to the wire
+ * rather than one floating above the drawing. `cx`/`tipY` are the wire end; the
+ * body hangs above it (rounded, like every other body in this app) and the tip
+ * stops just short of the pin so the pin stays visible.
+ */
+export function tunnelTagPath(cx: number, tipY: number, w: number, h = TAG_H): PathCmd[] {
+  const half = w / 2;
+  const bottom = tipY - TAG_TIP;
+  return roundedPath(
+    [
+      { x: cx, y: tipY },
+      { x: cx + half, y: bottom },
+      { x: cx + half, y: bottom - h },
+      { x: cx - half, y: bottom - h },
+      { x: cx - half, y: bottom },
+      { x: cx, y: tipY },
+    ],
+    0.12,
+  );
+}
+
+/**
  * Body shape for a component type in its local EAST frame. `gate.*` get
  * distinctive shapes; mux/demux get trapezoids; everything else keeps the
  * clean box (register/RAM/arithmetic families, U4 polish may refine).

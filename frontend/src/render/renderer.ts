@@ -94,6 +94,13 @@ export interface Renderer {
   drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void;
   /** Queue text (drawn after paths within the current layer). */
   drawText(x: number, y: number, text: string, style: TextStyle): void;
+  /**
+   * Width of `text` in **world units** at `size` (UI_OVERHAUL §91): a tunnel
+   * tag's box has to fit the name it holds, and a label overflowing its own tag
+   * is worse than no tag. Measured through the same font the flush will use, so
+   * the box and the glyph cannot disagree. Immediate, not queued.
+   */
+  measureText(text: string, size: number, font?: string): number;
   /** Draw all queued geometry since the last flush (layer boundary). */
   flush(): void;
   /** Final flush. */
