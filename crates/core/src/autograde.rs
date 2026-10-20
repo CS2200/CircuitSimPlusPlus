@@ -915,6 +915,11 @@ fn halt_outcome(h: &Halt) -> (GradeOutcome, &'static str) {
         HaltReason::Oscillation => (GradeOutcome::Oscillation, "oscillation"),
         HaltReason::FloatingRead => (GradeOutcome::FloatingRead, "floating-read"),
         HaltReason::Contention => (GradeOutcome::OtherHalt, "contention"),
+        // A breakpoint in a submitted circuit stops the graded run exactly as
+        // it stops the interactive one (docs/format-v2.md §9): the part is a
+        // watcher, and the run it watches ends there. Named, so the report
+        // says which part did it rather than a bare "error".
+        HaltReason::Breakpoint => (GradeOutcome::OtherHalt, "breakpoint"),
         HaltReason::CycleLimit => (GradeOutcome::CycleLimit, "cycle-limit"),
         _ => (GradeOutcome::OtherHalt, "error"),
     }

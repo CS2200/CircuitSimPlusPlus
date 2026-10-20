@@ -294,6 +294,7 @@ mod tests {
             "wiring.splitter",
             "arith.bit-extender",
             "io.led",
+            "debug.breakpoint",
         ] {
             assert_eq!(t.timing(kind, 1), Timing::default(), "{kind}");
         }

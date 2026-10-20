@@ -57,6 +57,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "arith.negator",
     "arith.shifter",
     "arith.subtractor",
+    "debug.breakpoint",
     "gate.and",
     "gate.buffer",
     "gate.nand",
@@ -228,6 +229,14 @@ pub enum CompKind {
     Probe {
         /// Width in bits.
         bitsize: u32,
+    },
+    /// Breakpoint (`debug.breakpoint`): a run stops when the watched value
+    /// arrives (CircuitSim CE's `BreakpointPeer`, DESIGN.md §6 "Debugging").
+    /// Observation-only: it drives nothing, so it can sit on any net.
+    Breakpoint {
+        /// The watched value (`value` attr, parsed; its width is the
+        /// `bitsize` attr, so a width of its own would be redundant).
+        value: Value,
     },
     /// Multiplexer (`plexers.mux`).
     Mux {
@@ -751,6 +760,34 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             c.enumeration("radix", READOUT_RADIX, "unsigned");
             c.finish();
             (vec![PinSig::i("in", b)], c, CompKind::Probe { bitsize: b })
+        }
+        // Breakpoint (UI_OVERHAUL §90, docs/format-v2.md §9): `in` is the
+        // watched value and `en` gates the watch — the old tool's
+        // `BreakpointPeer` DATA/ENABLE pair, kept because a conditional
+        // breakpoint ("only while this is asserted") is the useful half of
+        // one. `in` is deliberately the FIRST input pin: the engine fires on
+        // a delivery to it (`delay.rs`), and the registry's pin order is what
+        // tells it which pin that is.
+        "debug.breakpoint" => {
+            let mut c = AttrCheck::new(attrs, &["bitsize", "value", "radix"]);
+            let b = c.bitsize(1);
+            let value = c.string("value", "0");
+            // `radix` is DISPLAY-only, exactly as on `wiring.constant`: the
+            // stored value is always hex.
+            let _ = c.enumeration("radix", &["hex", "bin", "dec"], "hex");
+            c.finish();
+            let parsed = match Value::from_hex_masks(b, &value, "", "") {
+                Ok(v) => v,
+                Err(e) => {
+                    c_issue(&mut c, format!("attr 'value': {e}"));
+                    Value::zero(b)
+                }
+            };
+            (
+                vec![PinSig::i("in", b), PinSig::i("en", 1)],
+                c,
+                CompKind::Breakpoint { value: parsed },
+            )
         }
         "plexers.mux" => {
             let mut c = AttrCheck::new(attrs, &["bitsize", "selectBits"]);
@@ -1602,5 +1639,36 @@ mod tests {
         assert!(e[0].message.contains("value"));
         let (_, e) = pins("wiring.constant", json!({"bitsize": 8, "value": "ff"}));
         assert!(e.is_empty());
+    }
+
+    /// `debug.breakpoint` (UI_OVERHAUL §90): the new tool's counterpart to the
+    /// old `BreakpointPeer`'s DATA/ENABLE pair — `in` carries the watched value at
+    /// `bitsize`, and `en` is the single line that gates the watch.
+    /// `in` must be the FIRST input pin: the engine fires on a delivery to it
+    /// and identifies it by slot (`delay.rs`'s `react`).
+    #[test]
+    fn breakpoint_pins_and_attrs() {
+        let (p, e) = pins("debug.breakpoint", json!({"bitsize": 8, "value": "a5"}));
+        assert_eq!(p.unwrap(), vec!["in", "en"]);
+        assert!(e.is_empty(), "{e:?}");
+
+        // Unconfigured: a 1-bit watch for 0 — the same `value` default the
+        // constant has, so the two read alike in the Inspector.
+        let (p, e) = pins("debug.breakpoint", json!({}));
+        assert_eq!(p.unwrap(), vec!["in", "en"]);
+        assert!(e.is_empty(), "{e:?}");
+
+        // `radix` is display-only, exactly as on `wiring.constant`.
+        let (_, e) = pins("debug.breakpoint", json!({"radix": "bin"}));
+        assert!(e.is_empty(), "{e:?}");
+
+        // A watched value that does not fit `bitsize` is a load error, and so
+        // is an attr the part does not have.
+        let (_, e) = pins("debug.breakpoint", json!({"bitsize": 2, "value": "ff"}));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("attr 'value'"), "{e:?}");
+        let (_, e) = pins("debug.breakpoint", json!({"when": "rising"}));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("unknown attr 'when'"), "{e:?}");
     }
 }

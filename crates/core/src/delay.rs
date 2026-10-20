@@ -493,7 +493,10 @@ pub struct DelayEngine {
     trace_hash: u64,
     halted: Option<Halt>,
     /// True during the construction-time boot settle (module docs): no
-    /// cycle closes, no DTA settle tracking.
+    /// cycle closes, no DTA settle tracking, and no breakpoint fires (a
+    /// breakpoint watches *changes during the run*; every net takes on a
+    /// value at power-on, and stopping for that would be noise — see
+    /// `react`'s `Class::Sink` arm).
     in_boot: bool,
 }
 
@@ -664,7 +667,8 @@ impl DelayEngine {
         // Boot settle (module docs): run the power-on queue to quiescence
         // WITHOUT clock edges. A halt here (e.g. an enabled RAM port
         // reading a floating address, or an oscillating ring tripping the
-        // storm cap) becomes the sticky halt the first `run` reports.
+        // storm cap) becomes the sticky halt the first `run` reports. A
+        // breakpoint can never be the halt here: it does not fire in_boot.
         if let Err(h) = eng.boot() {
             eng.halted = Some(h);
         }
@@ -1101,7 +1105,7 @@ impl DelayEngine {
         }) {
             Ok(rep) => Ok(rep),
             Err(h) => {
-                self.halted = Some(h.clone());
+                self.record_halt(&h);
                 Err(h)
             }
         }
@@ -1116,9 +1120,7 @@ impl DelayEngine {
         }
         while let Some(ev) = self.queue.pop() {
             let is_clock = matches!(ev.kind, EvKind::Clock { .. });
-            self.apply(ev).inspect_err(|h| {
-                self.halted = Some(h.clone());
-            })?;
+            self.apply(ev).inspect_err(|h| self.record_halt(h))?;
             if is_clock {
                 return Ok(());
             }
@@ -1139,9 +1141,7 @@ impl DelayEngine {
                 break;
             }
             let ev = self.queue.pop().expect("peeked");
-            self.apply(ev).inspect_err(|h| {
-                self.halted = Some(h.clone());
-            })?;
+            self.apply(ev).inspect_err(|h| self.record_halt(h))?;
         }
         Ok(())
     }
@@ -1157,9 +1157,7 @@ impl DelayEngine {
                 break;
             }
             let ev = self.queue.pop().expect("peeked");
-            self.apply(ev).inspect_err(|h| {
-                self.halted = Some(h.clone());
-            })?;
+            self.apply(ev).inspect_err(|h| self.record_halt(h))?;
         }
         Ok(())
     }
@@ -1278,6 +1276,41 @@ impl DelayEngine {
                 fr.pin
             ),
         }
+    }
+
+    /// The pause a breakpoint asks for: same contract shape as
+    /// [`DelayEngine::halt_floating`], but a **soft** halt — see
+    /// [`DelayEngine::record_halt`] for why it does not stick.
+    fn halt_breakpoint(&self, comp: u32) -> Halt {
+        let value = self.comps[comp as usize]
+            .breakpoint_value()
+            .cloned()
+            .unwrap_or_else(|| Value::zero(1));
+        Halt {
+            reason: HaltReason::Breakpoint,
+            cycle: self.rising_seen,
+            // Contract v1.2 details format: root-sheet document-order id,
+            // then the pin the halt is attributed to — so the UI highlights
+            // the breakpoint that fired like any other attributable halt.
+            details: format!(
+                "comp {} pin \"in\": watched value {value} arrived",
+                self.netlist.root_sheet_comp(CompId(comp)),
+            ),
+        }
+    }
+
+    /// Make a halt the engine's state. Every reason but `Breakpoint` is
+    /// **sticky**: the design is broken (or out of budget), so the engine
+    /// refuses to run again until a load/reset. A **breakpoint** is not a
+    /// fault at all — it is the pause the user asked for — so it is reported
+    /// and then forgotten, and the very next `run`/`step_*` continues from
+    /// exactly here (contract v1.2, `docs/ipc.md` §3). That is also why it
+    /// can live mid-settle: the rest of the cycle is still queued.
+    fn record_halt(&mut self, h: &Halt) {
+        if h.reason == HaltReason::Breakpoint {
+            return;
+        }
+        self.halted = Some(h.clone());
     }
 
     /// Apply one event (the queue's minimum).
@@ -1414,7 +1447,7 @@ impl DelayEngine {
                         self.cycle_settle_net = Some(net);
                     }
                 }
-                self.react(comp, net, kind, ev.time)?;
+                self.react(comp, net, slot as usize, kind, ev.time)?;
             }
             EvKind::Poke { comp, value } => {
                 self.comps[comp as usize].set_pin_value(value);
@@ -1424,8 +1457,17 @@ impl DelayEngine {
         Ok(())
     }
 
-    /// A value arrived at one sink pin: notify the sink component.
-    fn react(&mut self, comp: u32, net: u32, pin: SinkKind, time: u64) -> Result<(), Halt> {
+    /// A value arrived at one sink pin: notify the sink component. `slot` is
+    /// the pin's slot within the component (the breakpoint needs to know
+    /// *which* pin moved; the others match on `pin` alone).
+    fn react(
+        &mut self,
+        comp: u32,
+        net: u32,
+        slot: usize,
+        pin: SinkKind,
+        time: u64,
+    ) -> Result<(), Halt> {
         let c = comp as usize;
         match self.cdata[c].class {
             Class::Comb | Class::Splitter | Class::Rom => {
@@ -1466,7 +1508,35 @@ impl DelayEngine {
                 }
                 _ => {}
             },
-            Class::Source | Class::Sink => {}
+            Class::Source => {}
+            Class::Sink => {
+                // A breakpoint fires on the arrival of its **data** value:
+                // this delivery *is* the change CircuitSim CE's
+                // `Breakpoint.valueChanged` reacts to, and the enable is
+                // sampled at that same instant, exactly as CE reads it. CE's
+                // enable rule is kept to the letter — anything but a driven
+                // 0 enables, so an **unconnected** `en` still watches and an
+                // `X` is conservative.
+                //
+                // The power-on settle (`in_boot`) is not part of the run, so
+                // it never fires: every net comes up somewhere, and stopping
+                // at cycle 0 because a signal *is* its breakpoint value (and
+                // not because it *became* it) is noise, not a breakpoint.
+                if !self.in_boot {
+                    if let Some(target) = self.comps[c].breakpoint_value() {
+                        // Pin order is the registry's: `in`, then `en`
+                        // (components.rs). The delivery updated `views` before
+                        // calling us, so the data pin already holds the new
+                        // value and the enable reads as of this instant.
+                        let (data_slot, _) = self.cdata[c].in_pins[0];
+                        let (en_slot, _) = self.cdata[c].in_pins[1];
+                        let enabled = self.views[c][en_slot].bit(0) != Bit::Zero;
+                        if slot == data_slot && enabled && &self.views[c][data_slot] == target {
+                            return Err(self.halt_breakpoint(comp));
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -2318,6 +2388,182 @@ mod tests {
             !eng.net_contended(NetId(carried as u32)),
             "an X that flowed in is not a short"
         );
+    }
+
+    // ---- Breakpoint (UI_OVERHAUL §90, docs/format-v2.md §9)
+
+    /// A toggling register watched by a breakpoint: `r` is `0` at power-on and
+    /// flips at every rising edge (`d = ¬q`), so `q` *becomes* 1 in cycle 1 and
+    /// *becomes* 0 in cycle 2. `en` is wired to the named constant or left
+    /// unwired.
+    fn breakpoint_register_json(watch: &str, en: Option<&str>) -> String {
+        let en_wire = match en {
+            Some(c) => {
+                format!(r#",{{"a":{{"comp":"{c}","pin":"out"}},"b":{{"comp":"bp","pin":"en"}}}}"#)
+            }
+            None => String::new(),
+        };
+        format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}},
+                {{"id":"inv","type":"gate.not","pos":[0,0]}},
+                {{"id":"bp","type":"debug.breakpoint","pos":[0,0],"attrs":{{"value":"{watch}"}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"inv","pin":"in"}}}},
+                {{"a":{{"comp":"inv","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"bp","pin":"in"}}}}{en_wire}
+            ]}}]
+        }}"##
+        )
+    }
+
+    /// A breakpoint pauses the run at the cycle whose change matched it — and
+    /// the pause is **soft**: the engine keeps its sticky-halt slot empty, so
+    /// the very next run carries on (contract v1.2, `docs/ipc.md` §3). Every
+    /// other halt is sticky because the design it reports is broken.
+    #[test]
+    fn breakpoint_pauses_the_run_without_poisoning_the_engine() {
+        let mut eng = engine(&breakpoint_register_json("1", None), 500);
+        let h = eng.run(3).expect_err("the breakpoint must stop the run");
+        assert_eq!(h.reason, HaltReason::Breakpoint);
+        assert_eq!(h.cycle, 1, "stopped within the cycle whose edge raised q");
+        // The same contract shape as any attributable halt, so the UI can
+        // highlight the part that fired (`api.rs` `sim_halted`).
+        assert!(h.details.starts_with("comp "), "{}", h.details);
+        assert!(h.details.contains("pin \"in\""), "{}", h.details);
+        assert!(h.details.contains("0x1"), "{}", h.details);
+
+        assert!(eng.halted().is_none(), "a breakpoint must not be sticky");
+
+        // The next run continues — the rest of the interrupted cycle settles
+        // too — and q falls at the following edge as usual.
+        let rep = eng.run(1).expect("a breakpoint does not poison the engine");
+        assert_eq!(rep.cycles, 1);
+        assert_eq!(eng.named_value("r"), Some(k(1, 0)));
+
+        // It is not a one-shot: coming back to the watched value fires again.
+        let h2 = eng.run(1).expect_err("q rose again");
+        assert_eq!(h2.cycle, 3);
+    }
+
+    /// The enable and the value comparison keep CircuitSim CE's rule to the
+    /// letter (`Breakpoint.valueChanged`): the watch is armed when `en` is
+    /// anything but a driven `0`, and it fires when the data value *equals*
+    /// the watched value.
+    #[test]
+    fn breakpoint_enable_rule_is_circuit_sim_ce() {
+        // en ← 0: disarmed, so the register passes through 1 twice quietly.
+        let mut eng = engine(&breakpoint_register_json("1", Some("zero")), 500);
+        eng.run(4).expect("a disarmed breakpoint never fires");
+        assert!(eng.halted().is_none());
+
+        // en ← 1: armed, and it fires.
+        let mut eng = engine(&breakpoint_register_json("1", Some("one")), 500);
+        assert_eq!(eng.run(4).unwrap_err().reason, HaltReason::Breakpoint);
+
+        // Unwired `en` reads Z, and CE's rule ("anything but 0") calls that
+        // armed — the plain "break on this signal" case needs no wiring.
+        let mut eng = engine(&breakpoint_register_json("1", None), 500);
+        assert_eq!(eng.run(4).unwrap_err().reason, HaltReason::Breakpoint);
+
+        // Watching 0 on the same line stops on the *fall* (cycle 2), not on the
+        // rise — the value has to arrive, and 0 was already there at power-on.
+        let mut eng = engine(&breakpoint_register_json("0", None), 500);
+        let h = eng.run(4).expect_err("q fell to the watched value");
+        assert_eq!(h.cycle, 2);
+    }
+
+    /// A breakpoint is edge-like, not level-like: it fires on a value
+    /// *arriving*, so holding the watched value is not a hit and leaving and
+    /// returning is. That is what makes "step past the breakpoint" mean
+    /// anything — CE stops the clock the moment the value arrives, so a value
+    /// that has stopped moving never stops it again.
+    #[test]
+    fn breakpoint_fires_on_arrival_not_on_level() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"p","type":"wiring.pin","pos":[0,0],"name":"p"}},
+                {{"id":"bp","type":"debug.breakpoint","pos":[0,0],"attrs":{{"value":"1"}}}}
+            ], "wires": [
+                {{"a":{{"comp":"p","pin":"pin"}},"b":{{"comp":"bp","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run_until_time(1500).expect("a quiet first cycle");
+
+        // The poke is the change: the breakpoint fires as the value arrives.
+        assert!(eng.poke_at("p", k(1, 1), 1500));
+        let h = eng.run_until_time(2000).expect_err("the value arrived");
+        assert_eq!(h.reason, HaltReason::Breakpoint);
+        assert_eq!(h.cycle, 1);
+        assert!(h.details.contains("0x1"), "{}", h.details);
+
+        // Held at the watched value, cycles pass quietly: nothing arrives.
+        eng.run_until_time(9000).expect("no arrival, no breakpoint");
+        assert!(eng.halted().is_none());
+
+        // A second arrival is a hit again.
+        assert!(eng.poke_at("p", k(1, 0), 9500));
+        eng.run_until_time(10000)
+            .expect("leaving the value is not a hit");
+        assert!(eng.poke_at("p", k(1, 1), 10500));
+        let h2 = eng.run_until_time(11000).expect_err("it arrived again");
+        assert_eq!(h2.cycle, 10);
+    }
+
+    /// Arriving at a value the net *already* carries at power-on is not a hit:
+    /// the boot settle is not part of the run (every net comes up somewhere,
+    /// and stopping for that would stop every breakpoint on a constant-0 line
+    /// at cycle 0). Only *becoming* the value is an event.
+    #[test]
+    fn breakpoint_does_not_fire_at_power_on() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"k","type":"wiring.constant","pos":[0,0],
+                  "attrs":{{"bitsize":4,"value":"9"}}}},
+                {{"id":"bp","type":"debug.breakpoint","pos":[0,0],
+                  "attrs":{{"bitsize":4,"value":"9"}}}}
+            ], "wires": [
+                {{"a":{{"comp":"k","pin":"out"}},"b":{{"comp":"bp","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(4)
+            .expect("a value that was always there never arrives");
+        assert!(eng.halted().is_none());
+    }
+
+    /// A breakpoint *observes* (docs/format-v2.md §9's consume table): it
+    /// consumes nothing, so watching an undriven net is legal — no
+    /// floating-read halt — and `Z` is simply never the watched value.
+    #[test]
+    fn breakpoint_never_consumes() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"bp","type":"debug.breakpoint","pos":[0,0],
+                  "attrs":{{"value":"1"}}}}
+            ], "wires": []}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(3)
+            .expect("a watcher cannot consume a floating value");
+        assert!(eng.halted().is_none());
     }
 }
 

@@ -200,7 +200,10 @@ pub struct SimStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HaltReason {
-    /// A breakpoint fired (interactive stepping).
+    /// A `debug.breakpoint` reached its watched value (format-v2 §9). The one
+    /// **non-sticky** halt: it is a pause, not a fault, so the next
+    /// `step_*`/`run_until` continues from exactly here and only a load/reset
+    /// can end it early (see [`Sim`]).
     Breakpoint,
     /// A `Z` was consumed — gate input, register D at an edge, memory port
     /// access (§4.1).
@@ -324,6 +327,11 @@ pub trait EventSink: Send {
 /// - `CompId`s on the wire are always document-order indices within the
 ///   referenced circuit (see [`NamedComponent`]); engine-internal
 ///   flattened ids are mapped back at the boundary.
+/// - A halt with `reason: breakpoint` (a `debug.breakpoint` hit, format-v2
+///   §9) is a *pause*: it is reported through `sim_halted` like any other
+///   halt, but the engine does not refuse to run again — the next
+///   `step_tick`/`step_cycles`/`run_until` carries on from exactly there.
+///   Every other reason is sticky until a load/reset.
 ///
 /// Default bodies are `unimplemented!()` scaffolding (task B0); the engine
 /// fills them in across tasks B2–B6. Callers must not rely on defaults.

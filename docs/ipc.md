@@ -63,7 +63,7 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 |---|---|---|
 | `net_diffs` | `{ cycle, full, changes: [{ net, val, at?, contended? }] }` | Only changed nets, never full state (DESIGN.md §7.2) — **one exception (v1.1):** the single initial batch after load/resume has `full: true` and contains ALL nets (the UI's initial paint); every later batch is changed-nets-only with `full: false`. `at` = ns since run start. **v1.2:** `contended` is present and `true` when that net's `X` is a genuine short circuit (two enabled drivers disagreeing — DESIGN.md §4.1); absent for an `X` that merely flowed in. The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. **Consumers that need history tap the batches before that merge** (`DiffPump`'s `onRaw`): the waveform viewer (UI_OVERHAUL §89) records from there, so the ≤ 1-batch-per-frame rule stays a *painting* rule and costs the trace nothing. No new event, command or field. |
 | `sim_status` | `{ running, cycle, eff_hz }` | On play/pause and ~1 Hz while running. |
-| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting (shape pinned in §5). |
+| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting (shape pinned in §5). **`breakpoint` is the one reason that is not sticky:** every other halt means the design is broken (or out of budget) and the engine refuses to run until a load/reset, while a breakpoint is a *pause* — the next `sim_step_*`/`sim_run_until` continues from exactly there (Contract v1.2, `docs/format-v2.md` §9). The UI can therefore leave the transport armed instead of showing a fatal error. |
 | `timing_update` | `{ t_obs, est_time, violations, top_paths }` | DTA results (DESIGN.md §4.4), after `sim_run_until` / pause. `violations: TimingViolation[]` = `{ circuit, comp_id, kind: "setup" \| "hold", detail }` (the count is `violations.length`). `top_paths: TimingPath[]` = `{ circuit, comps: [comp_id], delay_ns }`. |
 
 ## 4. Net identifiers
@@ -83,7 +83,7 @@ truth).
   within `LoadError.circuit`. **v1 limitation:** `LoadResult.net_map` covers the root circuit
   only (the UI edits one sheet at a time).
 - **`sim_halted.details` shape:** for component-attributable halts (floating-read, contention,
-  oscillation, setup/hold), `details` starts with `comp <CompId> pin "<name>": <message>` so
+  oscillation, setup/hold, breakpoint), `details` starts with `comp <CompId> pin "<name>": <message>` so
   the UI can ring the offending component on the canvas. The CompId is the **root-sheet**
   document-order id: when the culprit is inside a subcircuit, the engine reports the enclosing
   subcircuit INSTANCE's root-sheet id (v1 UI highlights the root sheet only). Free-form text

@@ -18,7 +18,7 @@ _Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/de
 - Resource caps: bitsize ≤ 32; gate inputs ≤ 32; select bits ≤ 8; memory depth ≤ 2²⁰ and power-of-2; splitter pins ≤ 64.
 - Power-on state: **RAM powers on `X`** — an uninitialized word is unknown, and a read of it propagates `X` like any other unknown value (docs/format-v2.md §9) — while **registers still power on 0** (legacy compatibility; under review, see docs/bugs.md). Deterministic either way: `X` is as reproducible as `0`. Combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
 - Divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
-- The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters never).
+- The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters/breakpoints never).
 - `clock_half_period_ns` engine parameter (CLI default 1000 ns).
 - **Boot settle**: the delay engine settles to quiescence before cycle accounting begins — overclocked designs now correctly yield setup/hold violations instead of spurious floating-read halts.
 - **Wire delay is per-path** (driver→sink path length × constant; stubs never inflate other sinks; Manhattan fallback for missing points) — layout cannot unfairly change a student's grade.
@@ -339,6 +339,7 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 | `width` / `height` in grid units — unset derives the box from its pin count, and the pins |
 | are never crowded)                                                                        |
 | I/O (UI-only)                                                                             | button, LED, hex display, text annotation (`misc.text`) — inert headless                                                                                                                                                                                             |
+| Debugging                                                                                 | `breakpoint` — watches `in` for a `value` while `en` is armed; hitting one **pauses** the run and the next step continues (the one halt that is not a fault). The old tool's `BreakpointPeer`, kept instead of substituted with a probe                                                                                              |
 
 Deliberately **excluded**: tunnels, named wires, `counter` (register + adder is the lesson), any "black-box convenience" parts that hide the underlying logic from students.
 

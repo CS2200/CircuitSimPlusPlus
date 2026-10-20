@@ -29,6 +29,10 @@
 //! - Operations with no error channel (`poke`, `mem_write`, `snapshot`,
 //!   `resume`, `reset`) report failures as a `sim_halted` event with
 //!   `reason: error`; unknown ids/names are silent no-ops.
+//! - A `reason: breakpoint` halt (a `debug.breakpoint` hit, format-v2 §9) is
+//!   a *pause*, not a fault: the transport stops, and every operation that
+//!   runs the engine again continues from exactly where it stopped — no
+//!   reload, no lost state. It is the only reason that is not sticky.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -900,6 +904,51 @@ mod tests {
         let res = s.load_circuit_bytes(bytes.as_bytes());
         assert!(res.ok, "{:?}", res.errors);
         (s, rec.0)
+    }
+
+    /// A breakpoint halt reaches the wire as `reason: breakpoint` — the same
+    /// event, with the same `details` shape, as any other attributable halt —
+    /// and the session is *not* stuck on it: the engine treats a breakpoint as
+    /// a pause, so the next step carries on (contract v1.2, docs/ipc.md §3).
+    /// This is the difference the UI relies on: everything else here is
+    /// terminal until a reload.
+    #[test]
+    fn breakpoint_halt_is_surfaced_and_the_run_continues() {
+        let doc = r##"{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"clk","type":"wiring.clock","pos":[0,0]},
+                {"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{"value":"1"}},
+                {"id":"r1","type":"mem.register","pos":[0,0],"name":"r1"},
+                {"id":"n1","type":"gate.not","pos":[0,0]},
+                {"id":"bp","type":"debug.breakpoint","pos":[0,0],"attrs":{"value":"1"}}
+            ], "wires": [
+                {"a":{"comp":"clk","pin":"out"},"b":{"comp":"r1","pin":"clk"}},
+                {"a":{"comp":"one","pin":"out"},"b":{"comp":"r1","pin":"en"}},
+                {"a":{"comp":"n1","pin":"out"},"b":{"comp":"r1","pin":"d"}},
+                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"n1","pin":"in"}},
+                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}}
+            ]}]
+        }"##;
+        let (mut s, rec) = session(doc);
+        s.step_cycles(3);
+        let h = rec
+            .lock()
+            .unwrap()
+            .halts
+            .last()
+            .cloned()
+            .expect("the breakpoint was reported");
+        assert_eq!(h.reason, crate::api::HaltReason::Breakpoint);
+        assert_eq!(h.cycle, 1, "r1 rose at the first edge");
+        assert!(h.details.starts_with("comp "), "{}", h.details);
+        assert!(h.details.contains("pin \"in\""), "{}", h.details);
+
+        // The design is still live: stepping on is legal and reports no
+        // further halt (r1 falls in cycle 2; it has to *arrive* at 1 again).
+        s.step_cycles(1);
+        assert_eq!(rec.lock().unwrap().halts.len(), 1);
     }
 
     #[test]

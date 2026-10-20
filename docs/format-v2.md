@@ -152,6 +152,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `wiring.clock`                            | `out`                                           | —                                                                                                                                                                                           |
 | `wiring.splitter`                         | `bus` + one per `splits` key                    | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every bus bit must be covered exactly once; bus width = max index + 1     |
 | `wiring.probe`                            | `in`                                            | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                   |
+| `debug.breakpoint`                        | `in`, `en`                                      | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only. The run **pauses** when `in` becomes `value` while `en` is not a driven `0` (§9)                                                          |
 | `plexers.mux`                             | `in0`..`in{2^sel−1}`, `sel`, `out`              | `bitsize` (1), `selectBits` (1; 1..=8)                                                                                                                                                      |
 | `plexers.demux`                           | `in`, `sel`, `out0`..`out{2^sel−1}`             | `bitsize` (1), `selectBits` (1)                                                                                                                                                             |
 | `plexers.decoder`                         | `in`, `out0`..`out{2^in−1}`                     | `inputBits` (2; 1..=8)                                                                                                                                                                      |
@@ -287,6 +288,19 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   over-wide `addrBits`, and the lenient post-validation path.
 - Divide by zero yields quotient and remainder `X`. A mux with an `X` select outputs the
   data value when all data inputs are equal, else `X`.
+- A **breakpoint** (`debug.breakpoint`) is the one halt that is not a fault. It fires when its
+  `in` value **becomes** `value` while `en` is anything but a driven `0` — CircuitSim CE's
+  `BreakpointPeer` rule to the letter, an **unconnected** enable included, so a bare "stop when
+  this signal reaches 5" needs no wiring. Two things follow from "becomes": it never fires
+  during the power-on settle (a net that simply *comes up* at the watched value was not a
+  change, so a breakpoint on a line that idles low does not stop cycle 0), and holding the
+  watched value is not a hit, so stepping past a breakpoint that has fired means stepping
+  forward rather than re-hitting it. The pause is **not sticky** — the next step/run continues
+  from exactly there, which is what makes it a debugger's breakpoint rather than a dead end
+  (`sim_halted`'s `reason: "breakpoint"`; docs/ipc.md §3). It also *observes*: it consumes
+  nothing, so it may watch an undriven net without halting on the floating value. A graded run
+  is not special — a breakpoint left in a submitted circuit stops the graded run and the report
+  names it (docs/autograder.md).
 
 **The floating-consume table (§4.1, D3).** Consuming a floating (`Z`) value is a
 simulation-halting error naming the component and pin. What counts as _consuming_:
@@ -303,6 +317,7 @@ simulation-halting error naming the component and pin. What counts as _consuming
 | RAM                             | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
 | ROM                             | `addr` continuously                                                                 |
 | pin / probe / LED / hex display | **nothing** — they _observe_; an idle bus displaying as `Z` is legal                |
+| breakpoint                      | **nothing** — it _observes_ too, and `en` gating the watch does not make it consume |
 | splitter                        | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer         |
 
 When a control input is `X` (mux select, buffer enable, register enable, RAM

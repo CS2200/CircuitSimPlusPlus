@@ -164,6 +164,13 @@ enum BehaviorKind {
         bus_width: u32,
     },
     Probe,
+    /// Breakpoint (UI_OVERHAUL §90): a watcher, not a part of the logic.
+    /// It evaluates to nothing at all; the *engine* is what acts on it,
+    /// comparing a delivery against `value` (`delay.rs`'s `react`).
+    Breakpoint {
+        /// The watched value; its width is the `in` pin's width.
+        value: Value,
+    },
     Mux {
         bitsize: u32,
         select_bits: u32,
@@ -282,6 +289,9 @@ impl Behavior {
                 bus_width: *bus_width,
             },
             CompKind::Probe { .. } => BehaviorKind::Probe,
+            CompKind::Breakpoint { value } => BehaviorKind::Breakpoint {
+                value: value.clone(),
+            },
             CompKind::Mux {
                 bitsize,
                 select_bits,
@@ -361,6 +371,16 @@ impl Behavior {
     /// [`Behavior::eval_splitter`], not `eval`).
     pub fn is_splitter(&self) -> bool {
         matches!(self.kind, BehaviorKind::Splitter { .. })
+    }
+
+    /// The value a breakpoint watches, if this behavior is one. The engine
+    /// asks per delivered value (`delay.rs`'s `react`), so this is the one
+    /// place the "is it a breakpoint" question is answered.
+    pub fn breakpoint_value(&self) -> Option<&Value> {
+        match &self.kind {
+            BehaviorKind::Breakpoint { value } => Some(value),
+            _ => None,
+        }
     }
 
     /// Combinational evaluation: input pin values (pin-signature order
@@ -447,6 +467,7 @@ impl Behavior {
                 unreachable!("splitters evaluate via eval_splitter (bidirectional pins)")
             }
             BehaviorKind::Probe
+            | BehaviorKind::Breakpoint { .. }
             | BehaviorKind::Led
             | BehaviorKind::HexDisplay
             | BehaviorKind::Text => Ok(vec![]),
@@ -810,6 +831,9 @@ impl Behavior {
             BehaviorKind::Clock { .. } => ("wiring.clock", 1),
             BehaviorKind::Splitter { .. } => ("wiring.splitter", 1),
             BehaviorKind::Probe => ("wiring.probe", 1),
+            // A breakpoint observes; it adds no delay of its own (it is an
+            // "ideal" kind in the delay table — docs/delay-table.md).
+            BehaviorKind::Breakpoint { .. } => ("debug.breakpoint", 1),
             BehaviorKind::Mux { bitsize, .. } => ("plexers.mux", *bitsize),
             BehaviorKind::Demux { bitsize, .. } => ("plexers.demux", *bitsize),
             BehaviorKind::Decoder { .. } => ("plexers.decoder", 1),
@@ -1880,5 +1904,24 @@ mod tests {
         // Ideal parts have zero delay.
         let sp = mk("wiring.splitter", json!({"splits": {"a": [0]}}));
         assert_eq!(sp.timing(&table).prop, 0);
+        let bp = mk("debug.breakpoint", json!({"value": "1"}));
+        assert_eq!(bp.timing(&table).prop, 0);
+    }
+
+    /// A breakpoint is a watcher, not a part of the logic: it evaluates to
+    /// nothing, has no delay, and what it *does* do — compare a delivered
+    /// value against its target — happens in the engine (`delay.rs`'s
+    /// `react`). This is the engine's whole view of it.
+    #[test]
+    fn breakpoint_is_a_watcher() {
+        let bp = mk("debug.breakpoint", json!({"bitsize": 8, "value": "a5"}));
+        assert_eq!(bp.breakpoint_value(), Some(&k(8, 0xa5)));
+        // No outputs, whether the watched value is known or floating: an
+        // observer never fails on a floating input (format-v2 §9).
+        assert!(bp.eval(&refs(&[k(8, 0xa5), k(1, 1)])).unwrap().is_empty());
+        assert!(bp.eval(&refs(&[Value::z(8), Value::z(1)])).is_ok());
+        // …and nothing else looks like one.
+        assert_eq!(mk("wiring.probe", json!({})).breakpoint_value(), None);
+        assert_eq!(mk("io.led", json!({})).breakpoint_value(), None);
     }
 }

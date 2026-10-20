@@ -55,7 +55,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | field                            | meaning                                                                                                                                             |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cycles`                         | rising edges executed                                                                                                                               |
-| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"`  |
+| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"`  |
 | `halt_details`                   | `comp <id> pin "<pin>": <message>` when attributable (root-sheet document-order id; see `docs/ipc.md` §3's `sim_halted`), else a plain message      |
 | `t_obs`                          | max observed per-cycle settle time, ns                                                                                                              |
 | `est_time`                       | `cycles × t_obs`, saturating                                                                                                                        |

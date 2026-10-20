@@ -118,8 +118,8 @@ effective_prop(T, b) = components[T].prop + components[T].perBit × (b − 1)
 
 An instance's timing comes **only** from its type's table entry; there is no
 per-instance override (DESIGN.md §4.3). Component types absent from `components`
-(wiring pins/constants/clocks/probes/splitters, `arith.bit-extender`,
-inert `io.*`) are ideal: zero delay.
+(wiring pins/constants/clocks/probes/splitters, `arith.bit-extender`, `debug.breakpoint`,
+inert `io.*`) are ideal: zero delay — an observer must not perturb what it observes.
 
 ## Validation rules
 
