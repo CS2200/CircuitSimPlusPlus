@@ -418,6 +418,43 @@ describe("updateComponent", () => {
     expect(doc.circuit(0).wires).toHaveLength(1); // still there (backend validation would flag it)
   });
 
+  it("an attrs edit that RESIZES a part drags its wires along (§56)", () => {
+    const doc = CircuitDocument.create();
+    const konst = doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [0, 0],
+      attrs: { value: "1", bitsize: 4 },
+    });
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 0] });
+    doc.addWire(0, {
+      a: { comp: konst, pin: "out" },
+      b: { comp: probe, pin: "in" },
+      points: [
+        [3, 1],
+        [20, 1],
+      ],
+    });
+    // Editor knowledge (fake): a constant's `out` rides the box's right edge, so
+    // widening it moves the pin; a probe's `in` does not move at all.
+    doc.pinGeometry = (comp, pin) => {
+      if (comp.type === "wiring.probe" && pin === "in") {
+        return { pos: [20, 1] as [number, number], facing: "W" as const };
+      }
+      if (comp.type !== "wiring.constant" || pin !== "out") return null;
+      const w = comp.attrs?.bitsize === 32 ? 7.8 : 3;
+      return { pos: [w, 1] as [number, number], facing: "E" as const };
+    };
+
+    doc.updateComponent(0, konst, { attrs: { value: "1", bitsize: 32 } });
+
+    const pts = doc.circuit(0).wires[0].points;
+    expect(pts[0]).toEqual([7.8, 1]); // re-anchored to the pin's new position
+    expect(pts.at(-1)).toEqual([20, 1]); // the far end did not move
+    for (let i = 1; i < pts.length; i++) {
+      expect(pts[i][0] === pts[i - 1][0] || pts[i][1] === pts[i - 1][1]).toBe(true);
+    }
+  });
+
   it("throws on unknown component id", () => {
     const doc = CircuitDocument.create();
     expect(() => doc.updateComponent(0, "nope", { name: "x" })).toThrow('no component "nope"');
@@ -869,6 +906,83 @@ describe("moving a selection with junctions", () => {
         }
       }
     }
+  });
+});
+
+describe("normalizePinEnds (healing a file written against older symbol sizes)", () => {
+  /** A constant whose `out` pin rides its box, and a probe whose `in` is fixed. */
+  function withGeometry(doc: CircuitDocument): CircuitDocument {
+    doc.pinGeometry = (comp, pin) => {
+      if (comp.type === "wiring.probe" && pin === "in") {
+        return { pos: [20, 1] as [number, number], facing: "W" as const };
+      }
+      if (comp.type !== "wiring.constant" || pin !== "out") return null;
+      return { pos: [7.8, 1] as [number, number], facing: "E" as const };
+    };
+    return doc;
+  }
+
+  function staleDoc(): CircuitDocument {
+    const doc = withGeometry(CircuitDocument.create());
+    const konst = doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [0, 0],
+      attrs: { value: "1", bitsize: 32 },
+    });
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 0] });
+    // As an older symbol size — or another tool — would have written it: at x=3.
+    doc.addWire(0, {
+      a: { comp: konst, pin: "out" },
+      b: { comp: probe, pin: "in" },
+      points: [
+        [3, 1],
+        [20, 1],
+      ],
+    });
+    return doc;
+  }
+
+  it("puts a stale pin end back on its pin, silently", () => {
+    const doc = staleDoc();
+    const before = { dirty: doc.dirty, revision: doc.revision, undo: doc.canUndo };
+    doc.normalizePinEnds();
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [7.8, 1],
+      [20, 1],
+    ]);
+    // Not an edit: no undo step, no revision bump, and not unsaved work.
+    expect(doc.canUndo).toBe(before.undo);
+    expect(doc.revision).toBe(before.revision);
+    expect(doc.dirty).toBe(before.dirty);
+  });
+
+  it("is the identity on a document already in step", () => {
+    const doc = staleDoc();
+    doc.normalizePinEnds();
+    const inStep = JSON.stringify(doc.circuit(0));
+    doc.normalizePinEnds();
+    expect(JSON.stringify(doc.circuit(0))).toBe(inStep);
+  });
+
+  it("without the pinGeometry hook, nothing is touched", () => {
+    const doc = CircuitDocument.create(); // no hook
+    const konst = doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [0, 0],
+      attrs: { value: "1", bitsize: 32 },
+    });
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 0] });
+    doc.addWire(0, {
+      a: { comp: konst, pin: "out" },
+      b: { comp: probe, pin: "in" },
+      points: [
+        [3, 1],
+        [20, 1],
+      ],
+    });
+    const before = JSON.stringify(doc.circuit(0));
+    doc.normalizePinEnds();
+    expect(JSON.stringify(doc.circuit(0))).toBe(before);
   });
 });
 

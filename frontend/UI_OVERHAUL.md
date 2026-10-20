@@ -2472,3 +2472,52 @@ What is deliberately unchanged: a plain wire is still **not** a hover target (on
 answers — §55's and §87's "idle wire hover does nothing"), a junction end still gets no tag, and
 the route is still the connection. A tag is a label _on_ a wire, not a component that connects by
 name; nothing about the netlist or the engine moved for this.
+
+## 92. Readouts that size their part, and the value card
+
+Two reports, one root: a value that does not read as wide as the wire under it.
+
+- **A constant's and a probe's body is sized to the readout it draws.** Both were a
+  fixed 3×2, so 32 bits of zero were cut to `0x000…` by §56's ellipsis and an 8-bit
+  constant drew the same width as a 4-bit one. `catalog.readoutWidth(bits, radix)`
+  now asks what the WIDEST text the declared width can print in that base needs —
+  `0x` + one digit per nibble, `0b` + one per bit, or the most decimal digits — and
+  the box is exactly that. Sizing on the declared WIDTH rather than the current value
+  is what keeps the box still while a value is typed, and it is the only rule a probe
+  can use at all: a probe's value is live.
+- **A pin on an edge rides that edge.** A constant's `out` was hard-coded at `dx: 3`;
+  it is now at `dx: readoutWidth(...)`, so growing the box keeps the pin on the box's
+  right edge — "grow the pins by the correct size", as the report put it. A probe
+  points along its `in`, so it grows _behind_ that pin and the pin never moves.
+- **A wire end that names a pin IS at that pin.** The model always claimed this
+  (`document.ts`: the polyline's first/last point tracks the pin), but nothing had
+  ever moved a pin except a drag or a rotation, and those carry the wire with them.
+  An attrs edit that RESIZES a part now does the same: `updateComponent` runs the
+  pass rotation already used (`followGeometry` → `followWire`), re-anchors the glued
+  ends, re-stubs them along the new facing, and re-seats any junction child — all in
+  the one undo step. Widening a constant's bit size therefore drags its wire along.
+- **And every load resolves ends against the layout, silently** (`normalizePinEnds`:
+  no undo entry, no revision bump, no dirty flag). A hand-authored file, a converted
+  one, and anything this app wrote before a symbol grew can all name a pin whose body
+  has since been sized differently; the ends go back on their pins before the
+  document is adopted, so no wire is ever drawn detached from the pin it names. The
+  stored point is a route hint; the pin reference is the truth (format-v2 §2).
+- **Shift+click a wire reads its value at the NET's own width.** The card printed
+  `0x0` for 32 bits of zero because `formatValue` does not pad. It now pads to the
+  width the net's pins declare, in a base that cycles on further shift+clicks —
+  **binary first** (a wide net's bits are usually the question being asked), then
+  hex, then decimal — remembered per wire for the life of the document. A wide binary
+  readout wraps onto further lines, indented, so the bits stay countable rather than
+  becoming a banner.
+- **A tunnel's TAG answers to the same gesture.** The tag is the only part of a hidden
+  route you can see (§87), so shift+clicking it reads the tunnel's value — otherwise
+  the gesture would need exactly the route the tag exists to hide.
+- A by-product of the last two: a value read out **statically** (a probe wired straight
+  to a constant, §40; and the §51 Z/X fallback) now goes through the same width
+  padding as a live value instead of echoing the constant's raw digits. One rule,
+  `readoutMode`: a 1-bit pin reads plain `0`/`1`, a wider one follows the part's base.
+
+**Acceptance:** frontend lint / 443 unit / build green; e2e 79 passed with the U1
+stress benchmark flaky (machine-load sensitive; it passed on retry). Four screenshot
+baselines were regenerated because the demo and logic sheets carry readout parts:
+`sim-lit`, `timing-path`, `timing-violation`, `demo-{dark,light,oled}`.

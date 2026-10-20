@@ -116,7 +116,11 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
   sit on half-grid (or finer) positions, so drawn geometry is not integer-only. Canonical
   serialization emits whole values as JSON integers (`[[1, 2]]`, never `[[1.0, 2.0]]`), which
   keeps pre-fractional files byte-identical. Empty `points` means a straight line between the
-  computed attachment points (the UI derives pin positions from `pos`/`rot`).
+  computed attachment points (the UI derives pin positions from `pos`/`rot`). **A pin endpoint's
+  point is that pin's computed position** — the stored coordinate is the route's hint for
+  getting there, and the pin reference is the truth: a symbol's size is a rendering convention
+  this format does not fix, so an app whose symbols changed size since the file was written
+  re-lays those ends out on load.
 - Fan-out = multiple wires sharing one source pin. Buses have no width of their own — width
   is a property of the driving pin (§5.2).
 - Wires/junctions are scoped to their circuit; cross-hierarchy connection happens only

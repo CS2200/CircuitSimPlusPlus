@@ -400,58 +400,62 @@ export class CircuitDocument {
     const c = this.circuit(circuitIdx);
     const components = c.components.map((x) => (ids.has(x.id) ? rotatedComponent(x, map) : x));
     // Pins rotate about the body center: wires glued to a rotated component
-    // must follow (re-anchored + re-stubbed along the new facing). Requires
-    // the editor's `pinGeometry` hook; without it, geometry stays untouched.
-    let wires = c.wires;
-    if (this.pinGeometry !== undefined) {
-      const geom = this.pinGeometry;
-      const byId = new Map(components.map((x) => [x.id, x]));
-      wires = c.wires.map((w) => this.reanchorRotatedWire(w, ids, byId, geom));
-    }
+    // must follow (re-anchored + re-stubbed along the new facing).
+    const byId = new Map(components.map((x) => [x.id, x]));
+    const wires = this.followGeometry(c.wires, ids, byId);
     const label = ids.size === 1 ? `${verb} ${[...ids][0]}` : `${verb} ${ids.size} components`;
     this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
   }
 
-  /** Follow a rotated component's pins: re-anchor the wire ends + repair. */
-  private reanchorRotatedWire(
-    w: CsxWire,
+  /**
+   * Re-attach every wire end glued to a pin of `ids`, against `byId`'s CURRENT
+   * layout, then re-seat the junction children of any wire that actually moved.
+   * Wraps the editor's `pinGeometry`; without it geometry stays untouched.
+   *
+   * Callers: rotation (pins swing about the body centre) and `updateComponent`
+   * (an attrs edit can RESIZE a part — a constant's body grows to fit a wide
+   * value, taking its edge-mounted `out` pin with it) and load (§56's healing
+   * of a file whose wire ends were written against older symbol sizes).
+   */
+  private followGeometry(
+    wires: CsxWire[],
     ids: ReadonlySet<string>,
     byId: ReadonlyMap<string, CsxComponent>,
-    geom: NonNullable<CircuitDocument["pinGeometry"]>,
-  ): CsxWire {
-    const ends: ("a" | "b")[] = [];
-    if (isPinEndpoint(w.a) && ids.has(w.a.comp)) ends.push("a");
-    if (isPinEndpoint(w.b) && ids.has(w.b.comp)) ends.push("b");
-    if (ends.length === 0) return w;
-    let points = w.points.map((p) => [p[0], p[1]] as [number, number]);
-    for (const end of ends) {
-      const ep = end === "a" ? w.a : w.b;
-      if (!isPinEndpoint(ep)) continue;
-      const comp = byId.get(ep.comp);
-      if (comp === undefined) continue;
-      const g = geom(comp, ep.pin);
-      if (g === null) continue; // orphan endpoint: leave geometry alone
-      const idx = end === "a" ? 0 : points.length - 1;
-      points[idx] = [g.pos[0], g.pos[1]];
-      // A 180° rotation puts the pin on the opposite edge: nudge the
-      // adjacent bend onto the (new) facing side so the stub never dives
-      // back through the body.
-      if (points.length >= 3) {
-        const adjIdx = end === "a" ? 1 : points.length - 2;
-        const adj = points[adjIdx];
-        const v = FACING_VEC[g.facing];
-        const along = (adj[0] - g.pos[0]) * v.x + (adj[1] - g.pos[1]) * v.y;
-        if (along < 0) {
-          if (v.x !== 0) {
-            adj[0] = g.pos[0] + v.x * Math.max(Math.abs(adj[0] - g.pos[0]), 0.5);
-          } else {
-            adj[1] = g.pos[1] + v.y * Math.max(Math.abs(adj[1] - g.pos[1]), 0.5);
-          }
-        }
-      }
-      points = repairEnd(points, end, facingAxis(g.facing));
-    }
-    return { ...w, points };
+  ): CsxWire[] {
+    const geom = this.pinGeometry;
+    if (geom === undefined) return wires;
+    const moved: number[] = [];
+    let next = wires.map((w, i) => {
+      const followed = followWire(w, ids, byId, geom);
+      if (!samePoints(followed.points, w.points)) moved.push(i);
+      return followed;
+    });
+    for (const i of moved) next = reprojectJunctionDependents(next, i);
+    return next;
+  }
+
+  /**
+   * Resolve every pin end in every circuit against the CURRENT layout, and save
+   * nothing: no undo entry, no dirty flag. A wire end that names a pin IS at
+   * that pin (the model's own promise); a file can name a pin whose body has
+   * since been sized differently — a hand-authored one, a converted one, or one
+   * this app wrote before a symbol grew (§56). Nothing moves unless a point was
+   * actually stale, so this is the identity on a file already in step.
+   *
+   * The editor calls it once per load, which is why it writes through
+   * `replaceCircuits` rather than `exec`: the loaded document has no history yet
+   * and must not read as unsaved.
+   */
+  normalizePinEnds(): void {
+    if (this.pinGeometry === undefined) return;
+    let changed = false;
+    const circuits = this.data.circuits.map((c) => {
+      const byId = new Map(c.components.map((x) => [x.id, x]));
+      const wires = this.followGeometry(c.wires, new Set(byId.keys()), byId);
+      if (!changed && !sameWireList(wires, c.wires)) changed = true;
+      return wires === c.wires ? c : { ...c, wires };
+    });
+    if (changed) this.replaceCircuits(circuits);
   }
 
   /** Delete a selection (components + their wires + selected wires) as ONE command. */
@@ -583,6 +587,10 @@ export class CircuitDocument {
       });
       if (dangling.size > 0) wires = removeWiresCascade(wires, dangling);
     }
+    // An attrs edit can RESIZE the part, and a pin that sits on an edge rides
+    // that edge (a constant's `out`): the wires glued to it follow (UI_OVERHAUL
+    // §56), in this same undo step.
+    wires = this.followGeometry(wires, new Set([id]), new Map([[id, updated]]));
     this.exec(
       `edit ${id}`,
       coalesceKey,
@@ -1081,6 +1089,65 @@ const FACING_VEC: Record<Rotation, { x: number; y: number }> = {
 /** Axis a pin's escape stub runs along for a given facing. */
 function facingAxis(facing: Rotation): "h" | "v" {
   return facing === "E" || facing === "W" ? "h" : "v";
+}
+
+/** Exact point comparison: authored coordinates are exact, so no tolerance. */
+function samePoints(a: readonly [number, number][], b: readonly [number, number][]): boolean {
+  return a.length === b.length && a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1]);
+}
+
+function sameWireList(a: readonly CsxWire[], b: readonly CsxWire[]): boolean {
+  return a.length === b.length && a.every((w, i) => w === b[i]);
+}
+
+/**
+ * Follow a part's geometry with one wire (UI_OVERHAUL §56/§81): an end that
+ * names a pin of a part in `ids` returns to that pin, its adjacent bend is
+ * nudged onto the pin's new facing side so the stub never dives back through
+ * the body, and the end segment is repaired so the route stays orthogonal —
+ * never a diagonal stub. Pure, and the identity when nothing moved (same point
+ * list in, same object out), which is what lets the caller cheaply tell which
+ * wires really changed. A join end, an orphaned reference, and a pin that did
+ * not move are all left exactly as they were.
+ */
+export function followWire(
+  w: CsxWire,
+  ids: ReadonlySet<string>,
+  byId: ReadonlyMap<string, CsxComponent>,
+  geom: NonNullable<CircuitDocument["pinGeometry"]>,
+): CsxWire {
+  const ends: ("a" | "b")[] = [];
+  if (isPinEndpoint(w.a) && ids.has(w.a.comp)) ends.push("a");
+  if (isPinEndpoint(w.b) && ids.has(w.b.comp)) ends.push("b");
+  if (ends.length === 0 || w.points.length < 2) return w;
+  let points = w.points.map((p) => [p[0], p[1]] as [number, number]);
+  for (const end of ends) {
+    const ep = end === "a" ? w.a : w.b;
+    if (!isPinEndpoint(ep)) continue;
+    const comp = byId.get(ep.comp);
+    if (comp === undefined) continue;
+    const g = geom(comp, ep.pin);
+    if (g === null) continue; // orphan endpoint: leave geometry alone
+    const idx = end === "a" ? 0 : points.length - 1;
+    points[idx] = [g.pos[0], g.pos[1]];
+    // A 180° rotation — or a grown body — puts the pin somewhere else: nudge
+    // the adjacent bend onto the facing side so the stub stays on its axis.
+    if (points.length >= 3) {
+      const adjIdx = end === "a" ? 1 : points.length - 2;
+      const adj = points[adjIdx];
+      const v = FACING_VEC[g.facing];
+      const along = (adj[0] - g.pos[0]) * v.x + (adj[1] - g.pos[1]) * v.y;
+      if (along < 0) {
+        if (v.x !== 0) {
+          adj[0] = g.pos[0] + v.x * Math.max(Math.abs(adj[0] - g.pos[0]), 0.5);
+        } else {
+          adj[1] = g.pos[1] + v.y * Math.max(Math.abs(adj[1] - g.pos[1]), 0.5);
+        }
+      }
+    }
+    points = repairEnd(points, end, facingAxis(g.facing));
+  }
+  return samePoints(points, w.points) ? w : { ...w, points };
 }
 
 /** Axis of an axis-aligned segment; null when diagonal or zero-length. */

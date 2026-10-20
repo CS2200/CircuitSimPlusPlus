@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { radixText } from "./radix";
+import { nextValueCardMode, radixText } from "./radix";
 
 /**
  * `radixText` is the readout a stored value gets on a part's body — and now in
@@ -34,5 +34,14 @@ describe("radixText", () => {
     expect(radixText("5", "octal", 4)).toBe("0x5");
     expect(radixText("5", "hex", 0)).toBe("0x5");
     expect(radixText("5", "hex", 99)).toBe("0x00000005");
+  });
+});
+
+/** The shift+click value card's base cycle (UI_OVERHAUL §56). */
+describe("nextValueCardMode", () => {
+  it("walks binary → hex → decimal, then wraps", () => {
+    expect(nextValueCardMode("bin")).toBe("hex");
+    expect(nextValueCardMode("hex")).toBe("unsigned");
+    expect(nextValueCardMode("unsigned")).toBe("bin");
   });
 });

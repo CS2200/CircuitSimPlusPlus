@@ -110,6 +110,27 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("subcircuit")).toEqual(["circuit", "width", "height"]);
   });
 
+  it("a value readout sizes its body to the declared width (§56)", () => {
+    const w = (type: string, attrs: Record<string, unknown>): number => compSize({ type, attrs }).w;
+    // The base: as wide as the digits need, and no wider.
+    expect(w("wiring.constant", { bitsize: 1 })).toBe(3);
+    expect(w("wiring.constant", { bitsize: 4 })).toBe(3);
+    // 8 bits is one hex digit more, so the box grows a little — this is the
+    // mismatch the screenshot showed, two widths drawn identically.
+    expect(w("wiring.constant", { bitsize: 8 })).toBe(3.5);
+    expect(w("wiring.constant", { bitsize: 32 })).toBe(7.8); // 0x00000000
+    expect(w("wiring.constant", { bitsize: 32, radix: "bin" })).toBe(25.1); // 32 bits
+    expect(w("wiring.constant", { bitsize: 32, radix: "dec" })).toBe(7.8); // 10 digits
+    expect(w("wiring.probe", { bitsize: 32 })).toBe(w("wiring.constant", { bitsize: 32 }));
+  });
+
+  it("a constant's `out` rides the box edge; a probe's `in` does not move", () => {
+    const konst = { type: "wiring.constant", attrs: { bitsize: 32 } };
+    expect(compPins(konst)[0].dx).toBe(compSize(konst).w);
+    // The probe points along its pin, so its body grows behind it.
+    expect(compPins({ type: "wiring.probe", attrs: { bitsize: 32 } })[0].dx).toBe(0);
+  });
+
   it("a memory offers both widths as one-click picks, never a dropdown", () => {
     const widths = editableAttrs("mem.ram").filter((f) => f.group === "Width");
     expect(widths.map((f) => [f.key, f.label, f.kind])).toEqual([

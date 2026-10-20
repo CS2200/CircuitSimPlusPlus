@@ -72,3 +72,17 @@ export function parseRadixValueMasked(text: string, radix: string, bits: number)
   const mask = w >= 32 ? 0xffffffff : 2 ** w - 1;
   return ((n & mask) >>> 0).toString(16);
 }
+
+/**
+ * The bases the shift+click value card cycles (UI_OVERHAUL §56): **binary
+ * first**, because the bits of a wide net are usually the question being asked
+ * of it, then the two compact readings — hex, then decimal.
+ */
+export const VALUE_CARD_MODES = ["bin", "hex", "unsigned"] as const;
+export type ValueCardMode = (typeof VALUE_CARD_MODES)[number];
+
+/** The next base in the card's cycle (wraps around). */
+export function nextValueCardMode(mode: ValueCardMode): ValueCardMode {
+  const i = VALUE_CARD_MODES.indexOf(mode);
+  return VALUE_CARD_MODES[(i + 1) % VALUE_CARD_MODES.length];
+}

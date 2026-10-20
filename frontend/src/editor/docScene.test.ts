@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CsxWire } from "../model/csx";
+import type { WireValue } from "../ipc/types";
 import {
   clockLevelOf,
   danglingPins,
@@ -9,6 +10,7 @@ import {
   pickWireLabelAt,
   readableOn,
   tunnelTagSites,
+  valueCardLines,
   valueTextAtWidth,
 } from "./docScene";
 
@@ -264,5 +266,30 @@ describe("tunnel labels (UI_OVERHAUL §87)", () => {
     );
     // Without metrics the estimate rules, and the same point is outside the tag.
     expect(pickWireLabelAt(wires, { x: 2.6, y: 0 })).toBeNull();
+  });
+});
+
+/**
+ * The shift+click value card (UI_OVERHAUL §56) reads a net at the NET's own
+ * width: 32 bits of zero are 32 zeros, not `0x0`, and a wide binary readout
+ * wraps so the bit count stays countable.
+ */
+describe("valueCardLines", () => {
+  const zero: WireValue = { v: "0", x: "", z: "" };
+
+  it("pads to the net's width, in the base the card is cycling", () => {
+    expect(valueCardLines(zero, "bin", 32)).toEqual(["0b0000000000000000", "  0000000000000000"]);
+    expect(valueCardLines(zero, "hex", 32)).toEqual(["0x00000000"]);
+    expect(valueCardLines(zero, "unsigned", 32)).toEqual(["0"]);
+    // A value that already fills its width stays on one line.
+    expect(valueCardLines(zero, "bin", 4)).toEqual(["0b0000"]);
+  });
+
+  it("leaves what has no width alone", () => {
+    // Unknown: nothing to zero-pad.
+    expect(valueCardLines({ v: "0", x: "1", z: "" }, "bin", 32)).toEqual(["X"]);
+    // A net whose pins disagree about width is not padded to either.
+    expect(valueCardLines(zero, "hex", null)).toEqual(["0x0"]);
+    expect(valueCardLines(undefined, "bin", 32)).toEqual(["no sim loaded"]);
   });
 });

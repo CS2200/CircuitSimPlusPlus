@@ -155,6 +155,12 @@ function initDoc(d: CircuitDocument): CircuitDocument {
     const p = compLayout(comp, d.circuits).pins.find((x) => x.name === pin);
     return p === undefined ? null : { pos: [p.x, p.y], facing: p.facing };
   };
+  // A wire end that names a pin IS at that pin. A file can name a pin whose
+  // symbol has since been sized differently (hand-authored, converted, or
+  // written before a constant learned to grow to its value, §56), so resolve
+  // every pin end against the current layout once, here — silently, before the
+  // document is adopted, so it reads as neither an edit nor unsaved work.
+  d.normalizePinEnds();
   return d;
 }
 

@@ -19,7 +19,7 @@ import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
 import { formatValue, type ValueMode } from "../sim/controller";
 import { wireValueState } from "../lib/value";
-import { radixText } from "../lib/radix";
+import { radixText, type ValueCardMode } from "../lib/radix";
 import { breakpointCondition } from "../lib/breakpoint";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
@@ -92,6 +92,17 @@ export interface SimOverlay {
 function probeDisplayMode(attr: unknown): ValueMode {
   if (attr === "dec" || attr === "unsigned") return "unsigned";
   return attr === "signed" || attr === "hex" || attr === "bin" ? attr : "hex";
+}
+
+/**
+ * How a part's value pin reads (UI_OVERHAUL §21): a single-bit pin is a plain
+ * `0`/`1` with no prefix, a wider one follows the part's chosen radix. The one
+ * place this rule lives — the canvas applies it to live values, to a value
+ * carried statically by a constant, and to the memory readouts alike, so a
+ * 32-bit value is padded to 32 bits wherever it is shown.
+ */
+function readoutMode(pinBits: number, radix: unknown): ValueMode {
+  return pinBits <= 1 ? "unsigned" : probeDisplayMode(radix);
 }
 
 // ---- family tints, pin markers and live values (UI_OVERHAUL §21) ----
@@ -425,6 +436,34 @@ export function ellipsize(text: string, maxChars: number): string {
   return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
+/** Binary bits per card line (UI_OVERHAUL §56): a 32-bit word wraps in two. */
+const CARD_BIN_WRAP = 16;
+
+/**
+ * The value card's lines (UI_OVERHAUL §56): what a shift+click on a wire reads
+ * out, **padded to the NET's own declared width** — 32 bits of zero read as 32
+ * zeros, not `0x0`, because the width is the thing you asked the net about. The
+ * base comes from the card's cycle (binary first), and a wide binary readout
+ * wraps onto further lines, indented so the digits stay aligned and the bits
+ * stay countable. `X`/`Z` and a net whose pins disagree about width stay
+ * unpadded: there is no width to pad to.
+ */
+export function valueCardLines(
+  val: WireValue | undefined,
+  mode: ValueCardMode,
+  bits: number | null,
+): string[] {
+  if (val === undefined) return ["no sim loaded"];
+  const text = bits === null ? formatValue(val, mode) : valueTextAtWidth(val, mode, bits);
+  if (mode !== "bin" || text.length <= CARD_BIN_WRAP + 2) return [text];
+  const body = text.replace(/^0b/, "");
+  const out: string[] = [];
+  for (let i = 0; i < body.length; i += CARD_BIN_WRAP) {
+    out.push((i === 0 ? "0b" : "  ") + body.slice(i, i + CARD_BIN_WRAP));
+  }
+  return out;
+}
+
 /**
  * Pin whose net value is shown on the body (UI_OVERHAUL §21): clocks, pins,
  * probes, registers, RAM/ROM and I/O parts are all live readouts.
@@ -540,8 +579,8 @@ export interface SceneOverlay {
   } | null;
   /** Box-select rectangle in progress. */
   boxRect: Rect | null;
-  /** Shift-click wire info card: which wire + where to anchor the card. */
-  wireInfo: { wireIdx: number; pos: Vec2 } | null;
+  /** Shift-click wire info card: which wire, where to anchor, and which base it reads in. */
+  wireInfo: { wireIdx: number; pos: Vec2; mode: ValueCardMode } | null;
   /**
    * Part ids to outline as added or changed by the document being previewed
    * (version history, UI_OVERHAUL §76). Deliberately NOT the selection: a
@@ -965,26 +1004,16 @@ export class DocScene {
   }
 
   /**
-   * Which way a pin faces, away from its part's body (UI_OVERHAUL §91): the edge of
-   * its body rect that the pin sits on. This is what a tunnel tag orients itself by,
-   * so a tag pointed at a pin's outward side never lands on the part — whatever
-   * direction the wire leaves in, and whichever way the wire's copper runs.
+   * Which way a pin faces, away from its part's body (UI_OVERHAUL §91). This is
+   * what a tunnel tag orients itself by, so a tag pointed at a pin's outward
+   * side never lands on the part — whatever direction the wire leaves in, and
+   * whichever way the wire's copper runs.
    *
-   * The *edge* decides rather than the whole offset from the centre: on a wide part, a
-   * pin on the bottom edge near a corner is further left than it is down, and a
-   * "dominant axis" reading would face it west.
+   * Read straight off the layout, which is the single source of truth for pin
+   * geometry — the same `facing` wire routing leaves a pin on.
    */
   outwardOf(compId: string, pin: string): TagDir | undefined {
-    const layout = this.layouts.get(compId);
-    const p = layout?.pins.find((x) => x.name === pin);
-    if (layout === undefined || p === undefined) return undefined;
-    const { x, y, w, h } = layout.rect;
-    const on = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
-    if (on(p.x, x + w)) return "E";
-    if (on(p.x, x)) return "W";
-    if (on(p.y, y + h)) return "S";
-    if (on(p.y, y)) return "N";
-    return undefined;
+    return this.layouts.get(compId)?.pins.find((p) => p.name === pin)?.facing;
   }
 
   /** Topmost component body under the point (for dragging/selecting). */
@@ -1676,7 +1705,7 @@ export class DocScene {
               // ones are padded to the pin's DECLARED width, so the digit count
               // follows the bit size (4-bit `0x5` → 8-bit `0x05`).
               const pinBits = layout.pins.find((p) => p.name === pinName)?.bitsize ?? 1;
-              const mode = pinBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
+              const mode = readoutMode(pinBits, comp.attrs?.radix);
               valueText = valueTextAtWidth(val, mode, pinBits);
               valuePin = pinName;
             }
@@ -1692,7 +1721,14 @@ export class DocScene {
           const st = val !== undefined ? wireValueState(val) : undefined;
           if (st === "z" || st === "x") {
             const stat = this.staticPinText(comp, valuePin);
-            if (stat !== null) valueText = stat;
+            if (stat !== null) {
+              const pinBits = layout.pins.find((p) => p.name === valuePin)?.bitsize ?? 1;
+              valueText = valueTextAtWidth(
+                { v: stat, x: "", z: "" },
+                readoutMode(pinBits, comp.attrs?.radix),
+                pinBits,
+              );
+            }
           }
         }
         // Memory parts read out ADDRESS + data on the body instead of the word
@@ -1707,11 +1743,7 @@ export class DocScene {
           const val = this.livePinValue(comp, "addr", sim);
           const st = val !== undefined ? wireValueState(val) : undefined;
           if (val !== undefined && st !== "z" && st !== "x") {
-            addrText = valueTextAtWidth(
-              val,
-              addrBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
-              addrBits,
-            );
+            addrText = valueTextAtWidth(val, readoutMode(addrBits, comp.attrs?.radix), addrBits);
             addrNum = hexToNumber(val.v);
           } else {
             // A constant drives the address for real — show it immediately, even
@@ -1720,7 +1752,7 @@ export class DocScene {
             if (stat !== null) {
               addrText = valueTextAtWidth(
                 { v: stat, x: "", z: "" },
-                addrBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+                readoutMode(addrBits, comp.attrs?.radix),
                 addrBits,
               );
               addrNum = hexToNumber(stat);
@@ -1737,7 +1769,7 @@ export class DocScene {
           const dataPin = VALUE_PIN[comp.type];
           const dataBits = layout.pins.find((p) => p.name === dataPin)?.bitsize ?? 1;
           const weVal = comp.type === "mem.ram" ? this.livePinValue(comp, "we", sim) : undefined;
-          const dataMode = dataBits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix);
+          const dataMode = readoutMode(dataBits, comp.attrs?.radix);
           if (weVal !== undefined && wireValueState(weVal) === "high") {
             const dinVal = this.livePinValue(comp, "din", sim);
             if (dinVal !== undefined) valueText = valueTextAtWidth(dinVal, dataMode, dataBits);
@@ -1757,7 +1789,12 @@ export class DocScene {
         if (valueText === null && comp.type === "wiring.probe") {
           const staticVal = this.staticPinText(comp, "in");
           if (staticVal !== null) {
-            valueText = staticVal;
+            const pinBits = layout.pins.find((p) => p.name === "in")?.bitsize ?? 1;
+            valueText = valueTextAtWidth(
+              { v: staticVal, x: "", z: "" },
+              readoutMode(pinBits, comp.attrs?.radix),
+              pinBits,
+            );
             valuePin = "in";
           }
         }
@@ -1781,7 +1818,7 @@ export class DocScene {
             const bits = q?.bitsize ?? 1;
             valueText = valueTextAtWidth(
               { v: poked, x: "", z: "" },
-              bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+              readoutMode(bits, comp.attrs?.radix),
               bits,
             );
           }
@@ -1795,7 +1832,7 @@ export class DocScene {
           const bits = q?.bitsize ?? 1;
           valueText = valueTextAtWidth(
             { v: "0", x: "", z: "" },
-            bits <= 1 ? "unsigned" : probeDisplayMode(comp.attrs?.radix),
+            readoutMode(bits, comp.attrs?.radix),
             bits,
           );
         }
@@ -2249,15 +2286,18 @@ export class DocScene {
       }
     }
 
-    // Wire info card (shift+click): just the value on the wire (UX
-    // decision — net metadata was noise). Needs a loaded sim.
+    // Wire info card (shift+click): the value on the wire, read to the NET's own
+    // width, in the base the card is cycling (UI_OVERHAUL §56). Needs a loaded sim.
     if (overlay.wireInfo !== null) {
       const val = sim?.valueForWire(overlay.wireInfo.wireIdx);
+      const netId = this.nets.wireToNet.get(overlay.wireInfo.wireIdx);
+      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
+      const bits = inferNetBits(net, this.layouts).bits;
       drawCard(
         renderer,
         theme,
         { x: overlay.wireInfo.pos.x + 0.7, y: overlay.wireInfo.pos.y - 1.6 },
-        [val !== undefined ? formatValue(val, "hex") : "no sim loaded"],
+        valueCardLines(val, overlay.wireInfo.mode, bits),
       );
     }
   }

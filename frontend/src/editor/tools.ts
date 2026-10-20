@@ -9,6 +9,7 @@ import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
 import type { DocScene, Hit, SceneOverlay, WireHit } from "./docScene";
 import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } from "./route";
+import { nextValueCardMode, VALUE_CARD_MODES, type ValueCardMode } from "../lib/radix";
 
 /** How close to a branch wire a click counts as "on" it (grid units). */
 const BRANCH_TOL = 0.5;
@@ -185,7 +186,13 @@ export class ToolMachine {
   private pressWireIdx: number | null = null;
   /** The momentary io.button currently held, if any. */
   private pressButton: string | null = null;
-  private wireInfo: { wireIdx: number; pos: Vec2 } | null = null;
+  private wireInfo: { wireIdx: number; pos: Vec2; mode: ValueCardMode } | null = null;
+  /**
+   * The base each wire's info card reads in, remembered per wire for the life of
+   * this document (a new ToolMachine is built per document, so the map starts
+   * empty on load). A wire not in it yet reads binary (UI_OVERHAUL §56).
+   */
+  private readonly wireInfoModes = new Map<number, ValueCardMode>();
   /**
    * Left-press origin and whether the pointer has swept past
    * `DRAG_THRESHOLD` since. Distinguishes a drag-wire gesture (press on a
@@ -366,6 +373,14 @@ export class ToolMachine {
     // clickable somewhere, and the label is where the old schematic showed the name.
     const label = this.scene.pickWireLabel(world);
     if (label !== null) {
+      if (info.shiftKey) {
+        // Shift+click a TAG reads the tunnel's value (UI_OVERHAUL §56). The tag is
+        // the only part of a hidden route you can SEE, so it has to be able to
+        // answer for it — otherwise the gesture would need the route it hides.
+        this.inspectWire(label.wireIdx, world);
+        this.changed();
+        return;
+      }
       if (!this.selection.hasWire(label.wireIdx)) this.selection.set([], [label.wireIdx]);
       this.changed();
       return;
@@ -408,8 +423,9 @@ export class ToolMachine {
     const wire = this.scene.pickWire(world);
     if (wire !== null) {
       if (info.shiftKey) {
-        // shift+click a wire → what's on it (net info card)
-        this.wireInfo = { wireIdx: wire.wireIdx, pos: world };
+        // shift+click a wire → what's on it (net info card). Shift+clicking the
+        // SAME wire again cycles the base it reads in (§56).
+        this.inspectWire(wire.wireIdx, world);
         this.changed();
         return;
       }
@@ -468,6 +484,20 @@ export class ToolMachine {
       additive: info.shiftKey || info.ctrlKey,
     };
     this.changed();
+  }
+
+  /**
+   * Show the wire info card at `world` (UI_OVERHAUL §56). The FIRST look at a
+   * wire reads binary — the bits of a wide net are usually the question being
+   * asked — and each further shift+click on the same wire advances that wire's
+   * base: binary → hex → decimal → binary. Remembered per wire, so looking away
+   * and coming back does not lose the base you chose.
+   */
+  private inspectWire(wireIdx: number, world: Vec2): void {
+    const previous = this.wireInfoModes.get(wireIdx);
+    const mode = previous === undefined ? VALUE_CARD_MODES[0] : nextValueCardMode(previous);
+    this.wireInfoModes.set(wireIdx, mode);
+    this.wireInfo = { wireIdx, pos: world, mode };
   }
 
   /**

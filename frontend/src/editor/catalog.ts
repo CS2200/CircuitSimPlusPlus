@@ -184,6 +184,30 @@ function boxSpec(
   return withExtras(spec, extra);
 }
 
+/**
+ * The body width a value readout needs (UI_OVERHAUL §56): the WIDEST text the
+ * declared bit width can print in the chosen base — `0x` + one digit per nibble,
+ * `0b` + one per bit, or the most decimal digits the width can hold.
+ *
+ * Sizing on the declared width rather than on the current value is what keeps
+ * the box still while a value is typed, and it is the only rule a probe can use
+ * at all: a probe's value is live, so "fit what it shows" would resize the part
+ * on every clock.
+ *
+ * The readout is drawn at size 1 in a box `w` wide, of which `fitValueLine`
+ * gives the text `0.86 × w`; a character is 0.62 units, so the digits need
+ * `0.72 × chars` and the rest is air, so text never touches the edge.
+ */
+export function readoutWidth(bits: number, radix: unknown): number {
+  const b = Math.min(32, Math.max(1, bits));
+  // Hex pads to the nibble count, binary to the bit count, and decimal needs no
+  // prefix — just the most digits `b` bits can print (32 bits → 10).
+  const chars =
+    radix === "bin" ? 2 + b : radix === "dec" ? Math.ceil(b * Math.log10(2)) : 2 + hexWidthFor(b);
+  const w = chars * 0.72 + 0.6;
+  return Math.max(3, Math.round(w * 20) / 20); // to a tidy 0.05
+}
+
 /** Attach the optional palette label / body-mark scale to a spec. */
 function withExtras(
   spec: CompSpec,
@@ -571,20 +595,35 @@ const REGISTRY: Record<string, CompSpec> = {
   // the caption IS the value, and there is nothing to configure.
   "wiring.power": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: 1 }], "1"),
   "wiring.ground": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: 1 }], "0"),
-  "wiring.constant": boxSpec(
-    3,
-    2,
-    [{ name: "out", dx: 3, dy: 1, kind: "out", bitsize: BUS_WIDTH }],
-    "CONST",
-  ),
+  // A constant's body IS its value (UI_OVERHAUL §56): the box is sized to the
+  // readout it will draw, so a wide word is shown whole rather than cut with an
+  // ellipsis, and the `out` pin rides the box's right edge — a pin that sits on
+  // an edge stays on that edge (layout.ts), and its wires follow (document.ts).
+  "wiring.constant": {
+    width: (attrs) => readoutWidth(bitsOf(attrs), attrs["radix"]),
+    height: () => 2,
+    pins: (attrs) => [
+      {
+        name: "out",
+        dx: readoutWidth(bitsOf(attrs), attrs["radix"]),
+        dy: 1,
+        kind: "out",
+        bitsize: bitsOf(attrs),
+      },
+    ],
+    caption: () => "CONST",
+  },
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
-  // Roomier than a bare hexagon so a multi-bit readout fits (UI_OVERHAUL §56).
-  "wiring.probe": boxSpec(
-    3,
-    2,
-    [{ name: "in", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH }],
-    "PROBE",
-  ),
+  // The probe's pointed shape points along its `in` pin, so it grows AWAY from
+  // that pin: the pin stays put (dx 0), the body extends behind it, and the
+  // readout fits without pushing into whatever the probe is watching
+  // (UI_OVERHAUL §56).
+  "wiring.probe": {
+    width: (attrs) => readoutWidth(bitsOf(attrs), attrs["radix"]),
+    height: () => 2,
+    pins: (attrs) => [{ name: "in", dx: 0, dy: 1, kind: "in", bitsize: bitsOf(attrs) }],
+    caption: () => "PROBE",
+  },
   "wiring.splitter": splitterSpec(),
 
   // Debugging (UI_OVERHAUL §90): a watcher, not a part of the logic. `in` is the

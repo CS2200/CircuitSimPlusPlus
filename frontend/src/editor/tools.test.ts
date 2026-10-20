@@ -3,6 +3,9 @@ import { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { PointerInfo } from "../components/CanvasHost";
 import { DocScene } from "./docScene";
+import { pinPosition } from "./layout";
+import { tagWidth } from "./docScene";
+import { TAG_TIP } from "./shapes";
 import { copySelection, manhattanRoute, ToolMachine, type CanvasMenuState } from "./tools";
 
 const PI = (over: Partial<PointerInfo> = {}): PointerInfo => ({
@@ -139,7 +142,7 @@ describe("wiring", () => {
       tool.down(to, PI()); // the wire commits on the second click
       tool.up(PI());
     };
-    return { doc, sync, attrsOf, connect };
+    return { doc, scene, tool, sync, attrsOf, connect };
   }
 
   it("a probe adopts the width of what it is connected to", () => {
@@ -153,7 +156,10 @@ describe("wiring", () => {
     sync();
     expect(attrsOf(probe)?.bitsize).toBeUndefined(); // default 1 bit, no attr
 
-    connect({ x: 13, y: 11 }, { x: 20, y: 11 }); // konst.out → probe.in
+    // The constant's body is sized to its readout, so its edge-mounted `out` is
+    // not at x=13 any more — ask the layout where the pin really is (§56).
+    const out = pinPosition(doc.circuit(0).components[0], "out")!;
+    connect(out, { x: 20, y: 11 }); // konst.out → probe.in
 
     expect(doc.circuit(0).wires).toHaveLength(1);
     expect(attrsOf(konst)?.bitsize).toBe(32); // the driver is untouched
@@ -174,13 +180,60 @@ describe("wiring", () => {
     });
     sync();
 
-    // The constant's `out` pin (x=13, y=11) → the breakpoint's `in` (x=20, y=10.5).
-    connect({ x: 13, y: 11 }, { x: 20, y: 10.5 });
+    // The constant's `out` pin (sized to its readout, §56) → the breakpoint's
+    // `in` (x=20, y=10.5).
+    connect(pinPosition(doc.circuit(0).components[0], "out")!, { x: 20, y: 10.5 });
 
     // Watching a bus while declaring one bit would be the width mismatch the
     // watcher exists to avoid; the condition's own value is untouched.
     expect(attrsOf(bp)?.bitsize).toBe(8);
     expect(attrsOf(bp)?.value).toBe("0");
+  });
+
+  it("shift+click a wire reads its value, cycling binary → hex → decimal (§56)", () => {
+    const { doc, sync, tool, connect } = bareTool();
+    doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [10, 10],
+      attrs: { value: "1", bitsize: 32 },
+    });
+    doc.addComponent(0, { type: "wiring.probe", pos: [20, 10] });
+    sync();
+    const out = pinPosition(doc.circuit(0).components[0], "out")!;
+    connect(out, { x: 20, y: 11 });
+    // Partway along the wire: clear of both pins, so the card is about the WIRE.
+    const mid = { x: out.x + 1.1, y: 11 };
+    const inspect = () => {
+      tool.down(mid, PI({ shiftKey: true }));
+      tool.up(PI({ shiftKey: true }));
+      return tool.overlay().wireInfo;
+    };
+    expect(inspect()).toMatchObject({ wireIdx: 0, mode: "bin" }); // the bits first
+    expect(inspect()?.mode).toBe("hex"); // then the compact readings
+    expect(inspect()?.mode).toBe("unsigned");
+    expect(inspect()?.mode).toBe("bin"); // and around again
+  });
+
+  it("shift+click a tunnel's TAG reads the tunnel it hides (§56)", () => {
+    const { doc, sync, tool, connect } = bareTool();
+    doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [10, 10],
+      attrs: { value: "1", bitsize: 4 },
+    });
+    doc.addComponent(0, { type: "wiring.probe", pos: [20, 10], attrs: { bitsize: 4 } });
+    sync();
+    const out = pinPosition(doc.circuit(0).components[0], "out")!;
+    connect(out, { x: 20, y: 11 });
+    doc.setWireName(0, 0, "T");
+    sync();
+
+    // The tag lies along the wire, just east of the pin the point aims back at
+    // (§91) — that body is the handle a HIDDEN route has to answer on.
+    const handle = { x: out.x + TAG_TIP + tagWidth("T") / 2, y: out.y };
+    tool.down(handle, PI({ shiftKey: true }));
+    tool.up(PI({ shiftKey: true }));
+    expect(tool.overlay().wireInfo).toMatchObject({ wireIdx: 0, mode: "bin" });
   });
 
   it("a 1-bit source leaves a probe's default width alone", () => {
@@ -189,7 +242,7 @@ describe("wiring", () => {
     const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 10] });
     sync();
 
-    connect({ x: 13, y: 11 }, { x: 20, y: 11 });
+    connect(pinPosition(doc.circuit(0).components[0], "out")!, { x: 20, y: 11 });
 
     // No attr written: the width already matches, so nothing churns.
     expect(attrsOf(probe)?.bitsize).toBeUndefined();
