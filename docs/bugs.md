@@ -23,6 +23,22 @@ appendices so the active list stays honest._
   address. Each has a test; the golden hashes and the negative fixtures are
   unchanged.
 
+## The reset pin's semantics (decided 2026-10-21)
+
+`mem.register`/`mem.ram` have `rst` and `clk` again, hidden unless `showClk`/`showRst`
+(UI_OVERHAUL §93). Our reset is **synchronous** — it clears on a rising edge, and wins over
+a simultaneous enable — which is the right reading of a D flip-flop. CircuitSim CE's `Clear`
+is *asynchronous* (level-triggered: it zeroes the part on any input change while asserted),
+so the two differ for a reset pulse shorter than one clock; a reset held across an edge
+behaves the same in both, which is how the old schematic is drawn and how the converted
+LC-5200 uses it. Recorded here rather than "fixed", because the synchronous behaviour is
+deliberate.
+
+**Backlog (P3): more register types in the Memory palette.** A D *latch* (level-sensitive,
+transparent while enabled) and possibly a transparent-latch RAM variant would cover designs
+that want asynchronous/level behaviour instead of ours (and would make an asynchronous
+reset a property of a *type* rather than of the flag). Nothing depends on it yet.
+
 **Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
 and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says
 otherwise — UI_OVERHAUL §93), **213 backend + 445 unit + 80 e2e** tests green. RAM powers
@@ -504,6 +520,15 @@ UI_OVERHAUL §82.
 **Fill with 0s** (UI_OVERHAUL §82): "no image" now means "all unknown", and the common
 case — a lab that wants a zeroed memory — deserves one click rather than hand-typing an
 RLE run.
+
+**Evidence from the old format (2026-10-21).** The course's reference model *is* zero:
+CircuitSim CE's RAM is a Java `int[]`, and the taught ISA simulator agrees —
+`int_simulator.py`'s `access_mem` returns `0` for any address the program image does not
+define. The autograder's committed expected traces were generated under that rule. So
+"no image" meaning "all unknown" is a deliberate *divergence* from what a converted or
+course-run design expects; the transpiler compensates by giving a converted memory a
+full-depth zero image (`circuitsim-transpiler` `docs/02-mapping.md`). The open question is
+what the *new* tool should do by default for a memory a student draws.
 
 **Question for the Head TA — registers.** RAM now powers on `X`; registers still power on
 `0`. The same argument applies to them (a real flip-flop's power-on value is
