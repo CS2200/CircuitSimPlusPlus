@@ -2,9 +2,8 @@
 // CircuitSim++ build runner.
 //
 // A thin, cross-platform convenience wrapper over the commands documented in
-// README.md. It is NOT a second source of truth: every step here is the same
-// command CI runs (.github/workflows/backend.yml, frontend.yml), so if a gate
-// changes, change it in one place and keep the three in sync.
+// README.md. It is NOT a second source of truth: it is the commit gate, run
+// locally before committing (this GHES org has no Actions runners).
 //
 //   node scripts/build.mjs            # default target: check (backend + frontend)
 //   node scripts/build.mjs --list     # show every target
@@ -49,7 +48,7 @@ const TARGETS = {
   },
 
   lint: {
-    help: "format check + clippy -D warnings for core + cli (mirrors backend.yml)",
+    help: "format check + clippy -D warnings for core + cli",
     steps: [
       cargo("fmt", "--all", "--", "--check"),
       cargo("clippy", "-p", "csim-core", "-p", "csim", "--all-targets", "--", "-D", "warnings"),
@@ -181,8 +180,12 @@ if (args.includes("-h") || args.includes("--help")) {
   list();
 } else {
   const requested = args.filter((a) => !a.startsWith("-"));
-  if (requested.some((a) => a.startsWith("-"))) {
-    fail(`unknown option`, `run \`${binName()} --list\``);
+  const unknown = args.filter((a) => a.startsWith("-"));
+  if (unknown.length) {
+    fail(
+      `unknown option${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`,
+      `run \`${binName()} --list\` to see the available targets`,
+    );
   }
   for (const name of requested.length ? requested : ["check"]) {
     runSteps(name);

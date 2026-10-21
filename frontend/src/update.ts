@@ -5,23 +5,33 @@
  * Never forced, never auto-installs. Offline / any error = silent skip.
  */
 
-import pkg from "../package.json";
+import pkg from "../package.json" with { type: "json" };
 
 /**
- * The GitHub repo to poll, "owner/name". PLACEHOLDER until the human
- * creates the remote — the nudge silently skips while this is unset.
+ * The GitHub repo to poll, "owner/name". The in-app nudge silently skips
+ * while this is unset or unreachable.
  */
-export const GITHUB_REPO = "";
+export const GITHUB_REPO = "CS2200TAs/CircuitSimPlusPlus";
+
+/**
+ * The GitHub host that serves the releases. This is GitHub Enterprise Server
+ * (github.gatech.edu), NOT github.com — its REST API lives under `/api/v3`,
+ * and `api.github.com` has no knowledge of our repo.
+ */
+export const RELEASES_HOST = "github.gatech.edu";
+
+/** Release API base for RELEASES_HOST (`/api/v3` on GHES, plain on github.com). */
+export const RELEASES_API = `https://${RELEASES_HOST}/api/v3`;
 
 export const APP_VERSION: string = pkg.version;
 
 /** The repo to poll; `?updateRepo=owner/name` overrides (dev/e2e hook). */
 function repo(): string {
-  if (GITHUB_REPO !== "") return GITHUB_REPO;
   if (typeof window !== "undefined") {
-    return new URLSearchParams(window.location.search).get("updateRepo") ?? "";
+    const override = new URLSearchParams(window.location.search).get("updateRepo");
+    if (override) return override;
   }
-  return "";
+  return GITHUB_REPO;
 }
 
 export interface UpdateInfo {
@@ -84,7 +94,7 @@ export async function checkForUpdate(
 ): Promise<UpdateInfo | null> {
   if (repoName === "") return null;
   try {
-    const res = await fetchFn(`https://api.github.com/repos/${repoName}/releases/latest`, {
+    const res = await fetchFn(`${RELEASES_API}/repos/${repoName}/releases/latest`, {
       headers: { Accept: "application/vnd.github+json" },
     });
     if (!res.ok) return null;

@@ -33,14 +33,32 @@ once every platform's asset is attached.
 
 ---
 
-## Why there is no CI
+## Why there is no CI (Georgia Tech specifics)
 
-- **GHES has no hosted runners**, and this org has registered none — every
-  `runs-on:` would queue forever.
-- Even with runners we could not build all three OSes in one job; a Tauri build
-  targets the OS it runs on.
-- So the `.github/workflows/` files were removed and replaced by
-  `scripts/release.mjs`, run by hand on each OS.
+`github.gatech.edu` is a **self-hosted GitHub Enterprise Server (GHES)** —
+OIT runs the backend and funds the license; the College of Computing's
+Technology Services Organization (TSO) does front-end support. It is *not*
+github.com, which changes three things:
+
+- **No hosted runners.** GHES provides no GitHub-hosted runners, and this org
+  has registered no self-hosted ones — every `runs-on:` would queue for 24h and
+  then fail. Self-hosted runners *are* possible (and **free on GHES** — the
+  March-2026 per-minute runner fee explicitly does not apply to GHES), but they
+  need Actions enabled, repo/org admin, and an enterprise action allowlist,
+  i.e. a request to TSO. We did not take that route.
+- **No cross-OS build anyway.** Even with runners, one job can't build macOS +
+  Windows + Linux; a Tauri build targets the OS it runs on. That is why one
+  machine per OS is the natural shape.
+- **No public repositories.** GT policy routes public code to github.com, so
+  everything here is private. This is why the in-app update nudge — which polls
+  `/releases/latest` unauthenticated — silently no-ops: a private repo 404s the
+  API. Harmless, not a bug.
+
+The `.github/workflows/` files were therefore removed and replaced by
+`scripts/release.mjs`, run by hand on each OS.
+
+Support: TSO Help Desk `help@cc` (service front-end); OIT Technology Support
+Center `support@oit.gatech.edu`, 404-894-7173 (backend).
 
 ---
 

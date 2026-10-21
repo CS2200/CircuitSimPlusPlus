@@ -1,17 +1,18 @@
 import { expect, test } from "@playwright/test";
+import { RELEASES_API } from "../src/update";
 
 /**
  * U8: the update nudge — fetches the latest release tag (stubbed here),
  * shows the dialog when behind, "don't show again" persists per version.
- * The repo is selected via the ?updateRepo= dev hook (production repo is
- * set once the GitHub remote exists).
+ * The repo is selected via the ?updateRepo= dev hook (production repo comes
+ * from GITHUB_REPO in src/update.ts).
  */
 
 const LATEST = { tag_name: "v99.0.0", html_url: "https://example.test/rel/v99.0.0" };
 
 test("U8: nudge appears when behind, dismissal persists per version", async ({ page }) => {
   let fetched = 0;
-  await page.route("https://api.github.com/repos/o/r/releases/latest", (route) => {
+  await page.route(`${RELEASES_API}/repos/o/r/releases/latest`, (route) => {
     fetched++;
     void route.fulfill({ json: LATEST });
   });
@@ -34,7 +35,7 @@ test("U8: nudge appears when behind, dismissal persists per version", async ({ p
 });
 
 test("U8: offline check fails silently (no dialog, no crash)", async ({ page }) => {
-  await page.route("https://api.github.com/**", (route) => void route.abort());
+  await page.route(`${RELEASES_API}/**`, (route) => void route.abort());
   await page.goto("/?updateRepo=o/r");
   await expect(page.getByRole("button", { name: "File", exact: true })).toBeVisible();
   await page.waitForTimeout(400);

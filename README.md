@@ -13,6 +13,7 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/delay-table.md`](docs/delay-table.md) | Delay model, 74LS timing table, DTA/STA conventions |
 | [`docs/autograder.md`](docs/autograder.md) | Exit codes, assertion grammar, test-spec & snapshot schemas |
 | [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
+| [`docs/releasing.md`](docs/releasing.md) | How releases are cut on GT's runner-less GHES (3 machines, one per OS) |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
 ## Repository layout
@@ -46,9 +47,8 @@ anywhere Rust does, and statically links for the autograder.
 ## Build runner
 
 `scripts/build.mjs` is a thin, cross-platform wrapper over the exact commands
-below — the same ones CI runs. It adds no dependency (Node ≥ 22 is already
-required) and is not a second source of truth: keep it in sync with
-`.github/workflows/`.
+below and is the project's commit gate. It adds no dependency (Node ≥ 22 is
+already required).
 
 ```bash
 node scripts/build.mjs            # default: the full commit gate (backend + frontend)
@@ -62,9 +62,9 @@ node scripts/build.mjs musl ui    # run targets in order, stop on first failure
 | `lint` | format check + clippy `-D warnings` (core + cli) |
 | `test` | backend tests |
 | `fixtures` | regenerate the `.csx` fixtures into a temp dir and diff — no drift |
-| `check:backend` | `fixtures` + `lint` + `test` — mirrors `backend.yml` |
+| `check:backend` | `fixtures` + `lint` + `test` |
 | `ui` | frontend production build → `frontend/dist` |
-| `check:frontend` | `lint` + `test` + `build` — mirrors `frontend.yml` |
+| `check:frontend` | `lint` + `test` + `build` |
 | `check` | `check:backend` + `check:frontend` (default) |
 | `e2e` | Playwright (needs browsers, see prerequisites) |
 | `musl` | static musl release of the CLI |
@@ -197,22 +197,32 @@ codes, assertions, test-spec files): `docs/autograder.md`.
 
 ## Releasing (DESIGN.md §9)
 
-1. Set `GITHUB_REPO` in `frontend/src/update.ts` (owner/repo — the update
-   nudge silently skips until then).
-2. Push a tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. `.github/workflows/release.yml` builds the desktop bundles on
-   macOS/Windows/Linux and publishes a GitHub Release with the unsigned-build
-   workaround text (macOS: right-click → Open; Windows: SmartScreen → "More
-   info" → "Run anyway" — decision D14: we ship unsigned).
-4. Older installs nudge users to upgrade on startup (never forced).
+There is **no CI**: `github.gatech.edu` is GT's on-prem GitHub Enterprise
+Server, which provides no hosted runners and has none registered. Tauri bundles
+are also per-OS, so releases are cut locally by the three OS owners (Mac /
+Windows / Linux) with `scripts/release.mjs`: the captain opens a **draft**
+release, each owner attaches their OS, then it is published.
+
+**Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
+
+```bash
+# once per teammate:  gh auth login --hostname github.gatech.edu
+# captain, after bumping the version in BOTH crates/app/tauri.conf.json and
+# frontend/package.json, and pushing master:
+node scripts/release.mjs --tag v0.2.0 --draft
+# the other two, once the tag is pushed:
+git fetch --tags && git checkout v0.2.0
+node scripts/release.mjs --tag v0.2.0 --attach-only
+# captain, when --status shows all three platforms:
+node scripts/release.mjs --tag v0.2.0 --status
+node scripts/release.mjs --tag v0.2.0 --publish
+```
 
 ## CI
 
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `.github/workflows/backend.yml` | backend + `scripts/**` paths | fixture drift, fmt, clippy `-D warnings`, tests, musl build, Gradescope image build |
-| `.github/workflows/frontend.yml` | frontend paths | lint, unit, e2e, unsigned Tauri bundles (3 OS matrix) |
-| `.github/workflows/release.yml` | tags `v*` | release artifacts + release notes |
+The commit gate is `node scripts/build.mjs check` (backend fixture
+drift/fmt/clippy/test, then frontend lint/test/build). Run it locally before
+committing — there are no runners to run it for you.
 
 ## Conventions for contributors
 
