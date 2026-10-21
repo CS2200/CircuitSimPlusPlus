@@ -50,6 +50,8 @@ export default function SettingsDialog({
   showPerf,
   defaultBits,
   defaultInputs,
+  showClk,
+  showRst,
   defaultHz,
   updateCheckOn,
   historyUsage,
@@ -65,6 +67,8 @@ export default function SettingsDialog({
   onShowPerf,
   onDefaultBits,
   onDefaultInputs,
+  onShowClk,
+  onShowRst,
   onDefaultHz,
   onUpdateCheck,
   onReset,
@@ -90,6 +94,10 @@ export default function SettingsDialog({
   defaultBits: number;
   /** Gate input count seeded on newly placed gates. */
   defaultInputs: number;
+  /** Show a memory part's clock pin on placement (§93). */
+  showClk: boolean;
+  /** Show a memory part's reset pin on placement (§93). */
+  showRst: boolean;
   /** Default clock-speed exponent (hz = 10^(exp/10)). */
   defaultHz: number;
   updateCheckOn: boolean;
@@ -106,6 +114,8 @@ export default function SettingsDialog({
   onShowPerf: (v: boolean) => void;
   onDefaultBits: (v: number) => void;
   onDefaultInputs: (v: number) => void;
+  onShowClk: (v: boolean) => void;
+  onShowRst: (v: boolean) => void;
   onDefaultHz: (v: number) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
@@ -318,6 +328,18 @@ export default function SettingsDialog({
                   defaultInputs,
                   INPUT_CHOICES.map((n) => ({ value: n, label: `${n} inputs` })),
                   onDefaultInputs,
+                )}
+                {toggle(
+                  "Show clock pins on new registers and RAMs",
+                  "The clock pin is always there — hidden, the part follows the circuit's clock.",
+                  showClk,
+                  onShowClk,
+                )}
+                {toggle(
+                  "Show reset pins on new registers and RAMs",
+                  "The reset pin is always there — hidden, the part never resets.",
+                  showRst,
+                  onShowRst,
                 )}
               </section>
             )}

@@ -993,15 +993,23 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "mem.register" => {
             // `radix` is display-only: how the stored value reads on the body
             // (and in the Inspector's base chooser, UI_OVERHAUL §57).
-            let mut c = AttrCheck::new(attrs, &["bitsize", "radix"]);
+            // `showClk`/`showRst` are display-only too (UI_OVERHAUL §93): the
+            // clock and reset pins are ALWAYS in the model, so wiring from an
+            // old-format schematic resolves; these decide whether the editor
+            // draws them. An unwired one reads its default (rst 0, clk the
+            // circuit clock), which is how a new register is drawn without them.
+            let mut c = AttrCheck::new(attrs, &["bitsize", "radix", "showClk", "showRst"]);
             let b = c.bitsize(1);
             c.enumeration("radix", READOUT_RADIX, "unsigned");
+            let _ = c.boolean("showClk", false);
+            let _ = c.boolean("showRst", false);
             c.finish();
             (
                 vec![
                     PinSig::i("d", b),
                     PinSig::i("clk", 1),
                     PinSig::i("en", 1),
+                    PinSig::i("rst", 1),
                     PinSig::o("q", b),
                 ],
                 c,
@@ -1011,7 +1019,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "mem.ram" => {
             let mut c = AttrCheck::new(
                 attrs,
-                &["bitsize", "depth", "addrBits", "autoload", "contents"],
+                &[
+                    "bitsize", "depth", "addrBits", "autoload", "contents", "showClk", "showRst",
+                ],
             );
             let b = c.bitsize(1);
             let depth = c.uint("depth", 256, 1, MAX_MEM_DEPTH);
@@ -1022,6 +1032,8 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let addr_bits = c.uint("addrBits", addr_width(depth), 1, MAX_BITSIZE);
             let autoload = c.opt_string("autoload");
             let contents = c.opt_string("contents");
+            let _ = c.boolean("showClk", false);
+            let _ = c.boolean("showRst", false);
             c.finish();
             if !depth.is_power_of_two() {
                 c_issue(&mut c, format!("depth ({depth}) must be a power of two"));
@@ -1052,6 +1064,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("dout", b),
                     PinSig::i("we", 1),
                     PinSig::i("clk", 1),
+                    PinSig::i("rst", 1),
                 ],
                 c,
                 CompKind::Ram {
@@ -1376,7 +1389,14 @@ mod tests {
         // words (so a correct 8-bit address was flagged as a mismatch).
         assert_eq!(
             names_widths("mem.ram", json!({ "bitsize": 8, "depth": 256 })),
-            expect(&[("addr", 8), ("din", 8), ("dout", 8), ("we", 1), ("clk", 1),])
+            expect(&[
+                ("addr", 8),
+                ("din", 8),
+                ("dout", 8),
+                ("we", 1),
+                ("clk", 1),
+                ("rst", 1),
+            ])
         );
         assert_eq!(
             names_widths("mem.rom", json!({ "bitsize": 8, "depth": 16 })),
@@ -1391,6 +1411,7 @@ mod tests {
                 ("dout", 32),
                 ("we", 1),
                 ("clk", 1),
+                ("rst", 1),
             ])
         );
         // …and `addrBits` decouples the address width from `depth` in both
@@ -1401,7 +1422,14 @@ mod tests {
                 "mem.ram",
                 json!({ "bitsize": 8, "depth": 256, "addrBits": 4 })
             ),
-            expect(&[("addr", 4), ("din", 8), ("dout", 8), ("we", 1), ("clk", 1)])
+            expect(&[
+                ("addr", 4),
+                ("din", 8),
+                ("dout", 8),
+                ("we", 1),
+                ("clk", 1),
+                ("rst", 1),
+            ])
         );
         assert_eq!(
             names_widths(

@@ -11,6 +11,13 @@
 //! their generators. Hash re-blessing after an *intentional* engine-semantics
 //! change: `CSIM_BLESS=1 cargo test -p csim-core --test golden -- --nocapture`
 //! *prints* the new table — paste it below (the file is not rewritten).
+//!
+//! Last re-blessed by UI_OVERHAUL §93: `mem.register`/`mem.ram` carry the `rst`
+//! pin again (optional, unwired reads deasserted), so every register/RAM owns one
+//! more singleton net and the net ids the hash mixes shift. `t_obs` did not move
+//! in any scenario and a register's *behaviour* is unchanged with an unwired
+//! `rst` — the drift is numbering, and `cpu_fixtures_compute_the_program` (the
+//! architectural checks) is untouched.
 
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
@@ -37,7 +44,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 3,
         pokes: &[],
         t_obs: 39,
-        trace_hash: 0x68f5_b528_349e_fc82,
+        trace_hash: 0x44a3_115d_908c_aa32,
     },
     Scenario {
         fixture: "fsm.csx",
@@ -45,7 +52,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 40,
-        trace_hash: 0x3ba3_9a51_f88e_85bc,
+        trace_hash: 0xfa28_bcbe_f38e_aeaf,
     },
     Scenario {
         fixture: "alu.csx",
@@ -61,7 +68,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x4121_8bb1_fa56_1270,
+        trace_hash: 0xc55c_1bc4_595a_a500,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -69,7 +76,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x0889_0dfa_98d4_0cf9,
+        trace_hash: 0x66f1_c7a6_2ba9_81f0,
     },
 ];
 

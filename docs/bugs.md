@@ -6,8 +6,9 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
-**Current state (2026-10-19):** contract **v1.2**, file format **v4** (registers
-and RAMs have no `rst` pin), **213 backend + 443 unit + 80 e2e** tests green. RAM powers
+**Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
+and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says
+otherwise — UI_OVERHAUL §93), **213 backend + 445 unit + 80 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
 priority decoder gained CircuitSim CE's enable chain (`en_in`/`en_out`, `valid` as CE's
 Group Signal, `out` = `X` when nothing wins) so the class's cascaded encoder — the

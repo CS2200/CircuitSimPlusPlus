@@ -181,8 +181,9 @@ describe("wiring", () => {
     sync();
 
     // The constant's `out` pin (sized to its readout, §56) → the breakpoint's
-    // `in` (x=20, y=10.5).
-    connect(pinPosition(doc.circuit(0).components[0], "out")!, { x: 20, y: 10.5 });
+    // `in` (CE's DATA, on the part's bottom edge, §93).
+    const bpIn = pinPosition(doc.circuit(0).components[1], "in")!;
+    connect(pinPosition(doc.circuit(0).components[0], "out")!, bpIn);
 
     // Watching a bus while declaring one bit would be the width mismatch the
     // watcher exists to avoid; the condition's own value is untouched.

@@ -80,11 +80,11 @@ describe("CircuitDocument.create/fromJson", () => {
     expect(doc.circuit(0).components[0].attrs).not.toHaveProperty("delay");
   });
 
-  it("migrates a v3 document by dropping wiring to the retired rst pins", () => {
-    // Mirrors the backend's `format::migrate` v3 → v4 step: registers and RAMs
-    // have no `rst` pin, so those wires go — including a wire junctioned onto a
-    // dropped one (a shared reset fanned out) — and the surviving junction
-    // targets are renumbered to match.
+  it("migrates a v3 document by keeping its rst wiring and marking it visible", () => {
+    // Mirrors the backend's `format::migrate`: v4 removed the `rst` pin and v5
+    // has it back (§93), so nothing is dropped — the registers' clock/reset
+    // pins that the file wires are marked visible instead, and a junction that
+    // shared the reset survives untouched.
     const v3 = JSON.stringify({
       format: CSX_FORMAT,
       version: 3,
@@ -98,7 +98,7 @@ describe("CircuitDocument.create/fromJson", () => {
             { id: "n1", type: "gate.not", pos: [2, 0] },
             { id: "n2", type: "gate.not", pos: [4, 0] },
             { id: "r1", type: "mem.register", pos: [6, 0] },
-            { id: "r2", type: "mem.register", pos: [6, 4] },
+            { id: "r2", type: "mem.register", pos: [6, 4], attrs: { bitsize: 8 } },
           ],
           wires: [
             { a: { comp: "n0", pin: "out" }, b: { comp: "r1", pin: "rst" }, points: [] },
@@ -113,10 +113,15 @@ describe("CircuitDocument.create/fromJson", () => {
     const doc = CircuitDocument.fromJson(v3);
     expect(doc.data.version).toBe(CSX_VERSION);
     const wires = doc.circuit(0).wires;
-    expect(wires).toHaveLength(3);
-    expect(wires[0].a).toEqual({ comp: "n0", pin: "out" });
-    // The junction that pointed at wire 3 now points at wire 1.
-    expect(wires[2].a).toEqual({ join: { wire: 1, segment: 0 } });
+    expect(wires).toHaveLength(5);
+    expect(wires[0].b).toEqual({ comp: "r1", pin: "rst" });
+    // The junction still points at wire 0 (the reset it shared).
+    expect(wires[1].a).toEqual({ join: { wire: 0, segment: 0 } });
+    // Both wired reset pins are marked visible; the other attrs are untouched.
+    const byId = (id: string) => doc.circuit(0).components.find((c) => c.id === id);
+    expect(byId("r1")?.attrs?.showRst).toBe(true);
+    expect(byId("r2")?.attrs?.showRst).toBe(true);
+    expect(byId("r2")?.attrs?.bitsize).toBe(8);
   });
 
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {

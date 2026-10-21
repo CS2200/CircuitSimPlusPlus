@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "fsm",
   "settings": {
     "clockHz": 1,
@@ -57,7 +57,9 @@
             0
           ],
           "name": "s0",
-          "attrs": {}
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "register1",
@@ -67,7 +69,9 @@
             0
           ],
           "name": "s1",
-          "attrs": {}
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "ns_green",

@@ -23,7 +23,7 @@ import { radixText, type ValueCardMode } from "../lib/radix";
 import { breakpointCondition } from "../lib/breakpoint";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
-import { showsBodyCaption, compSize, compSpec, type PinKind } from "./catalog";
+import { showsBodyCaption, compSize, compSpec, pinShown, type PinKind } from "./catalog";
 import {
   BUBBLE_R,
   chipPath,
@@ -850,6 +850,8 @@ export class DocScene {
   private components: CsxComponent[] = [];
   private wires: CsxWire[] = [];
   private wirePaths: PathCmd[][] = [];
+  /** Components by id, for the pin-visibility gate (§93) during hit tests. */
+  private compsById = new Map<string, CsxComponent>();
   /** Junction dot positions per wire (at its own join endpoints). */
   private junctionDots: Vec2[] = [];
   private wireIndex = new UniformGrid(CELL);
@@ -884,6 +886,7 @@ export class DocScene {
     this.circuits = doc.circuits;
     const c = doc.circuit(circuitIdx);
     this.components = c.components;
+    this.compsById = new Map(c.components.map((x) => [x.id, x]));
     this.wires = c.wires;
     this.tagWidths.clear();
     this.layouts = new Map(c.components.map((x) => [x.id, compLayout(x, this.circuits)]));
@@ -929,9 +932,8 @@ export class DocScene {
     for (const comp of this.components) {
       const layout = this.layouts.get(comp.id);
       if (layout === undefined) continue;
-      for (const p of danglingPins(layout.pins, (pin) =>
-        this.nets.pinToNet.has(`${comp.id}:${pin}`),
-      )) {
+      const visible = layout.pins.filter((p) => pinShown(comp, p.name));
+      for (const p of danglingPins(visible, (pin) => this.nets.pinToNet.has(`${comp.id}:${pin}`))) {
         this.danglingPins.push({ x: p.x, y: p.y });
       }
     }
@@ -947,7 +949,9 @@ export class DocScene {
   pickPin(world: Vec2, tol = PIN_TOL): PinHit | null {
     let best: { d: number; compId: string; pin: string; pos: Vec2 } | null = null;
     for (const [id, layout] of this.layouts) {
+      const comp = this.compsById.get(id);
       for (const p of layout.pins) {
+        if (comp !== undefined && !pinShown(comp, p.name)) continue;
         const d = Math.hypot(world.x - p.x, world.y - p.y);
         if (d <= tol && (best === null || d < best.d)) {
           best = { d, compId: id, pin: p.name, pos: { x: p.x, y: p.y } };
@@ -963,8 +967,10 @@ export class DocScene {
   nearestPinOf(compId: string, world: Vec2): { pin: string; pos: Vec2 } | null {
     const layout = this.layouts.get(compId);
     if (layout === undefined || layout.pins.length === 0) return null;
+    const comp = this.compsById.get(compId);
     let best: { pin: string; pos: Vec2; d: number } | null = null;
     for (const p of layout.pins) {
+      if (comp !== undefined && !pinShown(comp, p.name)) continue;
       const d = Math.hypot(world.x - p.x, world.y - p.y);
       if (best === null || d < best.d) best = { pin: p.name, pos: { x: p.x, y: p.y }, d };
     }
@@ -1414,6 +1420,7 @@ export class DocScene {
       // drawn by a special case below (text/splitter/LED) — gets its markers
       // (UI_OVERHAUL §50).
       for (const p of layout.pins) {
+        if (!pinShown(comp, p.name)) continue; // §93: hidden clk/rst pins
         const dot = { x: p.x, y: p.y };
         if (p.kind === "out") outDots.push(dot);
         else if (p.kind === "in") inDots.push(dot);

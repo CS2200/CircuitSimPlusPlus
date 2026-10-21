@@ -118,11 +118,21 @@ class Circuit:
             "a": {"comp": a_comp, "pin": a_pin},
             "b": {"comp": b_comp, "pin": b_pin},
         })
+        # A register/RAM whose clock or reset pin is wired gets that pin marked
+        # VISIBLE (UI_OVERHAUL §93) — the same rule the loader's v4 -> v5
+        # migration applies, so a generated fixture is what the tool itself
+        # would write for the same schematic.
+        for comp, pin in ((a_comp, a_pin), (b_comp, b_pin)):
+            if pin not in ("clk", "rst"):
+                continue
+            for c in self.components:
+                if c["id"] == comp and c["type"] in ("mem.register", "mem.ram"):
+                    c.setdefault("attrs", {})["show" + pin.capitalize()] = True
 
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 4,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 5,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

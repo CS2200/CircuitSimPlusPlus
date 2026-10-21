@@ -27,6 +27,10 @@ export const PREF_SHOW_PERF = "csx.showPerf";
 export const PREF_DEFAULT_BITS = "csx.defaultBits";
 /** Gate input count seeded on newly placed gates. */
 export const PREF_DEFAULT_INPUTS = "csx.defaultInputs";
+/** Show a memory part's clock pin on placement (UI_OVERHAUL §93) — off. */
+export const PREF_SHOW_CLK = "csx.showClk";
+/** Show a memory part's reset pin on placement (UI_OVERHAUL §93) — off. */
+export const PREF_SHOW_RST = "csx.showRst";
 /** Where the transport speed slider starts (exponent: hz = 10^(exp/10)). */
 export const PREF_DEFAULT_HZ = "csx.defaultHz";
 

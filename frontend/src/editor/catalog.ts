@@ -627,15 +627,19 @@ const REGISTRY: Record<string, CompSpec> = {
   "wiring.splitter": splitterSpec(),
 
   // Debugging (UI_OVERHAUL §90): a watcher, not a part of the logic. `in` is the
-  // watched value and `en` gates the watch — the old tool's BreakpointPeer
-  // DATA/ENABLE pair. Two left-edge pins on a 3×2 box, like the probe: the body
-  // reads out the condition (`= 0x05`, docScene) instead of the mark alone.
+  // watched value (DATA) and `en` gates the watch (ENABLE). Its shape is
+  // CircuitSim CE's BreakpointPeer exactly (UI_OVERHAUL §93): `en` on the left
+  // edge, `in` on the bottom, on a 4×4 body — the old part worked, and a
+  // converted schematic's wires should land exactly where they always did. The
+  // body reads out the condition (`= 0x05`, docScene) instead of the mark alone.
   "debug.breakpoint": boxSpec(
-    3,
-    2,
+    4,
+    4,
     [
-      { name: "in", dx: 0, dy: 0.5, kind: "in", bitsize: BUS_WIDTH },
-      { name: "en", dx: 0, dy: 1.5, kind: "in" },
+      // `in` first: the engine identifies the watched pin by SLOT (format-v2
+      // §4), and `en` gates the watch — the old tool's DATA/ENABLE pair.
+      { name: "in", dx: 2, dy: 4, kind: "in", bitsize: BUS_WIDTH },
+      { name: "en", dx: 0, dy: 1, kind: "in" },
     ],
     "BP",
     { label: "Breakpoint" },
@@ -760,6 +764,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "d", dx: 0, dy: 1, kind: "in", bitsize: BUS_WIDTH },
       { name: "en", dx: 0, dy: 3, kind: "in" },
       { name: "clk", dx: 2, dy: 4, kind: "in" },
+      { name: "rst", dx: 4, dy: 4, kind: "in" },
       { name: "q", dx: 6, dy: 1, kind: "out", bitsize: BUS_WIDTH },
     ],
     "REG",
@@ -777,6 +782,7 @@ const REGISTRY: Record<string, CompSpec> = {
       { name: "din", dx: 0, dy: 4, kind: "in", bitsize: bitsOf(attrs) },
       { name: "dout", dx: 10, dy: 1, kind: "out", bitsize: bitsOf(attrs) },
       { name: "clk", dx: 3, dy: 6, kind: "in" },
+      { name: "rst", dx: 7, dy: 6, kind: "in" },
       { name: "we", dx: 9, dy: 6, kind: "in" },
     ],
     caption: () => "RAM",
@@ -1109,6 +1115,20 @@ const RADIX_FIELD: AttrField = {
  * unit-wide: the format has no per-instance `delay` override (dropped in v3)
  * and the panel offers none (§26).
  */
+/** The two width picks a memory part shows, in one place for RAM and ROM. */
+const MEMORY_WIDTH_FIELDS: AttrField[] = [
+  {
+    key: "addrBits",
+    label: "Address Bits",
+    kind: "picker",
+    derive: memAddrBits,
+    attrsFor: memoryWidthPatch,
+    group: "Width",
+    hint: "Sets the size too: 2^bits words.",
+  },
+  { ...BITSIZE_FIELD, label: "Data Bits" },
+];
+
 export function editableAttrs(type: string): AttrField[] {
   return baseFields(type);
 }
@@ -1287,10 +1307,29 @@ function baseFields(type: string): AttrField[] {
         },
       ];
     case "mem.register":
-      // The register shows its stored value on the body, in the chosen base.
-      return [BITSIZE_FIELD, RADIX_FIELD];
+      // The register shows its stored value on the body, in the chosen base —
+      // and its clock/reset pins are opt-in (§93): the pins always exist (an
+      // old-format file wires them), so showing one is a view choice, and an
+      // unwired one reads its default (rst 0, clk the circuit clock).
+      return [
+        BITSIZE_FIELD,
+        RADIX_FIELD,
+        {
+          key: "showClk",
+          label: "Show clock pin",
+          kind: "boolean",
+          group: "Options",
+          hint: "Hidden: the part follows the circuit's clock.",
+        },
+        {
+          key: "showRst",
+          label: "Show reset pin",
+          kind: "boolean",
+          group: "Options",
+          hint: "Hidden: the part never resets.",
+        },
+      ];
     case "mem.ram":
-    case "mem.rom":
       // `autoload` and `contents` are edited by the Inspector's Memory
       // section (file picker + hex-table dialog), not as plain fields.
       // Both widths are one-click picks, the way bit widths are everywhere
@@ -1298,17 +1337,26 @@ function baseFields(type: string): AttrField[] {
       // dropdown. There is no separate word-count field: a memory's size IS its
       // address space, so the address pick is what resizes it.
       return [
+        ...MEMORY_WIDTH_FIELDS,
         {
-          key: "addrBits",
-          label: "Address Bits",
-          kind: "picker",
-          derive: memAddrBits,
-          attrsFor: memoryWidthPatch,
-          group: "Width",
-          hint: "Sets the size too: 2^bits words.",
+          key: "showClk",
+          label: "Show clock pin",
+          kind: "boolean",
+          group: "Options",
+          hint: "Hidden: the memory follows the circuit's clock.",
         },
-        { ...BITSIZE_FIELD, label: "Data Bits" },
+        {
+          key: "showRst",
+          label: "Show reset pin",
+          kind: "boolean",
+          group: "Options",
+          hint: "Hidden: the memory never clears.",
+        },
       ];
+    case "mem.rom":
+      // A ROM has no clock or reset: it reads as soon as an address arrives,
+      // so it carries the width fields only (UI_OVERHAUL §93).
+      return [...MEMORY_WIDTH_FIELDS];
     case "subcircuit":
       // Its box (UI_OVERHAUL §79): the same one-click width pickers everything
       // else uses. Leaving them alone means "derive from the pins", which is what
@@ -1378,6 +1426,21 @@ export function compSize(
   const spec = compSpec(comp.type);
   const attrs = comp.attrs ?? {};
   return { w: spec.width(attrs), h: spec.height(attrs) };
+}
+
+/**
+ * Whether one of a part's pins is DRAWN and connectable (UI_OVERHAUL §93). The
+ * clock and reset pins of a memory part are always in the model — a converted
+ * old-format schematic wires them, and every endpoint must resolve — but they
+ * are hidden unless the part says otherwise, so a new schematic is not covered
+ * in clock/reset stubs. `showClk` / `showRst`, absent meaning hidden; every
+ * other pin of every other part is always shown.
+ */
+export function pinShown(comp: Pick<CsxComponent, "type" | "attrs">, pin: string): boolean {
+  if (comp.type !== "mem.register" && comp.type !== "mem.ram") return true;
+  if (pin === "clk") return comp.attrs?.showClk === true;
+  if (pin === "rst") return comp.attrs?.showRst === true;
+  return true;
 }
 
 export function compPins(

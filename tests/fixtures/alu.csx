@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "alu",
   "settings": {
     "clockHz": 1,

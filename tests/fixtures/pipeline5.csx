@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "pipeline5",
   "settings": {
     "clockHz": 1,
@@ -49,7 +49,8 @@
           ],
           "name": "pc",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -146,7 +147,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -158,7 +160,8 @@
           ],
           "name": "ir",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -167,7 +170,10 @@
           "pos": [
             0,
             0
-          ]
+          ],
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "splitter1",
@@ -232,7 +238,8 @@
           ],
           "name": "r0",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -244,7 +251,8 @@
           ],
           "name": "r1",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -256,7 +264,8 @@
           ],
           "name": "r2",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -268,7 +277,8 @@
           ],
           "name": "r3",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -280,7 +290,8 @@
           ],
           "name": "r4",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -292,7 +303,8 @@
           ],
           "name": "r5",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -304,7 +316,8 @@
           ],
           "name": "r6",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -316,7 +329,8 @@
           ],
           "name": "r7",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -328,7 +342,8 @@
           ],
           "name": "r8",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -340,7 +355,8 @@
           ],
           "name": "r9",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -352,7 +368,8 @@
           ],
           "name": "r10",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -364,7 +381,8 @@
           ],
           "name": "r11",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -376,7 +394,8 @@
           ],
           "name": "r12",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -388,7 +407,8 @@
           ],
           "name": "r13",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -400,7 +420,8 @@
           ],
           "name": "r14",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -412,7 +433,8 @@
           ],
           "name": "r15",
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -460,7 +482,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -471,7 +494,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -482,7 +506,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -493,7 +518,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -504,7 +530,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 3
+            "bitsize": 3,
+            "showClk": true
           }
         },
         {
@@ -515,7 +542,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 4
+            "bitsize": 4,
+            "showClk": true
           }
         },
         {
@@ -526,7 +554,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 4
+            "bitsize": 4,
+            "showClk": true
           }
         },
         {
@@ -537,7 +566,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 4
+            "bitsize": 4,
+            "showClk": true
           }
         },
         {
@@ -546,7 +576,10 @@
           "pos": [
             0,
             0
-          ]
+          ],
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "mux2",
@@ -774,7 +807,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -785,7 +819,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -796,7 +831,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 3
+            "bitsize": 3,
+            "showClk": true
           }
         },
         {
@@ -807,7 +843,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 4
+            "bitsize": 4,
+            "showClk": true
           }
         },
         {
@@ -816,7 +853,10 @@
           "pos": [
             0,
             0
-          ]
+          ],
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "ram0",
@@ -829,7 +869,8 @@
           "attrs": {
             "bitsize": 32,
             "depth": 256,
-            "contents": "256-0"
+            "contents": "256-0",
+            "showClk": true
           }
         },
         {
@@ -907,7 +948,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -918,7 +960,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 32
+            "bitsize": 32,
+            "showClk": true
           }
         },
         {
@@ -929,7 +972,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 3
+            "bitsize": 3,
+            "showClk": true
           }
         },
         {
@@ -940,7 +984,8 @@
             0
           ],
           "attrs": {
-            "bitsize": 4
+            "bitsize": 4,
+            "showClk": true
           }
         },
         {
@@ -949,7 +994,10 @@
           "pos": [
             0,
             0
-          ]
+          ],
+          "attrs": {
+            "showClk": true
+          }
         },
         {
           "id": "decoder2",

@@ -2521,3 +2521,39 @@ Two reports, one root: a value that does not read as wide as the wire under it.
 stress benchmark flaky (machine-load sensitive; it passed on retry). Four screenshot
 baselines were regenerated because the demo and logic sheets carry readout parts:
 `sim-lit`, `timing-path`, `timing-violation`, `demo-{dark,light,oled}`.
+
+## 93. The reset pin comes back (hidden), and the breakpoint gets its old shape
+
+Two things a converted old-format schematic needs, both about matching CircuitSim CE
+closely enough that the transpiler's output behaves and reads like the original.
+
+- **`mem.register` and `mem.ram` have their `clk` and `rst` pins again** — the pins §62
+  removed — but **both hidden by default**. The pins are always in the _model_ (`d, clk,
+en, rst, q`; `addr, din, dout, we, clk, rst`): every wire endpoint an old file names
+  still resolves, and nothing that used to load stops loading. What is new is two
+  display-only attrs, `showClk` and `showRst` (format-v2 §4, engine-validated exactly like
+  `radix`): absent means hidden, so a register you place is a clean `d/en/q` box, and a
+  hidden pin is not drawn, not pickable, not a wiring target and never counted as dangling.
+- **A hidden pin still has a defined value.** `rst` floating reads **deasserted** (0) — so a
+  register or RAM that never wires one behaves exactly as it did in §62 — and `clk` floating
+  makes the part follow the **circuit's clock**: the engine ticks it on the same global
+  rising edge the `wiring.clock` component rides (`implicit_clk` in `delay.rs`). A _wired_
+  reset is CircuitSim CE's Clear, kept to the letter: synchronous, and it wins over a
+  simultaneous enable; on a RAM it clears every word.
+- **Settings → Editing gets two defaults** — "Show clock pins / reset pins on new registers
+  and RAMs", both off — which only decides what a _newly placed_ part is seeded with (the
+  Inspector's two toggles then own that part). Absent attrs staying hidden is what makes a
+  pre-§93 file come forward looking the way it did: the loader's v4 → v5 step marks visible
+  only the parts that actually **wire** a clock or reset, so a converted schematic keeps its
+  clock/reset nubs and its wiring, and a schematic drawn after §62 gains none.
+- **The breakpoint's pinout is CircuitSim CE's `BreakpointPeer`, exactly**: a 4×4 body with
+  `en` (ENABLE) on the left edge and `in` (DATA) on the bottom, instead of two left-edge pins
+  on a 3×2 box (§90's first cut). The old part worked, so a converted schematic's wires now
+  land where they always did rather than being re-stubbed by the loader's pin-end healing.
+  The body still reads out its condition under its `BP` mark.
+
+**Acceptance:** frontend lint / 445 unit / build green; core 195 + 9 golden; e2e 80/80 with
+no baseline churn. Four golden trace hashes were re-blessed (§93 adds a net per
+register/RAM, and the hash mixes net ids — every `t_obs` is unchanged and
+`cpu_fixtures_compute_the_program` still passes, so the drift is numbering, not behaviour).
+The fixtures were regenerated at v5, and `sanity.csx` (hand-authored) was edited by hand.

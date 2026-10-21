@@ -102,10 +102,13 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("debug.breakpoint")).toEqual(["bitsize", "value", "radix"]);
     expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
-    expect(keys("mem.ram")).toEqual(["addrBits", "bitsize"]);
+    // A memory's clock and reset pins are opt-in, so the visibility flags are
+    // part of its editable attrs (UI_OVERHAUL §93) — the pins themselves are
+    // always in the model.
+    expect(keys("mem.ram")).toEqual(["addrBits", "bitsize", "showClk", "showRst"]);
     expect(keys("mem.rom")).toEqual(["addrBits", "bitsize"]);
     // The register shows its stored value, so it carries a base chooser (§57).
-    expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
+    expect(keys("mem.register")).toEqual(["bitsize", "radix", "showClk", "showRst"]);
     expect(keys("io.button")).toEqual(["bitsize"]);
     expect(keys("subcircuit")).toEqual(["circuit", "width", "height"]);
   });

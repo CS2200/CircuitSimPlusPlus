@@ -825,8 +825,10 @@ export class CircuitDocument {
  * Load-time version migrations, mirroring the backend's `format::migrate`
  * (`crates/core/src/format/mod.rs`). Each step upgrades a document **one**
  * version and the steps run in order, so a file several versions behind is
- * walked forward — a v2 file can carry `rst` wiring too (the pin predates v3),
- * so v2 → v3 → v4 is the real path.
+ * walked forward — a v2 file also predates v3 and v5, so v2 → v3 → v5 is the
+ * real path. v4 is skipped on purpose: it was the version that removed the
+ * `rst` pin, and v5 has it back (§93), so nothing has to be dropped and a
+ * v3/v4 file only gains the pin-visibility flags.
  */
 function migrate(data: CsxDocument): void {
   let version = data.version as number;
@@ -834,8 +836,8 @@ function migrate(data: CsxDocument): void {
     dropDelayModel(data);
     version = 3;
   }
-  if (version === 3) {
-    dropResetWires(data);
+  if (version >= 3 && version < 5) {
+    revealWiredControlPins(data);
     version = CSX_VERSION;
   }
   if (version !== (data.version as number)) {
@@ -859,47 +861,32 @@ function dropDelayModel(data: CsxDocument): void {
 }
 
 /**
- * v3 → v4: `mem.register`/`mem.ram` lost their `rst` pin, so wiring to one can
- * never resolve again. Drop those wires — and any wire junctioned onto one (its
- * net is gone; that fan-out is what a shared reset produced) — then renumber
- * the junction targets that survive, so the wires that remain still point at
- * the same neighbour.
+ * v3/v4 → v5: `mem.register`/`mem.ram` carry `showClk`/`showRst` (UI_OVERHAUL
+ * §93) — display-only flags for two pins that are always in the model. A part
+ * whose clock or reset pin a **wire names** keeps that pin visible: the wiring is
+ * the proof it is wanted, and it is how a schematic drawn before these flags
+ * comes forward looking exactly as it did. Nothing is dropped.
  */
-function dropResetWires(data: CsxDocument): void {
+function revealWiredControlPins(data: CsxDocument): void {
   for (const c of data.circuits ?? []) {
-    const retired = new Set(
-      (c.components ?? [])
-        .filter((x) => x.type === "mem.register" || x.type === "mem.ram")
-        .map((x) => x.id),
-    );
-    const wires = c.wires ?? [];
-    const dropped = wires.map(() => false);
-    for (;;) {
-      let changed = false;
-      wires.forEach((w, i) => {
-        if (dropped[i]) return;
-        const gone = [w.a, w.b].some((e) =>
-          isPinEndpoint(e) ? e.pin === "rst" && retired.has(e.comp) : dropped[e.join.wire] === true,
-        );
-        if (gone) {
-          dropped[i] = true;
-          changed = true;
-        }
-      });
-      if (!changed) break;
-    }
-    const remap: (number | null)[] = [];
-    let next = 0;
-    for (const drop of dropped) remap.push(drop ? null : next++);
-    wires.forEach((w, i) => {
-      if (dropped[i]) return;
+    const wired = new Set<string>();
+    for (const w of c.wires ?? []) {
       for (const e of [w.a, w.b]) {
-        if (isPinEndpoint(e)) continue;
-        const target = remap[e.join.wire];
-        if (target !== null && target !== undefined) e.join.wire = target;
+        if (isPinEndpoint(e) && (e.pin === "clk" || e.pin === "rst")) {
+          wired.add(`${e.comp}:${e.pin}`);
+        }
       }
-    });
-    c.wires = wires.filter((_, i) => !dropped[i]);
+    }
+    if (wired.size === 0) continue;
+    for (const comp of c.components ?? []) {
+      if (comp.type !== "mem.register" && comp.type !== "mem.ram") continue;
+      const showClk = wired.has(`${comp.id}:clk`);
+      const showRst = wired.has(`${comp.id}:rst`);
+      if (!showClk && !showRst) continue;
+      comp.attrs ??= {};
+      if (showClk) comp.attrs.showClk = true;
+      if (showRst) comp.attrs.showRst = true;
+    }
   }
 }
 

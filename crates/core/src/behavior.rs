@@ -31,8 +31,8 @@
 //! | demux / decoder | all inputs |
 //! | priority decoder | its input lines, while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means enabled rather than a floating-read halt (DESIGN.md §6) |
 //! | arithmetic | all inputs |
-//! | register (rising edge only) | `en` always; `d` only when `en ≠ 0` |
-//! | RAM | `addr` continuously (async read); `we` at the edge (`din` only when `we ≠ 0`) |
+//! | register (rising edge only) | `en` always; `d` only when `en ≠ 0` and `rst ≠ 1`; a floating `rst` reads deasserted |
+//! | RAM | `addr` continuously (async read); `we`/`rst` at the edge (`din` only when `we ≠ 0`; a floating `rst` reads deasserted; reset clears to 0) |
 //! | ROM | `addr` continuously |
 //! | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal (§4.1) |
 //! | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
@@ -704,49 +704,82 @@ impl Behavior {
     pub fn rising_edge(&mut self, ins: &[&Value]) -> Result<(), FloatingRead> {
         match &mut self.kind {
             BehaviorKind::Register { state } => {
-                // Pin signature (input order): d, clk, en. `clk` needs no
+                // Pin signature (input order): d, clk, en, rst. `clk` needs no
                 // handling — the engine calls this on its 0→1 edge.
-                let (d, en) = (ins[0], ins[2]);
+                let (d, en, rst) = (ins[0], ins[2], ins[3]);
                 consume(en, "en")?;
+                // The reset pin is optional (UI_OVERHAUL §93): a register that
+                // never wires it reads `Z`, which is treated as **deasserted**
+                // — exactly the state it was in before the pin came back. (A
+                // wired reset is consumed like any other input: `X` propagates.)
+                let rst_bit = if rst.has_z() { Bit::Zero } else { ctl(rst) };
                 let w = state.width();
-                match ctl(en) {
-                    Bit::One => {
-                        consume(d, "d")?;
-                        *state = d.clone();
-                    }
+                match rst_bit {
+                    // Synchronous reset wins over enable.
+                    Bit::One => *state = Value::zero(w),
                     Bit::X => {
-                        consume(d, "d")?;
+                        if ctl(en) != Bit::Zero {
+                            consume(d, "d")?;
+                        }
                         *state = Value::x(w);
                     }
-                    _ => {} // hold
+                    _ => match ctl(en) {
+                        Bit::One => {
+                            consume(d, "d")?;
+                            *state = d.clone();
+                        }
+                        Bit::X => {
+                            consume(d, "d")?;
+                            *state = Value::x(w);
+                        }
+                        _ => {} // hold
+                    },
                 }
                 Ok(())
             }
             BehaviorKind::Ram { bitsize, words, .. } => {
-                // Pin signature (input order): addr, din, we, clk. `clk` needs
-                // no handling here — the engine calls this on its 0→1 edge.
-                let (addr, din, we) = (ins[0], ins[1], ins[2]);
+                // Pin signature (input order): addr, din, we, clk, rst. `clk`
+                // needs no handling here — the engine calls this on its 0→1 edge.
+                let (addr, din, we, rst) = (ins[0], ins[1], ins[2], ins[4]);
                 consume(we, "we")?;
-                match ctl(we) {
-                    Bit::Zero => Ok(()),
-                    we_bit => {
-                        consume(din, "din")?;
-                        // addr is already consumed continuously by eval
-                        // (async read); a floating address halts there.
-                        match addr.to_u64() {
-                            Some(a) if (a as usize) < words.len() => {
-                                words[a as usize] = match we_bit {
-                                    Bit::One => din.clone(),
-                                    // we = X: the write may have happened.
-                                    _ => Value::x(*bitsize),
-                                };
-                            }
-                            // X address or past-end: write dropped
-                            // (documented, module header).
-                            _ => {}
+                // An unwired reset reads `Z`, treated as deasserted — a RAM that
+                // drives only we/clk keeps working (UI_OVERHAUL §93).
+                let rst_bit = if rst.has_z() { Bit::Zero } else { ctl(rst) };
+                match rst_bit {
+                    // Synchronous reset: clears every word, and wins over a write.
+                    Bit::One => {
+                        for w in words.iter_mut() {
+                            *w = Value::zero(*bitsize);
                         }
                         Ok(())
                     }
+                    Bit::X => {
+                        for w in words.iter_mut() {
+                            *w = Value::x(*bitsize);
+                        }
+                        Ok(())
+                    }
+                    _ => match ctl(we) {
+                        Bit::Zero => Ok(()),
+                        we_bit => {
+                            consume(din, "din")?;
+                            // addr is already consumed continuously by eval
+                            // (async read); a floating address halts there.
+                            match addr.to_u64() {
+                                Some(a) if (a as usize) < words.len() => {
+                                    words[a as usize] = match we_bit {
+                                        Bit::One => din.clone(),
+                                        // we = X: the write may have happened.
+                                        _ => Value::x(*bitsize),
+                                    };
+                                }
+                                // X address or past-end: write dropped
+                                // (documented, module header).
+                                _ => {}
+                            }
+                            Ok(())
+                        }
+                    },
                 }
             }
             _ => Ok(()),
@@ -1638,8 +1671,14 @@ mod tests {
         mk("mem.register", json!({"bitsize": 8}))
     }
 
-    fn reg_ins(d: Value, en: Value) -> [Value; 3] {
-        [d, k(1, 1), en] // clk=1 (engine calls rising_edge on the edge)
+    fn reg_ins(d: Value, en: Value) -> [Value; 4] {
+        // clk=1 (the engine calls rising_edge on the edge); rst UNWIRED (`Z`) —
+        // the optional pin's absent state, which reads as deasserted (§93).
+        [d, k(1, 1), en, Value::z(1)]
+    }
+
+    fn reg_ins_rst(d: Value, en: Value, rst: Value) -> [Value; 4] {
+        [d, k(1, 1), en, rst]
     }
 
     #[test]
@@ -1691,6 +1730,14 @@ mod tests {
         r.rising_edge(&refs(&reg_ins(Value::z(8), k(1, 0))))
             .unwrap();
         assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 42)]);
+        // A wired reset clears it, and wins over a simultaneous enable.
+        r.rising_edge(&refs(&reg_ins_rst(k(8, 99), k(1, 1), k(1, 1))))
+            .unwrap();
+        assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 0)]);
+        // A driven 0 is deasserted: back to latching.
+        r.rising_edge(&refs(&reg_ins_rst(k(8, 42), k(1, 1), k(1, 0))))
+            .unwrap();
+        assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 42)]);
     }
 
     #[test]
@@ -1715,6 +1762,14 @@ mod tests {
             r.rising_edge(&refs(&reg_ins(Value::z(8), Value::x(1)))),
             Err(FloatingRead::at("d"))
         );
+        // rst=X → state unknown (whether it reset is unknowable).
+        r.rising_edge(&refs(&reg_ins_rst(k(8, 1), k(1, 1), Value::x(1))))
+            .unwrap();
+        assert_eq!(r.eval(&[]).unwrap(), vec![Value::x(8)]);
+        // An unwired rst never halts: the pin is optional (§93).
+        r.rising_edge(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::z(1))))
+            .unwrap();
+        assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 7)]);
     }
 
     // ---- RAM / ROM -------------------------------------------------------
@@ -1731,7 +1786,7 @@ mod tests {
             vec![Value::x(8)]
         );
         // Write 77 @ 5 on the edge (ins order: addr, din, we, clk).
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1), k(1, 1), Value::z(1)]))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1739,7 +1794,7 @@ mod tests {
             vec![k(8, 77)]
         );
         // we=0: no write.
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 99), k(1, 0)]))
+        ram.rising_edge(&refs(&[k(4, 5), k(8, 99), k(1, 0), k(1, 1), Value::z(1)]))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1748,11 +1803,23 @@ mod tests {
         );
         // din floats during a write → halt; din floats with we=0 → fine.
         assert_eq!(
-            ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 1)])),
+            ram.rising_edge(&refs(&[
+                k(4, 5),
+                Value::z(8),
+                k(1, 1),
+                k(1, 1),
+                Value::z(1)
+            ])),
             Err(FloatingRead::at("din"))
         );
-        ram.rising_edge(&refs(&[k(4, 5), Value::z(8), k(1, 0)]))
-            .unwrap();
+        ram.rising_edge(&refs(&[
+            k(4, 5),
+            Value::z(8),
+            k(1, 0),
+            k(1, 1),
+            Value::z(1),
+        ]))
+        .unwrap();
         // addr floats during read → halt (async read is always accessing).
         assert_eq!(
             ram.eval(&refs(&[Value::z(4), k(8, 0), k(1, 0), k(1, 0)])),
@@ -1764,17 +1831,37 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)]
         );
-        ram.rising_edge(&refs(&[k(4, 6), k(8, 42), Value::x(1)]))
-            .unwrap();
+        ram.rising_edge(&refs(&[
+            k(4, 6),
+            k(8, 42),
+            Value::x(1),
+            k(1, 1),
+            Value::z(1),
+        ]))
+        .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 6), k(8, 0), k(1, 0), k(1, 0)]))
                 .unwrap(),
             vec![Value::x(8)]
         );
-        // we floats at the edge → halt.
+        // we floats at the edge → halt (the unwired rst rides along as Z).
         assert_eq!(
-            ram.rising_edge(&refs(&[k(4, 5), k(8, 1), Value::z(1)])),
+            ram.rising_edge(&refs(&[
+                k(4, 5),
+                k(8, 1),
+                Value::z(1),
+                k(1, 1),
+                Value::z(1)
+            ])),
             Err(FloatingRead::at("we"))
+        );
+        // rst=1 on the edge clears every word, and wins over a write.
+        ram.rising_edge(&refs(&[k(4, 5), k(8, 200), k(1, 1), k(1, 1), k(1, 1)]))
+            .unwrap();
+        assert_eq!(
+            ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
+                .unwrap(),
+            vec![k(8, 0)]
         );
     }
 
@@ -1789,7 +1876,7 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)] // read past end → X
         );
-        ram.rising_edge(&refs(&[k(2, 3), k(8, 9), k(1, 1)]))
+        ram.rising_edge(&refs(&[k(2, 3), k(8, 9), k(1, 1), k(1, 1), Value::z(1)]))
             .unwrap(); // write dropped
         assert_eq!(
             ram.eval(&refs(&[k(2, 3), k(8, 0), k(1, 0), k(1, 0)]))

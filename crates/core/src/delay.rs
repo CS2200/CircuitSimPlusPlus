@@ -464,6 +464,11 @@ pub struct DelayEngine {
     net_ever_driven: Vec<bool>,
     /// Precomputed sinks per net (comp order preserved).
     net_sinks: Vec<Vec<SinkPin>>,
+    /// Registers and RAMs whose `clk` pin sits on a floating net — nothing
+    /// drives it, so the pin is unwired (or wired to nothing that drives).
+    /// They are clocked by the circuit's clock: the engine ticks them with the
+    /// global rising clock event (UI_OVERHAUL §93).
+    implicit_clk: Vec<u32>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
     pending_gen: Vec<u64>,
@@ -587,6 +592,22 @@ impl DelayEngine {
                     .collect()
             })
             .collect();
+        // Implicit clocks (UI_OVERHAUL §93): a register/RAM whose `clk` pin is
+        // on a floating net follows the *circuit's* clock. The clock component
+        // toggles with the global clock event (see the `EvKind::Clock` arm), so
+        // ticking these on the same event is the same edge — at the same time,
+        // in the same cycle. A net that merely *has* a driver is left to the
+        // ordinary path: the pin is wired, so its own edge decides.
+        let implicit_clk: Vec<u32> = (0..n as u32)
+            .filter(|&c| {
+                let cd = &cdata[c as usize];
+                matches!(cd.class, Class::Register | Class::Ram)
+                    && cd.in_pins.iter().any(|(slot, net)| {
+                        netlist.comps[c as usize].pins[*slot].pin == "clk"
+                            && netlist.nets[net.idx()].floating
+                    })
+            })
+            .collect();
         let n_nets = netlist.nets.len();
         let drives = ec::drive_slots(&netlist);
         let mut eng = DelayEngine {
@@ -604,6 +625,7 @@ impl DelayEngine {
             state_input_net,
             net_ever_driven: vec![false; n_nets],
             net_sinks,
+            implicit_clk,
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
             pending_cause: vec![None; n],
@@ -1350,6 +1372,14 @@ impl DelayEngine {
                 self.schedule(ev.time + self.half_period, EvKind::Clock { phase: !phase });
                 if phase {
                     self.rising_seen += 1;
+                    // Implicit clocks: the same edge, for the parts that do not
+                    // wire one (UI_OVERHAUL §93). `rising_seen` is bumped first,
+                    // so a halt or violation here reports the cycle that the
+                    // wired parts would report too.
+                    for i in 0..self.implicit_clk.len() {
+                        let c = self.implicit_clk[i];
+                        self.clock_edge(c, ev.time)?;
+                    }
                 }
             }
             EvKind::Fire { comp, gen } => {
@@ -2339,6 +2369,120 @@ mod tests {
             .expect("value_net present");
         assert_eq!(eng.net_value(net), k(1, 1));
     }
+    /// UI_OVERHAUL §93: the clock pin is optional. A register that never wires
+    /// one is clocked by the *circuit's* clock — the same global rising edge the
+    /// clock component rides — so a schematic drawn with the pin hidden still
+    /// ticks exactly once per cycle (a toggling counter proves "once", not
+    /// "whenever anything moves").
+    #[test]
+    fn an_unwired_clock_pin_follows_the_circuit_clock() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 5, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}},
+                {{"id":"n","type":"gate.not","pos":[0,0]}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"n","pin":"in"}}}},
+                {{"a":{{"comp":"n","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        assert_eq!(eng.named_value("r"), Some(k(1, 0)), "powers on at 0");
+        eng.run(1).unwrap();
+        assert_eq!(eng.named_value("r"), Some(k(1, 1)), "one cycle, one latch");
+        eng.run(1).unwrap();
+        assert_eq!(eng.named_value("r"), Some(k(1, 0)), "not two, and not zero");
+        eng.run(1).unwrap();
+        assert_eq!(eng.named_value("r"), Some(k(1, 1)), "still one per cycle");
+    }
+
+    /// …and a *wired* reset is a real input. Asserted over a simultaneous
+    /// enable it wins (synchronous, like CircuitSim CE's Clear), which is what
+    /// the old format's reset wiring expects from a converted schematic.
+    #[test]
+    fn a_wired_reset_wins_over_the_enable() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 5, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"rst","type":"wiring.pin","pos":[0,0],"name":"rst"}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"rst","pin":"pin"}},"b":{{"comp":"r","pin":"rst"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        // The register's clock is unwired, so it ticks with the circuit clock.
+        eng.run(1).unwrap();
+        assert_eq!(
+            eng.named_value("r"),
+            Some(k(1, 1)),
+            "latches while rst is low"
+        );
+        assert!(eng.poke_input_pin("rst", k(1, 1)), "the reset pin is wired");
+        eng.run(1).unwrap();
+        assert_eq!(
+            eng.named_value("r"),
+            Some(k(1, 0)),
+            "asserted reset clears it"
+        );
+        assert!(eng.poke_input_pin("rst", k(1, 0)));
+        eng.run(1).unwrap();
+        assert_eq!(
+            eng.named_value("r"),
+            Some(k(1, 1)),
+            "released, it latches again"
+        );
+    }
+
+    /// A RAM's reset clears every word (its stored state, not just the read
+    /// path) — and an unwired clock on a memory works the same way.
+    #[test]
+    fn a_wired_reset_clears_the_ram() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 5, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"addr","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"0","bitsize":4}}}},
+                {{"id":"data","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"5","bitsize":8}}}},
+                {{"id":"rst","type":"wiring.pin","pos":[0,0],"name":"rst"}},
+                {{"id":"m","type":"mem.ram","pos":[0,0],"attrs":{{"bitsize":8,"depth":16}}}},
+                {{"id":"out","type":"wiring.probe","pos":[0,0],"name":"out","attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"m","pin":"we"}}}},
+                {{"a":{{"comp":"addr","pin":"out"}},"b":{{"comp":"m","pin":"addr"}}}},
+                {{"a":{{"comp":"data","pin":"out"}},"b":{{"comp":"m","pin":"din"}}}},
+                {{"a":{{"comp":"rst","pin":"pin"}},"b":{{"comp":"m","pin":"rst"}}}},
+                {{"a":{{"comp":"m","pin":"dout"}},"b":{{"comp":"out","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(1).unwrap();
+        assert_eq!(
+            eng.named_value("out"),
+            Some(k(8, 5)),
+            "the word was written"
+        );
+        assert!(eng.poke_input_pin("rst", k(1, 1)));
+        eng.run(1).unwrap();
+        assert_eq!(
+            eng.named_value("out"),
+            Some(k(8, 0)),
+            "…and the reset cleared it"
+        );
+    }
+
     /// A driver fight resolves its net to `X` **and** is flagged as a short
     /// (`net_contended`), while an `X` that merely flows into another part is
     /// not — so the UI can say "short circuit" only when there is one

@@ -1,7 +1,7 @@
-# `.csx` — CircuitSim++ File Format v4 (normative)
+# `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 4.
+> **current** format, version 5.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,8 +11,8 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `4`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 4 and walks older files forward one version at a
+- Top-level `version` must be `5`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 5 and walks older files forward one version at a
   time (see below).
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
@@ -21,7 +21,7 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1, // UI clock speed at load time
@@ -41,13 +41,13 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   (the delay table alone, §4.3) — so neither field carries meaning. Migration
   is automatic on load: a v2 file loads and is re-saved as v3 with both
   removed, regardless of their old values.
-- **v3 → v4** drops wiring to the retired `rst` pins of `mem.register` and
-  `mem.ram` (§4). Resetting a circuit is the session's job (`sim_reset`, which
-  also re-applies memory autoload), never a pin's, so the pin — and every wire
-  reaching it — is gone. A wire **junctioned onto** a dropped wire goes with it
-  (its net no longer exists; that is the shape a shared reset fanned out into),
-  and the surviving wires are renumbered so every `join` target still points at
-  the same neighbour.
+- **v3 → v5** gives `mem.register` and `mem.ram` their `clk`/`rst` pins back,
+  now **optional to draw** (§4: `showClk`/`showRst`). Nothing is dropped — v4
+  removed the `rst` pin and v5 has it again, so the step that used to cut every
+  wire reaching one is gone, and a file written when `rst` was live comes
+  forward whole. A part whose clock or reset pin a wire names is marked visible;
+  a part the file never wired keeps both pins hidden. (v4 is skipped rather than
+  rewritten: its documents are exactly v5's minus the two flags.)
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -169,8 +169,8 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `arith.negator`                           | `in`, `out`                                     | `bitsize` (1)                                                                                                                                                                               |
 | `arith.shifter`                           | `in`, `amt`, `out`                              | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr")                                                                                                                               |
 | `arith.bit-extender`                      | `in`, `out`                                     | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign")                                                                                                                           |
-| `mem.register`                            | `d`, `clk`, `en`, `q`                           | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                   |
-| `mem.ram`                                 | `addr`, `din`, `dout`, `we`, `clk`              | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7) |
+| `mem.register`                            | `d`, `clk`, `en`, `rst`, `q`                    | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only; `showClk`, `showRst` (false) — display-only                                                                        |
+| `mem.ram`                                 | `addr`, `din`, `dout`, `we`, `clk`, `rst`       | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7), `showClk`, `showRst` (false) — display-only |
 | `mem.rom`                                 | `addr`, `out`                                   | same as `mem.ram`                                                                                                                                                                           |
 | `subcircuit`                              | from target circuit's named pins                | `circuit` (required)                                                                                                                                                                        |
 | `io.button`, `io.led`, `io.hexdisplay`    | `out` / `in` / `in`                             | `bitsize` (1; 4 for hexdisplay) — inert headless. `io.led` also takes `color` ("" = theme accent, else `#rrggbb`) and `intensity` (80; 0..=100 glow strength)                               |
@@ -273,8 +273,17 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   Grading stays deterministic: `X` is as reproducible as `0`, and what is now visible is
   the value a student needs to see. **Registers still power on at 0** — a legacy
   compatibility choice under review (docs/bugs.md carries the question for the Head TA).
-- A register has **no reset input**: it latches `d` on a rising edge while `en` is asserted and
-  holds otherwise. A circuit restarts through the session (`sim_reset`), not through a pin.
+- A register latches `d` on a rising edge while `en` is asserted and holds otherwise, and an
+  asserted `rst` clears it — synchronously, and **winning over a simultaneous enable**, which
+  is what CircuitSim CE's `Clear` does. A reset can also be expressed by the session
+  (`sim_reset`, which re-applies memory autoload), so the pin is optional (below).
+- The **clock and reset pins are optional in a schematic, never in the model** (§4:
+  `showClk`/`showRst` are display-only). A part that never wires one reads its default: `rst`
+  floats → deasserted (never resets), and `clk` floats → the part follows the **circuit's
+  clock**, i.e. it ticks on the same rising edge the `wiring.clock` component rides. That is
+  what makes an old-format schematic — which always has both pins wired — and a new schematic
+  drawn without them behave the same way, and it keeps a lone `rst` pin from halting a design
+  that never wanted one.
 - Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
   deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
   carry values but never originate them.
@@ -317,8 +326,8 @@ simulation-halting error naming the component and pin. What counts as _consuming
 | demux / decoder                 | all inputs                                                                          |
 | priority decoder                | its input lines, and only while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means *enabled* rather than a floating-read halt (`en_in` driven `0` disables, `X` is conservative) |
 | arithmetic                      | all inputs                                                                          |
-| register (rising edge only)     | `en` always; `d` only when `en ≠ 0`                                                 |
-| RAM                             | `addr` continuously (async read); `we` at the edge; `din` at the edge when `we ≠ 0` |
+| register (rising edge only)     | `en` always; `d` only when `en ≠ 0` and `rst ≠ 1`; a **floating `rst` reads deasserted** — the pin is optional (§4) |
+| RAM                             | `addr` continuously (async read); `we` and `rst` at the edge; `din` at the edge when `we ≠ 0`; a floating `rst` reads deasserted, so a memory that drives only `we`/`clk` keeps working |
 | ROM                             | `addr` continuously                                                                 |
 | pin / probe / LED / hex display | **nothing** — they _observe_; an idle bus displaying as `Z` is legal                |
 | breakpoint                      | **nothing** — it _observes_ too, and `en` gating the watch does not make it consume |

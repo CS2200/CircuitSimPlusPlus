@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 /// A whole `.csx` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -265,10 +265,10 @@ pub struct JoinRef {
 ///
 /// Documents written before the current [`FORMAT_VERSION`] are migrated
 /// first (§5.1 versioning): v2 → v3 drops the removed `settings.delayModel`
-/// field (there is only one engine now, the delay-aware one), and v3 → v4
-/// drops the wiring of the retired `rst` pins (registers and RAM have no
-/// reset input — resetting a circuit is the session's job, not a pin's).
-/// Files that already match the current version parse directly.
+/// field (there is only one engine now, the delay-aware one), and every
+/// document below v5 gains the `showClk`/`showRst` display flags of §93 —
+/// marked visible on the parts that actually wire those pins. Files that
+/// already match the current version parse directly.
 pub fn load_document(bytes: &[u8]) -> Result<Document, Vec<LoadError>> {
     let mut raw: Json = match serde_json::from_slice(bytes) {
         Ok(v) => v,
@@ -300,9 +300,14 @@ fn parse_error(message: String) -> LoadError {
 
 /// Apply the version-migration chain in place (§5.1). Each step upgrades a
 /// document **one** version and the steps run in order, so a file several
-/// versions behind is walked forward (a v2 file can carry `rst` wiring too —
-/// the pin predates v3, so v2 → v3 → v4 is the real path). Unknown or newer
-/// versions match no step and are left untouched, for `validate` to report.
+/// versions behind is walked forward (a v2 file also predates v3 and v5 —
+/// v2 → v3 → v5 is the real path). Unknown or newer versions match no step and
+/// are left untouched, for `validate` to report.
+///
+/// v4 is skipped on purpose: it was the version that *removed* the `rst` pin,
+/// and v5 has it back (UI_OVERHAUL §93). A v3 or v4 file therefore keeps every
+/// wire it has — nothing about `rst` has to be dropped after all — and only
+/// gains the visibility flags.
 fn migrate(v: &mut Json) {
     let Some(mut version) = v.get("version").and_then(Json::as_u64) else {
         return; // no `version` field at all — `validate` reports that
@@ -312,9 +317,9 @@ fn migrate(v: &mut Json) {
         drop_delay_model(v);
         version = 3;
     }
-    if version == 3 {
-        drop_retired_reset_wires(v);
-        version = 4;
+    if (3..5).contains(&version) {
+        reveal_wired_control_pins(v);
+        version = 5;
     }
     if version != start {
         v["version"] = Json::from(version);
@@ -342,120 +347,70 @@ fn drop_delay_model(v: &mut Json) {
     }
 }
 
-/// The v3 → v4 step: `mem.register` and `mem.ram` lost their `rst` pin, so
-/// wiring to one can never resolve again — drop it, in every circuit.
-fn drop_retired_reset_wires(v: &mut Json) {
-    if let Some(circuits) = v.get_mut("circuits").and_then(Json::as_array_mut) {
-        for circuit in circuits {
-            drop_reset_wires_in(circuit);
-        }
-    }
-}
-
-/// One circuit's v3 → v4 step: drop wiring to a retired `rst` pin.
-///
-/// A wire **junctioned onto** a dropped wire goes too — its net no longer
-/// exists, and that fan-out shape (one reset net reaching several registers)
-/// is exactly what the old editor produced. Surviving wires keep their order,
-/// so every `join` target is renumbered to match.
-fn drop_reset_wires_in(circuit: &mut Json) {
-    let retired: BTreeSet<String> = circuit
-        .get("components")
-        .and_then(Json::as_array)
-        .map(|comps| {
-            comps
-                .iter()
-                .filter_map(|comp| {
-                    let ty = comp.get("type").and_then(Json::as_str)?;
-                    if ty != "mem.register" && ty != "mem.ram" {
-                        return None;
-                    }
-                    comp.get("id").and_then(Json::as_str).map(str::to_owned)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if retired.is_empty() {
-        return;
-    }
-    let Some(wires) = circuit.get_mut("wires").and_then(Json::as_array_mut) else {
+/// The v5 step: `mem.register` and `mem.ram` carry `showClk`/`showRst`
+/// (UI_OVERHAUL §93) — display-only flags for two pins that are always in the
+/// model. A part whose clock or reset pin a **wire names** keeps that pin
+/// visible: the wiring is the proof it is wanted, and it is how a schematic
+/// drawn before these flags (including one whose `rst` wiring predates v4's
+/// removal) comes forward looking exactly as it did.
+fn reveal_wired_control_pins(v: &mut Json) {
+    let Some(circuits) = v.get_mut("circuits").and_then(Json::as_array_mut) else {
         return;
     };
-
-    /// Endpoint `{comp, pin}` naming a retired reset pin.
-    fn on_retired_reset(end: &Json, retired: &BTreeSet<String>) -> bool {
-        end.get("pin").and_then(Json::as_str) == Some("rst")
-            && end
-                .get("comp")
-                .and_then(Json::as_str)
-                .is_some_and(|id| retired.contains(id))
-    }
-    /// Endpoint `{join: {wire}}` target.
-    fn join_target(end: &Json) -> Option<usize> {
-        end.get("join")?
-            .get("wire")?
-            .as_u64()
-            .map(|wire| wire as usize)
-    }
-
-    let mut dropped = vec![false; wires.len()];
-    loop {
-        let mut changed = false;
-        for (i, wire) in wires.iter().enumerate() {
-            if dropped[i] {
-                continue;
-            }
-            let gone = ["a", "b"].iter().any(|side| {
-                wire.get(side).is_some_and(|end| {
-                    on_retired_reset(end, &retired)
-                        || join_target(end)
-                            .is_some_and(|w| dropped.get(w).copied().unwrap_or(false))
-                })
-            });
-            if gone {
-                dropped[i] = true;
-                changed = true;
+    for circuit in circuits {
+        // Every (component, pin) pair a wire endpoint names, for the two
+        // optional control pins.
+        let mut wired: BTreeSet<(String, String)> = BTreeSet::new();
+        if let Some(wires) = circuit.get("wires").and_then(Json::as_array) {
+            for w in wires {
+                for end in [w.get("a"), w.get("b")].into_iter().flatten() {
+                    let (Some(comp), Some(pin)) = (
+                        end.get("comp").and_then(Json::as_str),
+                        end.get("pin").and_then(Json::as_str),
+                    ) else {
+                        continue;
+                    };
+                    if pin == "clk" || pin == "rst" {
+                        wired.insert((comp.to_string(), pin.to_string()));
+                    }
+                }
             }
         }
-        if !changed {
-            break;
-        }
-    }
-    if !dropped.iter().any(|&d| d) {
-        return;
-    }
-
-    // Renumber junction targets before the wires move.
-    let mut remap = Vec::with_capacity(wires.len());
-    let mut next = 0u32;
-    for &drop in &dropped {
-        remap.push(if drop {
-            None
-        } else {
-            let at = next;
-            next += 1;
-            Some(at)
-        });
-    }
-    for (i, wire) in wires.iter_mut().enumerate() {
-        if dropped[i] {
+        if wired.is_empty() {
             continue;
         }
-        for side in ["a", "b"] {
-            let Some(join) = wire.get_mut(side).and_then(|e| e.get_mut("join")) else {
+        let Some(comps) = circuit.get_mut("components").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for comp in comps {
+            let ty = comp.get("type").and_then(Json::as_str);
+            if ty != Some("mem.register") && ty != Some("mem.ram") {
                 continue;
-            };
-            let Some(target) = join.get("wire").and_then(Json::as_u64) else {
-                continue;
-            };
-            if let Some(Some(new)) = remap.get(target as usize) {
-                join["wire"] = Json::from(*new);
             }
-        }
-    }
-    for i in (0..dropped.len()).rev() {
-        if dropped[i] {
-            wires.remove(i);
+            let Some(id) = comp.get("id").and_then(Json::as_str).map(str::to_owned) else {
+                continue;
+            };
+            let show_clk = wired.contains(&(id.clone(), "clk".to_string()));
+            let show_rst = wired.contains(&(id, "rst".to_string()));
+            if !show_clk && !show_rst {
+                continue;
+            }
+            let Some(obj) = comp.as_object_mut() else {
+                continue;
+            };
+            if !obj.get("attrs").is_some_and(Json::is_object) {
+                obj.insert("attrs".to_string(), Json::Object(Default::default()));
+            }
+            let attrs = obj
+                .get_mut("attrs")
+                .and_then(Json::as_object_mut)
+                .expect("attrs is an object");
+            if show_clk {
+                attrs.insert("showClk".to_string(), Json::Bool(true));
+            }
+            if show_rst {
+                attrs.insert("showRst".to_string(), Json::Bool(true));
+            }
         }
     }
 }
@@ -748,12 +703,13 @@ mod tests {
         assert_eq!(load_document(out.as_bytes()).unwrap(), doc);
     }
 
-    /// v3 → v4 migration: `mem.register`/`mem.ram` no longer have an `rst`
-    /// pin, so wiring to one is dropped — including a wire junctioned onto a
-    /// dropped wire (the shared-reset fan-out the editor produced) — and the
-    /// surviving wires are renumbered so `join` targets still resolve.
+    /// v3 → v5 migration: `mem.register`/`mem.ram` carry `showClk`/`showRst`
+    /// (UI_OVERHAUL §93), and a part whose clock or reset pin a wire names keeps
+    /// that pin **visible**. Nothing is dropped: v4 removed the `rst` pin and v5
+    /// has it back, so a file written when `rst` was live comes forward whole —
+    /// the pin, the wire, and the fan-out junction that shared it.
     #[test]
-    fn v3_document_migrates_dropping_reset_wires() {
+    fn v3_document_keeps_reset_wiring_and_marks_it_visible() {
         let v3 = r#"{
             "format": "circuitsim-plus-plus",
             "version": 3,
@@ -765,7 +721,7 @@ mod tests {
                 { "id": "n2", "type": "gate.not", "pos": [4, 0] },
                 { "id": "n3", "type": "gate.not", "pos": [6, 0] },
                 { "id": "r1", "type": "mem.register", "pos": [8, 0] },
-                { "id": "r2", "type": "mem.register", "pos": [8, 4] }
+                { "id": "r2", "type": "mem.register", "pos": [8, 4], "attrs": { "bitsize": 8 } }
             ], "wires": [
                 { "a": { "comp": "n0", "pin": "out" }, "b": { "comp": "r1", "pin": "rst" } },
                 { "a": { "join": { "wire": 0, "segment": 0 } }, "b": { "comp": "r2", "pin": "rst" } },
@@ -777,25 +733,33 @@ mod tests {
         let doc = load_document(v3.as_bytes()).expect("a v3 file must migrate");
         assert_eq!(doc.version, FORMAT_VERSION);
         let circuit = &doc.circuits[0];
-        // The `rst` wire and the fan-out junctioned onto it are gone…
-        assert_eq!(circuit.wires.len(), 3, "{:#?}", circuit.wires);
-        assert_eq!(circuit.wires[0].a.as_pin(), Some(("n0", "out")));
-        assert_eq!(circuit.wires[0].b.as_pin(), Some(("n1", "in")));
-        // …and the junction that pointed at wire 3 now points at wire 1.
-        let join = circuit.wires[2].a.as_join().expect("junction survives");
-        assert_eq!((join.wire, join.segment), (1, 0));
-        assert_eq!(circuit.wires[2].b.as_pin(), Some(("n3", "in")));
-        // Canonical output is already current-version and re-loads cleanly.
+        // Not one wire was dropped — including the junction that shared the reset.
+        assert_eq!(circuit.wires.len(), 5, "{:#?}", circuit.wires);
+        assert_eq!(circuit.wires[0].b.as_pin(), Some(("r1", "rst")));
+        let join = circuit.wires[1].a.as_join().expect("junction survives");
+        assert_eq!((join.wire, join.segment), (0, 0));
+        // Both wired reset pins are marked visible on their part.
+        let by_id = |id: &str| {
+            circuit
+                .components
+                .iter()
+                .find(|c| c.id == id)
+                .expect("component exists")
+        };
+        assert_eq!(by_id("r1").attrs.get("showRst"), Some(&Json::Bool(true)));
+        assert_eq!(by_id("r2").attrs.get("showRst"), Some(&Json::Bool(true)));
+        // A part the file never touched keeps its own attrs untouched.
+        assert_eq!(by_id("r2").attrs.get("bitsize"), Some(&Json::from(8)));
         let out = to_canonical_json(&doc);
-        assert!(!out.contains("rst"), "{out}");
+        assert!(out.contains("showRst"), "{out}");
         assert_eq!(load_document(out.as_bytes()).unwrap(), doc);
     }
 
-    /// The steps chain: a v2 document (which predates v3 but still used the
-    /// `rst` pin) is walked v2 → v3 → v4 in one load, and ends up with both
-    /// the removed `delayModel`/`attrs.delay` **and** the `rst` wiring gone.
+    /// The steps chain: a v2 document (which predates v3 *and* v5) is walked
+    /// v2 → v3 → v5 in one load — `delayModel`/`attrs.delay` dropped, the reset
+    /// wiring kept and marked visible.
     #[test]
-    fn v2_document_migrates_all_the_way_to_no_reset_wiring() {
+    fn v2_document_migrates_all_the_way_keeping_its_reset_wiring() {
         let v2 = r#"{
             "format": "circuitsim-plus-plus",
             "version": 2,
@@ -810,9 +774,14 @@ mod tests {
         }"#;
         let doc = load_document(v2.as_bytes()).expect("a v2 file must migrate");
         assert_eq!(doc.version, FORMAT_VERSION);
-        assert!(doc.circuits[0].wires.is_empty());
+        assert_eq!(doc.circuits[0].wires.len(), 1);
+        assert_eq!(
+            doc.circuits[0].components[1].attrs.get("showRst"),
+            Some(&Json::Bool(true))
+        );
         let out = to_canonical_json(&doc);
-        assert!(!out.contains("rst") && !out.contains("delayModel"), "{out}");
+        assert!(out.contains("showRst"), "{out}");
+        assert!(!out.contains("delayModel"), "{out}");
         assert!(!out.contains("\"delay\""), "{out}");
         assert_eq!(load_document(out.as_bytes()).unwrap(), doc);
     }

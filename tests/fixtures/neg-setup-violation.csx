@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "neg-setup-violation",
   "settings": {
     "clockHz": 1,
@@ -57,7 +57,9 @@
             0
           ],
           "name": "r",
-          "attrs": {}
+          "attrs": {
+            "showClk": true
+          }
         }
       ],
       "wires": [

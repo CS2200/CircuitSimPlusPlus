@@ -1107,8 +1107,8 @@ mod tests {
         let nl = build_json(&json).unwrap();
         assert_eq!(nl.comps.len(), 3);
         // clk net + q→probe net + one singleton net per unwired register
-        // pin (d, en).
-        assert_eq!(nl.nets.len(), 4);
+        // pin (d, en, rst).
+        assert_eq!(nl.nets.len(), 5);
 
         let clk_net = &nl.nets[nl.comps[0].pins[0].net.idx()];
         assert_eq!(clk_net.width, 1);
@@ -1154,8 +1154,8 @@ mod tests {
             ]}"#,
         );
         let nl = build_json(&json).unwrap();
-        // 1 shared clk net + 3 unwired pin nets per register (d, en, q).
-        assert_eq!(nl.nets.len(), 1 + 3 * 3);
+        // 1 shared clk net + 4 unwired pin nets per register (d, en, q, rst).
+        assert_eq!(nl.nets.len(), 1 + 4 * 3);
         let clk_net = &nl.nets[nl.comps[0].pins[0].net.idx()];
         assert_eq!(clk_net.sinks.len(), 3);
         assert_eq!(clk_net.drivers.len(), 1);

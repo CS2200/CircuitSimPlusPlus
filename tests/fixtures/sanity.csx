@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 4,
+  "version": 5,
   "name": "sanity",
   "settings": {
     "clockHz": 1,
@@ -13,10 +13,10 @@
         { "id": "clk", "type": "wiring.clock", "pos": [0, 0] },
         { "id": "one", "type": "wiring.constant", "pos": [0, 0], "attrs": { "value": "1" } },
         { "id": "zero", "type": "wiring.constant", "pos": [0, 0] },
-        { "id": "r1", "type": "mem.register", "pos": [0, 0], "name": "r1" },
+        { "id": "r1", "type": "mem.register", "pos": [0, 0], "name": "r1", "attrs": { "showClk": true } },
         { "id": "n1", "type": "gate.not", "pos": [0, 0] },
         { "id": "a1", "type": "gate.and", "pos": [0, 0] },
-        { "id": "r2", "type": "mem.register", "pos": [0, 0], "name": "r2" },
+        { "id": "r2", "type": "mem.register", "pos": [0, 0], "name": "r2", "attrs": { "showClk": true } },
         { "id": "p", "type": "wiring.probe", "pos": [0, 0], "name": "out" }
       ],
       "wires": [

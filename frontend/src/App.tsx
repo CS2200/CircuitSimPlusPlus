@@ -93,6 +93,8 @@ import {
   PREF_DEFAULT_BITS,
   PREF_DEFAULT_HZ,
   PREF_DEFAULT_INPUTS,
+  PREF_SHOW_CLK,
+  PREF_SHOW_RST,
   PREF_GRID,
   PREF_PULSES,
   PREF_PULSE_SPEED,
@@ -257,6 +259,11 @@ export default function App() {
   // Placement seeds (Settings → Editing) and the transport's start speed.
   const [defaultBits, setDefaultBits] = useState(() => loadNumPref(PREF_DEFAULT_BITS, 1));
   const [defaultInputs, setDefaultInputs] = useState(() => loadNumPref(PREF_DEFAULT_INPUTS, 2));
+  // Whether a newly placed memory part shows its clock / reset pin
+  // (UI_OVERHAUL §93). Off by default: the pins are opt-in, so a fresh
+  // schematic is not covered in clock/reset stubs.
+  const [defaultShowClk, setDefaultShowClk] = useState(() => loadBoolPref(PREF_SHOW_CLK, false));
+  const [defaultShowRst, setDefaultShowRst] = useState(() => loadBoolPref(PREF_SHOW_RST, false));
   const [updateCheckOn, setUpdateCheckOn] = useState(() => loadBoolPref(PREF_UPDATE_CHECK, true));
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const stress = params.has("stress");
@@ -499,6 +506,12 @@ export default function App() {
   useEffect(() => {
     saveNumPref(PREF_DEFAULT_INPUTS, defaultInputs);
   }, [defaultInputs]);
+  useEffect(() => {
+    saveBoolPref(PREF_SHOW_CLK, defaultShowClk);
+  }, [defaultShowClk]);
+  useEffect(() => {
+    saveBoolPref(PREF_SHOW_RST, defaultShowRst);
+  }, [defaultShowRst]);
   useEffect(() => {
     saveNumPref(PREF_DEFAULT_HZ, hzExp);
   }, [hzExp]);
@@ -1500,9 +1513,16 @@ export default function App() {
       ) {
         seed.inputs = defaultInputs;
       }
+      // A memory part's clock and reset pins are opt-in (UI_OVERHAUL §93): the
+      // pins are always in the model, so the seed only decides whether they are
+      // drawn (and wired) from the start — the Editing prefs choose.
+      if (type === "mem.register" || type === "mem.ram") {
+        seed.showClk = defaultShowClk;
+        seed.showRst = defaultShowRst;
+      }
       return Object.keys(seed).length === 0 ? undefined : seed;
     },
-    [defaultBits, defaultInputs],
+    [defaultBits, defaultInputs, defaultShowClk, defaultShowRst],
   );
 
   // ---- menus ----
@@ -2227,6 +2247,8 @@ export default function App() {
           showPerf={showPerf}
           defaultBits={defaultBits}
           defaultInputs={defaultInputs}
+          showClk={defaultShowClk}
+          showRst={defaultShowRst}
           defaultHz={hzExp}
           updateCheckOn={updateCheckOn}
           onTheme={setTheme}
@@ -2240,6 +2262,8 @@ export default function App() {
           onShowPerf={setShowPerf}
           onDefaultBits={setDefaultBits}
           onDefaultInputs={setDefaultInputs}
+          onShowClk={setDefaultShowClk}
+          onShowRst={setDefaultShowRst}
           onDefaultHz={setHzExp}
           onUpdateCheck={setUpdateCheckOn}
           historyUsage={historyUsage}
