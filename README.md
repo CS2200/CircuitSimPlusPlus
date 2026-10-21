@@ -14,6 +14,7 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/autograder.md`](docs/autograder.md) | Exit codes, assertion grammar, test-spec & snapshot schemas |
 | [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
 | [`docs/releasing.md`](docs/releasing.md) | How releases are cut on GT's runner-less GHES (3 machines, one per OS) |
+| [`docs/distribution.md`](docs/distribution.md) | Distribution & update plan: public github.com mirror (decided, not built) |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
 ## Repository layout

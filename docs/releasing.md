@@ -6,6 +6,10 @@
 > Xcode, the Windows installer needs NSIS, the Linux packages need webkit2gtk —
 > so no single machine can build all three. We have one machine per OS; this is
 > the protocol that turns that into a release.
+>
+> **Planned change:** we intend to move builds, releases, and the update check
+> to a **public github.com mirror** (free hosted runners, works off-campus).
+> Decided but not built — see [`distribution.md`](distribution.md).
 
 Related: [`DESIGN.md`](../DESIGN.md) §9 (rolling releases), decision **D14**
 (we ship unsigned). The commit gate is `node scripts/build.mjs check`.
