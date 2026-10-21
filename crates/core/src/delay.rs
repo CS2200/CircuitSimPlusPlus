@@ -1025,8 +1025,18 @@ impl DelayEngine {
                     .expect("named_flat is parallel to named");
                 self.comps[ci.idx()].load_words(image)?;
                 let now = self.now;
-                self.eval_and_schedule(ci.0, now, None)
-                    .map_err(|h| h.details)?;
+                // Refresh the read output — a preload is a WRITE to the memory,
+                // so a floating *address* here must not fail it: this runs before
+                // the boot settle (and before any cycle), where every view is
+                // still `Z`, and a memory whose address is a register would
+                // otherwise refuse to load at all. The value settles on the
+                // ordinary path as soon as the address arrives; a real halt is
+                // reported then, with the same detail.
+                if let Err(h) = self.eval_and_schedule(ci.0, now, None) {
+                    if !matches!(h.reason, HaltReason::FloatingRead) {
+                        return Err(h.details);
+                    }
+                }
                 Ok(true)
             }
             _ => Ok(false),
@@ -1250,11 +1260,23 @@ impl DelayEngine {
             // consume table decides (a mux's unselected input is not
             // consumed; a gate input is and halts). `Z` on a driven net
             // means "still in flight or idle": wait (the output holds).
-            if cd.class == Class::Comb {
-                let waiting = ins
-                    .iter()
-                    .zip(cd.in_pins.iter())
-                    .any(|(v, &(_, net))| v.has_z() && !self.netlist.nets[net.idx()].floating);
+            //
+            // A memory's ASYNCHRONOUS READ path waits the same way, on its
+            // `addr` only (`din`/`we`/`clk` are edge inputs and must not stall
+            // a read): a RAM/ROM whose address is still in flight holds its
+            // output instead of judging a half-arrived `Z`. Without this, a
+            // converted design halted at power-on on an address that was merely
+            // in transit through a splitter — a `Z` on a *driven* net, which
+            // the cycle-close sweep exists to tell apart from a real floating
+            // read (`floating_sweep`, the never-driven oracle).
+            if matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
+                let waiting = cd.in_pins.iter().enumerate().any(|(i, &(slot, net))| {
+                    let read_now = match cd.class {
+                        Class::Comb => true,
+                        _ => self.netlist.comps[c].pins[slot].pin == "addr",
+                    };
+                    read_now && ins[i].has_z() && !self.netlist.nets[net.idx()].floating
+                });
                 if waiting {
                     return Ok(());
                 }
@@ -1681,7 +1703,13 @@ impl DelayEngine {
             }
             // Substitute immune floating views with a driven 0 so the
             // behavior's own consume rule (the oracle) only ever fires on
-            // genuinely never-driven nets.
+            // genuinely never-driven nets. "Immune" is the SAME test the eager
+            // path uses (`eval_and_schedule`): a `Z` on a net that a driver pin
+            // sits on is "still in flight or idle" — a deep combinational path
+            // takes several cycles to settle, so at the first cycle close its
+            // far end is legitimately `Z`, and halting there stopped every
+            // converted LC-5200 at power-on. Only a net with no driver pin at
+            // all — an unconnected input — is a real floating read.
             let mut ins: Vec<Value> = cd
                 .in_pins
                 .iter()
@@ -1690,7 +1718,7 @@ impl DelayEngine {
             let mut candidate = false;
             for (v, &(_, net)) in ins.iter_mut().zip(cd.in_pins.iter()) {
                 if v.has_z() {
-                    if self.net_ever_driven[net.idx()] {
+                    if self.net_ever_driven[net.idx()] || !self.netlist.nets[net.idx()].floating {
                         *v = Value::zero(v.width());
                     } else {
                         candidate = true;
@@ -2480,6 +2508,76 @@ mod tests {
             eng.named_value("out"),
             Some(k(8, 0)),
             "…and the reset cleared it"
+        );
+    }
+
+    /// A memory's ASYNCHRONOUS READ waits for its `addr` the same way a
+    /// combinational part waits for its inputs. A `Z` on a *driven* net is a
+    /// value still in transit — at power-on a splitter publishes `Z` onto its
+    /// sides before its bus has arrived — and a RAM/ROM that judged it then
+    /// halted a perfectly good design at cycle 0 (a converted LC-5200 did).
+    /// Only a net with no driver pin at all is a floating read.
+    #[test]
+    fn a_memory_read_waits_for_an_address_in_flight() {
+        // The ROM's `addr` is a splitter's split: the splitter drives it, so the
+        // net has a driver pin and is never "floating" — but the splitter's
+        // first publication is `Z`, before the constant on its bus arrives.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 5, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"5","bitsize":4}}}},
+                {{"id":"sp","type":"wiring.splitter","pos":[0,0],
+                  "attrs":{{"splits":{{"out0":[0,1,2,3]}}}}}},
+                {{"id":"rom","type":"mem.rom","pos":[0,0],"name":"rom",
+                  "attrs":{{"bitsize":4,"depth":16,"addrBits":4,
+                            "contents":"7 8 9 a b c d e f 1 2 3 4 5 6 0"}}}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"sp","pin":"bus"}}}},
+                {{"a":{{"comp":"sp","pin":"out0"}},"b":{{"comp":"rom","pin":"addr"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(1).unwrap(); // must not halt
+        let net = eng
+            .netlist()
+            .named
+            .iter()
+            .find(|n| n.name == "rom")
+            .expect("named rom")
+            .value_net
+            .expect("value_net present");
+        assert_eq!(eng.net_value(net), k(4, 12), "reads word 5 = 0xc");
+    }
+
+    /// A preload is a WRITE: `csim run --load mem=prog.hex` (and a memory's
+    /// `autoload`) must not fail because the read path has not settled yet — at
+    /// load time every view is still `Z`, so this used to report "grader
+    /// configuration: mem: comp N pin \"addr\": floating". The read output
+    /// refreshes on the ordinary path once the address arrives.
+    #[test]
+    fn a_preload_does_not_fail_on_an_unsettled_address() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 5, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"m","type":"mem.ram","pos":[0,0],"name":"mem",
+                  "attrs":{{"bitsize":8,"depth":16}}}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out","attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"m","pin":"dout"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        // The address is unwired (`Z`): the preload must succeed anyway. The
+        // design still halts when it *runs* — an address nobody drives is a real
+        // floating read — but loading a program into a memory is not a read.
+        assert!(eng.load_memory_image("mem", &[7]).is_ok());
+        assert!(
+            eng.netlist().named.iter().any(|n| n.name == "mem"),
+            "the named memory stays addressable"
         );
     }
 

@@ -6,6 +6,23 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Latest round — done (2026-10-21)
+
+- **The reset pin is back, hidden by default** (§93): `mem.register` /
+  `mem.ram` carry `clk` and `rst` again, visible only when `showClk` /
+  `showRst` says so, with an unwired `rst` reading deasserted and an unwired
+  `clk` following the circuit's clock. The breakpoint's pinout became
+  CircuitSim CE's `BreakpointPeer`. _(commit `7f661a9`; `UI_OVERHAUL.md` §93,
+  `docs/format-v2.md` §4/§9.)_
+- **Three engine rules the conversion exposed** (all in `delay.rs`, all stated
+  in format-v2 §9): a memory's asynchronous read **waits** on an address that is
+  still in flight (a `Z` on a net that *has* a driver pin) instead of halting a
+  settling design at power-on; the cycle-close sweep uses the same test, so only
+  a net with no driver pin at all is a floating read; and a memory **preload**
+  (`--load`, `autoload`) is a write, so it no longer fails on an unsettled
+  address. Each has a test; the golden hashes and the negative fixtures are
+  unchanged.
+
 **Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
 and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says
 otherwise — UI_OVERHAUL §93), **213 backend + 445 unit + 80 e2e** tests green. RAM powers
