@@ -39,28 +39,36 @@ transparent while enabled) and possibly a transparent-latch RAM variant would co
 that want asynchronous/level behaviour instead of ours (and would make an asynchronous
 reset a property of a *type* rather than of the flag). Nothing depends on it yet.
 
-## The old tool tolerates shorts; the new one shows them (found 2026-10-21)
+## Correction: the old file has no short — my splitter was echoing its own bus (2026-10-21)
 
-Converting the course's own reference CPU turned up a real semantic divergence, and it is
-the reason `pow` does not yet run on any converted CPU:
+**An earlier commit in this batch claimed the converted reference CPU "contains a short" that
+CE tolerates. That was wrong.** The mistake was mine and it is worth writing down, because it
+took two engine bugs to see.
 
-- `WireValue.merge` in CircuitSim CE throws on a *conflict* of two known bits
-  (`ShortCircuitException`), and the simulator catches that per link: the port's value is
-  **not updated** and a short circuit is *reported*, but the run continues with the value it
-  already had. The new engine instead resolves a driver fight to `X` and flags the net
-  (`net_contended`), because a short is a mistake a student should see.
-- Old designs contain these conflicts. In the reference solution two splitter outputs share
-  one net through the drawing (the copper genuinely joins them), and the *microcode* bus of
-  the datapath is written by both a register and a splitter that splits it. Under CE that is
-  a tolerated short; under our rule it is `X`, which then spreads through the microcode and
-  stops the CPU.
+The net is fine. In the reference solution the net carrying the instruction register's output
+has exactly two pins — `RegisterPeer(q)` and `SplitterPeer(bus)` — one writer; the splitter
+merely *taps* it. Its fanouts go to sinks: a bit extender's input, another splitter's bus, and
+the register file's read-address inputs (`Ry`/`Rx`/`Opcode`). Nothing drives that net twice, so
+there is nothing for CE to tolerate.
 
-Two engine bugs found on the way are **fixed** (a `Z` on a *driven* net is in flight, not a
-floating read; and a splitter no longer drives a side that already has a writer), which took
-the converted CPU from "X everywhere at cycle 2" to "one X net left, on the instruction-register
-bus". What remains is a decision: keep `X` (strict, and the reason converted designs like this
-one do not run), or offer a CE-compatible "tolerate a short" mode for converted documents —
-which is the same kind of question as the RAM power-on one above.
+What produced `X` was **our** splitter: `eval_splitter` drove its own `bus` pin with a
+pass-through of the net's value, which makes it a second writer on a net it only reads.
+CircuitSim CE never does that — `Splitter.valueChanged` pushes the *fanouts* when the bus
+changes, and pushes the *bus* only when a *fanout* changes, with its own last bus value (which
+starts `Z`) plus that fanout's bits. A pass-through is not that, and the engine's per-bit
+contention check turned the disagreement into `X` on the whole instruction bus.
+
+Fixed in `behavior.rs`: the bus is driven only for the bits a split that is itself externally
+driven claims (the assemble idiom), and each split reads the bus where nothing else drives it.
+On the converted reference CPU, X-carrying nets after a run went from 4 to **0** at cycle 1 and
+46 to 0 at cycle 3, and the CPU now **executes the program**: `IR` takes `0x9D00003F`, then
+`0x3DD00000`, then `0x9300001A` — the program's first three words — with `A`, `B`, `MAR` and the
+microcode state doing the expected work.
+
+**What remains is behavioural, not `X`:** past those first instructions the PC wanders (`0x9`,
+`0x3`, `0x14`, …) instead of following the program, and `pow` never reaches its answer. The
+autograder's own `reg_states.csv` is a per-cycle reference, so the next step is to diff our
+register file against it cycle by cycle.
 
 **Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
 and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says

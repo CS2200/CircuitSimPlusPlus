@@ -15,9 +15,11 @@
 //! Last re-blessed twice in one batch. First by UI_OVERHAUL §93: `mem.register`/
 //! `mem.ram` carry the `rst` pin again (optional, unwired reads deasserted), so
 //! every register/RAM owns one more singleton net and the net ids the hash mixes
-//! shift. Then by the splitter fix: a splitter now drives a fanout pin only when
-//! nothing else drives it (CE pushes a fanout only when *it* changes the value),
-//! so `multicycle` sees fewer events. In both cases `t_obs` did not move and the
+//! shift. Then by the splitter fix: a splitter no longer ECHOES its bus back onto
+//! its own `bus` pin (CE pushes a fanout only when it changes the value, and pushes
+//! the bus only with its own last bus value, which starts `Z`), and it drives a
+//! fanout only where nothing else does — so the three splitter-using fixtures see
+//! fewer events. In both cases `t_obs` did not move and the
 //! architectural checks (`cpu_fixtures_compute_the_program`, `fixture_alu_computes`)
 //! still pass — the drift is events, not results.
 
@@ -62,7 +64,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x5587_df81_c9c2_c186,
+        trace_hash: 0xd73b_492d_af9f_d5e5,
     },
     Scenario {
         fixture: "multicycle.csx",
@@ -70,7 +72,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0xd9d1_ef2b_0d60_5631,
+        trace_hash: 0x9b4c_51ce_8a7c_9119,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -78,7 +80,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x66f1_c7a6_2ba9_81f0,
+        trace_hash: 0xf81a_978b_fb39_e1d6,
     },
 ];
 
