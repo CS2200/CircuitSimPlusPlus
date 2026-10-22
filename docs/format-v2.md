@@ -333,6 +333,14 @@ simulation-halting error naming the component and pin. What counts as _consuming
 | breakpoint                      | **nothing** — it _observes_ too, and `en` gating the watch does not make it consume                                                                                                                          |
 | splitter                        | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer                                                                                                                                  |
 
+**A memory's `din` and `dout` are one-directional, and `dout` is driven continuously.** A
+memory therefore *cannot* stand in for a bidirectional port: wiring `din` and `dout` to the
+same net makes the memory fight whatever writes there (a short, §9), and the write enable is
+active-high — the old tool's combined load/store RAM, whose single `Data` port switches
+direction and whose `Load` pin means _storing while LOW_, has to be converted into a split
+port plus an inverter, not a straight pin rename (the transpiler does exactly that and says
+so).
+
 **A splitter never fights.** It is plumbing, and each side is driven by the splitter **only
 when nothing else drives it** — the same rule for the bus and for the fanouts, and it covers
 both idioms: _splitting_ (the bus is driven by someone else, the split feeds a sink) and
