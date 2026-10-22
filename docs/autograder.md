@@ -11,7 +11,7 @@ addressing, and memory preloading + sandboxing.
 ```bash
 csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rss-cap-mb M]
     [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
-    [--expect-halt] [--clock-half-period-ns N] [--sta] [--paths K]
+    [--expect-halt] [--pause-on-breakpoints] [--clock-half-period-ns N] [--sta] [--paths K]
     [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--sta] [--json out.json]
@@ -55,7 +55,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | field                            | meaning                                                                                                                                             |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cycles`                         | rising edges executed                                                                                                                               |
-| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"`  |
+| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"` — `"breakpoint"` only with `pause_on_breakpoints`, since a graded run ignores them by default (§1) |
 | `halt_details`                   | `comp <id> pin "<pin>": <message>` when attributable (root-sheet document-order id; see `docs/ipc.md` §3's `sim_halted`), else a plain message      |
 | `t_obs`                          | max observed per-cycle settle time, ns                                                                                                              |
 | `est_time`                       | `cycles × t_obs`, saturating                                                                                                                        |

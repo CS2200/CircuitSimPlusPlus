@@ -110,6 +110,11 @@ struct RunArgs {
     /// Exit 2 when the run consumes its cycle budget without halting.
     #[arg(long)]
     expect_halt: bool,
+    /// Pause at `debug.breakpoint`s instead of ignoring them. Off by default: a
+    /// breakpoint is a debug aid, and a graded run must not be cut short by one
+    /// (§8.1).
+    #[arg(long)]
+    pause_on_breakpoints: bool,
     /// Clock half-period in ns (delay mode).
     #[arg(long)]
     clock_half_period_ns: Option<u64>,
@@ -282,6 +287,7 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
         cfg.baseline_est_time = Some(b);
     }
     cfg.expect_halt |= args.expect_halt;
+    cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
     if let Some(h) = args.clock_half_period_ns {
         cfg.clock_half_period = h;
     }

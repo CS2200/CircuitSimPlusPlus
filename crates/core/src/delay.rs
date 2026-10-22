@@ -493,6 +493,11 @@ pub struct DelayEngine {
     /// Cap on applied events per cycle (storm detection, §4.5); also the
     /// boot settle's quiescence cap.
     pub events_per_cycle_cap: u64,
+    /// Honour `debug.breakpoint`s (a pause) or ignore them. The editor wants the pause;
+    /// a **graded** run does not — a breakpoint is a debug aid a submitter left in their
+    /// schematic, and the old tool never let one end a graded run (DESIGN.md §8.1), so
+    /// `GradeConfig` turns this off by default.
+    pub breakpoints_enabled: bool,
     events_this_cycle: u64,
     events_processed: u64,
     trace_hash: u64,
@@ -644,6 +649,7 @@ impl DelayEngine {
             violations: Vec::new(),
             clk_track: vec![ClockTrack::default(); n],
             events_per_cycle_cap: DEFAULT_EVENTS_PER_CYCLE_CAP,
+            breakpoints_enabled: true,
             events_this_cycle: 0,
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
@@ -1574,7 +1580,7 @@ impl DelayEngine {
                 // it never fires: every net comes up somewhere, and stopping
                 // at cycle 0 because a signal *is* its breakpoint value (and
                 // not because it *became* it) is noise, not a breakpoint.
-                if !self.in_boot {
+                if !self.in_boot && self.breakpoints_enabled {
                     if let Some(target) = self.comps[c].breakpoint_value() {
                         // Pin order is the registry's: `in`, then `en`
                         // (components.rs). The delivery updated `views` before

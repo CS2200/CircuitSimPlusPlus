@@ -402,6 +402,14 @@ pub struct GradeConfig {
     pub include_sta: bool,
     /// §8.3 rubric hook: full credit when `est_time` is below this.
     pub rubric_full_credit_below: Option<u64>,
+    /// Pause at `debug.breakpoint`s during a graded run (default: **false**).
+    ///
+    /// A breakpoint is a *debug aid* the student left in their schematic; the old
+    /// tool never let one stop a graded run, and a submitted circuit that happens to
+    /// watch a signal that reaches the watched value would otherwise be graded on a
+    /// truncated run. Off by default, so a graded run "force shuts them up"; set it
+    /// when reproducing a pause by hand.
+    pub pause_on_breakpoints: bool,
 }
 
 impl Default for GradeConfig {
@@ -417,6 +425,7 @@ impl Default for GradeConfig {
             top_k: 10,
             include_sta: false,
             rubric_full_credit_below: None,
+            pause_on_breakpoints: false,
         }
     }
 }
@@ -436,6 +445,8 @@ pub struct TestSpec {
     pub baseline_est_time: Option<u64>,
     /// Require a natural halt within the cycle budget (exit 2 otherwise).
     pub expect_halt: Option<bool>,
+    /// Pause at `debug.breakpoint`s (default false: a graded run ignores them).
+    pub pause_on_breakpoints: Option<bool>,
     /// Top-k observed critical paths in the report.
     pub top_paths: Option<usize>,
     /// Include informational STA (`t_sta`, §4.4 — clearly labeled).
@@ -492,6 +503,7 @@ impl TestSpec {
         cfg.limits.rss_cap_bytes = self.rss_cap_bytes;
         cfg.baseline_est_time = self.baseline_est_time;
         cfg.expect_halt = self.expect_halt.unwrap_or(false);
+        cfg.pause_on_breakpoints = self.pause_on_breakpoints.unwrap_or(false);
         cfg.top_k = self.top_paths.unwrap_or(10);
         cfg.include_sta = self.include_sta.unwrap_or(false);
         cfg.rubric_full_credit_below = self.rubric_full_credit_below;
@@ -805,6 +817,10 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
         Ok(e) => e,
         Err(e) => return Ok(malformed(e, &table_name, started)),
     };
+    // A graded run ignores `debug.breakpoint`s unless asked otherwise: they are a
+    // debug aid a submitter left in their schematic, and the old tool never let one
+    // end a graded run (DESIGN.md §8.1).
+    eng.breakpoints_enabled = cfg.pause_on_breakpoints;
     grade_delay(&mut eng, cfg, &table, started)
 }
 
@@ -915,10 +931,9 @@ fn halt_outcome(h: &Halt) -> (GradeOutcome, &'static str) {
         HaltReason::Oscillation => (GradeOutcome::Oscillation, "oscillation"),
         HaltReason::FloatingRead => (GradeOutcome::FloatingRead, "floating-read"),
         HaltReason::Contention => (GradeOutcome::OtherHalt, "contention"),
-        // A breakpoint in a submitted circuit stops the graded run exactly as
-        // it stops the interactive one (docs/format-v2.md §9): the part is a
-        // watcher, and the run it watches ends there. Named, so the report
-        // says which part did it rather than a bare "error".
+        // Only reachable with `pause_on_breakpoints` (the grading default is to
+        // ignore them, DESIGN.md §8.1). Named, so the report says which part did
+        // it rather than a bare "error".
         HaltReason::Breakpoint => (GradeOutcome::OtherHalt, "breakpoint"),
         HaltReason::CycleLimit => (GradeOutcome::CycleLimit, "cycle-limit"),
         _ => (GradeOutcome::OtherHalt, "error"),
@@ -1144,6 +1159,53 @@ mod tests {
     use crate::format::load_document;
 
     const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+
+    /// The counter, plus a `debug.breakpoint` watching `r1` reach 1 — which it does on
+    /// the very first cycle, so the part fires immediately unless it is ignored.
+    fn counter_with_breakpoint_json() -> String {
+        let base = counter_json();
+        let bp = r#"{"id":"bp","type":"debug.breakpoint","pos":[0,0],
+             "attrs":{"bitsize":1,"value":"1"}}"#;
+        let wire = r#"{"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}}"#;
+        base.replace(
+            r#"{"id":"dmem","type":"mem.ram","pos":[0,0],"name":"dmem","#,
+            &format!(
+                "{bp},{{\"id\":\"dmem\",\"type\":\"mem.ram\",\"pos\":[0,0],\"name\":\"dmem\","
+            ),
+        )
+        .replace(
+            r#"{"a":{"comp":"one","pin":"out"},"b":{"comp":"r1","pin":"en"}}"#,
+            &format!(
+                r#"{{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},{wire}"#
+            ),
+        )
+    }
+
+    /// A graded run **ignores** breakpoints: a debug aid left in a submitted schematic
+    /// must not cut the run short (DESIGN.md §8.1). Opting in still pauses.
+    #[test]
+    fn a_graded_run_ignores_breakpoints_unless_asked() {
+        let doc = doc(&counter_with_breakpoint_json());
+
+        let cfg = GradeConfig {
+            limits: RunLimits {
+                max_cycles: 20,
+                ..RunLimits::default()
+            },
+            ..GradeConfig::default()
+        };
+        let out = grade(&doc, &cfg).unwrap();
+        assert_eq!(out.outcome, GradeOutcome::Passed, "ignored by default");
+        assert_eq!(out.report.halt_reason, "completed");
+        assert!(out.report.cycles > 1, "kept running past the watched value");
+
+        let paused = GradeConfig {
+            pause_on_breakpoints: true,
+            ..cfg
+        };
+        let out = grade(&doc, &paused).unwrap();
+        assert_eq!(out.report.halt_reason, "breakpoint", "opt-in still pauses");
+    }
 
     /// Toggling counter + named RAM: r1 flips each cycle, r2 follows one
     /// behind; probe `out` = and(n1.out, 1). T_obs = clk→Q 20 + not 9 +

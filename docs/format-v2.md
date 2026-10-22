@@ -321,9 +321,11 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   forward rather than re-hitting it. The pause is **not sticky** — the next step/run continues
   from exactly there, which is what makes it a debugger's breakpoint rather than a dead end
   (`sim_halted`'s `reason: "breakpoint"`; docs/ipc.md §3). It also _observes_: it consumes
-  nothing, so it may watch an undriven net without halting on the floating value. A graded run
-  is not special — a breakpoint left in a submitted circuit stops the graded run and the report
-  names it (docs/autograder.md).
+  nothing, so it may watch an undriven net without halting on the floating value. **A graded run
+  ignores breakpoints** — they are a debug aid a submitter left in their schematic, and the old
+  tool never let one end a graded run (`GradeConfig::pause_on_breakpoints` is false by default;
+  `csim run --pause-on-breakpoints` reproduces a pause by hand, and the report names the part
+  when it does fire — docs/autograder.md §6).
 
 **The floating-consume table (§4.1, D3).** Consuming a floating (`Z`) value is a
 simulation-halting error naming the component and pin. What counts as _consuming_:
