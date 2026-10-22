@@ -428,6 +428,44 @@ impl SinkKind {
     }
 }
 
+/// Which [`crate::api::Watch`] kind was installed (the engine-side form: the literal is
+/// already parsed and width-matched, so the per-cycle evaluation never re-parses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WatchKind {
+    /// Unchanged across this many consecutive cycle boundaries.
+    Stable(u64),
+    /// Becomes the wanted value (a transition).
+    Reaches,
+    /// Equals the wanted value (a level).
+    Is,
+}
+
+/// One installed stop condition plus the per-cycle bookkeeping it needs.
+#[derive(Debug, Clone)]
+struct WatchState {
+    /// The `probe('…')`-registry name being watched.
+    name: String,
+    kind: WatchKind,
+    /// The parsed literal (`None` for `Stable`).
+    want: Option<Value>,
+    /// Value at the previous boundary (`None` before the first evaluation).
+    last: Option<Value>,
+    /// Consecutive boundaries with an unchanged value (`Stable`).
+    stable_for: u64,
+    /// The cycle the value last changed (`Stable`'s `last_change_cycle`).
+    last_change_cycle: u64,
+}
+
+impl WatchState {
+    fn when(&self) -> &'static str {
+        match self.kind {
+            WatchKind::Stable(_) => "stable",
+            WatchKind::Reaches => "reaches",
+            WatchKind::Is => "is",
+        }
+    }
+}
+
 /// The delay-aware engine. See module docs for the semantics.
 #[derive(Debug)]
 pub struct DelayEngine {
@@ -502,6 +540,13 @@ pub struct DelayEngine {
     events_processed: u64,
     trace_hash: u64,
     halted: Option<Halt>,
+    /// Caller-defined stop conditions (§8.4), evaluated at every cycle boundary. Like
+    /// `breakpoints_enabled` this is caller configuration, so it is not part of a
+    /// savestate.
+    watch: Vec<WatchState>,
+    /// The stop that last held (contract v1.3) — reported as `Report::stop`, and what
+    /// makes a cycle count to completion reportable without a fixed budget.
+    stop: Option<crate::api::StopInfo>,
     /// True during the construction-time boot settle (module docs): no
     /// cycle closes, no DTA settle tracking, and no breakpoint fires (a
     /// breakpoint watches *changes during the run*; every net takes on a
@@ -706,6 +751,8 @@ impl DelayEngine {
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
             halted: None,
+            watch: Vec::new(),
+            stop: None,
             in_boot: true,
         };
         // Power-on for combinational loops: seed loop nets to 0 (same
@@ -1057,6 +1104,176 @@ impl DelayEngine {
         }
     }
 
+    /// Install the caller's stop conditions (§8.4, contract v1.3).
+    ///
+    /// Each name is validated against the same registry `probe('…')` reads (registers and
+    /// probes), and each literal is parsed and width-matched to the watched value, so a
+    /// typo fails here — with the run — instead of silently never stopping. An empty
+    /// slice clears the watches (and the recorded stop).
+    pub fn set_watch(&mut self, watch: &[crate::api::Watch]) -> Result<(), String> {
+        let mut installed = Vec::with_capacity(watch.len());
+        for w in watch {
+            let name = self.resolve_named(w.name())?;
+            let cur = self
+                .named_value(&name)
+                .ok_or_else(|| format!("'{name}' has no value to watch"))?;
+            let (kind, want) = match w {
+                crate::api::Watch::Stable { cycles, .. } => (WatchKind::Stable(*cycles), None),
+                crate::api::Watch::Reaches { value, .. } => (
+                    WatchKind::Reaches,
+                    Some(self.watch_literal(&name, &cur.width(), value)?),
+                ),
+                crate::api::Watch::Is { value, .. } => (
+                    WatchKind::Is,
+                    Some(self.watch_literal(&name, &cur.width(), value)?),
+                ),
+            };
+            installed.push(WatchState {
+                name,
+                kind,
+                want,
+                last: None,
+                stable_for: 0,
+                last_change_cycle: 0,
+            });
+        }
+        self.watch = installed;
+        self.stop = None;
+        Ok(())
+    }
+
+    /// Resolve a watch's name against the named registry.
+    ///
+    /// An exact name wins. Otherwise a **unique** `/`-suffix match is accepted: a watch's
+    /// name comes from the design's own labelling, and the old tester resolved those
+    /// recursively (`lookupRegister("PC-IF", 32, true)`), while the hierarchy is in the
+    /// name for a converted design (`c24/c29/$v0`). Ambiguity is an error, never a guess —
+    /// a grader must not silently watch one of two registers that happen to share a leaf.
+    fn resolve_named(&self, name: &str) -> Result<String, String> {
+        if self.netlist.named.iter().any(|n| n.name == name) {
+            return Ok(name.to_string());
+        }
+        let suffix = format!("/{name}");
+        let hits: Vec<&str> = self
+            .netlist
+            .named
+            .iter()
+            .map(|n| n.name.as_str())
+            .filter(|n| n.ends_with(&suffix))
+            .collect();
+        match hits.as_slice() {
+            [one] => Ok((*one).to_string()),
+            [] => Err(format!(
+                "no named register or probe '{name}' (a watch names what `probe('…')` reads)"
+            )),
+            many => Err(format!(
+                "'{name}' is ambiguous — {} named parts end with it: {}",
+                many.len(),
+                many.join(", ")
+            )),
+        }
+    }
+
+    /// Parse a watch literal and widen/truncate it to the watched value's width.
+    ///
+    /// The width comes from the *current* value, so a watch on a named register sees the
+    /// same width the assertion grammar would compare against.
+    fn watch_literal(&self, name: &str, width: &u32, text: &str) -> Result<Value, String> {
+        let v = crate::value::parse_int_literal(text)
+            .ok_or_else(|| format!("watch on '{name}': bad literal '{text}'"))?;
+        Ok(Value::from_u64(*width, v))
+    }
+
+    /// The stop that last held (§8.4), for the report.
+    pub fn stop_info(&self) -> Option<&crate::api::StopInfo> {
+        self.stop.as_ref()
+    }
+
+    /// Evaluate the stop conditions at a cycle boundary (§8.4).
+    ///
+    /// Called just before a rising edge is applied, which is the state the course graders
+    /// read after a clock tick: the previous cycle has fully settled, because events are
+    /// applied in time order. Returns the halt to raise when one holds.
+    ///
+    /// A watch that held is **disarmed** (dropped), so a caller that carries on after a
+    /// stop — the editor's "run until halt" then play again — is not stopped forever by a
+    /// condition that is still true. `Reaches` only ever fires on a transition, so it is
+    /// naturally once-per-change; `Is` and `Stable` are levels, and this is what keeps
+    /// them from re-firing on every subsequent run.
+    fn check_watch(&mut self) -> Result<(), Halt> {
+        if self.watch.is_empty() {
+            return Ok(());
+        }
+        // Taken out so the per-cycle bookkeeping can call `&self` readers (the value
+        // lookup) without a double borrow; put back before returning, and no event runs
+        // in between.
+        let mut watch = std::mem::take(&mut self.watch);
+        let cycle = self.rising_seen;
+        let mut fired: Option<crate::api::StopInfo> = None;
+        let mut keep: Vec<WatchState> = Vec::with_capacity(watch.len());
+        for mut w in watch.drain(..) {
+            let Some(cur) = self.named_value(&w.name) else {
+                keep.push(w);
+                continue;
+            };
+            let held = match w.kind {
+                WatchKind::Stable(need) => {
+                    if w.last.as_ref() == Some(&cur) {
+                        w.stable_for += 1;
+                    } else {
+                        w.stable_for = 0;
+                        w.last_change_cycle = cycle;
+                    }
+                    need > 0 && w.stable_for >= need
+                }
+                // A transition *into* the value: something that already held it at
+                // power-on is noise, like a `debug.breakpoint` that starts satisfied.
+                WatchKind::Reaches => {
+                    w.last.as_ref().is_some_and(|prev| prev != &cur)
+                        && w.want.as_ref() == Some(&cur)
+                }
+                WatchKind::Is => w.want.as_ref() == Some(&cur),
+            };
+            if held {
+                if fired.is_none() {
+                    fired = Some(crate::api::StopInfo {
+                        name: w.name.clone(),
+                        when: w.when().to_string(),
+                        at_cycle: cycle,
+                        last_change_cycle: matches!(w.kind, WatchKind::Stable(_))
+                            .then_some(w.last_change_cycle),
+                        value: format!("{cur}"),
+                    });
+                }
+                continue; // disarmed: it is spent
+            }
+            w.last = Some(cur);
+            keep.push(w);
+        }
+        self.watch = keep;
+        match fired {
+            None => Ok(()),
+            Some(info) => {
+                let detail = match info.last_change_cycle {
+                    Some(c) => format!(
+                        "watch '{}' {} held at cycle {} (value {}; last changed cycle {c})",
+                        info.name, info.when, info.at_cycle, info.value
+                    ),
+                    None => format!(
+                        "watch '{}' {} held at cycle {} (value {})",
+                        info.name, info.when, info.at_cycle, info.value
+                    ),
+                };
+                self.stop = Some(info);
+                Err(Halt {
+                    reason: HaltReason::Stop,
+                    cycle,
+                    details: detail,
+                })
+            }
+        }
+    }
+
     /// Read a word from a named memory (autograder `mem_read`, task B9).
     pub fn memory_word(&self, name: &str, addr: u64) -> Option<Value> {
         let named = self.netlist.named.iter().find(|n| n.name == name)?;
@@ -1380,10 +1597,15 @@ impl DelayEngine {
         let target = self.rising_seen + cycles;
         let mut run_cycles = 0;
         while let Some(ev) = self.queue.peek() {
-            if let EvKind::Clock { phase: true } = ev.kind {
+            let at_boundary = matches!(ev.kind, EvKind::Clock { phase: true });
+            if at_boundary {
                 if self.rising_seen == target {
                     break; // stop at the boundary; the edge belongs to the next run
                 }
+                // Caller-defined stop conditions (§8.4) are evaluated at the boundary:
+                // every event earlier than the edge has been applied, so the cycle has
+                // settled — the state a course grader reads after a clock tick.
+                self.check_watch()?;
             }
             let ev = self.queue.pop().expect("peeked");
             let was_rising = matches!(ev.kind, EvKind::Clock { phase: true });
@@ -1525,15 +1747,18 @@ impl DelayEngine {
         }
     }
 
-    /// Make a halt the engine's state. Every reason but `Breakpoint` is
+    /// Make a halt the engine's state. Every reason but `Breakpoint` and `Stop` is
     /// **sticky**: the design is broken (or out of budget), so the engine
     /// refuses to run again until a load/reset. A **breakpoint** is not a
     /// fault at all — it is the pause the user asked for — so it is reported
     /// and then forgotten, and the very next `run`/`step_*` continues from
     /// exactly here (contract v1.2, `docs/ipc.md` §3). That is also why it
-    /// can live mid-settle: the rest of the cycle is still queued.
+    /// can live mid-settle: the rest of the cycle is still queued. A **stop**
+    /// (§8.4) is the same shape for the same reason: the design did what the
+    /// caller was waiting for, which is not a fault, so the disarmed watch lets
+    /// the caller carry on.
     fn record_halt(&mut self, h: &Halt) {
-        if h.reason == HaltReason::Breakpoint {
+        if matches!(h.reason, HaltReason::Breakpoint | HaltReason::Stop) {
             return;
         }
         self.halted = Some(h.clone());
@@ -2292,6 +2517,135 @@ mod tests {
         assert_eq!(eng.violations().len(), 2);
         assert_eq!(eng.violations()[1].kind, ViolationKind::Hold);
         assert_eq!(eng.violations()[1].comp.0, eng.violations()[0].comp.0);
+    }
+
+    /// A register whose `d` is a pokeable named pin: the fixture the stop-condition
+    /// tests watch.
+    fn watchy_json() -> String {
+        format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"d","type":"wiring.pin","pos":[0,0],"name":"d"}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"d","pin":"pin"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
+        }}"##
+        )
+    }
+
+    /// `stable` is the shape of both CS 2200 CPU rules (the EC pipeline's "PC unchanged
+    /// for N ticks", project 1's "the microcode state register stopped changing"), and it
+    /// is what makes a cycle count to completion reportable: the stop *is* the end.
+    #[test]
+    fn watch_stable_stops_the_run_and_reports_both_cycles() {
+        use crate::api::Watch;
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Stable {
+            name: "r".into(),
+            cycles: 3,
+        }])
+        .expect("installs");
+        let err = eng.run(100).unwrap_err();
+        assert_eq!(err.reason, HaltReason::Stop);
+        let info = eng.stop_info().cloned().expect("stop recorded");
+        assert_eq!((info.name.as_str(), info.when.as_str()), ("r", "stable"));
+        assert_eq!(info.value, "0x0");
+        // Detected `cycles` boundaries after the value last moved; the course graders
+        // report that last-move cycle, so both are carried.
+        assert_eq!(info.last_change_cycle, Some(0));
+        assert_eq!(info.at_cycle, 3);
+        assert_eq!(err.cycle, 3, "the halt's cycle is the stop's cycle");
+    }
+
+    /// `reaches` fires on the *transition*: a value that already held it when the run
+    /// started is not a stop, exactly like `debug.breakpoint` (format-v2 §9).
+    #[test]
+    fn watch_reaches_ignores_the_value_it_started_with() {
+        use crate::api::Watch;
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Reaches {
+            name: "r".into(),
+            value: "0".into(),
+        }])
+        .expect("installs");
+        assert!(eng.run(10).is_ok(), "holding the value is not a stop");
+        eng.set_watch(&[Watch::Reaches {
+            name: "r".into(),
+            value: "1".into(),
+        }])
+        .expect("installs");
+        assert!(eng.poke_at("d", k(1, 1), 190));
+        let err = eng.run(10).unwrap_err();
+        assert_eq!(err.reason, HaltReason::Stop);
+        assert_eq!(eng.stop_info().unwrap().value, "0x1");
+    }
+
+    /// `is` is the level form, and — as the old tester's `Clock.tickUntil` does — it is
+    /// satisfied *before* the first tick too. That is the whole difference from
+    /// `reaches`.
+    #[test]
+    fn watch_is_fires_on_a_level_and_can_hold_before_any_cycle() {
+        use crate::api::Watch;
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Is {
+            name: "r".into(),
+            value: "0".into(),
+        }])
+        .expect("installs");
+        assert_eq!(eng.run(100).unwrap_err().cycle, 0);
+        // `stable(1)` needs one boundary of *history*, so it fires a cycle later.
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Stable {
+            name: "r".into(),
+            cycles: 1,
+        }])
+        .expect("installs");
+        assert_eq!(eng.run(100).unwrap_err().cycle, 1);
+    }
+
+    /// A watch that held is disarmed, so a caller that carries on — "run until halt",
+    /// then play again — is not stopped forever by a condition that is still true.
+    /// `stop_info` keeps reporting what happened, for the report.
+    #[test]
+    fn a_fired_watch_is_disarmed_but_still_reported() {
+        use crate::api::Watch;
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Is {
+            name: "r".into(),
+            value: "0".into(),
+        }])
+        .expect("installs");
+        assert_eq!(eng.run(100).unwrap_err().reason, HaltReason::Stop);
+        eng.run(5).expect("the watch was spent, not sticky");
+        assert_eq!(eng.stop_info().unwrap().when, "is");
+    }
+
+    /// A watch names what `probe('…')` reads, and a typo fails the run rather than
+    /// silently never stopping.
+    #[test]
+    fn a_watch_validates_its_name_and_literal() {
+        use crate::api::Watch;
+        let mut eng = engine(&watchy_json(), 50);
+        let err = eng
+            .set_watch(&[Watch::Stable {
+                name: "nope".into(),
+                cycles: 1,
+            }])
+            .unwrap_err();
+        assert!(err.contains("nope"), "{err}");
+        let err = eng
+            .set_watch(&[Watch::Is {
+                name: "r".into(),
+                value: "zz".into(),
+            }])
+            .unwrap_err();
+        assert!(err.contains("bad literal"), "{err}");
     }
 
     #[test]

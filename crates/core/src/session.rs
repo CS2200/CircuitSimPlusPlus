@@ -42,8 +42,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::api::{
-    CompId, EventSink, LoadError, LoadErrorKind, LoadResult, NetChange, NetDiffs, NetId,
-    SaveResult, Sim, SimHalted, SimStatus, TimingUpdate, WireValue,
+    CompId, EventSink, HaltReason, LoadError, LoadErrorKind, LoadResult, NetChange, NetDiffs,
+    NetId, SaveResult, Sim, SimHalted, SimStatus, TimingUpdate, Watch, WireValue,
 };
 use crate::delay::{DelayEngine, Halt, RunReport};
 use crate::format::{self, Document};
@@ -656,6 +656,23 @@ impl Sim for Session {
         let Some(st) = state.as_mut() else { return };
         st.run_cycles(n, &mut **sink);
         st.emit_status(&mut **sink);
+    }
+
+    fn set_watch(&mut self, watch: &[Watch]) {
+        let mut g = self.inner.lock().expect("session mutex poisoned");
+        let Inner { state, sink, .. } = &mut *g;
+        let Some(st) = state.as_mut() else { return };
+        // A bad name/literal is a *caller* error, not a simulation event: the engine
+        // keeps its previous watches and the message is reported as a halt, which is
+        // what the watch control in the UI surfaces.
+        if let Err(msg) = st.engine.0.set_watch(watch) {
+            let h = Halt {
+                reason: HaltReason::Error,
+                cycle: st.engine.cycle(),
+                details: msg,
+            };
+            st.emit_halted(&mut **sink, &h);
+        }
     }
 
     fn run_until(&mut self, cycle: u64) {

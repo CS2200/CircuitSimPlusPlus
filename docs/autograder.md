@@ -99,7 +99,13 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   "timeout_ms": 60000,
   "rss_cap_bytes": 268435456,
   "baseline_est_time": 100000,
-  "expect_halt": false,
+  "expect_halt": false, // with "stop", means "one of them must hold"
+  // §8.4 stop conditions: run until one holds instead of for a fixed count. `cycles` then
+  // *is* the cycle count to completion, and the report's `stop` names which held and when.
+  "stop": [
+    { "when": "stable", "name": "PC-IF", "cycles": 100 }, // PC unchanged for 100 boundaries
+    { "when": "reaches", "name": "isHalt", "value": "1" }, // the pin becomes 1
+  ],
   "top_paths": 10,
   "include_sta": false,
   "rubric_full_credit_below": 90000, // §8.3 rubric hook
@@ -109,6 +115,17 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   "assertions": ["probe('result') == 0x2A", "violations == 0"],
 }
 ```
+
+The same conditions from the command line, repeatable — `--stop WHEN:NAME[:ARG]`:
+
+```sh
+csim run submission.csx --cycles 50000 --stop stable:PC-IF:100 \
+  --assert "probe('c24/c29/$v0') == 0x100"
+```
+
+`WHEN` is `stable` (then `CYCLES`), `reaches` or `is` (then a `VALUE` in §4's literal
+syntax). `NAME` may be a unique `/`-suffix of a name rather than the full path, since a
+design names its own registers while an assertion is written from outside.
 
 ## 6. Snapshot files (`csim snapshot` / `csim resume`)
 

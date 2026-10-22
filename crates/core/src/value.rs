@@ -966,6 +966,25 @@ impl Value {
     }
 }
 
+/// Parse an integer literal in the grammar the assertion language uses: `0x…` hex,
+/// `0b…` binary, anything else decimal. Returns `None` on a malformed literal, so a
+/// caller can report it against the name it came from.
+pub fn parse_int_literal(text: &str) -> Option<u64> {
+    let t = text.trim();
+    let (radix, digits) = if let Some(rest) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X"))
+    {
+        (16, rest)
+    } else if let Some(rest) = t.strip_prefix("0b").or_else(|| t.strip_prefix("0B")) {
+        (2, rest)
+    } else {
+        (10, t)
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(digits, radix).ok()
+}
+
 impl fmt::Display for Value {
     /// Fully known values render as hex (`0x1fa3`); anything containing X
     /// or Z renders as an MSB-first bit string (`0b1x0z`).

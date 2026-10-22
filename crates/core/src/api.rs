@@ -214,8 +214,93 @@ pub enum HaltReason {
     Oscillation,
     /// The run consumed its cycle budget.
     CycleLimit,
+    /// A caller-defined [`Watch`] held at a cycle boundary (§8.4): the design
+    /// did whatever the caller was waiting for. Like [`HaltReason::Breakpoint`]
+    /// this is a *stop*, not a fault — it is how a run ends "naturally" without
+    /// a fixed cycle count, and it is what makes a **cycle count to completion**
+    /// reportable (`Report::cycles` at the stop, with `stop.at_cycle` naming when).
+    Stop,
     /// Any other abnormal halt.
     Error,
+}
+
+/// A caller-defined stop condition (DESIGN.md §8.4, contract v1.3).
+///
+/// This is the general form of the one "has it finished?" primitive every course
+/// harness ends up writing: the old tester API's `Clock.tickUntil(maxTicks, stop)`,
+/// CS 2200's "the PC/state register stopped changing" and "IR holds HALT", and CS
+/// 2110's "the `isHalt` pin is 1". CircuitSim itself has no halt concept — a design
+/// simply stops changing — so the condition has always been reconstructed outside
+/// the engine. Here it is an atom over the same named components `probe('…')`
+/// addresses (registers and probes), evaluated at every cycle boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "when", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Watch {
+    /// The value has been identical across `cycles` consecutive cycle boundaries.
+    ///
+    /// The shape of both CS 2200 CPU rules: the EC pipeline's "PC unchanged for 100
+    /// ticks" (`MAX_CYCLES_PER_INSTR`) and project 1's "the microcode state register
+    /// stopped changing".
+    Stable {
+        /// Named register or probe (the `probe('…')` registry).
+        name: String,
+        /// Consecutive unchanged boundaries required.
+        cycles: u64,
+    },
+    /// The value **becomes** `value` at a cycle boundary.
+    ///
+    /// Fires on the *transition*, like `debug.breakpoint` (docs/format-v2.md §9): a
+    /// signal that already holds the value before the run is not a stop, so this
+    /// cannot fire on power-on noise. CS 2110 project 2's `isHalt` pin, CS 2200
+    /// project 2's "IR opcode is HALT".
+    Reaches {
+        /// Named register or probe.
+        name: String,
+        /// Literal: `0x…` hex, `0b…` binary or decimal, as in the assertion grammar.
+        value: String,
+    },
+    /// The value **equals** `value` at a cycle boundary (a level, not a transition).
+    ///
+    /// Unlike [`Watch::Reaches`] this can fire on the first boundary — use it when the
+    /// condition being already true means the design was already finished.
+    Is {
+        /// Named register or probe.
+        name: String,
+        /// Literal, as in [`Watch::Reaches`].
+        value: String,
+    },
+}
+
+impl Watch {
+    /// The watched name (shared by every variant).
+    pub fn name(&self) -> &str {
+        match self {
+            Watch::Stable { name, .. } | Watch::Reaches { name, .. } | Watch::Is { name, .. } => {
+                name
+            }
+        }
+    }
+}
+
+/// Which watch stopped the run, and the cycles that mattered (contract v1.3).
+///
+/// `at_cycle` is when the condition was *detected*, which for [`Watch::Stable`] is
+/// `last_change_cycle + cycles` — the course graders report the **last progress**
+/// cycle instead (`Main.kt`'s `lastChangedCycle`), so both are carried rather than
+/// leaving a grader to re-derive the off-by-one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopInfo {
+    /// The watched name.
+    pub name: String,
+    /// `"stable"` | `"reaches"` | `"is"`.
+    pub when: String,
+    /// Cycle (rising edges seen) when the condition held.
+    pub at_cycle: u64,
+    /// For `stable`: the cycle the value last changed before it held.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_change_cycle: Option<u64>,
+    /// The value observed when it held, rendered (hex unless it has `X`/`Z`).
+    pub value: String,
 }
 
 /// Event: simulation halted. `details` names the component/pin for UI
@@ -371,6 +456,17 @@ pub trait Sim {
     /// Run until `cycle`, then emit DTA results (§4.4).
     fn run_until(&mut self, cycle: u64) {
         unimplemented!("csim-core engine — BACKEND.md task B5/B6")
+    }
+
+    /// Set the caller-defined stop conditions, evaluated at every cycle boundary
+    /// (§8.4). `step_*`/`run_until` then stop early when one holds and report
+    /// [`HaltReason::Stop`] like any other halt (a *stop*, not a fault, so — like a
+    /// breakpoint — the next call carries on). An empty slice clears them.
+    ///
+    /// This is the editor-visible half of the API: it is what lets a UI offer "run
+    /// until the design halts" instead of "run 500 more cycles".
+    fn set_watch(&mut self, watch: &[Watch]) {
+        unimplemented!("csim-core engine — contract v1.3")
     }
 
     /// Drive a component pin (interactive poking / test setup).

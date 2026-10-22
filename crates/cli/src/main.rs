@@ -127,9 +127,18 @@ struct RunArgs {
     /// Course baseline est_time for speedup_vs_baseline.
     #[arg(long)]
     baseline_est_time: Option<u64>,
-    /// Exit 2 when the run consumes its cycle budget without halting.
+    /// Exit 2 when the run consumes its cycle budget without halting. With
+    /// `--stop` conditions, this means "one of them must hold".
     #[arg(long)]
     expect_halt: bool,
+    /// Stop condition (§8.4), repeatable: `stable:NAME:CYCLES`,
+    /// `reaches:NAME:VALUE` or `is:NAME:VALUE` — run until a watched
+    /// register/probe holds, instead of a fixed cycle count. `NAME` is what
+    /// `probe('…')` reads; `VALUE` takes `0x…`/`0b…`/decimal. The report's
+    /// `cycles` then *is* the cycle count to completion, and `stop` names the
+    /// condition that held.
+    #[arg(long = "stop", value_name = "WHEN:NAME[:ARG]")]
+    stops: Vec<String>,
     /// Pause at `debug.breakpoint`s instead of ignoring them. Off by default: a
     /// breakpoint is a debug aid, and a graded run must not be cut short by one
     /// (§8.1).
@@ -307,6 +316,10 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
         cfg.baseline_est_time = Some(b);
     }
     cfg.expect_halt |= args.expect_halt;
+    for spec in &args.stops {
+        cfg.watch
+            .push(autograde::parse_watch(spec).map_err(|e| e.to_string())?);
+    }
     cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
     if let Some(h) = args.clock_half_period_ns {
         cfg.clock_half_period = h;

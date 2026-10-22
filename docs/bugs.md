@@ -607,3 +607,22 @@ Recommendation: (1), on the same reasoning as RAM — but how much of a circuit'
 internal state a student should have to explain is a course-wide call, not a
 simulator's. Either way the change is one line where the state is created, plus the same
 test updates.
+
+**Open — a converted CPU can be cycle-unfaithful while being state-faithful (2026-10-22).**
+With the new `stop` conditions (§8.4) a run can finally be asked for its *cycle count to
+completion*, and the first design measured against the old tool disagrees: the EC project's
+reference `pipeline-pred.sim`, converted, reaches the expected final state exactly (all
+fifteen registers, PC `0x11`) but the PC takes **1772** cycles to settle where CE's grader
+reports **1316** — and a per-cycle diff shows the two trajectories parting at cycle 21 while
+seven of the fifteen registers stay identical throughout. Mid-flight the converted design
+takes an extra pass over a block CE does not, so the pipeline's *stall/prediction* structure
+differs even though the committed state ends up the same. Final-state grading could never see
+this; the EC benchmark grades **cycle counts**, so it is load-bearing there.
+
+`LC-5200Jordan.sim` is the control: its trajectory matches CE **cycle for cycle** (1500/1500,
+one harness offset), so this is design-dependent, not a global skew. Prime suspect is the
+in-cycle question the wire-delay change only partly answered: CE settles a cycle to
+*quiescence* and then latches, while our engine applies real per-part delays in event order,
+so a comparator or hazard output that arrives after the edge can be latched a cycle
+differently. Diagnosing it needs the trajectory oracle at the *first* divergence (cycle 21)
+with CE's own per-cycle pipeline latches (`ce_trace` prints them), which is the next step.

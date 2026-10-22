@@ -78,6 +78,10 @@ pub enum GradeOutcome {
     Passed,
     /// An assertion evaluated false (exit 1).
     AssertionFailed,
+    /// A caller-defined watch held (§8.4): not a failure in itself — the assertions
+    /// decide. Internal marker: it never reaches the report's `halt_reason`, which
+    /// says `"stop"`.
+    Stopped,
     /// Budget consumed without a natural halt while `expect_halt` was set
     /// (exit 2).
     CycleLimit,
@@ -104,6 +108,9 @@ impl GradeOutcome {
             GradeOutcome::Oscillation => EXIT_OSCILLATION,
             GradeOutcome::FloatingRead => EXIT_FLOATING_READ,
             GradeOutcome::MalformedFile => EXIT_MALFORMED_FILE,
+            // Internal marker only: a stop's verdict is the assertions', so this never
+            // reaches an exit code (see `grade_delay`'s outcome match).
+            GradeOutcome::Stopped => EXIT_ASSERTION_FAILED,
         }
     }
 }
@@ -287,6 +294,50 @@ impl<'a> Parser<'a> {
     }
 }
 
+/// Parse a compact stop condition (§8.4) — the CLI's `--stop`:
+///
+/// ```text
+/// stable:PC-IF:100      the value unchanged across 100 cycle boundaries
+/// reaches:$v0:0x100     the value becomes 0x100 (a transition)
+/// is:isHalt:1           the value equals 1 (a level)
+/// ```
+///
+/// `NAME` is what `probe('…')` reads; `VALUE` takes the assertion grammar's literals
+/// (`0x…`/`0b…`/decimal). The spec file spells the same thing structurally, as
+/// [`api::Watch`].
+pub fn parse_watch(text: &str) -> Result<api::Watch, AssertError> {
+    let err = || AssertError(text.to_string());
+    let mut parts = text.splitn(3, ':');
+    let when = parts.next().unwrap_or_default().trim();
+    let name = parts.next().unwrap_or_default().trim().to_string();
+    if name.is_empty() {
+        return Err(err());
+    }
+    let arg = parts.next().unwrap_or_default().trim();
+    let value = || {
+        if arg.is_empty() {
+            Err(err())
+        } else {
+            Ok(arg.to_string())
+        }
+    };
+    match when {
+        "stable" => {
+            let cycles = arg.parse::<u64>().map_err(|_| err())?;
+            Ok(api::Watch::Stable { name, cycles })
+        }
+        "reaches" => Ok(api::Watch::Reaches {
+            name,
+            value: value()?,
+        }),
+        "is" => Ok(api::Watch::Is {
+            name,
+            value: value()?,
+        }),
+        _ => Err(err()),
+    }
+}
+
 /// Parse one assertion string (grammar in module docs).
 pub fn parse_assertion(text: &str) -> Result<Assertion, AssertError> {
     let err = || AssertError(text.to_string());
@@ -402,6 +453,12 @@ pub struct GradeConfig {
     pub include_sta: bool,
     /// §8.3 rubric hook: full credit when `est_time` is below this.
     pub rubric_full_credit_below: Option<u64>,
+    /// Caller-defined stop conditions (§8.4): evaluated at every cycle boundary, the
+    /// first one to hold ends the run with `halt_reason: "stop"` — and the report's
+    /// `cycles` then *is* the cycle count to completion. With `expect_halt` set, a run
+    /// that consumes the budget without a watch holding is a `cycle-limit` failure
+    /// (that is what "the design was supposed to stop on its own" now means).
+    pub watch: Vec<api::Watch>,
     /// Pause at `debug.breakpoint`s during a graded run (default: **false**).
     ///
     /// A breakpoint is a *debug aid* the student left in their schematic; the old
@@ -422,6 +479,7 @@ impl Default for GradeConfig {
             clock_half_period: 1000,
             baseline_est_time: None,
             expect_halt: false,
+            watch: Vec::new(),
             top_k: 10,
             include_sta: false,
             rubric_full_credit_below: None,
@@ -443,8 +501,14 @@ pub struct TestSpec {
     pub rss_cap_bytes: Option<u64>,
     /// Course baseline processor's `est_time` for `speedup_vs_baseline`.
     pub baseline_est_time: Option<u64>,
-    /// Require a natural halt within the cycle budget (exit 2 otherwise).
+    /// Require a natural halt within the cycle budget (exit 2 otherwise). With `stop`
+    /// conditions configured, this means "at least one of them must hold".
     pub expect_halt: Option<bool>,
+    /// Stop conditions (§8.4) — see [`api::Watch`]. The generalisation of the old tester
+    /// API's `Clock.tickUntil(max, predicate)`, and how a course's "the PC stopped
+    /// changing" / "the halt pin is 1" rule is expressed.
+    #[serde(default)]
+    pub stop: Vec<api::Watch>,
     /// Pause at `debug.breakpoint`s (default false: a graded run ignores them).
     pub pause_on_breakpoints: Option<bool>,
     /// Top-k observed critical paths in the report.
@@ -503,6 +567,7 @@ impl TestSpec {
         cfg.limits.rss_cap_bytes = self.rss_cap_bytes;
         cfg.baseline_est_time = self.baseline_est_time;
         cfg.expect_halt = self.expect_halt.unwrap_or(false);
+        cfg.watch = self.stop;
         cfg.pause_on_breakpoints = self.pause_on_breakpoints.unwrap_or(false);
         cfg.top_k = self.top_paths.unwrap_or(10);
         cfg.include_sta = self.include_sta.unwrap_or(false);
@@ -570,8 +635,14 @@ pub struct Report {
     /// "malformed-file" (+ detail in `halt_details`).
     pub halt_reason: String,
     /// Names the component/pin involved in the halt, when any
-    /// (`comp <id> pin "<pin>": …` prefix, contract v1.1).
+    /// (`comp <id> pin "<pin>": …` prefix, contract v1.1), or the watch that held
+    /// (contract v1.3).
     pub halt_details: String,
+    /// Which stop condition ended the run, and at which cycle (§8.4) — `None` when the
+    /// run ended on the budget. With this set, `cycles` is the cycle count to
+    /// completion.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<api::StopInfo>,
     /// Max observed per-cycle settle time, delay-table units (ns); 0 in
     /// zero mode.
     pub t_obs: u64,
@@ -736,6 +807,7 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 cycles: 0,
                 halt_reason: "malformed-file".to_string(),
                 halt_details: String::new(),
+                stop: None,
                 t_obs: 0,
                 est_time: 0,
                 speedup_vs_baseline: None,
@@ -936,6 +1008,9 @@ fn halt_outcome(h: &Halt) -> (GradeOutcome, &'static str) {
         // it rather than a bare "error".
         HaltReason::Breakpoint => (GradeOutcome::OtherHalt, "breakpoint"),
         HaltReason::CycleLimit => (GradeOutcome::CycleLimit, "cycle-limit"),
+        // A stop is not a fault: the design did what the caller was waiting for. Its
+        // outcome is decided by the assertions, so it gets the marker that says so.
+        HaltReason::Stop => (GradeOutcome::Stopped, "stop"),
         _ => (GradeOutcome::OtherHalt, "error"),
     }
 }
@@ -968,6 +1043,12 @@ fn grade_delay(
     let nl = eng.netlist().clone();
     apply_loads(eng, &nl, cfg)?;
     apply_pokes_delay(eng, &nl, cfg)?;
+    // §8.4: caller-defined stop conditions. Installed before the run so a bad name or
+    // literal is a *configuration* error (exit 6), not a silent never-stop.
+    if !cfg.watch.is_empty() {
+        eng.set_watch(&cfg.watch)
+            .map_err(|m| ConfigError(format!("stop condition: {m}")))?;
+    }
     let deadline = cfg.limits.timeout.map(|t| started + t);
 
     // -- Run in chunks, checking limits between --------------------------
@@ -1013,6 +1094,17 @@ fn grade_delay(
     // -- Outcome (precedence in module docs) ------------------------------
     let all_passed = results.iter().all(|r| r.passed);
     let (outcome, halt_reason, halt_details) = match halt {
+        // A watch held: the run stopped where it should, so the verdict is the
+        // assertions' — not a forced failure.
+        Some((GradeOutcome::Stopped, reason, details)) => (
+            if all_passed {
+                GradeOutcome::Passed
+            } else {
+                GradeOutcome::AssertionFailed
+            },
+            reason.to_string(),
+            details,
+        ),
         Some((oc, reason, details)) => (oc, reason.to_string(), details),
         None if cfg.expect_halt => (
             GradeOutcome::CycleLimit,
@@ -1047,6 +1139,7 @@ fn grade_delay(
         cycles,
         halt_reason,
         halt_details,
+        stop: eng.stop_info().cloned(),
         t_obs,
         est_time,
         speedup_vs_baseline: cfg

@@ -423,6 +423,31 @@ Optional JSON/YAML spec replacing long flag lists: setup (memory loads, pokes, c
 
 ---
 
+### 8.4 Stop conditions (`stop`, contract v1.3)
+
+A run otherwise ends on its cycle budget, a fault, or a `debug.breakpoint`. A course's "the
+program has finished" rule is none of those — CircuitSim CE itself has **no halt concept at
+all** (a design simply stops changing), so every harness reconstructed it *outside* the
+engine: the tester API's `Clock.tickUntil(maxTicks, stop)`, CS 2200's "the PC/state register
+stopped changing" and "IR holds HALT", CS 2110's "the `isHalt` pin is 1". `stop` makes it a
+first-class condition, evaluated at every cycle boundary (the settled state a grader reads
+after a clock tick):
+
+| `when` | holds when | the rule it expresses |
+| --- | --- | --- |
+| `stable` | the value has been identical across N consecutive boundaries | the EC pipeline's "PC unchanged for 100 ticks"; project 1's "the microcode state register stopped changing" |
+| `reaches` | the value **becomes** X — a transition, like `debug.breakpoint` | CS 2110's "the `isHalt` pin is 1" |
+| `is` | the value **equals** X — a level, so it can hold before the first cycle, exactly as `tickUntil` tests its predicate | "the IR opcode is HALT" |
+
+`name` addresses what `probe('…')` reads; a **unique** `/`-suffix is accepted too, because a
+watch's name comes from the design's own labelling (`PC-IF`, `State`) while an assertion's is
+written by the grader with the full path — ambiguity is an error, never a guess. A watch that
+holds **disarms**, and the run reports `halt_reason: "stop"` with it in `stop`, so `cycles`
+then *is* the **cycle count to completion** (`stop.last_change_cycle` is the cycle the value
+last moved, which is what the course graders report). `expect_halt` now means "one of these
+must hold". The same primitive is `Sim::set_watch`, which is what lets the editor offer "run
+until it halts" — the old tool's Ctrl-K, automated.
+
 ## 9. Distribution & Updates
 
 - **Packaging:** GitHub Actions matrix builds → Tauri bundles: macOS `.dmg`, Windows `.zip`/`.exe`. Hosted on GitHub Releases (and/or mirrored to Canvas).
