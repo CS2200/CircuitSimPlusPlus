@@ -2002,6 +2002,60 @@ mod tests {
     use crate::format::load_document;
     use crate::netlist;
 
+    /// Per-cycle architectural trace of a design, for diffing one converted CPU against
+    /// another (or against the old tool's trace): `PROBE_DOC` = the `.csx`, `PROBE_CYCLES`
+    /// = how many cycles (default 200). Prints `TRACE <cycle> <PC-IF>,<r1..r15>`; a no-op
+    /// when `PROBE_DOC` is unset, so it costs nothing in an ordinary `cargo test`.
+    ///
+    /// This is the per-*cycle* companion to `csim nets` (which snapshots one net or part):
+    /// diffing two of these finds the first instruction a conversion gets wrong, and the
+    /// register it gets wrong, which is how the multicycle conversion's write-path bugs
+    /// were found.
+    #[test]
+    fn probe_trace() {
+        let path = std::env::var("PROBE_DOC").unwrap_or_default();
+        if path.is_empty() {
+            return;
+        }
+        let text = std::fs::read_to_string(&path).expect("probe doc");
+        let doc = crate::format::load_document(text.as_bytes()).expect("probe doc parses");
+        let nl = crate::netlist::build(&doc).expect("probe netlist");
+        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let mut eng = DelayEngine::new(nl, 1000, &table).expect("probe engine");
+        let cycles: u64 = std::env::var("PROBE_CYCLES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(200);
+        let regs = [
+            "$at", "$v0", "$a0", "$a1", "$a2", "$t0", "$t1", "$t2", "$s0", "$s1", "$s2", "$k0",
+            "$sp", "$fp", "$ra",
+        ];
+        let pick = |suffix: &str| -> Option<String> {
+            eng.netlist()
+                .named
+                .iter()
+                .filter(|n| n.kind == crate::api::NamedKind::Register)
+                .map(|n| n.name.clone())
+                .find(|n| n.as_str() == suffix || n.ends_with(&format!("/{suffix}")))
+        };
+        let names: Vec<String> = regs.iter().filter_map(|r| pick(r)).collect();
+        let pc = pick("PC-IF").expect("named PC-IF");
+        for i in 0..=cycles {
+            if i > 0 {
+                let _ = eng.run(1);
+            }
+            let render = |v: Option<Value>| match v {
+                None => "?".to_string(),
+                Some(v) if v.has_x() => "X".to_string(),
+                Some(v) => format!("{:X}", v.to_u64().unwrap_or(0)),
+            };
+            let row: Vec<String> = std::iter::once(render(eng.named_value(&pc)))
+                .chain(names.iter().map(|n| render(eng.named_value(n))))
+                .collect();
+            println!("TRACE {i} {}", row.join(","));
+        }
+    }
+
     pub(super) fn engine(json: &str, half: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
