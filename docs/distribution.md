@@ -62,22 +62,158 @@ Notes that drove the choice:
                              app nudge → api.github.com (no auth) ──────┘
 ```
 
-## Setup checklist (when we get to it)
+## Setup walkthrough (with rationale)
 
-- [ ] Create the **public github.com repo** (owner/name TBD — e.g.
-      `<owner>/CircuitSimPlusPlus`).
-- [ ] Add it as a second remote and push the mirror
-      (`git remote add public git@github.com:<owner>/CircuitSimPlusPlus.git`).
-- [ ] **Restore the CI workflows** — `backend.yml`, `frontend.yml`,
-      `release.yml` (recover the versions from git history before commit
-      `9638eb3`). On github.com, `actions/upload-artifact@v4` **does** work
-      (the v3 requirement was GHES-only).
-- [ ] **Revert the update nudge to github.com**: in `frontend/src/update.ts`
-      set `RELEASES_HOST = "github.com"`, `RELEASES_API = "https://api.github.com"`,
-      and `GITHUB_REPO = "<owner>/CircuitSimPlusPlus"`. (The `?updateRepo=`
-      override fix stays.)
-- [ ] Add `--mirror-to-ghes` to `scripts/release.mjs`.
-- [ ] Update `releasing.md` to describe the new flow.
+Placeholders: `OWNER` = the github.com account/org you create the public repo
+under; `CSIM` = `OWNER/CircuitSimPlusPlus`.
+
+### 0. Why any of this works
+
+Three independent facts line up:
+
+1. **GitHub.com public repos get free hosted macOS + Windows + Linux runners.**
+   That is the whole reason we can't do CI on GHES but can on github.com — the
+   *hosting*, not the git server, is what we're borrowing.
+2. **A public repo's `releases/latest` is readable with no auth.** So the app's
+   update check (a native, session-less HTTPS GET) can finally get a `200`.
+3. **GT's GHES is internet-reachable** (public IP `143.215.77.100`), so our
+   laptops — and the release job — can still talk to it for the optional copy
+   back.
+
+Nothing about *the app* changes. It still runs on students' machines, unsigned,
+and still talks to a GitHub API. We're just moving the build/release/update
+signal from a private GHES to a public github.com copy.
+
+### 1. Create the public github.com repo
+
+Create an **empty** repo (`OWNER/CircuitSimPlusPlus`) — no README, no .gitignore,
+no license. Set it **public**.
+
+**Why:** *public* is the switch that turns on both free hosted runners and
+anonymous `releases/latest`. An empty repo keeps the first push conflict-free.
+
+### 2. Add the mirror remote and push the code
+
+```bash
+git remote add public git@github.com:OWNER/CircuitSimPlusPlus.git
+git push public master
+git push public --tags        # only if you already have old tags to mirror
+```
+
+**Why:** GitHub Actions builds the code that's *in the github.com repo*. The
+mirror must contain the source at the exact commit you tag. GHES stays
+canonical; `public` is a push target, not a fork.
+
+### 3. Restore the CI workflows (and fix the old bug)
+
+Recover them from history, then apply the known correction:
+
+```bash
+git show 9638eb3^:.github/workflows/backend.yml  > .github/workflows/backend.yml
+git show 9638eb3^:.github/workflows/frontend.yml > .github/workflows/frontend.yml
+git show 9638eb3^:.github/workflows/release.yml  > .github/workflows/release.yml
+```
+
+Then **fix the bundle paths** in `frontend.yml` and `release.yml`:
+`crates/app/target/release/bundle/...` → **`target/release/bundle/...`**.
+
+**Why the restore works:** the runners exist here, so `runs-on: ubuntu-latest`
+etc. finally mean something. `actions/upload-artifact@v4` is *also* fine here —
+the v3-only rule was a GHES limitation, not a github.com one.
+
+**Why the path fix:** `CircuitSimPlusPlus` is a Cargo **workspace**, so Cargo
+hoists the build output to `<repo>/target/`, and Tauri's bundles land in
+`target/release/bundle/{dmg,nsis,deb,...}`. The committed workflows (a)
+pointed at the non-existent `crates/app/target/...`, (b) reused `body:` with
+`generate_release_notes`, and (c) had two matrix jobs racing to create the same
+release. Use the single-publisher version: each OS job uploads an artifact, then
+one `release` job with `permissions: contents: write` downloads them and
+publishes once.
+
+> Tip: `release.yml` should keep `on: push: tags: ["v*"]` and drop the `prod`
+> branch trigger (that was for the GHES world). The `GITHUB_TOKEN` is automatic;
+> **no secrets are needed**.
+
+### 4. Point the update nudge at github.com
+
+In `frontend/src/update.ts`:
+
+```ts
+export const RELEASES_HOST = "github.com";
+export const RELEASES_API = "https://api.github.com";
+export const GITHUB_REPO = "OWNER/CircuitSimPlusPlus";
+```
+
+**Why:** the previous values pointed at `github.gatech.edu/api/v3`, which 404s
+because a private repo rejects anonymous reads. Public github.com returns `200`,
+from any network, with no login. (The `?updateRepo=` override fix stays.)
+
+### 5. Bump the version and push a tag
+
+```bash
+# set the SAME version in BOTH:
+#   crates/app/tauri.conf.json   (the bundle version)
+#   frontend/package.json        (APP_VERSION the nudge compares against)
+git commit -am "release: v0.2.0"
+git push public master
+git tag v0.2.0 && git push public v0.2.0
+```
+
+**Why:** `release.yml` triggers on `v*` **tags**. The tag, `tauri.conf.json`,
+and `frontend/package.json` must all agree on `0.2.0`, or the bundle version and
+the version the nudge compares will disagree. Push the tag to **`public`** —
+that's the repo whose Actions run.
+
+### 6. Watch it build, verify the release
+
+Actions tab → the matrix runs on ubuntu/windows/macos → the single release job
+publishes. Confirm the release has:
+
+- macOS `.dmg`
+- Windows NSIS `.exe` (+ the zip)
+- Linux `.deb` / `.rpm` / `.AppImage`
+
+**Why it succeeds now:** all three OSes are real hosted machines, each building
+natively (Xcode on macOS, NSIS on Windows, webkit2gtk on Linux) — exactly what
+"per-OS, can't cross-compile" demands. Bundles come from `target/release/bundle`.
+
+### 7. Confirm the nudge path
+
+Unauthenticated check (should be `200`, JSON `tag_name` = `v0.2.0`):
+
+```bash
+curl -s https://api.github.com/repos/OWNER/CircuitSimPlusPlus/releases/latest \
+  | grep tag_name
+```
+
+**Why:** public + unauthenticated + `/latest` skips drafts/prereleases. That's
+precisely `checkForUpdate()`.
+
+### 8. Optional: copy the installers back to GHES
+
+```bash
+gh auth login --hostname github.gatech.edu      # once
+gh release download v0.2.0 --repo OWNER/CircuitSimPlusPlus --dir dist
+gh release create v0.2.0 dist/* \
+  --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus \
+  --title v0.2.0 --notes-file /tmp/unsigned-notes.md
+# or, if the GHES release exists:
+gh release upload v0.2.0 dist/* --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus --clobber
+```
+
+**Why:** GHES is on a public IP, so `gh` reaches it from your laptop and from
+CI. Doing it by hand keeps a GHES write-token out of the public repo.
+
+### 9. Update the docs
+
+Mark `distribution.md` as built; simplify `releasing.md` to the new flow; and
+revisit `DESIGN.md §9` (human-owned) — it still says "never auto-installs".
+
+### Rollback
+
+Delete the github.com repo (or flip it private). Nothing on GHES changes, and
+the app falls back to a silent no-op if `api.github.com` can't be read.
+
 
 ## The update nudge
 
