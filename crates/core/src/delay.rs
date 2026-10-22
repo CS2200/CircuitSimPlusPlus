@@ -2012,8 +2012,10 @@ mod tests {
 
     /// Per-cycle architectural trace of a design, for diffing one converted CPU against
     /// another (or against the old tool's trace): `PROBE_DOC` = the `.csx`, `PROBE_CYCLES`
-    /// = how many cycles (default 200). Prints `TRACE <cycle> <PC-IF>,<r1..r15>`; a no-op
-    /// when `PROBE_DOC` is unset, so it costs nothing in an ordinary `cargo test`.
+    /// = how many cycles (default 200), `PROBE_PC` = the program-counter register's name
+    /// (default `PC-IF`, the pipelined designs'; the multicycle ones call it `PC`). Prints
+    /// `TRACE <cycle> <PC>,<r1..r15>`; a no-op when `PROBE_DOC` is unset, so it costs
+    /// nothing in an ordinary `cargo test`.
     ///
     /// This is the per-*cycle* companion to `csim nets` (which snapshots one net or part):
     /// diffing two of these finds the first instruction a conversion gets wrong, and the
@@ -2055,7 +2057,11 @@ mod tests {
             extra.split(',').map(|x| x.trim().to_string()).collect()
         };
         let names: Vec<String> = wanted.iter().filter_map(|r| pick(r)).collect();
-        let pc = pick("PC-IF").expect("named PC-IF");
+        // The pipelined designs name it `PC-IF`, the multicycle ones `PC`; `PROBE_PC`
+        // overrides, so any named register can serve as the instruction boundary.
+        let pc_wanted = std::env::var("PROBE_PC").unwrap_or_else(|_| "PC-IF".to_string());
+        let pc = pick(&pc_wanted)
+            .unwrap_or_else(|| panic!("no named register '{pc_wanted}' — set PROBE_PC"));
         for i in 0..=cycles {
             if i > 0 {
                 let _ = eng.run(1);
