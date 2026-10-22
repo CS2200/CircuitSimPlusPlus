@@ -1073,11 +1073,12 @@ impl DelayEngine {
     /// transport, F14), which can differ from the net's applied value while an
     /// event is in flight.
     pub fn net_of_pin(&self, id: &str, pin: &str) -> Option<NetDump> {
-        let ci = self
-            .netlist
-            .comps
-            .iter()
-            .position(|c| c.inst_path.is_empty() && c.def_id == id)?;
+        let ci = match self.netlist.named.iter().position(|n| n.name == id) {
+            Some(i) => self.netlist.named_flat[i].idx(),
+            None => self.netlist.comps.iter().position(|c| {
+                c.inst_path.is_empty() && (c.def_id == id || c.name.as_deref() == Some(id))
+            })?,
+        };
         let slot = self.netlist.comps[ci]
             .pins
             .iter()
@@ -1092,11 +1093,14 @@ impl DelayEngine {
     /// The engine's view of one root-circuit component: its class, and every pin with
     /// the net it lands on, that net's value, and what the pin received (debugging aid).
     pub fn comp_dump(&self, id: &str) -> Option<CompDump> {
-        let ci = self
-            .netlist
-            .comps
-            .iter()
-            .position(|c| c.inst_path.is_empty() && c.def_id == id)?;
+        // The named registry is the authority on how a part is spelled; fall back to a
+        // scan so root parts with no `name` (a gate, say) are addressable by their id.
+        let ci = match self.netlist.named.iter().position(|n| n.name == id) {
+            Some(i) => self.netlist.named_flat[i].idx(),
+            None => self.netlist.comps.iter().position(|c| {
+                c.inst_path.is_empty() && (c.def_id == id || c.name.as_deref() == Some(id))
+            })?,
+        };
         let class = match self.cdata[ci].class {
             Class::Comb => "comb",
             Class::Splitter => "splitter",
@@ -2038,7 +2042,15 @@ mod tests {
                 .map(|n| n.name.clone())
                 .find(|n| n.as_str() == suffix || n.ends_with(&format!("/{suffix}")))
         };
-        let names: Vec<String> = regs.iter().filter_map(|r| pick(r)).collect();
+        // `PROBE_NAMES` (comma-separated suffixes) overrides the default register list,
+        // so any named part can be traced: pipeline latches, control words, memories.
+        let extra = std::env::var("PROBE_NAMES").unwrap_or_default();
+        let wanted: Vec<String> = if extra.is_empty() {
+            regs.iter().map(|r| r.to_string()).collect()
+        } else {
+            extra.split(',').map(|x| x.trim().to_string()).collect()
+        };
+        let names: Vec<String> = wanted.iter().filter_map(|r| pick(r)).collect();
         let pc = pick("PC-IF").expect("named PC-IF");
         for i in 0..=cycles {
             if i > 0 {
