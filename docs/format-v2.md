@@ -333,6 +333,16 @@ simulation-halting error naming the component and pin. What counts as _consuming
 | breakpoint                      | **nothing** — it _observes_ too, and `en` gating the watch does not make it consume                                                                                                                          |
 | splitter                        | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer                                                                                                                                  |
 
+**A splitter never fights.** It is plumbing, and each side is driven by the splitter **only
+when nothing else drives it** — the same rule for the bus and for the fanouts, and it covers
+both idioms: _splitting_ (the bus is driven by someone else, the split feeds a sink) and
+_assembling_ (a split is driven, the bus is the assembled word). CircuitSim CE works the same
+way: a `Splitter` pushes a fanout only when **it** changes that value, and pushes the bus with
+its own last bus value plus the changed fanout's bits — never the net's current resolution.
+Driving a side that already has a writer is what turned a converted reference CPU's
+instruction-register bus into `X`: a splitter's `bus` was a mux's `select`, its split was
+wired to a microcode control bit, and both writers disagreed.
+
 **A `Z` that is still in flight is not a floating read.** A `Z` view on a net that has a
 driver pin means "this value has not arrived yet (or the driver is idle)": a combinational
 part waits for it, a memory's **asynchronous read** (`addr`) waits for it the same way, and

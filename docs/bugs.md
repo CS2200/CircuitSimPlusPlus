@@ -39,6 +39,29 @@ transparent while enabled) and possibly a transparent-latch RAM variant would co
 that want asynchronous/level behaviour instead of ours (and would make an asynchronous
 reset a property of a *type* rather than of the flag). Nothing depends on it yet.
 
+## The old tool tolerates shorts; the new one shows them (found 2026-10-21)
+
+Converting the course's own reference CPU turned up a real semantic divergence, and it is
+the reason `pow` does not yet run on any converted CPU:
+
+- `WireValue.merge` in CircuitSim CE throws on a *conflict* of two known bits
+  (`ShortCircuitException`), and the simulator catches that per link: the port's value is
+  **not updated** and a short circuit is *reported*, but the run continues with the value it
+  already had. The new engine instead resolves a driver fight to `X` and flags the net
+  (`net_contended`), because a short is a mistake a student should see.
+- Old designs contain these conflicts. In the reference solution two splitter outputs share
+  one net through the drawing (the copper genuinely joins them), and the *microcode* bus of
+  the datapath is written by both a register and a splitter that splits it. Under CE that is
+  a tolerated short; under our rule it is `X`, which then spreads through the microcode and
+  stops the CPU.
+
+Two engine bugs found on the way are **fixed** (a `Z` on a *driven* net is in flight, not a
+floating read; and a splitter no longer drives a side that already has a writer), which took
+the converted CPU from "X everywhere at cycle 2" to "one X net left, on the instruction-register
+bus". What remains is a decision: keep `X` (strict, and the reason converted designs like this
+one do not run), or offer a CE-compatible "tolerate a short" mode for converted documents —
+which is the same kind of question as the RAM power-on one above.
+
 **Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
 and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says
 otherwise — UI_OVERHAUL §93), **213 backend + 445 unit + 80 e2e** tests green. RAM powers

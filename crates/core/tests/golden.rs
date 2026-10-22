@@ -12,12 +12,14 @@
 //! change: `CSIM_BLESS=1 cargo test -p csim-core --test golden -- --nocapture`
 //! *prints* the new table — paste it below (the file is not rewritten).
 //!
-//! Last re-blessed by UI_OVERHAUL §93: `mem.register`/`mem.ram` carry the `rst`
-//! pin again (optional, unwired reads deasserted), so every register/RAM owns one
-//! more singleton net and the net ids the hash mixes shift. `t_obs` did not move
-//! in any scenario and a register's *behaviour* is unchanged with an unwired
-//! `rst` — the drift is numbering, and `cpu_fixtures_compute_the_program` (the
-//! architectural checks) is untouched.
+//! Last re-blessed twice in one batch. First by UI_OVERHAUL §93: `mem.register`/
+//! `mem.ram` carry the `rst` pin again (optional, unwired reads deasserted), so
+//! every register/RAM owns one more singleton net and the net ids the hash mixes
+//! shift. Then by the splitter fix: a splitter now drives a fanout pin only when
+//! nothing else drives it (CE pushes a fanout only when *it* changes the value),
+//! so `multicycle` sees fewer events. In both cases `t_obs` did not move and the
+//! architectural checks (`cpu_fixtures_compute_the_program`, `fixture_alu_computes`)
+//! still pass — the drift is events, not results.
 
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
@@ -68,7 +70,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0xc55c_1bc4_595a_a500,
+        trace_hash: 0xd9d1_ef2b_0d60_5631,
     },
     Scenario {
         fixture: "pipeline5.csx",

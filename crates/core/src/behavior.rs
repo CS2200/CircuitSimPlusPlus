@@ -801,11 +801,23 @@ impl Behavior {
             panic!("eval_splitter on non-splitter (engine bug)");
         };
         debug_assert_eq!(nets.len(), 1 + splits.len(), "splitter pin count");
-        // Resolve the bus bit-by-bit: others' drive on the bus net merged
-        // with the driven splits' contributions (contention → X).
+        // Resolve the bus bit-by-bit: others' drive on the bus net, with a split's
+        // contribution merged in **only when something else drives that split**.
+        //
+        // That guard is CircuitSim CE's `Splitter.valueChanged`: it pushes onto the
+        // bus only when a *fanout changes*, and then with its own last bus value
+        // plus that fanout's bits. A split nobody drives is this splitter's own
+        // output, and echoing it back would force a stale bit over a fresh one from
+        // the bus's real driver — which resolved a whole microcode bus to `X` and
+        // stopped every converted CPU from ever latching anything. A split that IS
+        // driven is the assemble case (bus bits gathered from bits), and there the
+        // split is the authority for its bits.
         let mut resolved: Vec<Bit> = (0..*bus_width).map(|i| nets[0].bit(i)).collect();
         for (si, (_, map)) in splits.iter().enumerate() {
             let v = &nets[1 + si];
+            if v.is_fully_z() {
+                continue; // nothing but this splitter drives the split: no write-back
+            }
             for (j, &bus_bit) in map.iter().enumerate() {
                 if bus_bit >= *bus_width {
                     continue; // lenient path (invalid splits) — validation reported it
@@ -819,15 +831,27 @@ impl Behavior {
                 *b = merge_bit(*b, split_bit);
             }
         }
-        // Drive: the bus gets the full resolution; each split pin gets its
-        // bits back out of the resolution (so split→bus→split flows).
+        // Drive. A splitter is plumbing, and each side is driven by the splitter
+        // **only when nothing else drives it** — the same guard as the bus side
+        // above, and the reason is the same. Two idioms share these pins:
+        //
+        //  * splitting: the bus is driven by whoever drives it and the split
+        //    feeds a sink, so the splitter is the only writer of the split net;
+        //  * assembling: the split is driven (a control bit, say) and the bus is
+        //    the assembled word. There the split net has its own writer, and a
+        //    splitter that *also* drove it would fight it — which is what happened
+        //    to the course's reference CPU: a splitter's `bus` was a mux's 2-bit
+        //    `sel`, its split was wired (through the old copper) to a microcode
+        //    control bit, and my splitter drove both sides at once, so the two
+        //    writers disagreed and `X` spread across the datapath.
         let mut out = Vec::with_capacity(nets.len());
         out.push(Value::from_bits(&resolved));
-        for (_, map) in splits.iter() {
+        for (si, (_, map)) in splits.iter().enumerate() {
+            let externally_driven = !nets[1 + si].is_fully_z();
             out.push(Value::from_bits(
                 &map.iter()
                     .map(|&bb| {
-                        if bb < *bus_width {
+                        if bb < *bus_width && !externally_driven {
                             resolved[bb as usize]
                         } else {
                             Bit::Z
@@ -1613,13 +1637,15 @@ mod tests {
         assert_eq!(out[0], k(8, 0xAB));
         assert_eq!(out[1], k(4, 0xA)); // hi
         assert_eq!(out[2], k(4, 0xB)); // lo
-                                       // Splits driven → bus assembled; each split also re-driven with its
-                                       // resolved bits (so split→bus→split flows).
+                                       // Splits driven → bus assembled from them. The splitter does NOT drive
+                                       // those split pins back: they already have a writer, and driving them too
+                                       // is the fight that X'd the course's reference CPU (CE pushes a fanout
+                                       // only when *it* changes the value, never to echo the bus).
         let nets = [Value::z(8), k(4, 0xA), k(4, 0xB)];
         let out = sp.eval_splitter(&nets);
         assert_eq!(out[0], k(8, 0xAB));
-        assert_eq!(out[1], k(4, 0xA));
-        assert_eq!(out[2], k(4, 0xB));
+        assert_eq!(out[1], Value::z(4));
+        assert_eq!(out[2], Value::z(4));
         // Everything floating → drives Z (no-op in the net merge); no error.
         let nets = [Value::z(8), Value::z(4), Value::z(4)];
         let out = sp.eval_splitter(&nets);
@@ -1650,8 +1676,10 @@ mod tests {
                 Bit::Zero,
             ])
         );
-        assert_eq!(out[2], Value::x(4)); // lo
-                                         // hi undriven by others: gets the bus's (resolved) high nibble = 0.
+        // `lo` is driven by someone else, so the splitter leaves it alone (its own
+        // writer keeps the value); the X is what the *bus* resolves to.
+        assert_eq!(out[2], Value::z(4));
+        // hi undriven by others: gets the bus's (resolved) high nibble = 0.
         assert_eq!(out[1], k(4, 0x0));
     }
 
