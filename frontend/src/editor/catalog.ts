@@ -22,6 +22,8 @@ export interface PinSpec {
   kind: PinKind;
   /** Multi-bit pin width (for thickness ∝ bitsize); 1 when omitted. */
   bitsize?: number;
+  /** Draw an inversion bubble at this pin (gate input negation, `negate`). */
+  bubble?: boolean;
 }
 
 export interface CompSpec {
@@ -136,13 +138,21 @@ function uintAttr(
  * grows (UI_OVERHAUL §44, see `shapes.ts`'s `CAP_H`).
  */
 function gateSpec(caption: string, minInputs: number): CompSpec {
+  // A bubbled input (`negate`) widens the body by one grid unit, exactly as
+  // CircuitSim CE does, so the bubble sits inside the input edge and the pin
+  // stays on the outline (format-v2 §4).
+  const negatedInputs = (attrs: Readonly<Record<string, unknown>>): number[] =>
+    Array.isArray(attrs.negate) ? (attrs.negate as number[]) : [];
+  const bodyWidth = (attrs: Readonly<Record<string, unknown>>): number =>
+    negatedInputs(attrs).length > 0 ? 6 : 5;
   return {
-    width: () => 5,
+    width: bodyWidth,
     height: (attrs) => Math.max(3, numAttr(attrs, "inputs", 2) + 1),
     pins: (attrs) => {
       const n = Math.max(minInputs, numAttr(attrs, "inputs", 2));
       const h = Math.max(3, n + 1);
       const width = bitsOf(attrs); // bitwise multi-bit gates (DLS-style)
+      const bubbled = negatedInputs(attrs);
       const pins: PinSpec[] = [];
       for (let i = 0; i < n; i++) {
         pins.push({
@@ -151,9 +161,16 @@ function gateSpec(caption: string, minInputs: number): CompSpec {
           dy: ((i + 1) * h) / (n + 1),
           kind: "in",
           bitsize: width,
+          bubble: bubbled.includes(i),
         });
       }
-      pins.push({ name: "out", dx: 5, dy: h / 2, kind: "out", bitsize: width });
+      pins.push({
+        name: "out",
+        dx: bodyWidth(attrs),
+        dy: h / 2,
+        kind: "out",
+        bitsize: width,
+      });
       return pins;
     },
     caption: () => caption,
@@ -1147,7 +1164,9 @@ function baseFields(type: string): AttrField[] {
         max: 32,
         group: "Width",
       });
-      // (Gate inputs are plain — `negateInputs` was removed, §24.)
+      // Gate inputs are not plain any more: `negate` lists the inputs that carry an
+      // inversion bubble (format-v2 §4), restored after §24 removed it — a dropped
+      // bubble is different logic, and every pipelined course design uses them.
     }
     return fields;
   }

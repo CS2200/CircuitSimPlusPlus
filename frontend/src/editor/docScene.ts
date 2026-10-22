@@ -1620,7 +1620,14 @@ export class DocScene {
       const spec = compSpec(comp.type);
       const cx = layout.rect.x + layout.rect.w / 2;
       const cy = layout.rect.y + layout.rect.h / 2;
-      const shape = gateShape(comp.type, cx - local.w / 2, cy - local.h / 2, local.w, local.h);
+      const shape = gateShape(
+        comp.type,
+        cx - local.w / 2,
+        cy - local.h / 2,
+        local.w,
+        local.h,
+        Array.isArray(comp.attrs?.negate) ? (comp.attrs.negate as number[]) : [],
+      );
       if (shape !== null) {
         renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: bodyFill });
         renderer.drawPath(rotatePath(shape.body, cx, cy, rot), strokeStyle);
@@ -1633,6 +1640,9 @@ export class DocScene {
           const b = shape.outBubble;
           const p = rotPt(b.x, b.y, cx, cy, rot);
           bubbles.push(p);
+        }
+        for (const b of shape.inBubbles ?? []) {
+          bubbles.push(rotPt(b.x, b.y, cx, cy, rot));
         }
         for (const b of bubbles) {
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });

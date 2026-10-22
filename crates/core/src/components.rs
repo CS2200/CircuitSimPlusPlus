@@ -184,6 +184,14 @@ pub enum CompKind {
         bitsize: u32,
         /// Number of inputs (`inputs` attr, ≥ 2).
         inputs: u32,
+        /// Input bubbles (`negate` attr): these inputs are inverted before the gate
+        /// function is applied. Sorted, unique, each `< inputs`. Empty = none.
+        ///
+        /// CircuitSim CE spells these `Negate i` on the same part, and a fresh design
+        /// needs them too — a bubbled input is a different circuit, not a cosmetic
+        /// choice, so this cannot be dropped (UI_OVERHAUL §24 removed them once; the
+        /// conversion of every pipelined course design depends on them).
+        negate: Vec<u32>,
     },
     /// Tri-state controlled buffer (`wiring.controlled-buffer`).
     ControlledBuffer {
@@ -543,9 +551,50 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             (vec![PinSig::i("in", b), PinSig::o("out", b)], c, kind)
         }
         "gate.and" | "gate.or" | "gate.xor" | "gate.nand" | "gate.nor" | "gate.xnor" => {
-            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs"]);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "inputs", "negate"]);
             let b = c.bitsize(1);
             let inputs = c.uint("inputs", 2, 2, MAX_GATE_INPUTS);
+            // Input bubbles: an array of input indices, each inverted before the gate
+            // function runs. Absent (or empty) means no bubbles.
+            let mut negate: Vec<u32> = Vec::new();
+            match attrs.get("negate") {
+                None => {}
+                Some(Json::Array(items)) => {
+                    for item in items {
+                        let idx = match item.as_u64() {
+                            Some(v) => v,
+                            None => {
+                                c_issue(
+                                    &mut c,
+                                    format!(
+                                        "attr 'negate' must be an array of input indices, got {item}"
+                                    ),
+                                );
+                                continue;
+                            }
+                        };
+                        if idx >= u64::from(inputs) {
+                            c_issue(
+                                &mut c,
+                                format!(
+                                    "attr 'negate' lists input {idx}, but the gate has {inputs} input(s)"
+                                ),
+                            );
+                        } else if negate.contains(&(idx as u32)) {
+                            c_issue(&mut c, format!("attr 'negate' lists input {idx} twice"));
+                        } else {
+                            negate.push(idx as u32);
+                        }
+                    }
+                    // Canonical order, so a file's bytes do not depend on the order the
+                    // bubbles happened to be written in.
+                    negate.sort_unstable();
+                }
+                Some(other) => c_issue(
+                    &mut c,
+                    format!("attr 'negate' must be an array of input indices, got {other}"),
+                ),
+            }
             c.finish();
             let mut pins: Vec<PinSig> = (0..inputs)
                 .map(|i| PinSig::i(format!("in{i}"), b))
@@ -563,6 +612,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 op,
                 bitsize: b,
                 inputs,
+                negate,
             };
             (pins, c, kind)
         }

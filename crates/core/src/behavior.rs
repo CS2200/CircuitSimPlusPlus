@@ -137,6 +137,9 @@ enum BehaviorKind {
     Gate {
         op: GateOp,
         bitsize: u32,
+        /// Input bubbles (`negate` attr): these input indices are inverted before the
+        /// gate function is applied.
+        negate: Vec<u32>,
     },
     /// Transistor / pass gate (`wiring.transistor`): the controlled buffer's
     /// behaviour with a `gate` control, so a halt names the pin the part has.
@@ -268,9 +271,15 @@ impl Behavior {
         let kind = match &cfg.kind {
             CompKind::Not { .. } => BehaviorKind::Not,
             CompKind::Buffer { .. } => BehaviorKind::Buffer,
-            CompKind::Gate { op, bitsize, .. } => BehaviorKind::Gate {
+            CompKind::Gate {
+                op,
+                bitsize,
+                negate,
+                ..
+            } => BehaviorKind::Gate {
                 op: *op,
                 bitsize: *bitsize,
+                negate: negate.clone(),
             },
             CompKind::Transistor { bitsize } => BehaviorKind::Transistor { bitsize: *bitsize },
             CompKind::ControlledBuffer { bitsize } => {
@@ -397,7 +406,11 @@ impl Behavior {
                 consume(ins[0], "in")?;
                 Ok(vec![ins[0].clone()])
             }
-            BehaviorKind::Gate { op, bitsize } => {
+            BehaviorKind::Gate {
+                op,
+                bitsize,
+                negate,
+            } => {
                 for (i, v) in ins.iter().enumerate() {
                     consume(v, format!("in{i}"))?;
                 }
@@ -406,11 +419,18 @@ impl Behavior {
                     GateOp::And => Value::all_ones(*bitsize),
                     _ => Value::zero(*bitsize),
                 };
-                for v in ins.iter() {
+                for (i, v) in ins.iter().enumerate() {
+                    // A bubbled input is inverted *before* the function runs, exactly as
+                    // CE draws it — so a gate with all inputs bubbled is its dual.
+                    let bubbled = if negate.contains(&(i as u32)) {
+                        v.not()
+                    } else {
+                        (*v).clone()
+                    };
                     acc = match base {
-                        GateOp::And => acc.and(v),
-                        GateOp::Or => acc.or(v),
-                        _ => acc.xor(v),
+                        GateOp::And => acc.and(&bubbled),
+                        GateOp::Or => acc.or(&bubbled),
+                        _ => acc.xor(&bubbled),
                     };
                 }
                 if invert {
@@ -1254,6 +1274,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn gate_input_bubbles() {
+        // `negate` inverts the listed inputs *before* the function, so the CE schematics'
+        // bubbled gates mean what they draw. Every pipelined course design uses these in
+        // its hazard/forwarding logic, so getting them wrong stalls the pipeline.
+        let and_b0 = mk("gate.and", json!({"inputs": 2, "negate": [0]}));
+        let ins = [k(1, 0), k(1, 1)];
+        assert_eq!(
+            and_b0.eval(&refs(&ins)).unwrap(),
+            vec![k(1, 1)],
+            "AND(!0, 1) = 1"
+        );
+        let ins = [k(1, 1), k(1, 1)];
+        assert_eq!(
+            and_b0.eval(&refs(&ins)).unwrap(),
+            vec![k(1, 0)],
+            "AND(!1, 1) = 0"
+        );
+
+        let or_b1 = mk("gate.or", json!({"inputs": 2, "negate": [1]}));
+        let ins = [k(1, 0), k(1, 1)];
+        assert_eq!(
+            or_b1.eval(&refs(&ins)).unwrap(),
+            vec![k(1, 0)],
+            "OR(0, !1) = 0"
+        );
+
+        // All inputs bubbled: the gate becomes its dual (De Morgan), not a no-op.
+        let and_both = mk("gate.and", json!({"inputs": 2, "negate": [0, 1]}));
+        let ins = [k(1, 0), k(1, 0)];
+        assert_eq!(
+            and_both.eval(&refs(&ins)).unwrap(),
+            vec![k(1, 1)],
+            "AND(!0, !0) = 1"
+        );
+
+        // Output inversion and input bubbles compose: a bubbled NOR = OR(!a, !b) negated.
+        let nor_b0 = mk("gate.nor", json!({"inputs": 2, "negate": [0]}));
+        let ins = [k(1, 0), k(1, 0)];
+        assert_eq!(
+            nor_b0.eval(&refs(&ins)).unwrap(),
+            vec![k(1, 0)],
+            "NOR(!0, 0) = 0"
+        );
+
+        // A bubble propagates X like any input; a bubbled input still consumes (Z halts).
+        let ins = [Value::x(1), k(1, 1)];
+        assert_eq!(and_b0.eval(&refs(&ins)).unwrap(), vec![Value::x(1)]);
+        let ins = [Value::z(1), k(1, 1)];
+        assert_eq!(and_b0.eval(&refs(&ins)), Err(FloatingRead::at("in0")));
     }
 
     #[test]

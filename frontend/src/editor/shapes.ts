@@ -146,6 +146,9 @@ export interface GateShape {
   extra: PathCmd[][];
   /** Output bubble center, if the output is negated (NAND/NOR/XNOR/NOT). */
   outBubble: Vec2 | null;
+  /** Input bubble centers, for the inputs the `negate` attribute inverts (optional:
+   * only the gate families that can carry bubbles fill it in). */
+  inBubbles?: Vec2[];
 }
 
 /**
@@ -321,6 +324,7 @@ export function gateShape(
   y: number,
   w: number,
   h: number,
+  negate: readonly number[] = [],
 ): GateShape | null {
   switch (type) {
     case "gate.and":
@@ -350,10 +354,22 @@ export function gateShape(
           { t: "L", x, y: y + h },
         ]);
       }
+      // Input bubbles (`negate`): the same y rule the catalog uses for `in{i}`, and the
+      // body is one unit wider when any input is bubbled, so the bubble sits inside the
+      // input edge with the pin still on it — CE's own geometry.
+      // `gateSpec` sizes the body `h = max(3, inputs + 1)`, so the pin rule is
+      // `(i + 1) * h / (inputs + 1)` with `inputs = h - 1`; the bubble sits just inside
+      // the input edge, which CE widens by one unit for exactly this.
+      const inputs = Math.max(2, Math.round(h) - 1);
+      const inBubbles: Vec2[] = negate.map((i) => ({
+        x: x + BUBBLE_R,
+        y: y + ((i + 1) * h) / (inputs + 1),
+      }));
       return {
         body,
         extra,
         outBubble: negated ? { x: x + w - BUBBLE_R, y: y + h / 2 } : null,
+        inBubbles,
       };
     }
     case "gate.not":
@@ -361,9 +377,10 @@ export function gateShape(
         body: triPath(x, y, w - 2 * BUBBLE_R, h),
         extra: [],
         outBubble: { x: x + w - BUBBLE_R, y: y + h / 2 },
+        inBubbles: [],
       };
     case "gate.buffer":
-      return { body: triPath(x, y, w, h), extra: [], outBubble: null };
+      return { body: triPath(x, y, w, h), extra: [], outBubble: null, inBubbles: [] };
     case "io.button": {
       // A push button (UI_OVERHAUL §48), oriented so the plunger/cap point RIGHT
       // along the lead to the output pin (UI decision: rotated 90° clockwise).
