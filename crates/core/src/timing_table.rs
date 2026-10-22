@@ -33,6 +33,13 @@ use crate::behavior::Timing;
 use crate::components::KNOWN_TYPES;
 
 /// The embedded reference table (DRAFT 74LS typicals, DESIGN.md §4.4).
+/// The built-in table. **Wire propagation is disabled** (`"wire": { "num": 0 }`) for the
+/// first production run, by Head-TA decision: a conversion has to reproduce CircuitSim
+/// CE, which has no delay at all, and per-path wire delays brought *clock skew* with them
+/// — an edge reaching registers at different times, which CE's atomic edge never does (a
+/// converted CPU lost its first instruction to exactly that). Only component delays
+/// count for now; the per-path machinery is still built and simply contributes 0, so
+/// turning `num` back on restores it.
 const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 
 /// Component kinds a table must define — everything with a nonzero delay
@@ -278,7 +285,15 @@ mod tests {
         let ram = t.timing("mem.ram", 32);
         assert_eq!((ram.access, ram.setup, ram.hold), (50, 15, 5));
         assert_eq!(t.timing("mem.rom", 32).access, 50);
-        // Wire constant: 1 ns per 10 grid units.
+        // Wire propagation ships **disabled** (`wire.num = 0`): only component delays
+        // count for now (Head-TA decision for the first production run — see
+        // `BUILTIN_74LS_V1`). The constant is still data: a table that sets it gets it
+        // back, which `delay.rs`'s wire tests do to keep the per-path machinery covered.
+        assert_eq!(t.wire_delay(200), 0);
+        assert_eq!(t.wire_delay(9), 0);
+        let mut wired: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V1).unwrap();
+        wired["wire"]["num"] = serde_json::json!(1);
+        let t = TimingTable::from_json(&wired.to_string()).unwrap();
         assert_eq!(t.wire_delay(200), 20);
         assert_eq!(t.wire_delay(9), 0);
     }

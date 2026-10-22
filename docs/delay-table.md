@@ -55,7 +55,27 @@ at X MHz". When staff finalize the numbers, a **new table version**
 
 Unknown fields anywhere in the document are rejected.
 
-## Wire delay semantics (contract v1.2, F14)
+## Wire delay is OFF for the first production run (2026-10-22)
+
+**Every wire contributes 0 ns.** The table ships `"wire": { "num": 0 }`, so
+`arrival(sink) = driver commit time` and only **component** delays count. This is a
+deliberate Head-TA decision for the first term CircuitSim++ runs in production, and it
+is not merely cosmetic:
+
+- a conversion has to reproduce **CircuitSim CE**, which has *no* delay at all. Wire
+  delays brought **clock skew** with them — an edge reaching each register at a
+  different time, depending on how much wire sat between it and the clock source —
+  where CE's edge is atomic, every clocked part latching the values from *before* it.
+  A converted CPU lost its first instruction to exactly that: the PC (clocked first)
+  advanced, the new PC reached the I-MEM, and the IF/ID latch (clocked later) latched
+  the *next* fetch instead. With wires off, that class of race is gone by construction;
+- `t_obs` and `t_sta` therefore measure **component delays only** while this is in
+  force, so their absolute values are not comparable with earlier runs;
+- the per-path machinery below is still built and still exercised by tests (which
+  switch `wire.num` back on for themselves) — turning `num` back on restores it
+  exactly, wire lengths and all.
+
+## Wire delay semantics (contract v1.2, F14) — inert while `wire.num = 0`
 
 Wire delay is **per-path, never net-lumped**: a sink pin's arrival is
 
@@ -81,8 +101,16 @@ Consequences, all normative:
   `pos` positions (a single straight segment). The UI always saves drawn
   paths, so hand-drawn circuits get exact lengths.
 - STA uses the same per-path lengths (informational only, below).
+- **While `wire.num = 0` (the shipped state) every term above is 0**: the lengths are
+  computed, they simply do not contribute. See the section above.
 
 ## Clock for grading runs
+
+There is **one global clock domain** (DESIGN.md §4.3): a `clock` component mirrors the
+global clock, so an edge reaches every clocked part at the same instant. With wire delay
+off that is true by construction (`arrival = commit time` for every sink); if wires are
+turned back on, the clock must stay skew-free, because CE's atomic edge is what the course
+designs (and their conversions) are built on.
 
 The delay engine's global clock half-period is a run parameter,
 `--clock-half-period-ns` / `clock_half_period_ns` (spec), default **1000

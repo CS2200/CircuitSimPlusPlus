@@ -20,8 +20,11 @@ describe("delay table readout", () => {
     expect(componentDelayText("misc.text")).toBeNull();
   });
 
-  it("prices a wire by its path length", () => {
-    expect(wireDelayPerUnit()).toBeCloseTo(0.1, 6);
-    expect(wireDelayText(20)).toContain("≈ 2.0 ns");
+  it("prices a wire by its path length — currently at zero", () => {
+    // Wire propagation ships *off* (`"wire": { "num": 0 }`): only component delays count
+    // for the first production run (Head-TA decision, docs/delay-table.md). The pricing
+    // functions still read the table, so the constant stays data, not code.
+    expect(wireDelayPerUnit()).toBe(0);
+    expect(wireDelayText(20)).toContain("≈ 0.0 ns");
   });
 });

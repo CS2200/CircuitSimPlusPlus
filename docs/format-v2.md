@@ -369,7 +369,8 @@ part waits for it, a memory's **asynchronous read** (`addr`) waits for it the sa
 a register/RAM samples only at its edge. Only a net with **no driver pin at all** — an
 input nobody connected — is a real floating read, and that is what the cycle-close sweep
 reports. Without this rule a deep combinational path halts a design at power-on, while it is
-merely settling: converted old-format designs, whose wire delays are long, hit it first.
+merely settling (converted old-format designs hit it first, and with wire propagation
+off — see `docs/delay-table.md` — only component delays are in play).
 Preloading a memory (`--load`, `autoload`) is a **write**, so it never fails on an unsettled
 address either; the read output refreshes on the ordinary path once the address arrives.
 

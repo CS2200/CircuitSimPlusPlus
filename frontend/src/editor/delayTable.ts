@@ -55,6 +55,11 @@ export function componentDelayText(type: string): string | null {
 
 /** Table delay for a wire of `length` grid units (per-path, docs/delay-table.md). */
 export function wireDelayText(lengthUnits: number): string {
+  // Wire propagation ships off (`wire.num = 0`, Head-TA decision): say so rather than
+  // showing a "0.00 ns/unit" that looks like a property of this particular wire.
+  if (wireDelayPerUnit() === 0) {
+    return `≈ 0.0 ns (${lengthUnits.toFixed(1)} units · wire propagation is off)`;
+  }
   const ns = lengthUnits * wireDelayPerUnit();
   return `≈ ${ns.toFixed(1)} ns (${lengthUnits.toFixed(1)} units × ${wireDelayPerUnit().toFixed(2)} ns)`;
 }

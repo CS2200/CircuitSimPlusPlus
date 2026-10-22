@@ -612,6 +612,10 @@ impl DelayEngine {
         let views: Vec<Vec<Value>> = ec::drive_slots(&netlist); // all-Z, same shape
                                                                 // Per-sink path delays (F14): grid units × the table's wire
                                                                 // constant; min per net for the shared "latest value" slot.
+                                                                // Per-sink path delays (F14): grid units × the table's wire constant; min per net
+                                                                // for the shared "latest value" slot. Wire propagation is currently **off** — the
+                                                                // table ships `wire.num = 0` — so this is 0 everywhere and only component delays
+                                                                // count (see `timing_table.rs`); the per-path shape is kept for when wires return.
         let net_sink_delay: Vec<Vec<u64>> = netlist
             .nets
             .iter()
@@ -2075,6 +2079,25 @@ mod tests {
         DelayEngine::new(nl, half, &table).expect("test engine builds")
     }
 
+    /// The built-in table with wire propagation **on** (`wire.num = 1`).
+    ///
+    /// The shipped table disables wire delay (`num = 0`, Head-TA decision), so the tests
+    /// that pin the per-path transport machinery — path lengths, stub branches, narrow
+    /// pulses — build their own copy with the wires back on. Nothing else should use this.
+    pub(super) fn wired_table() -> TimingTable {
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        v["wire"]["num"] = serde_json::json!(1);
+        TimingTable::from_json(&v.to_string()).unwrap()
+    }
+
+    /// As `engine`, but with wire propagation on.
+    pub(super) fn wired_engine(json: &str, half: u64) -> DelayEngine {
+        let doc = load_document(json.as_bytes()).expect("test doc parses");
+        let nl = netlist::build(&doc).expect("test doc netlists");
+        DelayEngine::new(nl, half, &wired_table()).expect("test engine builds")
+    }
+
     pub(super) fn k(width: u32, v: u64) -> Value {
         Value::from_u64(width, v)
     }
@@ -2151,7 +2174,9 @@ mod tests {
             ]}}]
         }}"##
         );
-        let mut eng = engine(&json, 5000);
+        // Wire propagation on for this one: the per-path transport machinery is what it
+        // tests (the shipped table disables wire delay).
+        let mut eng = wired_engine(&json, 5000);
         assert!(eng.poke_at("src", k(1, 1), 100));
         assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns pulse < t_pd 9
         eng.run_until_time(200).unwrap();
@@ -2179,7 +2204,9 @@ mod tests {
             ]}}]
         }}"##
         );
-        let mut eng = engine(&json, 5000);
+        // Wires on for this one: the per-path transport machinery is its subject (the
+        // shipped table disables wire delay).
+        let mut eng = wired_engine(&json, 5000);
         assert!(eng.poke_at("src", k(1, 1), 100));
         assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns pulse
         eng.run_until_time(120).unwrap();
@@ -2213,6 +2240,9 @@ mod tests {
         let nl = netlist::build(&doc).unwrap();
         let mut custom: serde_json::Value =
             serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        // `num` too: the shipped table ships it 0 (wire delay disabled), and this test's
+        // whole subject is that the constant is data.
+        custom["wire"]["num"] = serde_json::json!(1);
         custom["wire"]["den"] = serde_json::json!(1);
         let table = TimingTable::from_json(&custom.to_string()).unwrap();
         let mut eng = DelayEngine::new(nl, 5000, &table).unwrap();
@@ -2504,17 +2534,20 @@ mod tests {
         // this died at cycle close with a spurious FloatingRead.
         let mut eng = engine(&json, 500);
         assert!(eng.halted().is_none(), "boot halt: {:?}", eng.halted());
-        // src rises at T=770; r2.d changes ~2255 ns later (3025), inside
-        // the setup window (15 ns) of r2's clock edge — the 300-unit clk
-        // wire delays the edge to 3000+30=3030 → warning, not a halt.
-        assert!(eng.poke_at("src", k(1, 1), 770));
+        // Wire propagation is off (the table ships `wire.num = 0`), so the *data* path has
+        // to do the violating: `src` rises at T=740 and r2.d changes ~2250 ns later, i.e.
+        // at 2990 — inside the 15 ns setup window before r2's T=3000 clock edge (edges are
+        // every period, 2 × the 500 ns half-period). The latch still happens; the report
+        // carries the warning rather than a halt.
+        assert!(eng.poke_at("src", k(1, 1), 740));
         let rep = eng.run(3).expect("overclocked run must complete");
         assert_eq!(rep.cycles, 3);
         assert_eq!(rep.violations.len(), 1, "exactly one setup violation");
         assert_eq!(rep.violations[0].kind, ViolationKind::Setup);
-        // The final-cycle fold (F7) counts the last cycle's settle:
-        // d changed at 3025, cycle 3 starts at 3000 → dt 25.
-        assert_eq!(rep.t_obs, 25, "final in-progress cycle is folded");
+        // The final-cycle fold (F7) counts the last cycle's settle. With wire
+        // propagation off the data lands at 2990, and cycle 3 spans 2000..3000, so the
+        // settle measures 990 ns (a wire-delayed clock used to make this 25).
+        assert_eq!(rep.t_obs, 990, "final in-progress cycle is folded");
     }
 
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
@@ -2563,7 +2596,7 @@ mod tests {
             ]}}]
         }}"##
         );
-        let mut eng = engine(&json, 5000);
+        let mut eng = wired_engine(&json, 5000);
         assert!(eng.poke_at("src", k(1, 1), 100));
         eng.run_until_time(120).unwrap();
         assert_eq!(eng.named_value("d"), Some(k(1, 0)));

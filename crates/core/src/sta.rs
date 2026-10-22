@@ -532,6 +532,19 @@ mod tests {
         analyze(&nl, &table, k).map(|r| (r, nl))
     }
 
+    /// As `sta`, but with wire propagation **on** (`wire.num = 1`). The shipped table
+    /// disables wire delay (Head-TA decision), so STA's per-path wire term is only
+    /// observable with a table that turns it back on.
+    fn wired_sta(json: &str, k: usize) -> Result<(StaResult, netlist::Netlist), StaError> {
+        let doc = load_document(json.as_bytes()).expect("test doc parses");
+        let nl = netlist::build(&doc).expect("test doc netlists");
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        v["wire"]["num"] = serde_json::json!(1);
+        let table = TimingTable::from_json(&v.to_string()).unwrap();
+        analyze(&nl, &table, k).map(|r| (r, nl))
+    }
+
     fn names<'a>(nl: &'a netlist::Netlist, comps: &[CompId]) -> Vec<&'a str> {
         comps
             .iter()
@@ -632,7 +645,8 @@ mod tests {
             ]}}]
         }}"##
         );
-        let (r, nl) = sta(&json, 10).unwrap();
+        // Wires on: this test's subject is the per-path wire term in STA.
+        let (r, nl) = wired_sta(&json, 10).unwrap();
         assert_eq!(
             r.t_sta, 50,
             "ROM access from a register output (probe endpoint: no setup)"

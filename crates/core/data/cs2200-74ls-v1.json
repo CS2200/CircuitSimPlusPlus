@@ -2,7 +2,7 @@
   "name": "cs2200-74ls-v1",
   "status": "DRAFT",
   "units": "ns",
-  "wire": { "num": 1, "den": 10 },
+  "wire": { "num": 0, "den": 10 },
   "components": {
     "gate.not": { "prop": 9 },
     "gate.buffer": { "prop": 9 },

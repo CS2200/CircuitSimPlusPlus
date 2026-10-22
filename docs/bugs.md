@@ -373,8 +373,9 @@ format bump. _(this round)_
 - ~~Propagation-delay readout~~ **done**: the Inspector shows the selected part's
   own cost from the published table (`crates/core/data/cs2200-74ls-v1.json`, read
   at build time so the numbers cannot drift — `prop 20 ns · setup 15 ns · hold
-5 ns` for a register), and a selected _wire_ shows its per-path delay (drawn
-  length × the table's 0.1 ns/unit). Both are **design** numbers; the transport's
+5 ns` for a register), and a selected _wire_ shows its per-path delay — which is
+  currently **0** for every wire, because wire propagation ships off (`wire.num = 0`,
+  Head-TA decision, `docs/delay-table.md`). Both are **design** numbers; the transport's
   `T_obs`/`top_paths` stay the measured ones.
 - ~~Animation pulse-rate slider~~ **done**: Settings → Canvas has a **Pulse speed**
   picker (50…200%); the pref is a percentage, and `PulseTracker` takes its
