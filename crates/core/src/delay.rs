@@ -510,6 +510,54 @@ pub struct DelayEngine {
     in_boot: bool,
 }
 
+/// One component as the engine sees it (the `csim nets --comp` debug dump).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CompDump {
+    pub comp: String,
+    /// Registry type string, e.g. `gate.not`.
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// The engine's classification: `comb`, `source`, `sink`, `register`, `ram`, …
+    pub class: String,
+    pub pins: Vec<CompPin>,
+}
+
+/// One pin of a [`CompDump`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CompPin {
+    pub pin: String,
+    pub dir: String,
+    pub net: usize,
+    pub net_value: String,
+    /// What this pin received (per-path transport).
+    pub received: String,
+}
+
+/// One net as the engine sees it — the `csim nets` debug dump.
+///
+/// A converted design that misbehaves usually misbehaves *here*: the schematic says who
+/// is connected, but only the engine knows which terminals it merged into the net, what
+/// the resolved value is, and what each input pin received.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NetDump {
+    /// Index into the engine's net list.
+    pub net: usize,
+    pub width: u32,
+    /// No driving pin at all (the net is `Z`).
+    pub floating: bool,
+    /// The net's applied (resolved) value, four-state aware.
+    pub value: String,
+    /// Pins that can drive it, `id.pin` (or `instance/id.pin` when inlined).
+    pub drivers: Vec<String>,
+    /// Pins that consume it, same naming.
+    pub sinks: Vec<String>,
+    /// The queried pin, when the dump was asked for one.
+    pub pin: Option<String>,
+    /// What that pin *received* (per-path transport), which can differ from `value`
+    /// while an event is in flight.
+    pub view: Option<String>,
+}
+
 impl DelayEngine {
     /// Build the engine. `clock_half_period` is in delay-table units
     /// (ns); it should exceed the design's true critical path or setup
@@ -663,7 +711,7 @@ impl DelayEngine {
         // with the other side of a splitter chain). The seed must reach
         // every sink's *view* (gates read views, F14).
         let (_, residue) = crate::engine_common::levelize(&eng.netlist, &eng.comps);
-        for c in residue {
+        for c in residue.iter().copied() {
             if eng.comps[c as usize].is_splitter() {
                 continue;
             }
@@ -690,6 +738,24 @@ impl DelayEngine {
                         wire_idx: None,
                     }]
                 })?;
+            }
+        }
+        // A seeded loop has *values* but has not been *evaluated*: every part in it
+        // would otherwise wait for a delivery that never comes, because a part whose
+        // first evaluation computes exactly the seeded 0 leaves its consumers' views
+        // untouched. That is not a corner case — the course pipelines' stall and
+        // forwarding logic is a combinational loop (En → ID/RR → comparators → the
+        // stall gate → En), so a design could freeze at power-on with its stall gate
+        // reading 0 forever while every wire was correct. So evaluate each loop
+        // component once from the seeded state; the boot queue then iterates the loop
+        // to its fixed point, and a genuine oscillator still trips the storm cap.
+        for c in &residue {
+            if eng.comps[*c as usize].is_splitter() {
+                continue;
+            }
+            if let Err(h) = eng.eval_and_schedule(*c, 0, None) {
+                eng.halted = Some(h);
+                break;
             }
         }
         // Boot settle (module docs): run the power-on queue to quiescence
@@ -999,6 +1065,108 @@ impl DelayEngine {
     }
 
     /// Write a word to a named RAM (autograder `mem_write`, task B9).
+    /// The engine's own view of the net carrying a root-circuit component pin.
+    ///
+    /// A debugging aid for conversions: it answers "what does the engine think is on
+    /// this net, and who is on it" — which is the question a schematic cannot answer
+    /// once a design misbehaves. `view` is what *this pin* received (per-path
+    /// transport, F14), which can differ from the net's applied value while an
+    /// event is in flight.
+    pub fn net_of_pin(&self, id: &str, pin: &str) -> Option<NetDump> {
+        let ci = self
+            .netlist
+            .comps
+            .iter()
+            .position(|c| c.inst_path.is_empty() && c.def_id == id)?;
+        let slot = self.netlist.comps[ci]
+            .pins
+            .iter()
+            .position(|p| p.pin == pin)?;
+        let net = self.netlist.comps[ci].pins[slot].net.idx();
+        let mut dump = self.net_dump(net);
+        dump.pin = Some(format!("{id}.{pin}"));
+        dump.view = Some(self.views[ci][slot].to_string());
+        Some(dump)
+    }
+
+    /// The engine's view of one root-circuit component: its class, and every pin with
+    /// the net it lands on, that net's value, and what the pin received (debugging aid).
+    pub fn comp_dump(&self, id: &str) -> Option<CompDump> {
+        let ci = self
+            .netlist
+            .comps
+            .iter()
+            .position(|c| c.inst_path.is_empty() && c.def_id == id)?;
+        let class = match self.cdata[ci].class {
+            Class::Comb => "comb",
+            Class::Splitter => "splitter",
+            Class::Register => "register",
+            Class::Ram => "ram",
+            Class::Rom => "rom",
+            Class::Source => "source",
+            Class::Sink => "sink",
+        };
+        let pins = self.netlist.comps[ci]
+            .pins
+            .iter()
+            .enumerate()
+            .map(|(slot, p)| CompPin {
+                pin: p.pin.clone(),
+                dir: format!("{:?}", p.dir).to_lowercase(),
+                net: p.net.idx(),
+                net_value: self
+                    .net_values
+                    .get(p.net.idx())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "?".to_string()),
+                received: self.views[ci][slot].to_string(),
+            })
+            .collect();
+        Some(CompDump {
+            comp: id.to_string(),
+            type_: self.netlist.comps[ci].type_.clone(),
+            class: class.to_string(),
+            pins,
+        })
+    }
+
+    /// Every net that carries at least one pin, in id order (debugging aid).
+    pub fn nets(&self) -> Vec<NetDump> {
+        (0..self.netlist.nets.len())
+            .filter(|n| {
+                let net = &self.netlist.nets[*n];
+                !net.drivers.is_empty() || !net.sinks.is_empty()
+            })
+            .map(|n| self.net_dump(n))
+            .collect()
+    }
+
+    fn net_dump(&self, net: usize) -> NetDump {
+        let n = &self.netlist.nets[net];
+        let label = |(comp, pin): &(crate::api::CompId, String)| {
+            let c = &self.netlist.comps[comp.idx()];
+            if c.inst_path.is_empty() {
+                format!("{}.{pin}", c.def_id)
+            } else {
+                format!("{}/{}.{pin}", c.inst_path, c.def_id)
+            }
+        };
+        NetDump {
+            net,
+            width: n.width,
+            floating: n.floating,
+            value: self
+                .net_values
+                .get(net)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "?".to_string()),
+            drivers: n.drivers.iter().map(label).collect(),
+            sinks: n.sinks.iter().map(label).collect(),
+            pin: None,
+            view: None,
+        }
+    }
+
     pub fn set_memory_word(&mut self, name: &str, addr: u64, v: Value) -> bool {
         let Some(named) = self.netlist.named.iter().find(|n| n.name == name) else {
             return false;

@@ -23,6 +23,35 @@ appendices so the active list stays honest._
   address. Each has a test; the golden hashes and the negative fixtures are
   unchanged.
 
+## A combinational loop kept its seeded zeros (fixed 2026-10-21)
+
+**Every converted pipelined CPU was frozen at power-on**, and the cause was the engine's
+own start-up, not the conversion:
+
+* a combinational loop has no topological order, so the engine **seeds** its nets to `0`
+  (`delay.rs`, "Power-on for combinational loops") and lets the boot queue iterate them;
+* but the seeding wrote the `0` into each sink's **view** as if it had *arrived*, while
+  the loop's components were never evaluated at all. A part whose first evaluation
+  computes exactly that seeded `0` therefore delivers nothing, so the parts downstream of
+  it never see "arrived", hold their own seeded `0`, and the loop never runs. Any loop
+  whose real fixed point is not all-zero froze — including the course pipelines' **stall
+  and forwarding logic**, which is a loop (`En → ID/RR → comparators → the stall gate →
+  En`, with the comparators reading the ID/RR's own outputs);
+* the symptom was maddening to read from the schematic, because every wire was right:
+  `NOT(AND(0,1))` sat at `0` with both its input and its output net reading a verified
+  `0x0`, and the same gate fed from a plain constant inverted correctly;
+* the fix evaluates each loop component once from the seeded state, so the boot queue
+  iterates the loop to its fixed point (a genuine oscillator still trips the storm cap).
+
+Found with a new debugging aid, `csim nets` (`--pin id.pin`, `--comp id`), which prints
+the engine's own view of a net or component: the terminals it merged, their directions,
+the resolved value, and what each pin *received*. The reference EC pipeline now runs its
+prologue exactly as CircuitSim CE does (`$sp = 0xA000`), and a converted student pipeline
+reproduces that student's own bug (`$v0 = 0x2` on `pow`, the same verdict the old grader
+gives), so the conversion is faithful where it can be seen; the pipelines still stall
+later in the run (`PC-IF` parks at `0x12` for the reference), which is the next thing to
+chase. All 199 core + 9 golden tests pass unchanged.
+
 ## The reset pin's semantics (decided 2026-10-21)
 
 `mem.register`/`mem.ram` have `rst` and `clk` again, hidden unless `showClk`/`showRst`

@@ -13,6 +13,7 @@ use clap::{Args, Parser, Subcommand};
 
 use csim_core::api::{LoadError, LoadErrorKind};
 use csim_core::autograde::{self, GradeConfig, LoadSource, RunLimits, TestSpec};
+use csim_core::delay::DelayEngine;
 use csim_core::format::{self, Document};
 use csim_core::timing_table::TimingTable;
 
@@ -49,6 +50,25 @@ enum Cmd {
         /// paths the design never uses).
         #[arg(long)]
         sta: bool,
+        /// Write the JSON output to this path instead of stdout.
+        #[arg(long)]
+        json: Option<PathBuf>,
+    },
+    /// Dump the engine's nets: id, width, resolved value, and the pins it merged as
+    /// drivers and sinks. A debugging aid for converted schematics — `--pin id.pin`
+    /// narrows it to one net and also shows what that pin received.
+    Nets {
+        /// Circuit file (.csx).
+        file: PathBuf,
+        /// Restrict to the net carrying this root-circuit pin (e.g. `c54.in`).
+        #[arg(long)]
+        pin: Option<String>,
+        /// Dump this root-circuit component instead: its class, pins, and views.
+        #[arg(long)]
+        comp: Option<String>,
+        /// Run this many cycles before dumping (default 1).
+        #[arg(long, default_value_t = 1)]
+        cycles: u64,
         /// Write the JSON output to this path instead of stdout.
         #[arg(long)]
         json: Option<PathBuf>,
@@ -654,6 +674,19 @@ fn main() -> ExitCode {
             sta,
             json,
         } => timing(file, *paths, *cycles, *sta, json.as_deref()),
+        Cmd::Nets {
+            file,
+            pin,
+            comp,
+            cycles,
+            json,
+        } => nets(
+            file,
+            pin.as_deref(),
+            comp.as_deref(),
+            *cycles,
+            json.as_deref(),
+        ),
         Cmd::Snapshot {
             file,
             out,
@@ -666,6 +699,101 @@ fn main() -> ExitCode {
             json,
         } => resume(snapshot, *cycles, json.as_deref()),
     }
+}
+
+/// `csim nets`: the engine's own view of the design's nets (a conversion-debugging
+/// aid). Loads and runs like `snapshot`, then prints either one net or the whole net
+/// list, as JSON.
+fn nets(
+    file: &Path,
+    pin: Option<&str>,
+    comp: Option<&str>,
+    cycles: u64,
+    json_out: Option<&Path>,
+) -> ExitCode {
+    let bytes = match std::fs::read(file) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("csim: {}: {e}", file.display());
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    };
+    let doc = match format::load_document(&bytes) {
+        Ok(d) => d,
+        Err(errors) => {
+            eprintln!(
+                "csim: {}",
+                serde_json::to_string(&errors).expect("serializes")
+            );
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    };
+    let nl = match csim_core::netlist::build(&doc) {
+        Ok(nl) => nl,
+        Err(errors) => {
+            eprintln!(
+                "csim: {}",
+                serde_json::to_string(&errors).expect("serializes")
+            );
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    };
+    let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
+    let mut eng = match DelayEngine::new(nl, 1000, &table) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("csim: {e:?}");
+            return ExitCode::from(exit::MALFORMED_FILE);
+        }
+    };
+    let _ = eng.run(cycles);
+
+    if let Some(id) = comp {
+        let text = match eng.comp_dump(id) {
+            Some(d) => serde_json::to_string_pretty(&d).expect("comp serializes"),
+            None => {
+                eprintln!("csim: no root-circuit component '{id}'");
+                return ExitCode::from(exit::USAGE);
+            }
+        };
+        match json_out {
+            Some(path) => {
+                if let Err(e) = std::fs::write(path, text) {
+                    eprintln!("csim: {}: {e}", path.display());
+                    return ExitCode::from(exit::USAGE);
+                }
+            }
+            None => println!("{text}"),
+        }
+        return ExitCode::SUCCESS;
+    }
+    let dumps = match pin {
+        None => eng.nets(),
+        Some(spec) => {
+            let Some((id, pin_name)) = spec.split_once('.') else {
+                eprintln!("csim: --pin must be <component>.<pin>, e.g. c54.in");
+                return ExitCode::from(exit::USAGE);
+            };
+            match eng.net_of_pin(id, pin_name) {
+                Some(d) => vec![d],
+                None => {
+                    eprintln!("csim: no root-circuit pin '{spec}'");
+                    return ExitCode::from(exit::USAGE);
+                }
+            }
+        }
+    };
+    let text = serde_json::to_string_pretty(&dumps).expect("nets serialize");
+    match json_out {
+        Some(path) => {
+            if let Err(e) = std::fs::write(path, text) {
+                eprintln!("csim: {}: {e}", path.display());
+                return ExitCode::from(exit::USAGE);
+            }
+        }
+        None => println!("{text}"),
+    }
+    ExitCode::SUCCESS
 }
 
 #[cfg(test)]
