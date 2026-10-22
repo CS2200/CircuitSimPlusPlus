@@ -1,0 +1,145 @@
+# Release — a version tag (v*) builds the desktop bundles on GitHub-hosted
+# runners and publishes ONE GitHub Release (DESIGN.md §9, D14). The release body
+# carries the unsigned-build workaround text students need.
+#
+# Runs on the PUBLIC github.com mirror only: GT's GHES has no runners, so the
+# `if:` guard keeps a tag pushed to GHES from queueing jobs forever. See
+# docs/distribution.md.
+#
+# Bundles live under the workspace-root `target/` (Cargo hoists it), i.e.
+# target/release/bundle/…, NOT crates/app/target/….
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0). Empty = v<version> from crates/app/tauri.conf.json."
+        required: false
+        type: string
+      prerelease:
+        description: "Publish as a prerelease"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_BODY: |
+    **These builds are unsigned** (team decision — no paid signing certificate).
+    Your OS will warn; the builds are fine. One-time workaround:
+
+    - **macOS:** right-click the app → **Open** → Open. (Or: `xattr -d com.apple.quarantine "CircuitSim++.app"`)
+    - **Windows:** SmartScreen → **More info** → **Run anyway**.
+
+    Linux: `.deb` / `.AppImage` / `.rpm` are attached.
+
+jobs:
+  build:
+    if: github.server_url == 'https://github.com'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend deps
+        run: npm --prefix frontend ci
+
+      - name: Tauri build (unsigned)
+        working-directory: crates/app
+        run: ../../frontend/node_modules/.bin/tauri build
+
+      # Windows: zip the .exe so the download is a single portable file.
+      - name: Zip Windows bundle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Compress-Archive -Path $exe.FullName -DestinationPath "circuitsimpp-windows.zip"
+
+      - name: Upload macOS bundle
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Upload Windows bundle
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            target/release/bundle/nsis/*.exe
+            circuitsimpp-windows.zip
+          if-no-files-found: error
+
+      - name: Upload Linux bundle
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  # One publisher, so the three build jobs never race to create the release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Resolve release tag
+        id: meta
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          tag="$INPUT_TAG"
+          if [ -z "$tag" ] && [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [ -z "$tag" ]; then
+            version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' crates/app/tauri.conf.json | head -n1)
+            tag="v${version}"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body: ${{ env.RELEASE_BODY }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,9 +1,11 @@
 # Distribution & Updates — plan
 
-> **Status: decided, not yet built (2026-10-21).** Today releases are still cut
-> privately on three machines — see [`releasing.md`](releasing.md) for the
-> process that actually runs. This doc records the plan so all three of us agree
-> before anyone sets it up. Nothing here is wired up yet.
+> **Status: in progress (2026-10-22).** Steps 3–4 below are **done** — the CI
+> workflows are restored (gated so they only run on github.com) and the update
+> nudge points at github.com. Still pending: **create + push the public mirror
+> repo, then tag a release**. Until that repo exists the nudge 404s and silently
+> skips. [`releasing.md`](releasing.md) describes the local three-machine
+> process that still works today.
 
 ## The problem, in one paragraph
 
@@ -104,7 +106,7 @@ git push public --tags        # only if you already have old tags to mirror
 mirror must contain the source at the exact commit you tag. GHES stays
 canonical; `public` is a push target, not a fork.
 
-### 3. Restore the CI workflows (and fix the old bug)
+### 3. Restore the CI workflows ✅ done
 
 Recover them from history, then apply the known correction:
 
@@ -134,7 +136,7 @@ publishes once.
 > branch trigger (that was for the GHES world). The `GITHUB_TOKEN` is automatic;
 > **no secrets are needed**.
 
-### 4. Point the update nudge at github.com
+### 4. Point the update nudge at github.com ✅ done
 
 In `frontend/src/update.ts`:
 

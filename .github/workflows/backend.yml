@@ -1,0 +1,65 @@
+# Backend CI — csim-core + csim (docs/tasks/BACKEND.md).
+# The Tauri shell (crates/app) is intentionally NOT built here; it is owned by
+# frontend.yml (needs webview system deps).
+#
+# CI runs on the PUBLIC github.com mirror only: GT's GHES has no runners, so the
+# `if:` guard below keeps pushes to GHES from queueing jobs forever. Remove the
+# guards if GHES ever gets runners. See docs/distribution.md.
+name: backend
+
+on:
+  push:
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+  pull_request:
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The committed .csx fixtures are generated artifacts (BACKEND.md B11).
+      # Nothing forced them to track tests/gen/*.py, so they drifted once
+      # already; this regenerates into a temp dir and diffs. Runs first: it
+      # needs no toolchain and fails in seconds.
+      - name: Fixtures match their generators
+        run: node scripts/check-fixtures.mjs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p csim-core -p csim --all-targets -- -D warnings
+      - run: cargo test -p csim-core -p csim
+
+  # Static musl build of the autograder CLI (DESIGN.md §8, G1).
+  musl:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p csim --release --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csim-linux-x86_64-musl
+          path: target/x86_64-unknown-linux-musl/release/csim
+
+  # The Gradescope image: builds the musl binary, runs the release test
+  # suite in-build, and the fixture sanity self-test inside the runtime
+  # image (M1 container acceptance, BACKEND.md task B10).
+  gradescope-image:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t csim-autograder -f gradescope/Dockerfile .

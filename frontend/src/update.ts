@@ -8,20 +8,20 @@
 import pkg from "../package.json" with { type: "json" };
 
 /**
- * The GitHub repo to poll, "owner/name". The in-app nudge silently skips
- * while this is unset or unreachable.
+ * The public github.com mirror to poll, "owner/name". Releases live there and
+ * are read with no auth — GT's GHES cannot serve them (it forbids public repos,
+ * so an anonymous read gets a 404). See docs/distribution.md.
+ *
+ * TODO(setup): replace OWNER with the github.com account/org once the mirror
+ * repo exists. Until then the check 404s and silently skips.
  */
-export const GITHUB_REPO = "CS2200TAs/CircuitSimPlusPlus";
+export const GITHUB_REPO = "OWNER/CircuitSimPlusPlus";
 
-/**
- * The GitHub host that serves the releases. This is GitHub Enterprise Server
- * (github.gatech.edu), NOT github.com — its REST API lives under `/api/v3`,
- * and `api.github.com` has no knowledge of our repo.
- */
-export const RELEASES_HOST = "github.gatech.edu";
+/** Where releases are served: the public github.com mirror, not GT's GHES. */
+export const RELEASES_HOST = "github.com";
 
-/** Release API base for RELEASES_HOST (`/api/v3` on GHES, plain on github.com). */
-export const RELEASES_API = `https://${RELEASES_HOST}/api/v3`;
+/** Release API base (github.com; on GHES this was `<host>/api/v3`). */
+export const RELEASES_API = "https://api.github.com";
 
 export const APP_VERSION: string = pkg.version;
 
