@@ -4,6 +4,7 @@ import { isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
 import { compPins, compSize } from "./catalog";
+import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
@@ -178,6 +179,8 @@ export class ToolMachine {
     attrs?: Record<string, unknown>;
     /** Shift-picked from the palette: keep placing until cancelled. */
     sticky: boolean;
+    /** A `wiring.pin`'s seeded name (the palette's `CLK`/`RST` tiles). */
+    name?: string;
   } | null = null;
   private hoverHit: Hit | null = null;
   /** What the pointer is over — drives the canvas cursor hint (§55). */
@@ -233,9 +236,10 @@ export class ToolMachine {
     sticky = false,
     attrs?: Record<string, unknown>,
     rot: CsxComponent["rot"] = "E",
+    name?: string,
   ): void {
     this.cancel();
-    this.placing = { type, pos: { x: 0, y: 0 }, rot, attrs, sticky };
+    this.placing = { type, pos: { x: 0, y: 0 }, rot, attrs, sticky, name };
     this.changed();
   }
 
@@ -340,12 +344,23 @@ export class ToolMachine {
     if (this.placing !== null) {
       const p = this.placing;
       const body = placementBodyPos(p, this.doc.circuits);
-      const placed = this.doc.addComponent(this.circuitIdx(), {
-        type: p.type,
-        pos: [body.x, body.y],
-        rot: p.rot,
-        ...(p.attrs !== undefined && { attrs: p.attrs }),
-      });
+      // One undo step for the placement *and* the wiring it causes (§4.3's one-clock
+      // rule; `applyClockDefaults` explains the convention).
+      // Unique per placement: a coalesce key groups *this* placement with the wiring it
+      // causes, and must not merge two placements into one undo step.
+      const placeKey = `place:${nextPlaceSeq()}`;
+      const placed = this.doc.addComponent(
+        this.circuitIdx(),
+        {
+          type: p.type,
+          pos: [body.x, body.y],
+          rot: p.rot,
+          ...(p.attrs !== undefined && { attrs: p.attrs }),
+          ...(p.name !== undefined && { name: p.name }),
+        },
+        placeKey,
+      );
+      applyClockDefaults(this.doc, this.circuitIdx(), placed, p.type, placeKey);
       // Select what was just placed: the natural follow-up is to rotate, edit
       // or wire it, and R/arrows/Delete act on the selection (UI_OVERHAUL §23).
       this.selection.set([placed], []);

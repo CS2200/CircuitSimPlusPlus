@@ -61,6 +61,9 @@ export interface WireInit {
   a: CsxEndpoint;
   b: CsxEndpoint;
   points: [number, number][];
+  /** A tunnel label (UI_OVERHAUL §86). A name is a *label*, not a joining rule — the
+   * connection is the wire (docs/format-v2.md §9). */
+  name?: string;
 }
 
 export class CircuitDocument {
@@ -268,7 +271,7 @@ export class CircuitDocument {
   }
 
   /** Place a component; returns its allocated id. */
-  addComponent(circuitIdx: number, init: ComponentInit): string {
+  addComponent(circuitIdx: number, init: ComponentInit, coalesceKey?: string): string {
     const c = this.circuit(circuitIdx);
     const id = allocComponentId(c);
     const comp: CsxComponent = {
@@ -281,7 +284,7 @@ export class CircuitDocument {
     };
     this.exec(
       `place ${init.type}`,
-      undefined,
+      coalesceKey,
       this.replaceCircuit(circuitIdx, {
         ...c,
         components: [...c.components, comp],
@@ -616,12 +619,12 @@ export class CircuitDocument {
   }
 
   /** Add a wire; returns its index. Throws on any invariant violation. */
-  addWire(circuitIdx: number, w: WireInit): number {
+  addWire(circuitIdx: number, w: WireInit, coalesceKey?: string): number {
     const c = this.circuit(circuitIdx);
     validateWire(c, w);
     this.exec(
       "add wire",
-      undefined,
+      coalesceKey,
       this.replaceCircuit(circuitIdx, {
         ...c,
         wires: [...c.wires, w],

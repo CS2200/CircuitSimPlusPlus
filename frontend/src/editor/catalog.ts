@@ -915,6 +915,9 @@ export interface PaletteItem {
   attrs?: Record<string, unknown>;
   /** Seed rotation (defaults east); an output pin seeds west. */
   rot?: CsxComponent["rot"];
+  /** Seed a `wiring.pin`'s name (`CLK`/`RST`: the clock and reset the editor wires a
+   * placed part to — `editor/clockDefaults.ts`). */
+  name?: string;
 }
 
 export const PALETTE: { group: string; items: PaletteItem[] }[] = [
@@ -941,6 +944,13 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
     items: [
       { type: "wiring.pin", label: "INPUT" },
       { type: "wiring.pin", label: "OUTPUT", attrs: { isOutput: true }, rot: "W" },
+      // The clock and reset a placed part wires itself to. Naming them here is the whole
+      // of the convention (a wire's name is a label, not a joining rule — format-v2 §9);
+      // placing one makes it explicit where a design's clock and reset come from.
+      // Labelled "… PIN" so they cannot be confused with the *clock* tile (`wiring.clock`,
+      // labelled CLK) — one is the source, the other is the pin that carries it.
+      { type: "wiring.pin", label: "CLK PIN", name: "CLK" },
+      { type: "wiring.pin", label: "RST PIN", name: "RST" },
       { type: "wiring.constant" },
       { type: "wiring.clock" },
       { type: "wiring.splitter" },
@@ -1354,24 +1364,7 @@ function baseFields(type: string): AttrField[] {
       // and its clock/reset pins are opt-in (§93): the pins always exist (an
       // old-format file wires them), so showing one is a view choice, and an
       // unwired one reads its default (rst 0, clk the circuit clock).
-      return [
-        BITSIZE_FIELD,
-        RADIX_FIELD,
-        {
-          key: "showClk",
-          label: "Show clock pin",
-          kind: "boolean",
-          group: "Options",
-          hint: "Hidden: the part follows the circuit's clock.",
-        },
-        {
-          key: "showRst",
-          label: "Show reset pin",
-          kind: "boolean",
-          group: "Options",
-          hint: "Hidden: the part never resets.",
-        },
-      ];
+      return [BITSIZE_FIELD, RADIX_FIELD];
     case "mem.ram":
       // `autoload` and `contents` are edited by the Inspector's Memory
       // section (file picker + hex-table dialog), not as plain fields.
@@ -1379,23 +1372,7 @@ function baseFields(type: string): AttrField[] {
       // else (§28): a memory reads as Address Bits + Data Bits, never as a
       // dropdown. There is no separate word-count field: a memory's size IS its
       // address space, so the address pick is what resizes it.
-      return [
-        ...MEMORY_WIDTH_FIELDS,
-        {
-          key: "showClk",
-          label: "Show clock pin",
-          kind: "boolean",
-          group: "Options",
-          hint: "Hidden: the memory follows the circuit's clock.",
-        },
-        {
-          key: "showRst",
-          label: "Show reset pin",
-          kind: "boolean",
-          group: "Options",
-          hint: "Hidden: the memory never clears.",
-        },
-      ];
+      return [...MEMORY_WIDTH_FIELDS];
     case "mem.rom":
       // A ROM has no clock or reset: it reads as soon as an address arrives,
       // so it carries the width fields only (UI_OVERHAUL §93).
@@ -1479,10 +1456,19 @@ export function compSize(
  * in clock/reset stubs. `showClk` / `showRst`, absent meaning hidden; every
  * other pin of every other part is always shown.
  */
-export function pinShown(comp: Pick<CsxComponent, "type" | "attrs">, pin: string): boolean {
-  if (comp.type !== "mem.register" && comp.type !== "mem.ram") return true;
-  if (pin === "clk") return comp.attrs?.showClk === true;
-  if (pin === "rst") return comp.attrs?.showRst === true;
+/**
+ * Whether a pin is drawn. Always true: `clk` and `rst` are in the model whether or not they
+ * are wired (format-v2 §4), so the editor draws them, and the old per-part **Show clock
+ * pin** / **Show reset pin** toggles are gone — the UI now wires a placed part's clock and
+ * reset for you (`editor/clockDefaults.ts`), which is a better answer than hiding the pin.
+ *
+ * `showClk`/`showRst` remain *legal* attributes: an old file that carries them still loads,
+ * and they are ignored rather than rejected.
+ */
+// The parameters stay in the signature because every call site passes them; the answer no
+// longer depends on either.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function pinShown(_comp: Pick<CsxComponent, "type" | "attrs">, _pin: string): boolean {
   return true;
 }
 

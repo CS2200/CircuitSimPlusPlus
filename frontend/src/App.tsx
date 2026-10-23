@@ -2003,6 +2003,7 @@ export default function App() {
                                   e.shiftKey,
                                   Object.keys(seed).length === 0 ? undefined : seed,
                                   item.rot,
+                                  item.name,
                                 )
                               }
                               onDragStart={(e) => {
@@ -2015,6 +2016,9 @@ export default function App() {
                                 }
                                 if (item.rot !== undefined) {
                                   e.dataTransfer.setData("text/x-csx-rot", item.rot);
+                                }
+                                if (item.name !== undefined) {
+                                  e.dataTransfer.setData("text/x-csx-name", item.name);
                                 }
                               }}
                               title={typeDisplayName(item.type)}

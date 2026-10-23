@@ -13,6 +13,7 @@ import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
 import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docScene";
+import { applyClockDefaults, nextPlaceSeq } from "../editor/clockDefaults";
 import { ToolMachine, type CanvasMenuState } from "../editor/tools";
 import { compSize } from "../editor/catalog";
 import type { SimController } from "../sim/controller";
@@ -54,6 +55,7 @@ export interface EditorHandle {
     sticky?: boolean,
     attrs?: Record<string, unknown>,
     rot?: "N" | "E" | "S" | "W",
+    name?: string,
   ): void;
   /** Redraw after an out-of-band doc mutation (properties dialog, …). */
   refresh(): void;
@@ -389,8 +391,8 @@ export default forwardRef<
   useImperativeHandle(
     ref,
     (): EditorHandle => ({
-      startPlacing: (type, sticky = false, attrs, rot) => {
-        tool.startPlacing(type, sticky, attrs, rot);
+      startPlacing: (type, sticky = false, attrs, rot, name) => {
+        tool.startPlacing(type, sticky, attrs, rot, name);
         bump();
       },
       refresh: () => {
@@ -485,12 +487,22 @@ export default forwardRef<
           const rot =
             rotRaw === "N" || rotRaw === "E" || rotRaw === "S" || rotRaw === "W" ? rotRaw : "E";
           const { w: bw, h: bh } = compSize({ type, attrs }, doc.circuits);
-          doc.addComponent(sheetRef.current, {
-            type,
-            pos: [Math.round(w.x - bw / 2), Math.round(w.y - bh / 2)],
-            rot,
-            ...(attrs !== undefined && { attrs }),
-          });
+          const name = e.dataTransfer.getData("text/x-csx-name");
+          // A drop is a placement like any other: same one-undo step, same default clock
+          // and reset wiring (`editor/clockDefaults.ts` explains the convention).
+          const key = `place:${nextPlaceSeq()}`;
+          const placed = doc.addComponent(
+            sheetRef.current,
+            {
+              type,
+              pos: [Math.round(w.x - bw / 2), Math.round(w.y - bh / 2)],
+              rot,
+              ...(attrs !== undefined && { attrs }),
+              ...(name !== "" && { name }),
+            },
+            key,
+          );
+          applyClockDefaults(doc, sheetRef.current, placed, type, key);
           bump();
         }
       }}
