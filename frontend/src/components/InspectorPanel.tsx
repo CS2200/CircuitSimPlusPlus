@@ -843,7 +843,7 @@ function FieldRow({
         <span>{field.label}</span>
         <input
           type="checkbox"
-          checked={value === true}
+          checked={value === undefined ? (field.dflt ?? false) : value === true}
           onChange={(e) => onCommitAttr(field.key, e.target.checked)}
         />
       </label>

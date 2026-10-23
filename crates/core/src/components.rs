@@ -298,6 +298,8 @@ pub enum CompKind {
     Comparator {
         /// Data width in bits.
         bitsize: u32,
+        /// Compare as 2's complement (CE's `Comparison Type` default) or unsigned.
+        signed: bool,
     },
     /// Negator (two's complement, `arith.negator`).
     Negator {
@@ -967,8 +969,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             )
         }
         "arith.comparator" => {
-            let mut c = AttrCheck::new(attrs, GATE_ATTRS);
+            let mut c = AttrCheck::new(attrs, &["bitsize", "signed"]);
             let b = c.bitsize(1);
+            // CE's `ComparatorPeer` offers "Comparison Type" — `2's complement` or
+            // `Unsigned` — and **defaults to 2's complement**, so a hand-drawn comparator
+            // here matches CE unless the sheet says otherwise (UI_OVERHAUL: the third
+            // registry attribute that is logic rather than decoration, after the gate
+            // input bubbles and the delay table).
+            let signed = c.boolean("signed", true);
             c.finish();
             (
                 vec![
@@ -979,7 +987,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     PinSig::o("gt", 1),
                 ],
                 c,
-                CompKind::Comparator { bitsize: b },
+                CompKind::Comparator { bitsize: b, signed },
             )
         }
         "arith.negator" => {

@@ -864,6 +864,25 @@ impl Value {
         Some(limbs_cmp(&self.ones, &rhs.ones))
     }
 
+    /// Compare two equal-width values as **2's complement** — CE's `ComparatorPeer`
+    /// "Comparison Type: 2's complement", which is its *default*.
+    ///
+    /// `None` when either side has `X`/`Z`, like [`Value::compare`]. Same sign bit ⇒ the
+    /// unsigned order is the signed order; different ⇒ the negative one is smaller. (This
+    /// is `Comparator.valueChanged`'s sign extension, without the 64-bit widening.)
+    pub fn compare_signed(&self, rhs: &Value) -> Option<Ordering> {
+        assert_eq!(self.width, rhs.width, "compare_signed: width mismatch");
+        if !self.is_fully_known() || !rhs.is_fully_known() {
+            return None;
+        }
+        let msb = self.width.saturating_sub(1);
+        match (self.bit(msb), rhs.bit(msb)) {
+            (Bit::One, Bit::Zero) => Some(Ordering::Less),
+            (Bit::Zero, Bit::One) => Some(Ordering::Greater),
+            _ => Some(limbs_cmp(&self.ones, &rhs.ones)),
+        }
+    }
+
     /// Shift left logical by `n` (≥ width → 0).
     pub fn shl(&self, n: u32) -> Value {
         if !self.is_fully_known() {
@@ -1004,6 +1023,24 @@ impl fmt::Display for Value {
 
 #[cfg(test)]
 mod tests {
+    /// The two comparisons differ exactly on negative values — CE's "Comparison Type".
+    #[test]
+    fn signed_compare_reads_the_top_bit_as_a_sign() {
+        let neg = Value::from_u64(4, 0xF); // -1 in 4-bit 2's complement
+        let one = Value::from_u64(4, 0x1);
+        let zero = Value::from_u64(4, 0x0);
+        let pos = Value::from_u64(4, 0x7);
+        assert_eq!(neg.compare(&one), Some(std::cmp::Ordering::Greater));
+        assert_eq!(neg.compare_signed(&one), Some(std::cmp::Ordering::Less));
+        assert_eq!(one.compare_signed(&zero), Some(std::cmp::Ordering::Greater));
+        assert_eq!(zero.compare_signed(&neg), Some(std::cmp::Ordering::Greater));
+        assert_eq!(pos.compare_signed(&zero), Some(std::cmp::Ordering::Greater));
+        assert_eq!(pos.compare_signed(&one), Some(std::cmp::Ordering::Greater));
+        // An unknown compares neither way, signed or not.
+        assert_eq!(Value::x(4).compare_signed(&one), None);
+        assert_eq!(Value::z(4).compare_signed(&one), None);
+    }
+
     use super::*;
 
     const ALL: [Bit; 4] = [Bit::Zero, Bit::One, Bit::X, Bit::Z];

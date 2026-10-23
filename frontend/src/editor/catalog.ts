@@ -1047,7 +1047,16 @@ export type AttrField =
       group?: string;
       hint?: string;
     }
-  | { key: string; label: string; kind: "boolean"; group?: string; hint?: string }
+  | {
+      key: string;
+      label: string;
+      kind: "boolean";
+      /** The value the *engine* applies when the attribute is absent (format-v2 §4),
+       * so the checkbox shows the effective default rather than a misleading unchecked. */
+      dflt?: boolean;
+      group?: string;
+      hint?: string;
+    }
   | { key: string; label: string; kind: "color"; group?: string; hint?: string }
   | {
       key: string;
@@ -1172,6 +1181,21 @@ function baseFields(type: string): AttrField[] {
   }
   if (type.startsWith("arith.")) {
     switch (type) {
+      case "arith.comparator":
+        return [
+          BITSIZE_FIELD,
+          // `Comparison Type` in the old format, and 2's complement is CE's default —
+          // dropping it compares unsigned, which flips branch conditions
+          // (format-v2 §4).
+          {
+            key: "signed",
+            label: "Signed (2's complement)",
+            kind: "boolean",
+            dflt: true,
+            group: "Options",
+            hint: "Off compares unsigned, as CE's “Unsigned” comparison type.",
+          },
+        ];
       case "arith.shifter":
         return [
           BITSIZE_FIELD,

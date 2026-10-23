@@ -202,7 +202,10 @@ enum BehaviorKind {
     Divider {
         bitsize: u32,
     },
-    Comparator,
+    Comparator {
+        /// 2's complement, CE's default (`ComparatorPeer.USE_SIGNED_COMPARE`).
+        signed: bool,
+    },
     Negator,
     Shifter {
         mode: ShiftMode,
@@ -325,7 +328,7 @@ impl Behavior {
             CompKind::Subtractor { bitsize } => BehaviorKind::Subtractor { bitsize: *bitsize },
             CompKind::Multiplier { bitsize } => BehaviorKind::Multiplier { bitsize: *bitsize },
             CompKind::Divider { bitsize } => BehaviorKind::Divider { bitsize: *bitsize },
-            CompKind::Comparator { .. } => BehaviorKind::Comparator,
+            CompKind::Comparator { signed, .. } => BehaviorKind::Comparator { signed: *signed },
             CompKind::Negator { .. } => BehaviorKind::Negator,
             CompKind::Shifter { mode, .. } => BehaviorKind::Shifter { mode: *mode },
             CompKind::BitExtender { out_bits, mode, .. } => BehaviorKind::BitExtender {
@@ -656,11 +659,16 @@ impl Behavior {
                     None => Ok(vec![Value::x(*bitsize), Value::x(*bitsize)]),
                 }
             }
-            BehaviorKind::Comparator => {
+            BehaviorKind::Comparator { signed } => {
                 for (v, name) in ins.iter().zip(["a", "b"]) {
                     consume(v, name)?;
                 }
-                Ok(match ins[0].compare(ins[1]) {
+                let order = if *signed {
+                    ins[0].compare_signed(ins[1])
+                } else {
+                    ins[0].compare(ins[1])
+                };
+                Ok(match order {
                     Some(std::cmp::Ordering::Less) => vec![one(), zero(), zero()],
                     Some(std::cmp::Ordering::Equal) => vec![zero(), one(), zero()],
                     Some(std::cmp::Ordering::Greater) => vec![zero(), zero(), one()],
@@ -914,7 +922,7 @@ impl Behavior {
             BehaviorKind::Subtractor { bitsize } => ("arith.subtractor", *bitsize),
             BehaviorKind::Multiplier { bitsize } => ("arith.multiplier", *bitsize),
             BehaviorKind::Divider { bitsize } => ("arith.divider", *bitsize),
-            BehaviorKind::Comparator => ("arith.comparator", 1),
+            BehaviorKind::Comparator { .. } => ("arith.comparator", 1),
             BehaviorKind::Negator => ("arith.negator", 1),
             BehaviorKind::Shifter { .. } => ("arith.shifter", 1),
             BehaviorKind::BitExtender { .. } => ("arith.bit-extender", 1),
