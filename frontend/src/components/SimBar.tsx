@@ -47,7 +47,9 @@ export default function SimBar({
   const hz = Math.round(10 ** (hzExp / 10));
   const running = s.status?.running ?? false;
   /** Paused at a breakpoint — a stop, but not a failure (docs/ipc.md §3). */
-  const paused = s.halted?.reason === "breakpoint";
+  // A breakpoint and a floating read are both *pauses* (contract v1.4): the run carries on
+  // when play is pressed again, so the bar offers that rather than looking stuck.
+  const paused = s.halted?.reason === "breakpoint" || s.halted?.reason === "floating-read";
 
   const guard = (p: Promise<void>) => p.catch((e: unknown) => setCmdError(String(e)));
 

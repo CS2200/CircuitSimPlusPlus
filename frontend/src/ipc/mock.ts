@@ -170,6 +170,8 @@ function valueToU32(val: WireValue): number {
 }
 
 export class MockCore implements CoreApi {
+  /** The editor's "stop when a part reads an unknown value" (§4.1), mock-side. */
+  private pauseOnUnknown = false;
   readonly events = new CoreEventEmitter();
 
   private tick = 0;
@@ -326,6 +328,10 @@ export class MockCore implements CoreApi {
     for (let i = 0; i < n * 2; i++) this.advanceTick();
   }
 
+  async setPauseOnUnknown(pause: boolean): Promise<void> {
+    this.pauseOnUnknown = pause;
+  }
+
   async runUntil(cycle: number): Promise<void> {
     if (cycle - this.cycle > MAX_RUN_UNTIL_CYCLES) {
       throw new Error(`mock run_until: target cycle ${cycle} exceeds safety cap`);
@@ -358,7 +364,10 @@ export class MockCore implements CoreApi {
     }
     if (compId === layout.bufferComp && pin === "consume") {
       if (!this.clk && this.busForced === null) {
-        // Consuming a floating value halts the simulation (DESIGN.md §4.1).
+        // Contract v1.4: a floating read is `X`, not a fault — the value is unknown and the
+        // design carries on. The editor's "stop when a part reads an unknown value"
+        // preference is what turns it into a pause, naming the part and pin.
+        if (!this.pauseOnUnknown) return;
         this.stopTimer();
         this.events.emit(IpcEvents.SimHalted, {
           cycle: this.cycle,

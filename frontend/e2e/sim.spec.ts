@@ -84,7 +84,7 @@ test("U5: full sim control loop over the mock core", async ({ page }) => {
   await expect(page.locator(".sim-tobs")).toContainText("T_obs");
 });
 
-test("U5: consuming a floating bus halts with a banner", async ({ page }) => {
+test("U5: a floating bus is X — consuming it is not itself a halt", async ({ page }) => {
   await page.getByRole("button", { name: "tick", exact: true }).click(); // load + 1 tick (clk high)
   await page.getByRole("button", { name: "tick", exact: true }).click(); // clk falls → bus floats
   await page.evaluate(() => {
@@ -95,9 +95,15 @@ test("U5: consuming a floating bus halts with a banner", async ({ page }) => {
     ).__sim;
     return sim.poke(5, "consume", { v: "0", x: "0", z: "0" }); // comp 5 = buffer
   });
-  await expect(page.locator(".sim-banner")).toContainText("floating-read");
-  await expect(page.locator(".sim-banner")).toContainText("comp 5");
-  await expect.poll(() => simState(page)).toMatchObject({ halted: "floating-read" });
+  // Contract v1.4: the engine never assumes a value. A floating read is `X` and the design
+  // carries on, so consuming a floating bus is no longer a *floating-read* halt. (The demo
+  // circuit may still pause on its own breakpoint, which is a different reason — hence the
+  // assertion is about the reason, not about there being no banner.)
+  //
+  // The editor's "Stop when a part reads an unknown value" preference turns it into a pause;
+  // its end-to-end acceptance lives with the engine tests (crates/core), because this mock
+  // core drives a canned trace whose breakpoint fires before the float is read.
+  expect((await simState(page)).halted ?? null).not.toBe("floating-read");
 });
 
 test("sim shortcuts: Ctrl+J tick, Ctrl+K run/pause, Ctrl+R reset", async ({ page }) => {

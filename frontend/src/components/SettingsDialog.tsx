@@ -50,8 +50,7 @@ export default function SettingsDialog({
   showPerf,
   defaultBits,
   defaultInputs,
-  showClk,
-  showRst,
+  pauseOnUnknown,
   defaultHz,
   updateCheckOn,
   historyUsage,
@@ -67,8 +66,7 @@ export default function SettingsDialog({
   onShowPerf,
   onDefaultBits,
   onDefaultInputs,
-  onShowClk,
-  onShowRst,
+  onPauseOnUnknown,
   onDefaultHz,
   onUpdateCheck,
   onReset,
@@ -95,9 +93,9 @@ export default function SettingsDialog({
   /** Gate input count seeded on newly placed gates. */
   defaultInputs: number;
   /** Show a memory part's clock pin on placement (§93). */
-  showClk: boolean;
+  pauseOnUnknown: boolean;
   /** Show a memory part's reset pin on placement (§93). */
-  showRst: boolean;
+  onPauseOnUnknown: (v: boolean) => void;
   /** Default clock-speed exponent (hz = 10^(exp/10)). */
   defaultHz: number;
   updateCheckOn: boolean;
@@ -114,8 +112,7 @@ export default function SettingsDialog({
   onShowPerf: (v: boolean) => void;
   onDefaultBits: (v: number) => void;
   onDefaultInputs: (v: number) => void;
-  onShowClk: (v: boolean) => void;
-  onShowRst: (v: boolean) => void;
+
   onDefaultHz: (v: number) => void;
   onUpdateCheck: (v: boolean) => void;
   /** Back to the shipped defaults (theme, accent, toggles). */
@@ -330,16 +327,12 @@ export default function SettingsDialog({
                   onDefaultInputs,
                 )}
                 {toggle(
-                  "Show clock pins on new registers and RAMs",
-                  "The clock pin is always there — hidden, the part follows the circuit's clock.",
-                  showClk,
-                  onShowClk,
-                )}
-                {toggle(
-                  "Show reset pins on new registers and RAMs",
-                  "The reset pin is always there — hidden, the part never resets.",
-                  showRst,
-                  onShowRst,
+                  "Stop when a part reads an unknown value",
+                  "A floating input reads as X (unknown) and the run carries on. On, the " +
+                    "editor stops on the first one and names the part and pin — press play " +
+                    "to continue from there.",
+                  pauseOnUnknown,
+                  onPauseOnUnknown,
                 )}
               </section>
             )}

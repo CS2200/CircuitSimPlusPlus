@@ -411,3 +411,32 @@ test("priority decoder: places from Plexers and edits its line count", async ({ 
   await page.getByLabel("Input lines").fill("8");
   expect((await placed())?.attrs?.inputBits).toBe(8);
 });
+
+test("placement wires a part's clock and reset (one clock source)", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  // The palette is a rail of group tabs that reveal their items on hover/focus (not click).
+  await page.locator('[data-group="Memory"]').hover();
+  await page.locator(".palette-item", { hasText: /reg/i }).first().click();
+  const spot = await world(page, 0, 0);
+  await page.mouse.click(spot.x, spot.y);
+  await page.keyboard.press("Escape");
+
+  const doc = JSON.parse(
+    await page.evaluate(() => (window as unknown as { __circuitDoc: () => string }).__circuitDoc()),
+  ) as {
+    circuits: {
+      components: { id: string; type: string; name?: string }[];
+      wires: { a: { comp: string }; b: { comp: string }; name?: string }[];
+    }[];
+  };
+  const c = doc.circuits[0];
+  // The design's clock is the circuit's global clock (never a pin), and the reset is a pin.
+  expect(c.components.some((x) => x.type === "wiring.clock")).toBe(true);
+  expect(c.components.some((x) => x.type === "wiring.pin" && x.name === "RST")).toBe(true);
+  const reg = c.components.find((x) => x.type === "mem.register");
+  expect(reg).toBeDefined();
+  const mine = c.wires.filter((w) => w.a.comp === reg?.id || w.b.comp === reg?.id);
+  expect(mine).toHaveLength(2);
+  expect(mine.map((w) => w.name).sort()).toEqual(["CLK", "RST"]);
+});

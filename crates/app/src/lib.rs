@@ -139,6 +139,16 @@ fn sim_pause(state: State<SimState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Pause when a component reads a value the model had to call unknown (DESIGN.md §4.1) —
+/// the editor's "stop and ask". The value is `X` (nothing is assumed), and the halt is a
+/// *pause*: pressing play carries on from exactly there, like a breakpoint.
+#[tauri::command]
+fn sim_set_pause_on_unknown(state: State<SimState>, pause: bool) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    session(&mut guard)?.set_pause_on_unknown(pause);
+    Ok(())
+}
+
 #[tauri::command]
 fn sim_step_tick(state: State<SimState>) -> Result<(), String> {
     let mut guard = lock(&state)?;
@@ -453,6 +463,7 @@ pub fn run() {
             save_image,
             sim_play,
             sim_pause,
+            sim_set_pause_on_unknown,
             sim_step_tick,
             sim_step_cycles,
             sim_run_until,

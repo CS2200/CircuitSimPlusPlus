@@ -36,12 +36,25 @@ class TauriEvents implements CoreEvents {
   }
 }
 
+/**
+ * The user's "stop when a part reads an unknown value" preference (DESIGN.md §4.1), kept
+ * here and re-sent after every load/reset: both *rebuild* the engine, and a setting a person
+ * chose must outlive that. The backend holds no such state on purpose — it is a UI setting.
+ */
+let pauseOnUnknown = false;
+
+/** `load_circuit` / `sim_reset` rebuild the engine, so the preference is re-sent after one. */
+function reapplyPrefs<T>(result: T): T {
+  if (pauseOnUnknown) void invoke("sim_set_pause_on_unknown", { pause: true });
+  return result;
+}
+
 class TauriCore implements CoreApi {
   loadCircuit(src: { path?: string; bytes?: Uint8Array }): Promise<LoadResult> {
-    return invoke("load_circuit", {
+    return invoke<LoadResult>("load_circuit", {
       path: src.path ?? null,
       bytes: src.bytes !== undefined ? Array.from(src.bytes) : null,
-    });
+    }).then(reapplyPrefs);
   }
 
   saveCircuit(path: string, document: unknown): Promise<SaveResult> {
@@ -68,8 +81,17 @@ class TauriCore implements CoreApi {
     return invoke("sim_run_until", { cycle });
   }
 
+  /**
+   * The preference is remembered *here* and re-sent after every load/reset: both rebuild
+   * the engine, and a user setting must outlive that (the backend does not persist it).
+   */
+  setPauseOnUnknown(pause: boolean): Promise<void> {
+    pauseOnUnknown = pause;
+    return invoke("sim_set_pause_on_unknown", { pause });
+  }
+
   reset(): Promise<void> {
-    return invoke("sim_reset");
+    return invoke<void>("sim_reset").then(reapplyPrefs);
   }
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void> {

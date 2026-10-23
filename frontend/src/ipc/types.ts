@@ -196,6 +196,12 @@ export interface CoreApi {
    */
   stepTick(): Promise<void>;
   stepCycles(n: number): Promise<void>;
+  /**
+   * Pause on the first read of a value the model had to call unknown (§4.1). Off: the run
+   * carries on and the `X` shows up wherever it is used. It is a *pause* — the next
+   * `play`/`step` continues (frontend/src/editor/../prefs.ts `csx.pauseOnUnknown`).
+   */
+  setPauseOnUnknown(pause: boolean): Promise<void>;
   runUntil(cycle: number): Promise<void>;
 
   /**

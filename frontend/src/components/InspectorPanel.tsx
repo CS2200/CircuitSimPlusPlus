@@ -297,6 +297,25 @@ export default function InspectorPanel({
    */
   const unnamedPin = comp.type === "wiring.pin" && (comp.name ?? "") === "";
   const nameKey = `${comp.id}:name`;
+  /**
+   * The editor's clock/reset convention (`editor/clockDefaults.ts`): a placed part wires
+   * itself to a pin named `CLK` / `RST`, and any capitalisation of those words is accepted
+   * when *finding* one. A different spelling is not an error — a wire's name is a label,
+   * not a joining rule — but it will not be found, so this says so once.
+   */
+  const typed = (comp.name ?? "").trim();
+  const clockAlias =
+    comp.type === "wiring.pin" && /^(clk|clock|rst|reset)$/i.test(typed)
+      ? /^(clk|clock)$/i.test(typed)
+        ? { want: "CLK", is: typed }
+        : { want: "RST", is: typed }
+      : null;
+  const clockAliasHint =
+    clockAlias !== null && clockAlias.is !== clockAlias.want
+      ? `Convention: ${clockAlias.want}. “${clockAlias.is}” still works — the name is a ` +
+        `label — but the editor wires a placed part's clock and reset to the upper-case ` +
+        `form, so this pin will not be found by default.`
+      : null;
 
   // ---- memory images (UI_OVERHAUL §11): two loading methods ----
   const isMemory = comp.type === "mem.ram" || comp.type === "mem.rom";
@@ -385,6 +404,24 @@ export default function InspectorPanel({
         <p className="inspector-note" data-note="unnamed-pin">
           ⚠ Name this pin — a sheet&apos;s named pins are its subcircuit interface, and an unnamed
           pin stops the file from loading (format-v2 §5).
+        </p>
+      )}
+
+      {clockAliasHint !== null && (
+        <p className="inspector-note" data-note="clock-alias">
+          ⓘ {clockAliasHint}
+          {comp.name !== undefined && comp.name !== clockAlias?.want && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="inspector-link"
+                onClick={() => commit({ name: clockAlias?.want }, "name")}
+              >
+                Rename to {clockAlias?.want}
+              </button>
+            </>
+          )}
         </p>
       )}
 
