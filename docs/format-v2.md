@@ -386,6 +386,21 @@ input nobody connected — is a real floating read, and that is what the cycle-c
 reports. Without this rule a deep combinational path halts a design at power-on, while it is
 merely settling (converted old-format designs hit it first, and with wire propagation
 off — see `docs/delay-table.md` — only component delays are in play).
+
+Two refinements keep that wait from over-reaching, and both are conformance-critical:
+
+* **Only a pin the part actually reads may stall it.** The wait asks the part's own consume
+  table (the table just above). A `Z` on a pin a part never reads — a mux's *unselected*
+  input, a controlled buffer's data while disabled — is not its problem, and a **gated bus**
+  is exactly this shape. Waiting on *any* input instead pinned the mux's output at `Z`
+  forever, and a register sampling that `Z` read `X` for the rest of the run; every converted
+  old-format design that gates a bus on its write-back path hit it.
+* **An *idle* driven net is final, not in flight.** A `Z` whose net's drivers have all
+  committed what they drive (every one enabled off — a tri-state bus driving nothing) will
+  never be replaced by a value, so there is nothing to wait for: the part evaluates and its
+  consume table reads the `Z` like any other. Only a driver with a change still queued on its
+  propagation delay, or one that has produced no output at all yet, is "in flight".
+
 Preloading a memory (`--load`, `autoload`) is a **write**, so it never fails on an unsettled
 address either; the read output refreshes on the ordinary path once the address arrives.
 

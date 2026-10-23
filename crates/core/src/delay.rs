@@ -47,8 +47,13 @@
 //!
 //! ## Floating-consume in an event engine (§4.1, per-consumer since F6)
 //!
-//! Combinational components evaluate only once **all** their input views
-//! are non-`Z` (a `Z` view means "not yet arrived"; the output holds).
+//! A combinational component holds its output while a `Z` it would
+//! actually *read* is still on its way — the wait consults the same
+//! consume table as the sweep below, so a `Z` on a pin the part never
+//! reads (a mux's *unselected* input, a disabled buffer's data) does not
+//! stall it, and a `Z` whose drivers have all committed — an idle
+//! tri-state bus — is final, not in flight: there is nothing to wait for,
+//! so the part evaluates (`net_in_flight`).
 //! At each **cycle close** a per-consumer sweep halts the run with
 //! `FloatingRead` only when a pin that *consumes* (per the behavior
 //! module's consume table — muxes consume only the selected input,
@@ -1670,7 +1675,13 @@ impl DelayEngine {
             // never arrive — it is passed through so the behavior's
             // consume table decides (a mux's unselected input is not
             // consumed; a gate input is and halts). `Z` on a driven net
-            // means "still in flight or idle": wait (the output holds).
+            // means "in flight or idle": wait only while the value is
+            // still on its way (`net_in_flight`). An *idle* driven net —
+            // every driver enabled off, i.e. a tri-state bus driving
+            // nothing — is final, not in flight, so it must not stall the
+            // part: a mux with a disabled buffer on its unselected input
+            // used to wait forever and hold its output at `Z` instead of
+            // passing the selected input through.
             //
             // A memory's ASYNCHRONOUS READ path waits the same way, on its
             // `addr` only (`din`/`we`/`clk` are edge inputs and must not stall
@@ -1681,12 +1692,35 @@ impl DelayEngine {
             // the cycle-close sweep exists to tell apart from a real floating
             // read (`floating_sweep`, the never-driven oracle).
             if matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
-                let waiting = cd.in_pins.iter().enumerate().any(|(i, &(slot, net))| {
-                    let read_now = match cd.class {
-                        Class::Comb => true,
-                        _ => self.netlist.comps[c].pins[slot].pin == "addr",
-                    };
-                    read_now && ins[i].has_z() && !self.netlist.nets[net.idx()].floating
+                // A `Z` may only stall the part if the part would *read* it: ask the
+                // behavior's own consume table (`eval`). A `Z` it never reads — a mux's
+                // unselected input, a disabled tri-state buffer's data — is not its
+                // problem, and that is the whole point of a gated bus. Waiting on any
+                // input instead deadlocked every converted design whose write-back path
+                // gates a bus this way: the mux waited forever and held its output at `Z`
+                // (then a consuming register stored `X`) rather than passing the selected
+                // input through. `floating_sweep` already states this oracle — "muxes
+                // consume only the selected input, disabled buffers nothing".
+                //
+                // A memory's asynchronous read path is the one exception: it waits on its
+                // `addr` only (`din`/`we`/`clk` are edge inputs and must not stall a read),
+                // so for RAM/ROM the pin is named directly rather than asked of `eval`.
+                let wakes: Option<usize> = if cd.class == Class::Comb {
+                    let refs: Vec<&Value> = ins.iter().collect();
+                    match beh.eval(&refs) {
+                        Ok(_) => None,
+                        Err(fr) => self.input_index_for(c, &fr.pin),
+                    }
+                } else {
+                    cd.in_pins
+                        .iter()
+                        .position(|&(slot, _)| self.netlist.comps[c].pins[slot].pin == "addr")
+                };
+                let waiting = wakes.map_or(false, |i| {
+                    let (_slot, net) = cd.in_pins[i];
+                    ins[i].has_z()
+                        && !self.netlist.nets[net.idx()].floating
+                        && self.net_in_flight(net)
                 });
                 if waiting {
                     return Ok(());
@@ -1724,6 +1758,36 @@ impl DelayEngine {
             self.schedule(now + delay, EvKind::Fire { comp, gen });
         }
         Ok(())
+    }
+
+    /// Is `net`'s current value still on its way in? True while any driver of the net has
+    /// not yet committed what it drives — either it has produced no output at all, or it
+    /// has a change queued on its propagation delay.
+    ///
+    /// `Z` means two different things and only this separates them: a value **in flight**
+    /// (wait for it) and an **idle bus** — every driver enabled off, a tri-state part
+    /// driving nothing. The second is final, so a part seeing that `Z` on a pin it does not
+    /// even read must not stall on it (the conformance case is `mux_z_input`).
+    fn net_in_flight(&self, net: NetId) -> bool {
+        self.net_drivers[net.idx()]
+            .iter()
+            .any(|&(c, slot)| self.driver_in_flight(c as usize, slot))
+    }
+
+    /// Has `c` not yet committed the value it drives on output `slot`?
+    fn driver_in_flight(&self, c: usize, slot: usize) -> bool {
+        if self.pending_gen[c] == 0 {
+            return true; // no output produced yet: the `Z` is the initial state, not a decision
+        }
+        self.cdata[c]
+            .out_pins
+            .iter()
+            .position(|&(s, _)| s == slot)
+            .map_or(false, |i| {
+                self.pending_val[c]
+                    .get(i)
+                    .map_or(false, |pending| pending != &self.drives[c][slot])
+            })
     }
 
     /// The index (into a component's `in_pins`/input list) whose pin is named `pin` —
@@ -2917,6 +2981,46 @@ mod tests {
         eng.poke_at("eb", k(1, 0), 110);
         eng.run(1).unwrap(); // bus idles at Z across a cycle close — no halt
         assert_eq!(eng.named_value("bus"), Some(Value::z(8)));
+    }
+
+    /// A tri-state bus idling at `Z` on a mux's **unselected** input must not stall the
+    /// mux. That `Z` is final — every driver enabled off — not a value on its way, and the
+    /// mux never reads that pin, so the selected input passes through.
+    ///
+    /// Before this, the wait-for-arrival rule saw a `Z` on a *driven* net and made the mux
+    /// wait forever, holding its output at `Z`. Every converted design that gates a bus
+    /// this way — the LC-5200's write-back path is exactly this shape — read `Z`, and a
+    /// register consuming it stored `X` for the rest of the run.
+    #[test]
+    fn mux_passes_through_with_idle_bus_on_unselected_input() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"zero","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"0"}}}},
+                {{"id":"sel0","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":1,"value":"0"}}}},
+                {{"id":"five","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"05"}}}},
+                {{"id":"off","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":1,"value":"0"}}}},
+                {{"id":"buf","type":"wiring.controlled-buffer","pos":[0,0],"attrs":{{"bitsize":8}}}},
+                {{"id":"m","type":"plexers.mux","pos":[0,0],"attrs":{{"bitsize":8,"selectBits":1}}}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out","attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"m","pin":"in0"}}}},
+                {{"a":{{"comp":"five","pin":"out"}},"b":{{"comp":"buf","pin":"in"}}}},
+                {{"a":{{"comp":"off","pin":"out"}},"b":{{"comp":"buf","pin":"en"}}}},
+                {{"a":{{"comp":"buf","pin":"out"}},"b":{{"comp":"m","pin":"in1"}}}},
+                {{"a":{{"comp":"sel0","pin":"out"}},"b":{{"comp":"m","pin":"sel"}}}},
+                {{"a":{{"comp":"m","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(1).expect("an idle bus on a pin the part does not read is not a fault");
+        assert_eq!(
+            eng.named_value("out"),
+            Some(k(8, 0)),
+            "sel=0 passes in0 through; the disabled buffer on in1 is not read"
+        );
     }
 
     /// F11: the RAM write-enable is tracked like din/addr — a `we`

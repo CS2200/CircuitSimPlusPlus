@@ -22,6 +22,12 @@
 //! fewer events. In both cases `t_obs` did not move and the
 //! architectural checks (`cpu_fixtures_compute_the_program`, `fixture_alu_computes`)
 //! still pass — the drift is events, not results.
+//!
+//! Re-blessed again by the idle-bus fix: a part now waits for a `Z` input only if its own
+//! consume table reads it *and* the value is still on its way (`net_in_flight`), so a `Z`
+//! on a pin a part never reads no longer stalls it. Only `alu.csx` moved — its 8-way mux
+//! has six unconnected inputs — and again `t_obs` held and the architectural checks pass:
+//! the drift is one fewer spurious hold, not a different result.
 
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
@@ -64,7 +70,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0xd73b_492d_af9f_d5e5,
+        trace_hash: 0x13d4_9d0e_fdb3_5205,
     },
     Scenario {
         fixture: "multicycle.csx",
@@ -72,7 +78,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x9b4c_51ce_8a7c_9119,
+        trace_hash: 0xb009_1cba_432c_f5c7,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -80,7 +86,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0xf81a_978b_fb39_e1d6,
+        trace_hash: 0x3221_6d5d_e6c2_3e29,
     },
 ];
 
