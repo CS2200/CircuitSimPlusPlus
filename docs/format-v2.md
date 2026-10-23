@@ -327,8 +327,23 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   `csim run --pause-on-breakpoints` reproduces a pause by hand, and the report names the part
   when it does fire — docs/autograder.md §6).
 
-**The floating-consume table (§4.1, D3).** Consuming a floating (`Z`) value is a
-simulation-halting error naming the component and pin. What counts as _consuming_:
+**The floating-consume table (contract v1.4).** A pin that consumes a floating (`Z`) value
+reads it as **`X`** — unknown — and the simulation carries on. The engine never *assumes* a
+value: `Z` describes the net (no driver), `X` describes what a consumer learns from it
+(nothing), and where the value is used the `X` propagates until something observes it, at
+which point the verdict says so (an `X` never equals a literal, §4.1). A read of an unknown
+can *pause* a run — `pause_on_unknown`, the editor's "ask me before carrying on", a pause and
+not a fault — but it is off by default, because a graded run should see the `X` rather than
+stop at it.
+
+This is deliberately **harsher than CircuitSim CE**, which has no `X`: its parts each pick a
+value for a floating pin (its gates coalesce `Z` to `0`, an enable reads it as `1`, a
+register stores `Z`, a mux passes it on). Reproducing that is the *converter's* job, not the
+engine's — it writes CE's meanings in as explicit drivers for the pins CE defines (`clk` →
+0, `rst` → 0, `en` → 1) and leaves the rest to `X`, so a converted design cannot silently
+depend on a value nobody wrote down. Every other consuming pin follows its own rule (below):
+a mux consumes only the input its `sel` picks, a disabled buffer consumes nothing, a register
+consumes `d` only on its enabled edge.
 
 | Component                       | Consumes                                                                                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

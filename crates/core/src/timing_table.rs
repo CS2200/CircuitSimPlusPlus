@@ -39,7 +39,18 @@ use crate::components::KNOWN_TYPES;
 /// — an edge reaching registers at different times, which CE's atomic edge never does (a
 /// converted CPU lost its first instruction to exactly that). Only component delays
 /// count for now; the per-path machinery is still built and simply contributes 0, so
-/// turning `num` back on restores it.
+/// turning `num` back on restores it.///
+/// **And that has a second consequence, which matters: it removes *clock skew*.** A clock
+/// edge is delivered per sink like any other transition, so with wire delays a register
+/// further from the clock source clocks later than one nearer — and a design built for CE,
+/// whose edge is atomic (one oscillator toggling every clocked part at once), can latch a
+/// value a cycle early. That is not hypothetical: it cost a converted CPU its first
+/// instruction, because the PC (clocked early) advanced and only then did the IF/ID latch
+/// (clocked late) sample the *new* fetch. Real silicon **does** have skew — accounting for
+/// it is a legitimate thing to want — so this is a simplification, not a correction, and it
+/// is the reason the two must move together: whenever wire propagation comes back, the
+/// "one global clock domain" rule (DESIGN.md §4.3) has to come back with it, or that bug
+/// returns with it.
 const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 
 /// Component kinds a table must define — everything with a nonzero delay
