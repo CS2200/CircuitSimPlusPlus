@@ -658,6 +658,13 @@ impl Sim for Session {
         st.emit_status(&mut **sink);
     }
 
+    fn set_pause_on_unknown(&mut self, pause: bool) {
+        let mut g = self.inner.lock().expect("session mutex poisoned");
+        if let Some(st) = g.state.as_mut() {
+            st.engine.0.pause_on_unknown = pause;
+        }
+    }
+
     fn set_watch(&mut self, watch: &[Watch]) {
         let mut g = self.inner.lock().expect("session mutex poisoned");
         let Inner { state, sink, .. } = &mut *g;
@@ -1086,14 +1093,17 @@ mod tests {
         let mut s = Session::new(Box::new(rec.clone()));
         assert!(s.load_circuit_bytes(json.as_bytes()).ok);
         let r = rec.0.lock().unwrap();
-        let h = r.halts.last().expect("power-on floating read");
-        assert_eq!(h.reason, crate::api::HaltReason::FloatingRead);
-        assert!(
-            h.details
-                .starts_with("comp 1 pin \"in1\": floating (Z) value consumed"),
-            "got: {}",
-            h.details
+        // Default: the floating read is `X` and the run carries on.
+        assert_ne!(
+            r.halts.last().map(|h| h.reason),
+            Some(crate::api::HaltReason::FloatingRead),
+            "a floating read is not a fault any more"
         );
+        // NOTE: this read happens in the *boot settle*, before a caller can set
+        // `pause_on_unknown` — so the opt-in pause (covered for run-time reads by
+        // `delay::tests::a_floating_gate_input_is_read_as_x_and_pausing_is_opt_in`) cannot
+        // fire here, and the session's `set_pause_on_unknown` is what the next `step_*`
+        // would honour. A power-on read should not hold a design before it can start.
     }
 
     fn last_cycle(rec: &Arc<StdMutex<Rec>>) -> u64 {

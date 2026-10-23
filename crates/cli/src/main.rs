@@ -139,6 +139,11 @@ struct RunArgs {
     /// condition that held.
     #[arg(long = "stop", value_name = "WHEN:NAME[:ARG]")]
     stops: Vec<String>,
+    /// Pause when a component reads a value the model had to call unknown (an `X`),
+    /// naming the component and pin. Off by default: a graded run carries on and the `X`
+    /// shows up in the assertion results.
+    #[arg(long)]
+    pause_on_unknown: bool,
     /// Pause at `debug.breakpoint`s instead of ignoring them. Off by default: a
     /// breakpoint is a debug aid, and a graded run must not be cut short by one
     /// (§8.1).
@@ -321,6 +326,7 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
             .push(autograde::parse_watch(spec).map_err(|e| e.to_string())?);
     }
     cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
+    cfg.pause_on_unknown |= args.pause_on_unknown;
     if let Some(h) = args.clock_half_period_ns {
         cfg.clock_half_period = h;
     }

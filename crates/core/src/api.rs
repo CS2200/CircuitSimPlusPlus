@@ -469,6 +469,13 @@ pub trait Sim {
         unimplemented!("csim-core engine — contract v1.3")
     }
 
+    /// Pause when a component reads a value the model had to call unknown (§4.1), naming
+    /// the component and pin — the editor's "ask me before carrying on". Off, the value is
+    /// `X` and the run carries on; the UI is where "stop and ask" belongs, not the engine.
+    fn set_pause_on_unknown(&mut self, pause: bool) {
+        unimplemented!("csim-core engine — contract v1.4")
+    }
+
     /// Drive a component pin (interactive poking / test setup).
     fn poke(&mut self, comp_id: CompId, pin: &str, value: WireValue) {
         unimplemented!("csim-core engine — BACKEND.md task B4")

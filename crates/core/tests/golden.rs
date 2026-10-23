@@ -366,12 +366,22 @@ fn fixture_fsm_alternates() {
 
 #[test]
 fn negative_fixtures_halt_as_advertised() {
-    // floating-read: exit 5 via the delay engine.
+    // floating-read: **not a fault** since contract v1.4. The value it reads is `X` —
+    // unknown — and the run carries on, so the verdict is the assertion's (an `X` never
+    // equals a literal). `pause_on_unknown` is what asks to be stopped instead, which is
+    // the editor's setting, not a grader's.
     let doc = load("neg-floating-read.csx");
     let mut cfg = autograde::GradeConfig::default();
     cfg.limits.max_cycles = 2;
+    cfg.assertions = vec![autograde::parse_assertion("probe('r') == 0").unwrap()];
+    let out = autograde::grade(&doc, &cfg).unwrap();
+    assert_eq!(out.outcome, autograde::GradeOutcome::AssertionFailed);
+    let mut cfg = autograde::GradeConfig::default();
+    cfg.limits.max_cycles = 2;
+    cfg.pause_on_unknown = true;
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::FloatingRead);
+    assert_eq!(out.outcome.exit_code(), autograde::EXIT_FLOATING_READ);
 
     // contention: bus is X; an equality assertion must fail (exit 1).
     let doc = load("neg-contention.csx");

@@ -864,6 +864,24 @@ impl Value {
         Some(limbs_cmp(&self.ones, &rhs.ones))
     }
 
+    /// Every `Z` bit as `X` — the same value, but "unknown" rather than "nobody is
+    /// driving". Used where the model *reads* a floating net: `Z` describes the net (a
+    /// tri-state bus with no active driver), `X` describes what a consumer learns from it
+    /// (nothing). See `delay.rs`'s `eval_and_schedule` for why the engine never assumes a
+    /// value here — the converter encodes CE's implied constants instead.
+    pub fn z_to_x(&self) -> Value {
+        if !self.has_z() {
+            return self.clone();
+        }
+        let bits: Vec<Bit> = (0..self.width)
+            .map(|i| match self.bit(i) {
+                Bit::Z => Bit::X,
+                b => b,
+            })
+            .collect();
+        Value::from_bits(&bits)
+    }
+
     /// Compare two equal-width values as **2's complement** — CE's `ComparatorPeer`
     /// "Comparison Type: 2's complement", which is its *default*.
     ///

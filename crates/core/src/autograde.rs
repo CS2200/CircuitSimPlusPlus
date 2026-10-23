@@ -459,6 +459,11 @@ pub struct GradeConfig {
     /// that consumes the budget without a watch holding is a `cycle-limit` failure
     /// (that is what "the design was supposed to stop on its own" now means).
     pub watch: Vec<api::Watch>,
+    /// Pause when a component reads a value the model had to call unknown (§4.1) —
+    /// default **false**, because a graded run should carry on and let the `X` surface in
+    /// the verdict rather than stopping at the first one. A *pause*, not a fault: the next
+    /// chunk carries on (see the engine's `pause_on_unknown`).
+    pub pause_on_unknown: bool,
     /// Pause at `debug.breakpoint`s during a graded run (default: **false**).
     ///
     /// A breakpoint is a *debug aid* the student left in their schematic; the old
@@ -479,6 +484,7 @@ impl Default for GradeConfig {
             clock_half_period: 1000,
             baseline_est_time: None,
             expect_halt: false,
+            pause_on_unknown: false,
             watch: Vec::new(),
             top_k: 10,
             include_sta: false,
@@ -511,6 +517,10 @@ pub struct TestSpec {
     pub stop: Vec<api::Watch>,
     /// Pause at `debug.breakpoint`s (default false: a graded run ignores them).
     pub pause_on_breakpoints: Option<bool>,
+    /// Pause on the first read of an unknown value (default false: carry on; the `X` shows
+    /// up in the assertion results instead).
+    #[serde(default)]
+    pub pause_on_unknown: bool,
     /// Top-k observed critical paths in the report.
     pub top_paths: Option<usize>,
     /// Include informational STA (`t_sta`, §4.4 — clearly labeled).
@@ -569,6 +579,7 @@ impl TestSpec {
         cfg.expect_halt = self.expect_halt.unwrap_or(false);
         cfg.watch = self.stop;
         cfg.pause_on_breakpoints = self.pause_on_breakpoints.unwrap_or(false);
+        cfg.pause_on_unknown = self.pause_on_unknown;
         cfg.top_k = self.top_paths.unwrap_or(10);
         cfg.include_sta = self.include_sta.unwrap_or(false);
         cfg.rubric_full_credit_below = self.rubric_full_credit_below;
@@ -1043,6 +1054,9 @@ fn grade_delay(
     let nl = eng.netlist().clone();
     apply_loads(eng, &nl, cfg)?;
     apply_pokes_delay(eng, &nl, cfg)?;
+    // A floating read is a *pause* the caller may ask for (it names the component and pin);
+    // by default the run carries on with the value as `X`.
+    eng.pause_on_unknown = cfg.pause_on_unknown;
     // §8.4: caller-defined stop conditions. Installed before the run so a bad name or
     // literal is a *configuration* error (exit 6), not a silent never-stop.
     if !cfg.watch.is_empty() {
@@ -1647,9 +1661,10 @@ mod tests {
     }
 
     #[test]
-    fn floating_read_exit_5() {
-        // Register d ← controlled buffer with en tied to 0: the net is
-        // driven (no load error) but floats at the edge (§4.1).
+    fn a_floating_read_reaches_the_verdict_as_x() {
+        // Register d ← controlled buffer with en tied to 0: the net is driven (no load
+        // error) but reads back `Z`, so the register stores **X**. That is not a fault any
+        // more — the assertion is what catches it, because an X never equals a literal.
         let json = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
@@ -1668,13 +1683,27 @@ mod tests {
             ]}}]
         }}"##
         );
-        let out = grade(&doc(&json), &cfg3()).unwrap();
+        let mut cfg = cfg3();
+        cfg.assertions
+            .push(parse_assertion("probe('r') == 0x0").expect("parses"));
+        let out = grade(&doc(&json), &cfg).unwrap();
+        assert_eq!(out.outcome, GradeOutcome::AssertionFailed);
+        assert_eq!(out.report.halt_reason, "completed");
+        assert!(
+            out.report.assertions[0].actual.contains('x')
+                || out.report.assertions[0].actual.contains('X'),
+            "the X is what the verdict shows: {}",
+            out.report.assertions[0].actual
+        );
+        // Asking to be told stops the run instead, and names what read it.
+        let mut cfg = cfg3();
+        cfg.pause_on_unknown = true;
+        let out = grade(&doc(&json), &cfg).unwrap();
         assert_eq!(out.outcome, GradeOutcome::FloatingRead);
         assert_eq!(out.outcome.exit_code(), EXIT_FLOATING_READ);
-        assert_eq!(out.report.halt_reason, "floating-read");
         assert!(
-            out.report.halt_details.contains("pin \"d\""),
-            "{:?}",
+            out.report.halt_details.contains("pin 'd'"),
+            "{}",
             out.report.halt_details
         );
     }

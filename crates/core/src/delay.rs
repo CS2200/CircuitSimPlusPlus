@@ -531,6 +531,12 @@ pub struct DelayEngine {
     /// Cap on applied events per cycle (storm detection, §4.5); also the
     /// boot settle's quiescence cap.
     pub events_per_cycle_cap: u64,
+    /// Pause when a component reads a net nothing drives (§4.1): a **pause**, not a fault
+    /// — the value it read is `X` (unknown), the engine carries on by default, and the
+    /// converter is what supplies CE's implied constants (`clk`/`rst` → 0, an enable → 1).
+    /// The editor turns this on to *ask*; a graded run leaves it off and lets the `X`
+    /// surface in the verdict.
+    pub pause_on_unknown: bool,
     /// Honour `debug.breakpoint`s (a pause) or ignore them. The editor wants the pause;
     /// a **graded** run does not — a breakpoint is a debug aid a submitter left in their
     /// schematic, and the old tool never let one end a graded run (DESIGN.md §8.1), so
@@ -747,6 +753,7 @@ impl DelayEngine {
             clk_track: vec![ClockTrack::default(); n],
             events_per_cycle_cap: DEFAULT_EVENTS_PER_CYCLE_CAP,
             breakpoints_enabled: true,
+            pause_on_unknown: false,
             events_this_cycle: 0,
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
@@ -1653,7 +1660,7 @@ impl DelayEngine {
         } else {
             // Each input pin reads its own *view* of its net (per-path
             // transport, F14).
-            let ins: Vec<Value> = cd
+            let mut ins: Vec<Value> = cd
                 .in_pins
                 .iter()
                 .map(|(slot, _)| self.views[c][*slot].clone())
@@ -1685,9 +1692,15 @@ impl DelayEngine {
                     return Ok(());
                 }
             }
-            let ins_refs: Vec<&Value> = ins.iter().collect();
-            beh.eval(&ins_refs)
-                .map_err(|fr| self.halt_floating(comp, fr))?
+            // A `Z` that survives the wait is on a net **nothing drives**: it is not in
+            // flight, it never arrives. When a behaviour consumes such a pin, read it as
+            // `X` — the model does not know, so it will not guess. The old tool let each
+            // component pick a value for such a pin (its gates coalesce `Z` to 0, an
+            // enable treats it as 1, a register stores `Z`); that choice belongs to the
+            // *converter*, which writes it as an explicit constant driver, so the engine
+            // never invents one. `pause_on_unknown` is the editor's "ask me first".
+            let beh_ref = beh;
+            self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))?
         };
         if outs == self.pending_val[c] {
             return Ok(()); // already scheduled to commit exactly this
@@ -1713,21 +1726,76 @@ impl DelayEngine {
         Ok(())
     }
 
-    fn halt_floating(&self, comp: u32, fr: FloatingRead) -> Halt {
+    /// The index (into a component's `in_pins`/input list) whose pin is named `pin` —
+    /// `consume`'s error names the pin, and the caller needs the slot to substitute for.
+    fn input_index_for(&self, c: usize, pin: &str) -> Option<usize> {
+        self.cdata[c]
+            .in_pins
+            .iter()
+            .position(|&(slot, _)| self.netlist.comps[c].pins[slot].pin == pin)
+    }
+
+    /// Evaluate a component, reading a floating net as `X` rather than faulting: only the
+    /// pin the behaviour *actually consumed* is substituted, so an unselected mux input
+    /// stays `Z` (the three-valued rule reads all data inputs to decide, and must not see
+    /// an `X` it was never asked about). `max` bounds the retries by the input count.
+    fn eval_reading_unknowns<T: Default>(
+        &self,
+        c: usize,
+        ins: &mut [Value],
+        mut run: impl FnMut(&[&Value]) -> Result<T, FloatingRead>,
+    ) -> Result<T, Halt> {
+        for _ in 0..=ins.len() {
+            let refs: Vec<&Value> = ins.iter().collect();
+            match run(&refs) {
+                Ok(outs) => return Ok(outs),
+                Err(fr) => {
+                    let Some(i) = self.input_index_for(c, &fr.pin) else {
+                        return Ok(T::default()); // not an input pin: nothing to substitute
+                    };
+                    if self.pause_on_unknown {
+                        return Err(self.halt_unknown(c as u32, &fr.pin));
+                    }
+                    ins[i] = ins[i].z_to_x();
+                }
+            }
+        }
+        Ok(T::default())
+    }
+
+    /// The halt a **floating read** asks for (§4.1): a component read a net nothing
+    /// drives, so the value it read is `X` — unknown. Every fact a person needs to find it
+    /// is in the message: the component's **type**, its **name** when it has one, where it
+    /// **lives** (circuit, and the instance path when it is nested), and which **pin** did
+    /// the reading — because "a mux's `sel` is floating" and "a mux's `in6` is floating"
+    /// are different problems.
+    fn halt_unknown(&self, c: u32, pin: &str) -> Halt {
+        let fc = &self.netlist.comps[c as usize];
+        let doc = CompId(fc.def_idx as u32);
+        let name = self
+            .netlist
+            .named
+            .iter()
+            .find(|n| n.circuit == fc.def_circuit && n.comp_id == doc)
+            .map(|n| format!(" '{}'", n.name))
+            .unwrap_or_default();
         Halt {
             reason: HaltReason::FloatingRead,
             cycle: self.rising_seen,
-            // Contract v1.1 details format: root-sheet document-order id.
             details: format!(
-                "comp {} pin \"{}\": floating (Z) value consumed",
-                self.netlist.root_sheet_comp(CompId(comp)),
-                fr.pin
+                "{}{} ({}) at {}, pin '{}' — nothing drives that net, so the value read is \
+                 X (unknown)",
+                fc.type_,
+                name,
+                fc.origin(),
+                fc.def_circuit,
+                pin
             ),
         }
     }
 
     /// The pause a breakpoint asks for: same contract shape as
-    /// [`DelayEngine::halt_floating`], but a **soft** halt — see
+    /// [`DelayEngine::halt_unknown`], but a **soft** halt — see
     /// [`DelayEngine::record_halt`] for why it does not stick.
     fn halt_breakpoint(&self, comp: u32) -> Halt {
         let value = self.comps[comp as usize]
@@ -1758,7 +1826,10 @@ impl DelayEngine {
     /// caller was waiting for, which is not a fault, so the disarmed watch lets
     /// the caller carry on.
     fn record_halt(&mut self, h: &Halt) {
-        if matches!(h.reason, HaltReason::Breakpoint | HaltReason::Stop) {
+        if matches!(
+            h.reason,
+            HaltReason::Breakpoint | HaltReason::Stop | HaltReason::FloatingRead
+        ) {
             return;
         }
         self.halted = Some(h.clone());
@@ -2047,15 +2118,34 @@ impl DelayEngine {
         self.clk_track[c].last_edge = Some(time);
         // Sample inputs from the pins' *views* and latch (consume rules
         // fire here).
-        let ins: Vec<Value> = self.cdata[c]
+        let mut ins: Vec<Value> = self.cdata[c]
             .in_pins
             .iter()
             .map(|(slot, _)| self.views[c][*slot].clone())
             .collect();
-        let ins_refs: Vec<&Value> = ins.iter().collect();
-        self.comps[c]
-            .rising_edge(&ins_refs)
-            .map_err(|fr| self.halt_floating(comp, fr))?;
+        // The edge path reads `d`/`din`, so a `Z` here is a value *about to be stored*.
+        // It is read as `X`: a register that samples a floating input holds X, which is
+        // the electrical truth (and only surfaces in the verdict if something reads it).
+        let mut attempts = 0;
+        loop {
+            let refs: Vec<&Value> = ins.iter().collect();
+            match self.comps[c].rising_edge(&refs) {
+                Ok(()) => break,
+                Err(fr) => {
+                    attempts += 1;
+                    let Some(i) = self.input_index_for(c, &fr.pin) else {
+                        break;
+                    };
+                    if self.pause_on_unknown {
+                        return Err(self.halt_unknown(comp, &fr.pin));
+                    }
+                    ins[i] = ins[i].z_to_x();
+                    if attempts > ins.len() {
+                        break;
+                    }
+                }
+            }
+        }
         // Q / dout commit after clk→Q / access (gen-guarded: last edge wins).
         self.eval_and_schedule(comp, time, None)?;
         Ok(())
@@ -2136,8 +2226,11 @@ impl DelayEngine {
                 continue;
             }
             let ins_refs: Vec<&Value> = ins.iter().collect();
-            if let Err(fr) = beh.eval(&ins_refs) {
-                return Err(self.halt_floating(c as u32, fr));
+            if beh.eval(&ins_refs).is_err() && self.pause_on_unknown {
+                // The cycle-close oracle for a component that never got an event: same
+                // event as the eager path's, so the same pause and the same message.
+                let fr = beh.eval(&ins_refs).unwrap_err();
+                return Err(self.halt_unknown(c as u32, &fr.pin));
             }
         }
         Ok(())
@@ -2755,22 +2848,33 @@ mod tests {
     }
 
     #[test]
-    fn floating_gate_input_halts_at_cycle_close() {
+    fn a_floating_gate_input_is_read_as_x_and_pausing_is_opt_in() {
         let json = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
-                {{"id":"c","type":"wiring.constant","pos":[0,0]}},
-                {{"id":"g","type":"gate.and","pos":[0,0]}}
+                {{"id":"c","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"g","type":"gate.and","pos":[0,0]}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"p"}}
             ], "wires": [
-                {{"a":{{"comp":"c","pin":"out"}},"b":{{"comp":"g","pin":"in0"}}}}
+                {{"a":{{"comp":"c","pin":"out"}},"b":{{"comp":"g","pin":"in0"}}}},
+                {{"a":{{"comp":"g","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}}
             ]}}]
         }}"##
         );
+        // `in1` is connected to nothing. The gate reads it as X — the model does not
+        // know it, so it will not assume it — and the design runs: the verdict says so
+        // when the X reaches an observation.
         let mut eng = engine(&json, 500);
-        let halt = eng.run(1).expect_err("must halt");
+        eng.run(1).expect("a floating read is not a fault");
+        assert!(eng.named_value("p").expect("probe").has_x());
+        // The editor turns the pause on to *ask*; then it stops and names the pin.
+        let mut eng = engine(&json, 500);
+        eng.pause_on_unknown = true;
+        let halt = eng.run(1).expect_err("pause_on_unknown asks");
         assert_eq!(halt.reason, HaltReason::FloatingRead);
         assert!(halt.details.contains("in1"), "got: {}", halt.details);
+        assert!(halt.details.contains("gate.and"), "got: {}", halt.details);
     }
 
     fn bus_json() -> String {
