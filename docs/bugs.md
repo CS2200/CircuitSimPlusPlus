@@ -6,6 +6,23 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Latest round — done (2026-10-23)
+
+- **An idle tri-state bus no longer deadlocks the part reading around it** (fixed @ `983cff2`).
+  The wait-for-arrival rule was "any input view is `Z` on a net that *has* a driver pin", but a
+  disabled `wiring.controlled-buffer`'s `Z` is **final, not in flight**, and the part may not even
+  read that pin. A mux with a disabled buffer on its **unselected** input therefore waited
+  forever and held its output at `Z`; a register sampling that `Z` stored `X` for the rest of the
+  run. Two refinements: the wait asks the part's own **consume table** which pin it reads (a `Z`
+  on a pin a part never reads cannot stall it; a memory's asynchronous read keeps its `addr`-only
+  wait), and waits only while the value is genuinely **in flight** (`net_in_flight`: a driver with
+  a change queued on its propagation delay, or one that has produced no output yet). Regression
+  test `mux_passes_through_with_idle_bus_on_unselected_input`; `golden.rs` re-blessed for `alu`,
+  `multicycle`, `pipeline5` — `t_obs` held and the architectural checks still pass (the drift is
+  events: parts that no longer hold). This is the whole **write-back path** of a converted
+  LC-5200: MEM muxes between the ALU result and `D-MEM.dout` through controlled buffers, and the
+  buffer on the branch not taken is disabled. `docs/format-v2.md` §9 states both refinements.
+
 ## Latest round — done (2026-10-21)
 
 - **The reset pin is back, hidden by default** (§93): `mem.register` /
