@@ -775,33 +775,26 @@ impl DelayEngine {
             stop: None,
             in_boot: true,
         };
-        // Power-on for combinational loops: seed loop nets to 0 (same
-        // deterministic rule as the zero-delay engine) so feedback logic
-        // starts from a defined state. Splitters are excepted: they carry
-        // values but never originate them (B11 — a 0 seed phantom-contends
-        // with the other side of a splitter chain). The seed must reach
-        // every sink's *view* (gates read views, F14).
-        let (_, residue) = crate::engine_common::levelize(&eng.netlist, &eng.comps);
-        for c in residue.iter().copied() {
-            if eng.comps[c as usize].is_splitter() {
-                continue;
-            }
-            for (_, net) in &eng.cdata[c as usize].out_pins {
-                let width = eng.netlist.nets[net.idx()].width;
-                eng.net_values[net.idx()] = Value::zero(width);
-                // NOT `net_scheduled`: the seed gives the net a *value* so its consumers do
-                // not stall on a `Z` view, but nothing has been *committed* on it yet. The
-                // commit happens when the loop part evaluates, and it is the change test
-                // (`resolved != net_scheduled`) that fires the arrivals its consumers need.
-                // Seeding `net_scheduled` to the same 0 made that commit invisible — no
-                // `Net`, no `Deliver` — so a part inside the loop that was seeded a view but
-                // never got an arrival (a splitter on a loop-driven bus) sat on its initial
-                // `Z` for the whole run while every wire was correct.
-                for sp in &eng.net_sinks[net.idx()] {
-                    eng.views[sp.comp as usize][sp.slot as usize] = Value::zero(width);
-                }
-            }
-        }
+        // Power-on starts from **nothing**, exactly as CircuitSim CE does: every net holds
+        // `Z` ("no driver") and nothing evaluates a part until a value actually arrives.
+        //
+        // This used to seed every net in a combinational loop to `0` and then evaluate each
+        // loop part once from that snapshot. The seed was a guess, and for a *symmetric*
+        // latch all-zeros is not one of its two stable states — it is the unstable diagonal.
+        // Two cross-coupled NANDs with equal delay, both updating at the same simulated
+        // instant with neither able to win, then flip forever: a converted datapath's STATE
+        // buffer ping-ponged `0x3f ↔ 0x0` for ~100k laps *during boot*, which is what
+        // tripped the per-boot event cap while the old tool ran that design to completion.
+        //
+        // CE never gets there because CE never starts anywhere. `CircuitState.pushValue` and
+        // `propagate` notify a port only when its value *changes*, so a part whose inputs
+        // have never moved is never evaluated at all; a loop stays inert until a real signal
+        // — a register's committed output, a constant, a clock edge — reaches it, and it
+        // then settles by propagation (with CE's own `OscillationException` reserved for a
+        // loop that genuinely cannot settle). We now do the same: no seed, no one-shot
+        // evaluation of the residue, just the power-on commits below and then the boot
+        // queue. A loop part whose first evaluation reproduces its input is still heard,
+        // because a net starts at `Z` and any committed value is therefore a change.
         // Power-on: sources and state elements commit their initial
         // outputs at T=0 (in comp order, §4.3).
         for c in 0..n as u32 {
@@ -816,28 +809,6 @@ impl DelayEngine {
                         wire_idx: None,
                     }]
                 })?;
-            }
-        }
-        // A seeded loop has *values* but has not been *evaluated*: every part in it
-        // would otherwise wait for a delivery that never comes, because a part whose
-        // first evaluation computes exactly the seeded 0 leaves its consumers' views
-        // untouched. That is not a corner case — the course pipelines' stall and
-        // forwarding logic is a combinational loop (En → ID/RR → comparators → the
-        // stall gate → En), so a design could freeze at power-on with its stall gate
-        // reading 0 forever while every wire was correct. So evaluate each loop
-        // component once from the seeded state; the boot queue then iterates the loop
-        // to its fixed point, and a genuine oscillator still trips the storm cap.
-        // Splitters included. A splitter is exempt from the *seed* above — it originates
-        // no value, so seeding one would phantom-contend with the other side of a chain —
-        // but it is not exempt from being *evaluated*, and skipping it left a slicing
-        // splitter on its initial `Z` for the whole run. Its output then never *changed*,
-        // so no arrival was ever delivered to the parts reading it: a converted datapath's
-        // memory address line stayed floating while every wire was correct. `wiring.constant`
-        // masked it, because a source is evaluated at power-on whatever loops it sits in.
-        for c in &residue {
-            if let Err(h) = eng.eval_and_schedule(*c, 0, None) {
-                eng.halted = Some(h);
-                break;
             }
         }
         // Boot settle (module docs): run the power-on queue to quiescence
@@ -2985,10 +2956,20 @@ mod tests {
     }
 
     #[test]
-    fn event_storm_halts_with_oscillation() {
-        // nand(a=src, b=self): primed at src=0 (out=1), then src=1 →
-        // event storm (a gate feeding its own input has no stable state).
-        let json = format!(
+    fn a_floating_ring_settles_and_the_event_cap_still_halts_a_runaway() {
+        // A gate whose feedback input is simply floating is *inert*, as it is in CE:
+        // `CircuitState` notifies a port only when its value changes, so a part whose inputs
+        // have never moved is never evaluated, and nothing invents a state for the loop. We
+        // settle it at `X` — the documented "a floating read is unknown" rule — instead of at
+        // a seeded `0`, and the seeded `0` is what used to walk an undriven cross-coupled pair
+        // between its two stable states, forever, during boot.
+        //
+        // CE can still oscillate on such a shape, because its gate coalesces the floating
+        // input to 0 and the loop then has definite values to flip between. We hold `X`, and
+        // `X` is a fixed point of every combinational function here, so ours settles. Both
+        // fail that design — CE raises `OscillationException`, and an `X` matches no expected
+        // value — so the verdicts agree while the mechanisms differ.
+        let floating = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
@@ -3000,10 +2981,42 @@ mod tests {
             ]}}]
         }}"##
         );
-        let mut eng = engine(&json, 5000);
+        let mut eng = engine(&floating, 5000);
         eng.events_per_cycle_cap = 200;
         eng.poke_at("src", k(1, 1), 10);
-        let halt = eng.run(1).expect_err("storm must halt");
+        eng.run(2)
+            .expect("a ring with nothing driving it settles; it does not storm");
+
+        // The cap is still what stops a runaway inside one cycle, and that is the halt the
+        // autograder maps to its oscillation exit. A long chain exceeds any small budget, and
+        // a *clocked* loop amplifying each edge lands here too — it is only the boot-time
+        // combinational loop above that no longer can.
+        let gates: String = (0..64)
+            .map(|i| format!("{{\"id\":\"n{i}\",\"type\":\"gate.not\",\"pos\":[0,0]}}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut wires = vec![
+            "{\"a\":{\"comp\":\"clk\",\"pin\":\"out\"},\"b\":{\"comp\":\"n0\",\"pin\":\"in\"}}"
+                .to_string(),
+        ];
+        for i in 0..63 {
+            wires.push(format!(
+                "{{\"a\":{{\"comp\":\"n{i}\",\"pin\":\"out\"}},\"b\":{{\"comp\":\"n{}\",\"pin\":\"in\"}}}}",
+                i + 1
+            ));
+        }
+        let chain = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}}, {gates}
+            ], "wires": [ {wires} ]}}]
+        }}"##,
+            wires = wires.join(",")
+        );
+        let mut eng = engine(&chain, 5000);
+        eng.events_per_cycle_cap = 8;
+        let halt = eng.run(2).expect_err("the cap must halt a runaway");
         assert_eq!(halt.reason, HaltReason::Oscillation);
     }
 

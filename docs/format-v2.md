@@ -157,7 +157,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `gate.and` `or` `xor` `nand` `nor` `xnor` | `in0`..`in{inputs-1}`, `out`                                       | `bitsize` (1), `inputs` (2; 2..=32), `negate` (absent — input bubbles, see below)                                                                                                                                                                                                                                                                                                                                                   |
 | `wiring.controlled-buffer` ⚠️¹            | `in`, `en`, `out`                                                  | `bitsize` (1)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `wiring.pin`                              | `pin`                                                              | `bitsize` (1), `isOutput` (false), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                                                                                                                                                                                                                                      |
-| `wiring.transistor`                       | `in`, `gate`, `out`                                                | `bitsize` (1) — a pass gate: the `in` value while `gate` is 1, `Z` while it is 0, `X` while it is unknown (a floating `gate` halts naming `gate`)                                                                                                                                                                                                                                                                                  |
+| `wiring.transistor`                       | `in`, `gate`, `out`                                                | `bitsize` (1) — a pass gate: the `in` value while `gate` is 1, `Z` while it is 0, `X` while it is unknown (a floating `gate` matches no enable bit, so the switch is open and the output is `Z`; the `in` pin is what a floating-read halt names when the gate *is* driven `1`)                                                                                                                                                                                                                                                                                  |
 | `wiring.power` / `wiring.ground`          | `out`                                                              | _none_ — a fixed 1-bit `1` / `0` source (UI_OVERHAUL §71); the same behaviour kind as `wiring.constant`, so a stray attr is an unknown-attr error                                                                                                                                                                                                                                                                                  |
 | `wiring.constant`                         | `out`                                                              | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only                                                                                                                                                                                                                                                                                                                    |
 | `wiring.clock`                            | `out`                                                              | —                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -311,9 +311,15 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   Through v5 the second case read `Z` as deasserted instead, which quietly made an *engine*
   rule load-bearing for the converter. The migration is what keeps an old file behaving as it
   did: the semantics changed, so the version did.
-- Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
-  deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
-  carry values but never originate them.
+- Combinational feedback is **not seeded at all**: power-on starts from nothing, exactly as
+  CircuitSim CE does. Every net holds `Z` ("no driver") and a part is evaluated only when a
+  value actually arrives, so a loop with no driven entry point stays inert — nothing invents
+  a state for it. (Through v6 the engine seeded every feedback net to `0` and evaluated each
+  loop part once from that snapshot. The seed was a guess, and for a symmetric latch
+  all-zeros is the *unstable* diagonal, so a cross-coupled pair flipped between its two
+  stable states for as long as the boot allowed — a converted datapath's `STATE` buffer ran
+  ~100k laps there.) Determinism is unchanged — nothing is ever resolved randomly (§4.5) —
+  but the deterministic answer is now "no value yet" rather than "zero".
 - RAM `depth` must be a power of two (validation), and its `addr` pin is
   `ceil(log2 depth)` wide by default; `addrBits` overrides that (`mem.rom` too), so the
   address width belongs to the design rather than to the word count. Fewer bits than the
@@ -354,18 +360,23 @@ not a fault — but it is off by default, because a graded run should see the `X
 stop at it.
 
 This is deliberately **harsher than CircuitSim CE**, which has no `X`: its parts each pick a
-value for a floating pin (its gates coalesce `Z` to `0`, an enable reads it as `1`, a
-register stores `Z`, a mux passes it on). Reproducing that is the *converter's* job, not the
-engine's — it writes CE's meanings in as explicit drivers for the pins CE defines (`clk` →
-0, `rst` → 0, `en` → 1) and leaves the rest to `X`, so a converted design cannot silently
-depend on a value nobody wrote down. Every other consuming pin follows its own rule (below):
+value for a floating pin (its gates coalesce `Z` to `0`; a *register's* enable reads it as
+`1`, while a **controlled buffer's** reads it as *disabled*, because CE's
+`ControlledBuffer.valueChanged` tests `== State.ONE`; a register stores `Z`; a mux passes it
+on). Reproducing that is the *converter's* job, not the engine's — it writes CE's meanings in
+as explicit drivers for the pins CE defines (`clk` → 0, `rst` → 0, a register `en` → 1, a
+controlled buffer `en` → 0) and leaves the rest to `X`, so a converted design cannot silently
+depend on a value nobody wrote down. Where CE *propagates* the unknown instead of reading it
+as a value — an adder with an invalid input emits all-`Z`, a comparator drives `Z` on its
+three outputs, a mux with an invalid select emits `Z` — the tie is deliberately *not* written:
+pinning a `0` there would activate a part CE leaves inert. Every other consuming pin follows its own rule (below):
 a mux consumes only the input its `sel` picks, a disabled buffer consumes nothing, a register
 consumes `d` only on its enabled edge.
 
 | Component                       | Consumes                                                                                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | gates (incl. not/buffer)        | every input                                                                                                                                                                                                  |
-| controlled buffer               | `en` always; `in` only while `en ≠ 0`                                                                                                                                                                        |
+| controlled buffer               | `in` only while `en` is a **driven `1`** (CE's `== State.ONE`); an `en` holding `Z` is *disabled* — it consumes nothing and the part drives nothing — and an `X` `en` means "might be on", so `in` is consumed conservatively |                                                                                                                                                                        |
 | mux                             | `sel` always; the selected data input (all of them if `sel` is `X`)                                                                                                                                          |
 | demux / decoder                 | all inputs                                                                                                                                                                                                   |
 | priority decoder                | its input lines, and only while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means _enabled_ rather than a floating-read halt (`en_in` driven `0` disables, `X` is conservative) |
