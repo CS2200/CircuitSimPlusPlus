@@ -869,7 +869,10 @@ impl Behavior {
         //    assemble), for splits nothing else drives; a split that has a writer
         //    of its own keeps it.
         let mut bus_drive: Vec<Bit> = vec![Bit::Z; *bus_width as usize];
-        let mut bus_value: Vec<Bit> = (0..*bus_width).map(|i| nets[0].bit(i)).collect();
+        // The bus's *received* value, read once per evaluation: split outputs slice it and
+        // the old code re-read `nets[0].bit(bb)` for every mapped fanout bit. This buffer
+        // replaces a dead `bus_value` that was merged per bit and then never read.
+        let bus_bits: Vec<Bit> = (0..*bus_width).map(|i| nets[0].bit(i)).collect();
         for (si, (_, map)) in splits.iter().enumerate() {
             let v = &nets[1 + si];
             if v.is_fully_z() {
@@ -886,27 +889,25 @@ impl Behavior {
                 };
                 let at = bus_bit as usize;
                 bus_drive[at] = merge_bit(bus_drive[at], split_bit);
-                bus_value[at] = merge_bit(bus_value[at], split_bit);
             }
         }
         let mut out = Vec::with_capacity(nets.len());
         out.push(Value::from_bits(&bus_drive));
         for (_, map) in splits.iter() {
-            out.push(Value::from_bits(
-                &map.iter()
-                    .map(|&bb| {
-                        if bb < *bus_width {
-                            // CE pushes a fanout from the value *it received on the bus*
-                            // (`Splitter.valueChanged`, `PORT_JOINED` branch: it slices the
-                            // incoming `value`). That is what other parts drive on the bus —
-                            // **not** the fold of the fanouts' own drives, which manufactured
-                            // an `X` here and then drove it back onto the fanout net.
-                            nets[0].bit(bb)
-                        } else {
-                            Bit::Z
-                        }
-                    })
-                    .collect::<Vec<_>>(),
+            out.push(Value::from_bits_iter(
+                map.len() as u32,
+                map.iter().map(|&bb| {
+                    if bb < *bus_width {
+                        // CE pushes a fanout from the value *it received on the bus*
+                        // (`Splitter.valueChanged`, `PORT_JOINED` branch: it slices the
+                        // incoming `value`). That is what other parts drive on the bus —
+                        // **not** the fold of the fanouts' own drives, which manufactured
+                        // an `X` here and then drove it back onto the fanout net.
+                        bus_bits[bb as usize]
+                    } else {
+                        Bit::Z
+                    }
+                }),
             ));
         }
         out

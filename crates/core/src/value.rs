@@ -375,6 +375,26 @@ impl Value {
         v
     }
 
+    /// Build from an iterator of per-bit states, `bits[0]` = least significant.
+    ///
+    /// The same result as [`Value::from_bits`] but without the intermediate slice: the
+    /// splitter builds one `Value` per fanout on every evaluation, and the `Vec<Bit>` it
+    /// used to collect first was pure allocation churn.
+    pub fn from_bits_iter(width: u32, bits: impl IntoIterator<Item = Bit>) -> Self {
+        let mut v = Self::zero(width);
+        for (i, b) in bits.into_iter().enumerate() {
+            let m = 1u64 << (i as u32 % LIMB_BITS);
+            let limb = i / LIMB_BITS as usize;
+            match b {
+                Bit::One => v.ones[limb] |= m,
+                Bit::X => v.xs[limb] |= m,
+                Bit::Z => v.zs[limb] |= m,
+                Bit::Zero => {}
+            }
+        }
+        v
+    }
+
     /// Build a known (no X/Z) value from raw `ones` limbs; extra limbs are
     /// truncated and missing limbs zero-filled. Internal use.
     fn from_limbs(width: u32, mut ones: Vec<u64>) -> Value {

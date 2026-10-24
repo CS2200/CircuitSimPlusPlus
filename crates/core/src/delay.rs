@@ -129,6 +129,7 @@
 //! timestamp and the cap below still fires on it.
 
 use std::collections::BinaryHeap;
+use std::sync::Arc;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead, Timing};
@@ -195,8 +196,11 @@ enum EvKind {
     Fire { comp: u32, gen: u64 },
     /// Apply a resolved net value to the net's shared "latest" slot at the
     /// earliest sink's arrival (transport bookkeeping; reactions happen
-    /// per sink via `Deliver`).
-    Net { net: u32, value: Value },
+    /// per sink via `Deliver`). The payload is shared by the `Net` event and
+    /// every `Deliver` event for the same resolution: a net with S sinks used
+    /// to clone its `Value` S times into S separate events, and the queue
+    /// carried S copies of a 100-byte struct.
+    Net { net: u32, value: Arc<Value> },
     /// Deliver a resolved net value to one sink pin's view, at that
     /// sink's own path-delay arrival (per-path transport, F14). `kind`
     /// is the precomputed sink-pin classification (avoids a per-event
@@ -206,10 +210,10 @@ enum EvKind {
         comp: u32,
         slot: u32,
         kind: SinkKind,
-        value: Value,
+        value: Arc<Value>,
     },
     /// Drive a root input pin at an absolute time (testbench poking).
-    Poke { comp: u32, value: Value },
+    Poke { comp: u32, value: Arc<Value> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -374,18 +378,18 @@ impl SnapEv {
             },
             "net" => EvKind::Net {
                 net: self.net,
-                value: value(width_of(self)?)?,
+                value: Arc::new(value(width_of(self)?)?),
             },
             "deliver" => EvKind::Deliver {
                 net: self.net,
                 comp: self.comp,
                 slot: self.slot,
                 kind: self.kind2,
-                value: value(width_of(self)?)?,
+                value: Arc::new(value(width_of(self)?)?),
             },
             "poke" => EvKind::Poke {
                 comp: self.comp,
-                value: value(width_of(self)?)?,
+                value: Arc::new(value(width_of(self)?)?),
             },
             other => return Err(format!("bad snapshot event kind '{other}'")),
         };
@@ -569,6 +573,10 @@ pub struct DelayEngine {
     /// They are clocked by the circuit's clock: the engine ticks them with the
     /// global rising clock event (UI_OVERHAUL §93).
     implicit_clk: Vec<u32>,
+    /// The components that *are* the global clock (`wiring.clock` sources).
+    /// Precomputed once: the `EvKind::Clock` arm used to rescan every component
+    /// on every edge, which is 2 × cycles × components of pure filtering.
+    clock_comps: Vec<u32>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
     pending_gen: Vec<u64>,
@@ -785,6 +793,12 @@ impl DelayEngine {
             .collect();
         let n_nets = netlist.nets.len();
         let drives = ec::drive_slots(&netlist);
+        // The global clock components, precomputed once: the `EvKind::Clock` arm
+        // used to rescan every component on every edge just to find these.
+        let clock_comps: Vec<u32> = (0..n as u32)
+            .filter(|&c| cdata[c as usize].class == Class::Source)
+            .filter(|&c| netlist.comps[c as usize].type_ == "wiring.clock")
+            .collect();
         let mut eng = DelayEngine {
             netlist,
             comps,
@@ -801,6 +815,7 @@ impl DelayEngine {
             net_ever_driven: vec![false; n_nets],
             net_sinks,
             implicit_clk,
+            clock_comps,
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
             pending_cause: vec![None; n],
@@ -1618,7 +1633,7 @@ impl DelayEngine {
             at.max(self.now),
             EvKind::Poke {
                 comp: fc.id.0,
-                value: v,
+                value: Arc::new(v),
             },
         );
         true
@@ -1803,6 +1818,7 @@ impl DelayEngine {
             // in transit through a splitter — a `Z` on a *driven* net, which
             // the cycle-close sweep exists to tell apart from a real floating
             // read (`floating_sweep`, the never-driven oracle).
+            let mut first_eval: Option<Vec<Value>> = None;
             if matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
                 // A `Z` may only stall the part if the part would *read* it: ask the
                 // behavior's own consume table (`eval`). A `Z` it never reads — a mux's
@@ -1819,8 +1835,13 @@ impl DelayEngine {
                 // so for RAM/ROM the pin is named directly rather than asked of `eval`.
                 let wakes: Option<usize> = if cd.class == Class::Comb {
                     let refs: Vec<&Value> = ins.iter().collect();
+                    // **Evaluate once**: in the common case every input has arrived, so
+                    // keep this result instead of asking the behaviour a second time below.
                     match beh.eval(&refs) {
-                        Ok(_) => None,
+                        Ok(outs) => {
+                            first_eval = Some(outs);
+                            None
+                        }
                         Err(fr) => self.input_index_for(c, &fr.pin),
                     }
                 } else {
@@ -1845,8 +1866,13 @@ impl DelayEngine {
             // enable treats it as 1, a register stores `Z`); that choice belongs to the
             // *converter*, which writes it as an explicit constant driver, so the engine
             // never invents one. `pause_on_unknown` is the editor's "ask me first".
-            let beh_ref = beh;
-            self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))?
+            match first_eval {
+                Some(outs) => outs,
+                None => {
+                    let beh_ref = beh;
+                    self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))?
+                }
+            }
         };
         if outs == self.pending_val[c] {
             return Ok(()); // already scheduled to commit exactly this
@@ -2067,11 +2093,8 @@ impl DelayEngine {
         match ev.kind {
             EvKind::Clock { phase } => {
                 self.next_rising = !phase;
-                let clocks: Vec<u32> = (0..self.comps.len() as u32)
-                    .filter(|&c| self.cdata[c as usize].class == Class::Source)
-                    .filter(|&c| self.netlist.comps[c as usize].type_ == "wiring.clock")
-                    .collect();
-                for c in clocks {
+                for i in 0..self.clock_comps.len() {
+                    let c = self.clock_comps[i];
                     self.comps[c as usize].set_phase(phase);
                     self.eval_and_schedule(c, ev.time, None)?;
                 }
@@ -2108,23 +2131,29 @@ impl DelayEngine {
                 self.cdata[c].out_pins = out_pins;
                 let cause = (comp, self.pending_cause[c]);
                 for net in affected {
-                    let resolved =
-                        ec::resolve(&self.netlist, &self.net_drivers, &self.drives, NetId(net));
+                    let resolved = Arc::new(ec::resolve(
+                        &self.netlist,
+                        &self.net_drivers,
+                        &self.drives,
+                        NetId(net),
+                    ));
                     // Transport: compare against the last *scheduled* value
                     // for this net, not the currently applied one (see
                     // `net_scheduled` field docs).
-                    if resolved != self.net_scheduled[net as usize] {
-                        self.net_scheduled[net as usize] = resolved.clone();
+                    if *resolved != self.net_scheduled[net as usize] {
+                        self.net_scheduled[net as usize] = (*resolved).clone();
                         // The shared "latest" slot applies at the earliest
                         // sink's arrival; each sink pin's *view* is
-                        // delivered at its own path delay (F14).
+                        // delivered at its own path delay (F14). The same
+                        // `resolved` is shared with every delivery — `Arc`
+                        // clone, not a 100-byte `Value` clone per sink.
                         let nidx = net as usize;
                         let at = ev.time + self.net_min_delay[nidx];
                         self.schedule(
                             at,
                             EvKind::Net {
                                 net,
-                                value: resolved.clone(),
+                                value: Arc::clone(&resolved),
                             },
                         );
                         // Causal pointer lands at apply time (below).
@@ -2140,7 +2169,7 @@ impl DelayEngine {
                                         comp: sp.comp,
                                         slot: sp.slot,
                                         kind: sp.kind,
-                                        value: resolved.clone(),
+                                        value: Arc::clone(&resolved),
                                     },
                                 )
                             })
@@ -2162,7 +2191,7 @@ impl DelayEngine {
                 if !value.is_fully_z() {
                     self.net_ever_driven[n] = true;
                 }
-                self.net_values[n] = value;
+                self.net_values[n] = (*value).clone();
             }
             EvKind::Deliver {
                 net,
@@ -2174,7 +2203,7 @@ impl DelayEngine {
                 // Per-sink transport arrival: update the pin's view, then
                 // notify the sink (F14). DTA settle and setup/hold
                 // tracking happen at the pin's own arrival time.
-                self.views[comp as usize][slot as usize] = value;
+                self.views[comp as usize][slot as usize] = (*value).clone();
                 if !self.in_boot && self.state_input_net[net as usize] {
                     let cycle_start = self.next_boundary - 2 * self.half_period;
                     let dt = ev.time - cycle_start;
@@ -2186,7 +2215,7 @@ impl DelayEngine {
                 self.react(comp, net, slot as usize, kind, ev.time)?;
             }
             EvKind::Poke { comp, value } => {
-                self.comps[comp as usize].set_pin_value(value);
+                self.comps[comp as usize].set_pin_value((*value).clone());
                 self.eval_and_schedule(comp, ev.time, None)?;
             }
         }
@@ -2406,39 +2435,48 @@ impl DelayEngine {
             if beh.is_splitter() {
                 continue; // splitters consume nothing
             }
-            // Substitute immune floating views with a driven 0 so the
-            // behavior's own consume rule (the oracle) only ever fires on
-            // genuinely never-driven nets. "Immune" is the SAME test the eager
-            // path uses (`eval_and_schedule`): a `Z` on a net that a driver pin
-            // sits on is "still in flight or idle" — a deep combinational path
-            // takes several cycles to settle, so at the first cycle close its
-            // far end is legitimately `Z`, and halting there stopped every
-            // converted LC-5200 at power-on. Only a net with no driver pin at
-            // all — an unconnected input — is a real floating read.
+            // Most components have no floating input at cycle close, so scan the views
+            // first and only build the owned input list when there is a `Z` to substitute
+            // or report. The old code cloned every input for every combinational part on
+            // every cycle close.
+            let mut any_z = false;
+            let mut candidate = false;
+            for &(slot, net) in &cd.in_pins {
+                if self.views[c][slot].has_z() {
+                    any_z = true;
+                    if !(self.net_ever_driven[net.idx()]
+                        || !self.netlist.nets[net.idx()].floating)
+                    {
+                        candidate = true;
+                        break;
+                    }
+                }
+            }
+            if !any_z || !candidate {
+                continue;
+            }
             let mut ins: Vec<Value> = cd
                 .in_pins
                 .iter()
                 .map(|(slot, _)| self.views[c][*slot].clone())
                 .collect();
-            let mut candidate = false;
             for (v, &(_, net)) in ins.iter_mut().zip(cd.in_pins.iter()) {
-                if v.has_z() {
-                    if self.net_ever_driven[net.idx()] || !self.netlist.nets[net.idx()].floating {
-                        *v = Value::zero(v.width());
-                    } else {
-                        candidate = true;
-                    }
+                if v.has_z()
+                    && (self.net_ever_driven[net.idx()] || !self.netlist.nets[net.idx()].floating)
+                {
+                    *v = Value::zero(v.width());
                 }
             }
-            if !candidate {
-                continue;
-            }
             let ins_refs: Vec<&Value> = ins.iter().collect();
-            if beh.eval(&ins_refs).is_err() && self.pause_on_unknown {
-                // The cycle-close oracle for a component that never got an event: same
-                // event as the eager path's, so the same pause and the same message.
-                let fr = beh.eval(&ins_refs).unwrap_err();
-                return Err(self.halt_unknown(c as u32, &fr.pin));
+            match beh.eval(&ins_refs) {
+                Ok(_) => {}
+                Err(fr) => {
+                    if self.pause_on_unknown {
+                        // The cycle-close oracle for a component that never got an event: same
+                        // event as the eager path's, so the same pause and the same message.
+                        return Err(self.halt_unknown(c as u32, &fr.pin));
+                    }
+                }
             }
         }
         Ok(())

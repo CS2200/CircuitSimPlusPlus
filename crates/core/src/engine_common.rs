@@ -284,15 +284,31 @@ pub(crate) fn resolve_except(
     except: u32,
 ) -> Value {
     let n = &netlist.nets[net.idx()];
-    let mut acc: Vec<Value> = Vec::new();
-    for &(c, slot) in &net_drivers[net.idx()] {
-        if c != except {
-            acc.push(drives[c as usize][slot].clone());
+    let drivers = &net_drivers[net.idx()];
+    // Fast path: 0 or 1 non-excepted driver. A splitter reads its pins' nets this way on
+    // every evaluation and most nets have a single driver, so allocating a `Vec` for that
+    // case is pure overhead. Only a genuinely contended net needs the merge buffer.
+    let mut first: Option<&Value> = None;
+    for &(c, slot) in drivers {
+        if c == except {
+            continue;
+        }
+        let v = &drives[c as usize][slot];
+        match first {
+            None => first = Some(v),
+            Some(_) => {
+                let mut acc: Vec<Value> = Vec::with_capacity(drivers.len());
+                for &(c2, slot2) in drivers {
+                    if c2 != except {
+                        acc.push(drives[c2 as usize][slot2].clone());
+                    }
+                }
+                return Value::contention_merge(n.width, &acc);
+            }
         }
     }
-    match acc.as_slice() {
-        [] => Value::z(n.width),
-        [v] => v.clone(),
-        _ => Value::contention_merge(n.width, &acc),
+    match first {
+        None => Value::z(n.width),
+        Some(v) => v.clone(),
     }
 }
