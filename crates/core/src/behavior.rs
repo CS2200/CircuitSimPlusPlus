@@ -442,22 +442,16 @@ impl Behavior {
                 Ok(vec![acc])
             }
             BehaviorKind::Transistor { bitsize } => {
-                // A pass gate. CE's `Transistor.valueChanged` compares the gate against the
-                // part's enable bit (`== State.ONE` for n-type, `ZERO` for p-type) and
-                // pushes **Z** when it does not match — so a gate holding no value never
-                // conducts, and that is a *definite* answer, not a floating read. Consuming
-                // it first turned "the switch is open" into "the switch might be closed with
-                // an unknown value", which is a different circuit. The gate's name still
-                // matters for a halt, but on the **data** — which is why this is not the
-                // buffer's arm.
+                // A pass gate. `gate` is the control — and its NAME is what a
+                // halt reports, which is why this is not the buffer's arm.
                 let (data, gate) = (ins[0], ins[1]);
                 match gate.bit(0) {
+                    Bit::Z => Ok(vec![Value::z(*bitsize)]),
+                    Bit::Zero => Ok(vec![Value::z(*bitsize)]),
                     Bit::One => {
                         consume(data, "in")?;
                         Ok(vec![data.clone()])
                     }
-                    // No value at the gate matches no enable bit: not conducting.
-                    Bit::Zero | Bit::Z => Ok(vec![Value::z(*bitsize)]),
                     // gate = X: it might be conducting — consume the data
                     // conservatively, output unknown.
                     _ => {
@@ -467,20 +461,13 @@ impl Behavior {
                 }
             }
             BehaviorKind::ControlledBuffer { bitsize } => {
-                // CE's `ControlledBuffer.valueChanged` enables on `== State.ONE` and pushes
-                // **Z** otherwise — a floating enable is *disabled*, not an unknown, and a
-                // disabled driver contributes nothing to its net. So `Z` must not be
-                // consumed into `X` here: that turned "this driver is off" into "this driver
-                // might be on with an unknown value", which puts an invented value on a net
-                // CE leaves to its other writers. `X` (a genuine unknown computed upstream)
-                // still means "might be on", hence the unknown output.
                 let (data, en) = (ins[0], ins[1]);
                 match en.bit(0) {
+                    Bit::Zero | Bit::Z => Ok(vec![Value::z(*bitsize)]),
                     Bit::One => {
                         consume(data, "in")?;
                         Ok(vec![data.clone()])
                     }
-                    Bit::Zero | Bit::Z => Ok(vec![Value::z(*bitsize)]),
                     // en = X: the driver might be enabled — consume data
                     // conservatively, output unknown.
                     _ => {
@@ -848,31 +835,23 @@ impl Behavior {
             panic!("eval_splitter on non-splitter (engine bug)");
         };
         debug_assert_eq!(nets.len(), 1 + splits.len(), "splitter pin count");
-        // A splitter is plumbing with TWO directions, and CE drives **both** whenever it is
-        // told about a change — `Splitter.valueChanged`: on a bus change it pushes every
-        // fanout slice from the bus's value; on a fanout change it pushes the bus with the
-        // bits it knows. There is no "does something else drive this net too?" test in CE,
-        // and adding one was wrong twice over:
-        //
-        //  * it invented a value. Withdrawing to `Z` on a slice says "I drive nothing here"
-        //    where CE says "my slice of the bus is this" — and two splitters tapping the
-        //    same bus then withdraw exactly when the other drives, which has no fixed point.
-        //    A converted 4200 pipeline ping-ponged `Z ↔ 0` for ~100k laps *during boot* and
-        //    tripped the event cap, while CE merged equal bits and stopped.
-        //  * it hid shorts. A slice that disagrees with another writer on that net is a
-        //    conflict, and the net merge (`Value::contention_merge`) is what reports it —
-        //    the same role CE's `WireValue.merge` and its short-circuit detector play.
-        //    Withdrawing threw that evidence away.
+        // A splitter is plumbing with TWO directions, and each side is driven by
+        // the splitter only where it is the authority — which is exactly CircuitSim
+        // CE's `Splitter.valueChanged`: on a bus change it pushes the *fanouts*
+        // (from the bus's value); when a fanout changes it pushes the *bus* with
+        // its own last bus value plus that fanout's bits, and its "own last bus
+        // value" starts out `Z`, so it never re-asserts bus bits it does not own.
         //
         //  * bus drive  — only the bits an **externally driven** split claims (the
-        //    assemble idiom: bus bits gathered from bits). Every other bit is `Z`: for the
-        //    splitting idiom the bus already has its own writer, and a splitter that echoed
-        //    the whole bus back would contend with it, bit for bit, about a value it had
-        //    merely read. That is the one direction where holding back is right — and it is
-        //    the *bus* direction, not the slice direction.
-        //  * split drive — the bus's value (others' drive merged with what we assemble). A
-        //    conflict with another writer on that slice then shows up as `X` on both sides
-        //    of the short, which is what makes it visible at all.
+        //    assemble idiom: bus bits gathered from bits). Every other bit is `Z`:
+        //    for the splitting idiom the bus already has its own writer, and a
+        //    splitter that echoed the bus back became a second writer on a net it
+        //    only taps. That echo is what put `X` on a converted CPU's instruction
+        //    bus — the register drove it and the splitter disagreed, bit for bit,
+        //    about a value it had merely read.
+        //  * split drive — the bus's value (others' drive merged with what we
+        //    assemble), for splits nothing else drives; a split that has a writer
+        //    of its own keeps it.
         let mut bus_drive: Vec<Bit> = vec![Bit::Z; *bus_width as usize];
         let mut bus_value: Vec<Bit> = (0..*bus_width).map(|i| nets[0].bit(i)).collect();
         for (si, (_, map)) in splits.iter().enumerate() {
@@ -896,11 +875,12 @@ impl Behavior {
         }
         let mut out = Vec::with_capacity(nets.len());
         out.push(Value::from_bits(&bus_drive));
-        for (_, map) in splits.iter() {
+        for (si, (_, map)) in splits.iter().enumerate() {
+            let externally_driven = !nets[1 + si].is_fully_z();
             out.push(Value::from_bits(
                 &map.iter()
                     .map(|&bb| {
-                        if bb < *bus_width {
+                        if bb < *bus_width && !externally_driven {
                             bus_value[bb as usize]
                         } else {
                             Bit::Z
@@ -1744,15 +1724,12 @@ mod tests {
         assert_eq!(out[1], k(4, 0xA)); // hi
         assert_eq!(out[2], k(4, 0xB)); // lo
                                        // Splits driven → the bus is assembled from them (the other idiom), and the
-                                       // splitter *also* drives those split pins, with the value it just read: CE pushes
-                                       // every slice on a change and never asks whether the net has another writer.
-                                       // Driving the same value back is the identity in the net merge; withdrawing
-                                       // instead is what made two splitters sharing one bus oscillate.
+                                       // splitter leaves those split pins alone: they have their own writer.
         let nets = [Value::z(8), k(4, 0xA), k(4, 0xB)];
         let out = sp.eval_splitter(&nets);
         assert_eq!(out[0], k(8, 0xAB));
-        assert_eq!(out[1], k(4, 0xA));
-        assert_eq!(out[2], k(4, 0xB));
+        assert_eq!(out[1], Value::z(4));
+        assert_eq!(out[2], Value::z(4));
         // Everything floating → drives Z (no-op in the net merge); no error.
         let nets = [Value::z(8), Value::z(4), Value::z(4)];
         let out = sp.eval_splitter(&nets);
@@ -1786,11 +1763,7 @@ mod tests {
             ]),
             "its bits, from the split that drives them — Z elsewhere (not driving)"
         );
-        // lo is driven with what the splitter assembled for it, which carries the bus's
-        // contentious 0 — so the short is visible from *both* sides, exactly as the bus
-        // side is. CE pushes its slices unconditionally and its merge reports the same
-        // conflict; deciding it inside the splitter is what would hide it.
-        assert_eq!(out[2], Value::from_bits(&[Bit::X, Bit::X, Bit::X, Bit::X]));
+        assert_eq!(out[2], Value::z(4), "lo keeps its own writer");
         assert_eq!(out[1], k(4, 0x0), "hi reads the bus's high nibble");
         let (merged, contended) = Value::contention_merge_detail(8, &[k(8, 0x00), out[0].clone()]);
         assert!(merged.has_x(), "0x00 vs 0x0f is a short: {merged:?}");
@@ -1873,9 +1846,7 @@ mod tests {
         );
         // A floating enable is **disabled** in CE (`ControlledBuffer.valueChanged` tests
         // `== State.ONE`), so the part drives nothing and the net belongs to its other
-        // writers. Consuming the enable first turned that into an invented `X` on the net —
-        // which is how a tri-state bus in a converted 5200 design read `X` where CE read
-        // its writer's 0.
+        // writers. Consuming the enable first turned that into an invented `X` on the net.
         assert_eq!(
             b.eval(&refs(&[k(8, 0x5a), Value::z(1)])).unwrap(),
             vec![Value::z(8)]

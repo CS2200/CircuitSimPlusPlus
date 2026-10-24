@@ -6,45 +6,48 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
-## Round — done (2026-10-24, splitter and enable semantics; a third change tried and reverted)
+## Round — done (2026-10-24, CE's enable rules; two changes tried and reverted)
 
-Two engine rules were ours rather than the old tool's, and each invented something a design
-never said. Both came out of tracing the corpus's oscillation rows against the old tool.
+**One engine rule was ours rather than the old tool's, and it is fixed.** A controlled buffer
+and a transistor now enable only on a **driven `1`**: CE's `ControlledBuffer.valueChanged` and
+`Transistor.valueChanged` compare the control against the enable bit and push `Z` otherwise, so
+a floating enable means *disabled* — the part drives nothing, and its net belongs to its other
+writers — and a floating transistor gate means the switch is open. We consumed those into `X`,
+turning "this driver is off" into "this driver might be on with an unknown value". The
+transpiler's tie for a floating `en` was the matching half of that mistake and is fixed with it:
+`en` is resolved per class now (a register reads it as enabled, a buffer as disabled).
 
-- **A splitter no longer withdraws.** On a fanout net another part also drove, the engine
-  drove `Z`; CE's `Splitter.valueChanged` pushes every slice unconditionally and lets the net
-  merge judge. Besides inventing a value, the withdrawal *hid* shorts — a slice that disagrees
-  with another writer is exactly what `Value::contention_merge` reports, the role CE's
-  `WireValue.merge` and short detector play. Two splitters tapping one bus withdrew precisely
-  when the other drove, so there was no fixed point: a converted 4200 pipeline ping-ponged
-  `Z ↔ 0` for ~100k laps *during boot* and tripped the event cap, while the old tool merged
-  equal bits and stopped. The *bus* half of the old rule stays (a pure tap still drives
-  nothing), which is the half the `…no short…` entry below was actually about.
-- **A controlled buffer and a transistor enable only on a driven `1`.** CE compares the
-  control against the enable bit and pushes `Z` otherwise, so a floating enable means
-  *disabled* — the part drives nothing and its net belongs to its other writers — and a
-  floating transistor gate means the switch is open. We consumed those into `X`, turning "this
-  driver is off" into "this driver might be on with an unknown value".
+**Two further changes were tried, measured, and reverted.** Both looked like fidelity, both had
+a real failing row behind them, and both went the wrong way once the corpus was the judge. The
+numbers are the record, because the reasoning that produced them was itself reasonable.
 
-**A third change — removing the boot seed — was tried and reverted, and the numbers are the
-record.** Power-on used to seed every feedback net to `0` and evaluate each loop part once
-from that snapshot. That seed is a guess, and for a symmetric latch all-zeros is its
-*unstable* diagonal, so a converted datapath's `STATE` buffer flipped between its two stable
-states (~100k laps) until the per-boot event cap fired. Starting from nothing instead — every
-net at `Z`, nothing evaluated until a value arrives, exactly as CE does — looked like the
-faithful answer, and the row it targeted did settle. The corpus disagreed: **154 rows** that
-had been passing came back with an all-`X` state (87 disagreements in the 4200 half alone,
-against 16 before). The reason is a model difference, not a bug in that change: our engine is
-*delay-aware* and CE is zero-delay, so CE settles a floating loop at a definite value by
-coalescing the read, while ours settles it at `X` — a fixed point of every combinational
-function we have — and every consumer of that loop inherits it. The seed is load-bearing
-exactly as its comment said, and the symmetric-latch row needs a *targeted* fix (deterministic
-ordering where two parts commit at the same timestamp, the way CE's link order breaks the tie)
-rather than the blanket removal.
+- **A splitter pushes its slices unconditionally** — which is literally what
+  `Splitter.valueChanged` does, and our withdrawal (drive `Z` when another part also drives the
+  net) made two splitters on one bus ping-pong `Z ↔ 0` for ~100k laps *during boot*. It fixed
+  that storm row and broke the corpus: **155 rows** came back all-`X`. The shape of CE's rule is
+  not its substance. CE pushes *its own last bus value* plus the fanout's bits
+  (`state.getLastPushed`), so its fanout drive is a **repeater**; our `eval_splitter` merges the
+  bus's live drivers into the slice value, so wherever a bus driver and a fanout disagree,
+  `merge_bit` fabricates an `X` that the splitter then drives *back onto the fanout net* — and a
+  datapath wired that way collapses. A faithful version needs the splitter to be **stateful**
+  (remember what it last pushed on each side) rather than reading live merged values; that is a
+  separate, testable change. Isolated by bisect on two affected rows: the pre-change engine
+  passes both (5237 and 6683 cycles — the course's own counts), splitter-only fails both,
+  enable-only passes both.
+- **Removing the boot seed** (power-on from nothing, as CE) — the seed is a guess, and for a
+  symmetric latch all-zeros is its *unstable* diagonal, so a converted datapath's `STATE` buffer
+  flipped between its two stable states (~100k laps) until the per-boot event cap fired. That
+  row did settle, and **154 rows** that had been passing came back all-`X`. The reason is a
+  model difference: our engine is *delay-aware* and CE is zero-delay, so CE settles a floating
+  loop at a definite value by coalescing the read, while ours settles at `X` — a fixed point of
+  every combinational function we have — and every consumer of that loop inherits it. The seed
+  is load-bearing exactly as its comment said, and its doc bullet says so now. The
+  symmetric-latch row wants a *targeted* fix instead: deterministic ordering where two parts
+  commit at the same timestamp, which is how CE's link order breaks the tie.
 
-`csim`'s `--tunnels` probe is what made the diagnosis measurable rather than inferable: it
-reads the *old* tool's named wires per cycle, so "which net carries `PC + 1`" is answered by
-the old tool instead of by argument.
+`csim`'s `--tunnels` probe is what made the first of those measurable rather than inferable: it
+reads the *old* tool's named wires per cycle, so "which net carries `PC + 1`" is answered by the
+old tool instead of by argument.
 
 ## Latest round — done (2026-10-23, third pass)
 
