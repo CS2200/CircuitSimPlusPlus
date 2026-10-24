@@ -300,6 +300,7 @@ impl<'a> Parser<'a> {
 /// stable:PC-IF:100      the value unchanged across 100 cycle boundaries
 /// reaches:$v0:0x100     the value becomes 0x100 (a transition)
 /// is:isHalt:1           the value equals 1 (a level)
+/// changes:PC:10000      the value changed at 10000 cycle boundaries
 /// ```
 ///
 /// `NAME` is what `probe('…')` reads; `VALUE` takes the assertion grammar's literals
@@ -334,6 +335,10 @@ pub fn parse_watch(text: &str) -> Result<api::Watch, AssertError> {
             name,
             value: value()?,
         }),
+        "changes" => {
+            let count = arg.parse::<u64>().map_err(|_| err())?;
+            Ok(api::Watch::Changes { name, count })
+        }
         _ => Err(err()),
     }
 }

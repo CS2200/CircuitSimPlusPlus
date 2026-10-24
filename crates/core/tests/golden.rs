@@ -61,7 +61,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 3,
         pokes: &[],
         t_obs: 39,
-        trace_hash: 0xdfab_86c7_4402_f0a1,
+        trace_hash: 0x91a0_5a34_91a4_6c30,
     },
     Scenario {
         fixture: "fsm.csx",
@@ -69,7 +69,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 40,
-        trace_hash: 0x09b5_f93b_ac5d_4854,
+        trace_hash: 0x5d00_45c8_6818_a4b4,
     },
     Scenario {
         fixture: "alu.csx",
@@ -77,7 +77,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x13d4_9d0e_fdb3_5205,
+        trace_hash: 0x2a13_1225_e53a_a71e,
     },
     Scenario {
         fixture: "multicycle.csx",
@@ -85,7 +85,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x7036_620e_a9fb_8d04,
+        trace_hash: 0x8da8_ca27_5942_04cf,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -93,7 +93,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x7d53_0798_67cc_4dfd,
+        trace_hash: 0xe494_ee8b_25dc_d628,
     },
 ];
 

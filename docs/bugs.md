@@ -6,6 +6,25 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Latest round — done (2026-10-23, third pass)
+
+- **v6: the engine stopped deciding what an unwired reset means.** Through v5 a floating
+  `rst` read as *deasserted* — an engine rule doing the converter's job, and one that made
+  the transpiler's own `rst` → 0 encoding redundant (so `_reset_only` skipped it, and the
+  engine's copy was the one that ran). Now `rst` is consumed like every other input: a
+  floating one is `X`, and the register/RAM holds `X`. The three writers take over — the
+  **transpiler** writes the 0 in for a converted design (in *both* tie modes: it is a
+  CE-*defined* control, not a guess about data), the **UI** places a `wiring.reset`, and a
+  new **v5 → v6 migration** gives every register/RAM whose `rst` nothing wires a constant-0
+  driver (a constant, not the button — the old semantics was "never resets"). `FORMAT_VERSION`
+  5 → 6 in the engine, the transpiler and `CSX_VERSION`; goldens re-blessed with **`t_obs`
+  unchanged** and the architectural checks passing.
+- **`wiring.reset` — the design's reset is a source part, not a naming convention.** A
+  square button beside `wiring.clock` (round stays general-purpose); behaviourally `Button`,
+  so a graded run sees it released. The "CLK PIN"/"RST PIN" palette tiles are gone with it:
+  CLK/RST stays a convenience the editor uses when it *looks* for a source, and the engine
+  binds nothing by name.
+
 ## Latest round — done (2026-10-23, second pass)
 
 - **A register whose enable shares a net with its clock now latches** (`arrive_together`).
@@ -657,3 +676,25 @@ in-cycle question the wire-delay change only partly answered: CE settles a cycle
 so a comparator or hazard output that arrives after the edge can be latched a cycle
 differently. Diagnosing it needs the trajectory oracle at the *first* divergence (cycle 21)
 with CE's own per-cycle pipeline latches (`ce_trace` prints them), which is the next step.
+
+## Performance round — the trace hash was rendering hex (2026-10-24)
+
+Profiling a 32,312-cycle datapath submission (`perf record -F 4000 -g`) put ~8% of the run
+in `mask_to_hex`, `alloc::fmt::*` and the `malloc`/`cfree` behind them. Nothing on a plain
+`csim run` should render: the only hot-path caller was `hash_event` (§4.6's determinism
+tripwire), which mixed an event's value by asking for `Value::to_wire_value()` — three
+`String`s, hex-formatted limb by limb — purely to hash their *bytes*. It now folds the raw
+representation (`Value::fold_bytes`: the width, then each of the three masks limb by limb),
+which allocates nothing and, unlike the rendering, tells two widths apart (`0x1` as 8 bits
+and as 64 were the same text). The digest therefore changes: the §4.6 goldens were
+re-blessed with the README's documented `CSIM_BLESS=1` workflow (`t_obs` unchanged at
+39/40/0/205/205 — only the five hashes moved), and a stored snapshot's `trace_hash` now
+predates the change.
+
+The same round added `--stop changes:NAME:COUNT`, counting boundaries at which the watched
+value *moved*. The course's CPU rule is a pair: `MAX_CYCLES_PER_INSTR = 100` (already
+`stable:PC:100`) and `MAX_INSTR_COUNT = 10000` (now `changes:PC:10000`). The submission
+harness had been approximating the second with a cycle budget, and a budget is a guess about
+a design's CPI: 30,000 was *below* what the recorded corpus legitimately needs (its longest
+run is 32,312), so working designs were reported as never halting. Counting PC moves is not
+a guess.

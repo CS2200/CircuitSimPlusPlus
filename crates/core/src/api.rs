@@ -269,15 +269,36 @@ pub enum Watch {
         /// Literal, as in [`Watch::Reaches`].
         value: String,
     },
+    /// The value has **changed** at `count` cycle boundaries — an instruction counter.
+    ///
+    /// The other half of the CS 2200 CPU rule pair. `Stable` above is
+    /// `MAX_CYCLES_PER_INSTR = 100`: how long one instruction may take. This is
+    /// `MAX_INSTR_COUNT = 10000`: how many the program may run before the grader gives up
+    /// ("Program doesn't halt properly"). Watching the PC, a change is a retired
+    /// instruction, so this bounds a runaway the way the course's own loop does.
+    ///
+    /// Prefer this over a large `--cycles` when the question is "did it finish": a cycle
+    /// budget is a guess about the design's CPI, and a guess that is too low reports a
+    /// working design as hung — which is exactly what a 30,000-cycle cap did to real
+    /// submissions whose longest legitimate run is 32,312 cycles.
+    Changes {
+        /// Named register or probe.
+        name: String,
+        /// Changes required. The first boundary only observes, so a value that starts
+        /// somewhere and never moves counts zero — like [`Watch::Reaches`], power-on is
+        /// not a change.
+        count: u64,
+    },
 }
 
 impl Watch {
     /// The watched name (shared by every variant).
     pub fn name(&self) -> &str {
         match self {
-            Watch::Stable { name, .. } | Watch::Reaches { name, .. } | Watch::Is { name, .. } => {
-                name
-            }
+            Watch::Stable { name, .. }
+            | Watch::Reaches { name, .. }
+            | Watch::Is { name, .. }
+            | Watch::Changes { name, .. } => name,
         }
     }
 }

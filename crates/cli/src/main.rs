@@ -132,11 +132,11 @@ struct RunArgs {
     #[arg(long)]
     expect_halt: bool,
     /// Stop condition (§8.4), repeatable: `stable:NAME:CYCLES`,
-    /// `reaches:NAME:VALUE` or `is:NAME:VALUE` — run until a watched
-    /// register/probe holds, instead of a fixed cycle count. `NAME` is what
-    /// `probe('…')` reads; `VALUE` takes `0x…`/`0b…`/decimal. The report's
-    /// `cycles` then *is* the cycle count to completion, and `stop` names the
-    /// condition that held.
+    /// `changes:NAME:COUNT`, `reaches:NAME:VALUE` or `is:NAME:VALUE` — run
+    /// until a watched register/probe holds, instead of a fixed cycle count.
+    /// `NAME` is what `probe('…')` reads; `VALUE` takes `0x…`/`0b…`/decimal.
+    /// The report's `cycles` then *is* the cycle count to completion, and
+    /// `stop` names the condition that held.
     #[arg(long = "stop", value_name = "WHEN:NAME[:ARG]")]
     stops: Vec<String>,
     /// Pause when a component reads a value the model had to call unknown (an `X`),

@@ -978,6 +978,27 @@ impl Value {
         }
     }
 
+    /// Fold the raw representation into a byte sink: the `width` (little-endian), then
+    /// each of the three masks limb by limb.
+    ///
+    /// This is what the §4.6 trace hash mixes. It used to mix
+    /// [`Value::to_wire_value`] instead — i.e. the *hex text* of all three masks — which
+    /// allocated three `String`s and ran the integer formatter for every event applied.
+    /// Measured on a 32k-cycle datapath run, that rendering was ~8% of the whole run
+    /// (`mask_to_hex` + `alloc::fmt::*` + the `malloc`/`free` traffic behind it), and it
+    /// is off the hot path entirely now.
+    ///
+    /// Unlike the hex rendering this includes the `width`, so an 8-bit `0x1` and a 64-bit
+    /// `0x1` no longer hash alike — the same value at two widths is two different things.
+    pub fn fold_bytes(&self, mut sink: impl FnMut(&[u8])) {
+        sink(&self.width.to_le_bytes());
+        for mask in [&self.ones, &self.xs, &self.zs] {
+            for limb in mask.iter() {
+                sink(&limb.to_le_bytes());
+            }
+        }
+    }
+
     /// Decode IPC hex masks for a `width`-bit value. Validates hex syntax,
     /// fit-in-width, and mask disjointness.
     pub fn from_wire_value(wv: &WireValue, width: u32) -> Result<Value, ValueError> {
@@ -1503,6 +1524,30 @@ mod tests {
             mask_to_hex(&[u64::MAX, u64::MAX]),
             "ffffffffffffffffffffffffffffffff"
         );
+    }
+
+    /// The trace hash folds the *representation* (see [`Value::fold_bytes`]) rather than
+    /// rendering hex, so it must still distinguish everything the rendering carried — and
+    /// one thing it did **not** (the width: `0x1` at 8 bits and at 64 collide as text).
+    #[test]
+    fn fold_bytes_carries_the_width_and_every_mask() {
+        let bytes = |v: &Value| {
+            let mut out = Vec::new();
+            v.fold_bytes(|b| out.extend_from_slice(b));
+            out
+        };
+        assert_eq!(bytes(&Value::from_u64(8, 1)), bytes(&Value::from_u64(8, 1)));
+        assert_ne!(
+            bytes(&Value::from_u64(8, 1)),
+            bytes(&Value::from_u64(64, 1)),
+            "same digits, different width"
+        );
+        assert_ne!(bytes(&Value::from_u64(8, 0)), bytes(&Value::from_u64(8, 1)));
+        // 8 bits is one limb: the width, then three masks of one limb each.
+        assert_eq!(bytes(&Value::from_u64(8, 1)).len(), 4 + 8 * 3);
+        // Every mask is present, not just the ones: X and Z are different events.
+        assert_ne!(bytes(&Value::zero(8)), bytes(&Value::x(8)));
+        assert_ne!(bytes(&Value::x(8)), bytes(&Value::z(8)));
     }
 
     #[test]

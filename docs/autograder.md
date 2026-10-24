@@ -66,7 +66,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `top_paths`                      | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
 | `t_sta`, `sta_note`              | informational structural bound (only with `--sta` / `include_sta`); STA totals include the destination register's setup time (docs/delay-table.md)  |
 | `delay_table`                    | table provenance, e.g. `"cs2200-74ls-v1 (DRAFT)"`                                                                                                   |
-| `trace_hash`                     | FNV-1a over the applied event stream (the §4.6 determinism tripwire)                                                                                |
+| `trace_hash`                     | FNV-1a over the applied event stream (the §4.6 determinism tripwire); values are mixed as their raw width + mask words, not as rendered hex — see `Value::fold_bytes`                                                                                |
 | `rubric_full_credit`             | `est_time < rubric_full_credit_below` when a threshold was given, else `null`                                                                       |
 | `errors`                         | the load/validation `[LoadError]` list when `halt_reason` is `"malformed-file"`; empty otherwise (F10: one malformed-file JSON shape everywhere)    |
 | `peak_rss_bytes`, `wall_time_ms` | telemetry                                                                                                                                           |
@@ -104,6 +104,7 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   // *is* the cycle count to completion, and the report's `stop` names which held and when.
   "stop": [
     { "when": "stable", "name": "PC-IF", "cycles": 100 }, // PC unchanged for 100 boundaries
+    { "when": "changes", "name": "PC-IF", "count": 10000 }, // …or it ran 10000 instructions
     { "when": "reaches", "name": "isHalt", "value": "1" }, // the pin becomes 1
   ],
   "top_paths": 10,
@@ -123,9 +124,11 @@ csim run submission.csx --cycles 50000 --stop stable:PC-IF:100 \
   --assert "probe('c24/c29/$v0') == 0x100"
 ```
 
-`WHEN` is `stable` (then `CYCLES`), `reaches` or `is` (then a `VALUE` in §4's literal
-syntax). `NAME` may be a unique `/`-suffix of a name rather than the full path, since a
-design names its own registers while an assertion is written from outside.
+`WHEN` is `stable` (then `CYCLES`), `changes` (then a `COUNT`), `reaches` or `is` (then a
+`VALUE` in §4's literal syntax). `NAME` may be a unique `/`-suffix of a name rather than the
+full path, since a design names its own registers while an assertion is written from outside.
+`stable` and `changes` are the two halves of CS 2200's CPU rule: PC unchanged for 100
+boundaries is `MAX_CYCLES_PER_INSTR`, PC changed 10,000 times is `MAX_INSTR_COUNT`.
 
 ## 6. Snapshot files (`csim snapshot` / `csim resume`)
 

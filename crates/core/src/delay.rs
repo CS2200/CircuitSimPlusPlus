@@ -86,7 +86,10 @@
 //!
 //! A running **FNV-1a trace hash** over every applied event (time, seq,
 //! kind, ids, value masks) is the determinism tripwire: same circuit +
-//! same inputs ⇒ same hash, every platform.
+//! same inputs ⇒ same hash, every platform. Values go in as their raw
+//! `width` + mask words (`Value::fold_bytes`), never as rendered text —
+//! rendering three hex `String`s per event cost ~8% of a run to hash the
+//! same bits.
 
 use std::collections::BinaryHeap;
 
@@ -443,6 +446,8 @@ enum WatchKind {
     Reaches,
     /// Equals the wanted value (a level).
     Is,
+    /// Changed at this many cycle boundaries (an instruction counter).
+    Changes(u64),
 }
 
 /// One installed stop condition plus the per-cycle bookkeeping it needs.
@@ -451,13 +456,15 @@ struct WatchState {
     /// The `probe('…')`-registry name being watched.
     name: String,
     kind: WatchKind,
-    /// The parsed literal (`None` for `Stable`).
+    /// The parsed literal (`None` for `Stable` and `Changes`).
     want: Option<Value>,
     /// Value at the previous boundary (`None` before the first evaluation).
     last: Option<Value>,
     /// Consecutive boundaries with an unchanged value (`Stable`).
     stable_for: u64,
-    /// The cycle the value last changed (`Stable`'s `last_change_cycle`).
+    /// Boundaries at which the value differed from the previous one (`Changes`).
+    changed: u64,
+    /// The cycle the value last changed (`Stable`'s and `Changes`' `last_change_cycle`).
     last_change_cycle: u64,
 }
 
@@ -467,6 +474,7 @@ impl WatchState {
             WatchKind::Stable(_) => "stable",
             WatchKind::Reaches => "reaches",
             WatchKind::Is => "is",
+            WatchKind::Changes(_) => "changes",
         }
     }
 }
@@ -1131,6 +1139,7 @@ impl DelayEngine {
                 .ok_or_else(|| format!("'{name}' has no value to watch"))?;
             let (kind, want) = match w {
                 crate::api::Watch::Stable { cycles, .. } => (WatchKind::Stable(*cycles), None),
+                crate::api::Watch::Changes { count, .. } => (WatchKind::Changes(*count), None),
                 crate::api::Watch::Reaches { value, .. } => (
                     WatchKind::Reaches,
                     Some(self.watch_literal(&name, &cur.width(), value)?),
@@ -1146,6 +1155,7 @@ impl DelayEngine {
                 want,
                 last: None,
                 stable_for: 0,
+                changed: 0,
                 last_change_cycle: 0,
             });
         }
@@ -1245,6 +1255,15 @@ impl DelayEngine {
                         && w.want.as_ref() == Some(&cur)
                 }
                 WatchKind::Is => w.want.as_ref() == Some(&cur),
+                // Counting changes: the first boundary only *observes*, so a value that is
+                // already settled when the run starts counts nothing.
+                WatchKind::Changes(need) => {
+                    if w.last.as_ref().is_some_and(|prev| prev != &cur) {
+                        w.changed += 1;
+                        w.last_change_cycle = cycle;
+                    }
+                    need > 0 && w.changed >= need
+                }
             };
             if held {
                 if fired.is_none() {
@@ -1252,8 +1271,11 @@ impl DelayEngine {
                         name: w.name.clone(),
                         when: w.when().to_string(),
                         at_cycle: cycle,
-                        last_change_cycle: matches!(w.kind, WatchKind::Stable(_))
-                            .then_some(w.last_change_cycle),
+                        last_change_cycle: matches!(
+                            w.kind,
+                            WatchKind::Stable(_) | WatchKind::Changes(_)
+                        )
+                        .then_some(w.last_change_cycle),
                         value: format!("{cur}"),
                     });
                 }
@@ -2376,18 +2398,12 @@ impl DelayEngine {
             EvKind::Net { net, value } => {
                 mix(&[2]);
                 mix(&net.to_le_bytes());
-                let wv = value.to_wire_value();
-                mix(wv.v.as_bytes());
-                mix(wv.x.as_bytes());
-                mix(wv.z.as_bytes());
+                value.fold_bytes(|b| mix(b));
             }
             EvKind::Poke { comp, value } => {
                 mix(&[3]);
                 mix(&comp.to_le_bytes());
-                let wv = value.to_wire_value();
-                mix(wv.v.as_bytes());
-                mix(wv.x.as_bytes());
-                mix(wv.z.as_bytes());
+                value.fold_bytes(|b| mix(b));
             }
             EvKind::Deliver {
                 net,
@@ -2400,10 +2416,7 @@ impl DelayEngine {
                 mix(&net.to_le_bytes());
                 mix(&comp.to_le_bytes());
                 mix(&slot.to_le_bytes());
-                let wv = value.to_wire_value();
-                mix(wv.v.as_bytes());
-                mix(wv.x.as_bytes());
-                mix(wv.z.as_bytes());
+                value.fold_bytes(|b| mix(b));
             }
         }
         self.trace_hash = h;
@@ -2750,6 +2763,46 @@ mod tests {
         assert_eq!(info.last_change_cycle, Some(0));
         assert_eq!(info.at_cycle, 3);
         assert_eq!(err.cycle, 3, "the halt's cycle is the stop's cycle");
+    }
+
+    /// `changes` is the other half of the CS 2200 rule pair: `MAX_INSTR_COUNT = 10000`
+    /// instructions, counted as moves of the PC. It exists so a grader can bound a runaway
+    /// *without* guessing a cycle budget — a too-small `--cycles` reports a working design
+    /// as hung, which is what a 30,000 cap did to submissions that legitimately run 32,312.
+    #[test]
+    fn watch_changes_counts_moves() {
+        use crate::api::Watch;
+        // The fixture latches `d` at the edge @200, so a poke at 190 is exactly one move
+        // of `r`: `count: 1` stops on it, `count: 2` never does.
+        for (count, stops) in [(1u64, true), (2, false)] {
+            let mut eng = engine(&watchy_json(), 50);
+            eng.set_watch(&[Watch::Changes {
+                name: "r".into(),
+                count,
+            }])
+            .expect("installs");
+            assert!(eng.poke_at("d", k(1, 1), 190));
+            let out = eng.run(10);
+            assert_eq!(out.is_err(), stops, "count={count}");
+            if stops {
+                let info = eng.stop_info().cloned().expect("stop recorded");
+                assert_eq!((info.name.as_str(), info.when.as_str()), ("r", "changes"));
+                assert_eq!(info.at_cycle, 2, "the latch at the edge @200 is the move");
+                assert_eq!(info.last_change_cycle, Some(2));
+            }
+        }
+        // A value that never moves is not a change: `is`-like, the first boundary only
+        // observes, so a settled register counts zero.
+        let mut eng = engine(&watchy_json(), 50);
+        eng.set_watch(&[Watch::Changes {
+            name: "r".into(),
+            count: 1,
+        }])
+        .expect("installs");
+        assert!(
+            eng.run(10).is_ok(),
+            "a still register is not an instruction"
+        );
     }
 
     /// `reaches` fires on the *transition*: a value that already held it when the run
