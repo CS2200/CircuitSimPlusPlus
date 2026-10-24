@@ -6,7 +6,7 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
-## Round — done (2026-10-24, CE's enable rules; two changes tried and reverted)
+## Round — done (2026-10-24, CE's enable and splitter rules; the boot change reverted)
 
 **One engine rule was ours rather than the old tool's, and it is fixed.** A controlled buffer
 and a transistor now enable only on a **driven `1`**: CE's `ControlledBuffer.valueChanged` and
@@ -21,19 +21,32 @@ transpiler's tie for a floating `en` was the matching half of that mistake and i
 a real failing row behind them, and both went the wrong way once the corpus was the judge. The
 numbers are the record, because the reasoning that produced them was itself reasonable.
 
-- **A splitter pushes its slices unconditionally** — which is literally what
-  `Splitter.valueChanged` does, and our withdrawal (drive `Z` when another part also drives the
-  net) made two splitters on one bus ping-pong `Z ↔ 0` for ~100k laps *during boot*. It fixed
-  that storm row and broke the corpus: **155 rows** came back all-`X`. The shape of CE's rule is
-  not its substance. CE pushes *its own last bus value* plus the fanout's bits
-  (`state.getLastPushed`), so its fanout drive is a **repeater**; our `eval_splitter` merges the
-  bus's live drivers into the slice value, so wherever a bus driver and a fanout disagree,
-  `merge_bit` fabricates an `X` that the splitter then drives *back onto the fanout net* — and a
-  datapath wired that way collapses. A faithful version needs the splitter to be **stateful**
-  (remember what it last pushed on each side) rather than reading live merged values; that is a
-  separate, testable change. Isolated by bisect on two affected rows: the pre-change engine
-  passes both (5237 and 6683 cycles — the course's own counts), splitter-only fails both,
-  enable-only passes both.
+- **A splitter drives its slices from the value it receives on the bus** (landed). CE's
+  `Splitter.valueChanged` has two branches and they are not symmetric: on a bus change it slices
+  the **incoming bus value** into every fanout, and on a fanout change it pushes the bus with its
+  own last bus value plus that fanout's bits. Our `eval_splitter` had a withdrawal instead — it
+  drove `Z` on any slice another part also drove — so two splitters on one bus withdrew exactly
+  when the other drove: no fixed point, and a `Z ↔ 0` storm for ~100k laps during boot
+  (`submission_373713172`).
+  The **first** attempt at this drove each slice from `bus_value` — the bus's drivers *folded
+  with the fanouts' own drives* — and regressed **155 rows** to all-`X`. The fold is right for the
+  *bus* direction and wrong for the slice direction: wherever a fanout's live driver disagreed
+  with the bus, the merge fabricated an `X` that the splitter then drove **back onto the fanout
+  net**. A confound hid the real story: at that time a controlled buffer with a floating enable
+  still drove an invented `X` onto its net, so those "live drivers" were `X` to begin with — the
+  two changes had to be measured *together*, and the enable rule landed first.
+  Isolated on three rows the wrong variant broke and one it fixes:
+
+  | row | slices from the folded bus value | slices from the received bus value |
+  | --- | --- | --- |
+  | `372649919` | all-`X` | pass, 5237 cycles |
+  | `373027353` | all-`X` | pass, 6683 cycles |
+  | `374174555` | all-`X` | pass, 1853 cycles (the course's count) |
+  | `373713172` | storm gone, `X` failure | storm gone, `X` failure |
+
+  The last row is the one whose *storm* this removes; it still fails on values, which is the
+  read-side difference (a gate coalescing CE's `Z`) and not this rule. Conflict is never decided
+  inside the part — the net merge reports it, as CE's `WireValue.merge` does.
 - **Removing the boot seed** (power-on from nothing, as CE) — the seed is a guess, and for a
   symmetric latch all-zeros is its *unstable* diagonal, so a converted datapath's `STATE` buffer
   flipped between its two stable states (~100k laps) until the per-boot event cap fired. That

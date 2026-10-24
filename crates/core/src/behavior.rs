@@ -875,13 +875,17 @@ impl Behavior {
         }
         let mut out = Vec::with_capacity(nets.len());
         out.push(Value::from_bits(&bus_drive));
-        for (si, (_, map)) in splits.iter().enumerate() {
-            let externally_driven = !nets[1 + si].is_fully_z();
+        for (_, map) in splits.iter() {
             out.push(Value::from_bits(
                 &map.iter()
                     .map(|&bb| {
-                        if bb < *bus_width && !externally_driven {
-                            bus_value[bb as usize]
+                        if bb < *bus_width {
+                            // CE pushes a fanout from the value *it received on the bus*
+                            // (`Splitter.valueChanged`, `PORT_JOINED` branch: it slices the
+                            // incoming `value`). That is what other parts drive on the bus —
+                            // **not** the fold of the fanouts' own drives, which manufactured
+                            // an `X` here and then drove it back onto the fanout net.
+                            nets[0].bit(bb)
                         } else {
                             Bit::Z
                         }
@@ -1723,8 +1727,9 @@ mod tests {
         assert_eq!(out[0], Value::z(8), "the bus keeps its own writer");
         assert_eq!(out[1], k(4, 0xA)); // hi
         assert_eq!(out[2], k(4, 0xB)); // lo
-                                       // Splits driven → the bus is assembled from them (the other idiom), and the
-                                       // splitter leaves those split pins alone: they have their own writer.
+                                       // Splits driven → the bus is assembled from them (the other idiom). The split pins
+                                       // are *also* driven here, with the value the splitter received on the bus (nothing,
+                                       // in this case) — CE pushes every slice on a change and lets the net merge judge.
         let nets = [Value::z(8), k(4, 0xA), k(4, 0xB)];
         let out = sp.eval_splitter(&nets);
         assert_eq!(out[0], k(8, 0xAB));
@@ -1763,7 +1768,10 @@ mod tests {
             ]),
             "its bits, from the split that drives them — Z elsewhere (not driving)"
         );
-        assert_eq!(out[2], Value::z(4), "lo keeps its own writer");
+        // The split drive is what *other parts* drive on the bus at lo's bit positions —
+        // 0x00 here — so it disagrees with lo's own writer, and the merge reports it. CE does
+        // the same: it slices the bus value it *received*, and the net merge decides.
+        assert_eq!(out[2], k(4, 0x0), "lo is driven with the bus's bits");
         assert_eq!(out[1], k(4, 0x0), "hi reads the bus's high nibble");
         let (merged, contended) = Value::contention_merge_detail(8, &[k(8, 0x00), out[0].clone()]);
         assert!(merged.has_x(), "0x00 vs 0x0f is a short: {merged:?}");
