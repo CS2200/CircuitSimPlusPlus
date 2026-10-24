@@ -171,6 +171,29 @@ fn limb_mask(width: u32, i: usize) -> u64 {
     }
 }
 
+/// Fold up to one limb's worth of bit states into `(ones, xs, zs)`.
+///
+/// The inline-limb fast path for [`Value::from_bits`] / [`Value::from_bits_iter`]:
+/// no `Value::zero`, no per-bit limb division, just an OR (or nothing) per bit.
+fn fold_bits_inline(bits: impl IntoIterator<Item = Bit>) -> (u64, u64, u64) {
+    let mut ones = 0u64;
+    let mut xs = 0u64;
+    let mut zs = 0u64;
+    for (i, b) in bits.into_iter().enumerate() {
+        if i >= LIMB_BITS as usize {
+            break;
+        }
+        let m = 1u64 << i;
+        match b {
+            Bit::One => ones |= m,
+            Bit::X => xs |= m,
+            Bit::Z => zs |= m,
+            Bit::Zero => {}
+        }
+    }
+    (ones, xs, zs)
+}
+
 /// `src >> n`, keeping `dst_limbs` limbs of the result.
 fn shr_bits(src: &[u64], n: u32, dst_limbs: usize) -> Vec<u64> {
     let limb_shift = (n / LIMB_BITS) as usize;
@@ -361,7 +384,17 @@ impl Value {
 
     /// Build from per-bit states, `bits[0]` = least significant.
     pub fn from_bits(bits: &[Bit]) -> Self {
-        let mut v = Self::zero(bits.len() as u32);
+        let width = bits.len() as u32;
+        if width >= 1 && width <= LIMB_BITS {
+            let (ones, xs, zs) = fold_bits_inline(bits.iter().copied());
+            return Value {
+                width,
+                ones: Limbs::Inline(ones),
+                xs: Limbs::Inline(xs),
+                zs: Limbs::Inline(zs),
+            };
+        }
+        let mut v = Self::zero(width);
         for (i, b) in bits.iter().enumerate() {
             let m = 1u64 << (i as u32 % LIMB_BITS);
             let limb = i / LIMB_BITS as usize;
@@ -381,6 +414,15 @@ impl Value {
     /// splitter builds one `Value` per fanout on every evaluation, and the `Vec<Bit>` it
     /// used to collect first was pure allocation churn.
     pub fn from_bits_iter(width: u32, bits: impl IntoIterator<Item = Bit>) -> Self {
+        if width >= 1 && width <= LIMB_BITS {
+            let (ones, xs, zs) = fold_bits_inline(bits);
+            return Value {
+                width,
+                ones: Limbs::Inline(ones),
+                xs: Limbs::Inline(xs),
+                zs: Limbs::Inline(zs),
+            };
+        }
         let mut v = Self::zero(width);
         for (i, b) in bits.into_iter().enumerate() {
             let m = 1u64 << (i as u32 % LIMB_BITS);
