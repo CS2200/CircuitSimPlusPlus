@@ -578,8 +578,11 @@ impl Behavior {
                     }
                 };
                 if !enabled {
-                    // Disabled: no index, no group signal, and nothing to pass on.
-                    return Ok(vec![Value::x(out_bits), Value::zero(1), Value::zero(1)]);
+                    // Disabled: no index, no group signal, and nothing to pass on. The
+                    // index is **`Z`** (no drive), not `X`: CE's `PriorityEncoder.valueChanged`
+                    // pushes `new WireValue(bitSize, State.Z)` here — an `X` would *drive* the
+                    // net and contend with whatever else is on it.
+                    return Ok(vec![Value::z(out_bits), Value::zero(1), Value::zero(1)]);
                 }
                 // Every line can affect the index or `valid`, so all consume — but only
                 // while the stage is listening, like a mux's selected input.
@@ -614,11 +617,13 @@ impl Behavior {
                         Value::from_u64(1, 1),
                         Value::zero(1),
                     ]),
-                    // Nothing asserted: no index (X, as in CE — `valid` is how a consumer
-                    // knows), `valid` low, and `en_out` high: "nothing here, ask the next
-                    // stage".
+                    // Nothing asserted: no index, `valid` low, and `en_out` high: "nothing
+                    // here, ask the next stage". The index is **`Z`**, as CE pushes it
+                    // (`PriorityEncoder.valueChanged`, the `highest == -1` branch) — no drive,
+                    // so the value belongs to the rest of the net. `valid` is how a consumer
+                    // knows there was no hit.
                     None => Ok(vec![
-                        Value::x(out_bits),
+                        Value::z(out_bits),
                         Value::zero(1),
                         Value::from_u64(1, 1),
                     ]),
@@ -1508,12 +1513,14 @@ mod tests {
         // in1 and in3 asserted → in3 wins.
         let hi = [k(1, 0), k(1, 1), k(1, 0), k(1, 1), k(1, 1)];
         assert_eq!(p.eval(&refs(&hi)).unwrap(), vec![k(2, 3), k(1, 1), k(1, 0)]);
-        // Nothing asserted → no index (X, as in CircuitSim CE), valid low, and `en_out`
+        // Nothing asserted → no index — **`Z`**, as CE pushes it (`PriorityEncoder.valueChanged`,
+        // the `highest == -1` branch: `new WireValue(bitSize, State.Z)`), so the net belongs to
+        // whatever else is on it rather than being driven unknown — `valid` low, and `en_out`
         // high: "nothing here, ask the next stage".
         let none = [k(1, 0), k(1, 0), k(1, 0), k(1, 0), k(1, 1)];
         assert_eq!(
             p.eval(&refs(&none)).unwrap(),
-            vec![Value::x(2), k(1, 0), k(1, 1)]
+            vec![Value::z(2), k(1, 0), k(1, 1)]
         );
         // An X above every known 1 leaves the result unknown.
         let x_hi = [k(1, 1), k(1, 0), k(1, 0), Value::x(1), k(1, 1)];
@@ -1550,12 +1557,13 @@ mod tests {
         let hit = [k(1, 0), k(1, 0), k(1, 1), k(1, 0)];
         let silent = [k(1, 0), k(1, 0), k(1, 0), k(1, 0)];
 
-        // A driven 0 disables: no index, no group signal, and nothing passed on.
+        // A driven 0 disables: no index, no group signal, and nothing passed on. CE's
+        // `!isEnabled` branch pushes `State.Z` for the index too — no drive, not an unknown.
         let mut disabled = hit.to_vec();
         disabled.push(k(1, 0));
         assert_eq!(
             p.eval(&refs(&disabled)).unwrap(),
-            vec![Value::x(2), k(1, 0), k(1, 0)]
+            vec![Value::z(2), k(1, 0), k(1, 0)]
         );
 
         // Disabled, the lines are not consumed, so a floating line is not an error.
