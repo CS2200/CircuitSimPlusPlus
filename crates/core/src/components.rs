@@ -84,6 +84,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "wiring.pin",
     "wiring.power",
     "wiring.probe",
+    "wiring.reset",
     "wiring.splitter",
     "wiring.transistor",
 ];
@@ -722,6 +723,21 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let mut c = AttrCheck::new(attrs, &[]);
             c.finish();
             (vec![PinSig::o("out", 1)], c, CompKind::Clock)
+        }
+        "wiring.reset" => {
+            // The design's **reset source** (DESIGN.md §4.3): a sibling of `wiring.clock` in
+            // the Wiring group — a *source part*, not a pin. CE's reset was a `Button` and
+            // the behaviour is that one unchanged: drive 1 while held, 0 otherwise, starting
+            // released, so a graded run sees it deasserted and a user can assert it.
+            //
+            // What the distinct type buys over `io.button` is something the *tooling* can
+            // recognise, exactly as `wiring.clock` is recognised, so "the design's reset"
+            // does not have to be spelled out as a naming convention. The difference is
+            // presentational, not electrical — a square button rather than a round one
+            // (`frontend/editor/shapes.ts`) — so the behaviour is `Button`'s.
+            let mut c = AttrCheck::new(attrs, &[]);
+            c.finish();
+            (vec![PinSig::o("out", 1)], c, CompKind::Button)
         }
         // Splitter pins are bidirectional (InOut): which side drives is
         // resolved dynamically (DESIGN.md §6 "arbitrary bit mapping — the

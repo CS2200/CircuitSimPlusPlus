@@ -631,6 +631,9 @@ const REGISTRY: Record<string, CompSpec> = {
     caption: () => "CONST",
   },
   "wiring.clock": boxSpec(2, 2, [{ name: "out", dx: 2, dy: 1, kind: "out" }], "CLK"),
+  // The reset source (DESIGN.md §4.3) — the same shape as the general-purpose button, so a
+  // graded run sees it released; the square contact in `shapes.ts` is what marks it out.
+  "wiring.reset": boxSpec(3, 2, [{ name: "out", dx: 3, dy: 1, kind: "out" }], "RST"),
   // The probe's pointed shape points along its `in` pin, so it grows AWAY from
   // that pin: the pin stays put (dx 0), the body extends behind it, and the
   // readout fits without pushing into whatever the probe is watching
@@ -871,6 +874,7 @@ const TYPE_NAMES: Readonly<Record<string, string>> = {
   "wiring.pin": "Pin",
   "wiring.constant": "Constant",
   "wiring.clock": "Clock",
+  "wiring.reset": "Reset",
   "wiring.probe": "Probe",
   "wiring.power": "Power",
   "wiring.ground": "Ground",
@@ -944,15 +948,17 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
     items: [
       { type: "wiring.pin", label: "INPUT" },
       { type: "wiring.pin", label: "OUTPUT", attrs: { isOutput: true }, rot: "W" },
-      // The clock and reset a placed part wires itself to. Naming them here is the whole
-      // of the convention (a wire's name is a label, not a joining rule — format-v2 §9);
-      // placing one makes it explicit where a design's clock and reset come from.
-      // Labelled "… PIN" so they cannot be confused with the *clock* tile (`wiring.clock`,
-      // labelled CLK) — one is the source, the other is the pin that carries it.
-      { type: "wiring.pin", label: "CLK PIN", name: "CLK" },
-      { type: "wiring.pin", label: "RST PIN", name: "RST" },
-      { type: "wiring.constant" },
+      // The design's clock and reset are **sources**, not pins: `wiring.clock` drives the
+      // square wave, `wiring.reset` is the square reset button — the one clearly deliberate
+      // button on a sheet. A placed part wires itself to whichever is in its circuit, and
+      // to a `wiring.pin` named `CLK`/`RST` only where a subcircuit boundary needs a port
+      // (a net cannot cross one). There is deliberately no "CLK PIN"/"RST PIN" tile: the
+      // CLK/RST *names* are a convenience the editor uses when it looks for a source (any
+      // capitalisation accepted), never a joining rule (format-v2 §9) — and the engine
+      // binds nothing by name, so an old file's `CLK`/`RST` pins keep working unchanged.
       { type: "wiring.clock" },
+      { type: "wiring.reset" },
+      { type: "wiring.constant" },
       { type: "wiring.splitter" },
       { type: "wiring.probe" },
       { type: "wiring.power" },

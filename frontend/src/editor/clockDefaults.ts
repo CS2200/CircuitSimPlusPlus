@@ -6,10 +6,11 @@
  * unwired clock. In the new model the pins are always in the part (format-v2 §4), so a
  * placement would otherwise drop a component into a design that reads a floating net — the
  * exact situation the old tool avoided by not having the pin at all. Placing therefore
- * wires it, by convention, to a `wiring.pin` named **`CLK`** / **`RST`** in the same
- * circuit, creating that pin when the circuit has none. At the root, `clk` uses the
- * design's `wiring.clock` instead when there is one (and creates one when there is not):
- * a root `CLK` input pin would leave the simulation with no clock to tick.
+ * wires it: **at the root to the design's own source parts** — the `wiring.clock` and the
+ * `wiring.reset`, creating either when absent — and in a **subcircuit** to a `wiring.pin`
+ * named `CLK` / `RST`, creating that port when the circuit has none. A subcircuit needs the
+ * port because a net cannot cross a circuit boundary; a root pin would be a control nothing
+ * drives.
  *
  * The convention is a *convenience*, not a format rule. A wire's `name` is a **label, not a
  * joining rule** (format-v2 §9) — the connection is the wire, and the label is what makes
@@ -47,6 +48,18 @@ export function nextPlaceSeq(): number {
 const SOURCE_PIN: Record<string, string> = {
   "wiring.pin": "pin",
   "wiring.clock": "out",
+  "wiring.reset": "out",
+};
+
+/**
+ * The source part a **root** circuit's default prefers, per convention (DESIGN.md §4.3).
+ * A root `CLK`/`RST` pin would have nothing driving it — the design's clock and reset are
+ * parts, so the root gets the part instead. Subcircuits still get a `wiring.pin` named
+ * `CLK`/`RST`, because a net cannot cross a circuit boundary and the port is the bridge.
+ */
+const ROOT_SOURCE: Record<string, string> = {
+  CLK: "wiring.clock",
+  RST: "wiring.reset",
 };
 
 function findSource(c: CsxCircuit, aliases: string[]): CsxComponent | undefined {
@@ -88,18 +101,21 @@ export function applyClockDefaults(
     let circuit = doc.circuits[circuitIdx];
     let source: CsxComponent | undefined = findSource(circuit, def.aliases);
 
-    // The design's own clock at the root: a part follows the circuit's clock, and a root
-    // `CLK` pin would have nothing ticking it.
-    if (source === undefined && def.label === "CLK" && circuitIdx === 0) {
-      source = circuit.components.find((x) => x.type === "wiring.clock");
-      if (source === undefined) {
-        const id = doc.addComponent(
-          circuitIdx,
-          { type: "wiring.clock", pos: [placed.pos[0], placed.pos[1] - 6] },
-          coalesceKey,
-        );
-        circuit = doc.circuits[circuitIdx];
-        source = circuit.components.find((x) => x.id === id);
+    // The design's own clock and reset at the root: a part follows them, and a root
+    // `CLK`/`RST` pin would have nothing driving it.
+    if (source === undefined && circuitIdx === 0) {
+      const want = ROOT_SOURCE[def.label];
+      if (want !== undefined) {
+        source = circuit.components.find((x) => x.type === want);
+        if (source === undefined) {
+          const id = doc.addComponent(
+            circuitIdx,
+            { type: want, pos: [placed.pos[0], placed.pos[1] - 6] },
+            coalesceKey,
+          );
+          circuit = doc.circuits[circuitIdx];
+          source = circuit.components.find((x) => x.id === id);
+        }
       }
     }
 

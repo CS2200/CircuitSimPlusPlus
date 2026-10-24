@@ -316,6 +316,7 @@ mod tests {
             "wiring.pin",
             "wiring.constant",
             "wiring.clock",
+            "wiring.reset",
             "wiring.probe",
             "wiring.splitter",
             "arith.bit-extender",

@@ -410,6 +410,44 @@ export function gateShape(
         outBubble: null,
       };
     }
+    case "wiring.reset": {
+      // The reset source (DESIGN.md §4.3): `io.button`'s geometry with a **square**
+      // contact, so the design's reset is the one deliberate button on the sheet while
+      // the round one stays general-purpose. Same orientation as the general button —
+      // plunger and cap point right, along the lead to the output pin.
+      const cy = y + h / 2;
+      const side = Math.min(w, h) * 0.52;
+      const sx = x + h * 0.42 - side / 2;
+      const sy = cy - side / 2;
+      const capX = x + w - h * 0.42;
+      return {
+        body: [
+          { t: "M", x: sx, y: sy },
+          { t: "L", x: sx + side, y: sy },
+          { t: "L", x: sx + side, y: sy + side },
+          { t: "L", x: sx, y: sy + side },
+          { t: "Z" },
+        ],
+        extra: [
+          // plunger stem (contact → cap)
+          [
+            { t: "M", x: sx + side, y: cy },
+            { t: "L", x: capX, y: cy },
+          ],
+          // cap bar (vertical, since the button is rotated)
+          [
+            { t: "M", x: capX, y: cy - h * 0.33 },
+            { t: "L", x: capX, y: cy + h * 0.33 },
+          ],
+          // lead from the cap to the output pin
+          [
+            { t: "M", x: capX, y: cy },
+            { t: "L", x: x + w, y: cy },
+          ],
+        ],
+        outBubble: null,
+      };
+    }
     case "wiring.controlled-buffer":
       // A buffer triangle with an enable lead on the bottom edge (UI_OVERHAUL
       // §43): the extra stroke connects the body's lower slanted edge to the

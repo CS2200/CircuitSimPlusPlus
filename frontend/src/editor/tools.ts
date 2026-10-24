@@ -465,7 +465,9 @@ export class ToolMachine {
       const hitComp = this.doc
         .circuit(this.circuitIdx())
         .components.find((x) => x.id === comp.compId);
-      if (hitComp?.type === "io.button") {
+      // Momentary parts: the general-purpose button and the design's reset — the same
+      // behaviour (1 only while held, so a graded run sees it released), a square contact.
+      if (hitComp?.type === "io.button" || hitComp?.type === "wiring.reset") {
         // Momentary push button (UI decision): its `out` is 1 only while held.
         this.selection.set([comp.compId], []);
         this.pressButton = comp.compId;

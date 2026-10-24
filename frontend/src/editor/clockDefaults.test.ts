@@ -21,10 +21,11 @@ describe("placing a clocked part wires its clock and reset", () => {
     const d = doc();
     const r = place(d, "mem.register");
     const c = d.circuits[0];
-    // The root's CLK **is** the design's own clock (a `CLK` pin would have nothing
-    // ticking it); the reset is a pin, so a design can be reset on purpose.
+    // The root's CLK **is** the design's own clock and its RST **is** the design's own
+    // reset: both are source *parts*, because a root `CLK`/`RST` pin would have nothing
+    // driving it (§4.3).
     expect(c.components.filter((x) => x.type === "wiring.clock")).toHaveLength(1);
-    expect(c.components.some((x) => x.type === "wiring.pin" && x.name === "RST")).toBe(true);
+    expect(c.components.filter((x) => x.type === "wiring.reset")).toHaveLength(1);
     // `addWire` canonicalises the endpoints, so find the wire by the pin it reached.
     const wired = (pin: string) =>
       c.wires.filter((w) =>
@@ -42,7 +43,7 @@ describe("placing a clocked part wires its clock and reset", () => {
     const b = place(d, "mem.register", [10, 30]);
     const c = d.circuits[0];
     expect(c.components.filter((x) => x.type === "wiring.clock")).toHaveLength(1);
-    expect(c.components.filter((x) => x.name === "RST")).toHaveLength(1);
+    expect(c.components.filter((x) => x.type === "wiring.reset")).toHaveLength(1);
     const touches = (e: (typeof c.wires)[number]["a"], id: string) =>
       isPinEndpoint(e) && e.comp === id;
     const touching = (id: string) => c.wires.filter((w) => touches(w.a, id) || touches(w.b, id));
