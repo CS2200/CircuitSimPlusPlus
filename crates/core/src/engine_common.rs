@@ -23,6 +23,96 @@ pub struct Halt {
     pub details: String,
 }
 
+/// Levelize (Kahn) over the flattened netlist: DAG components in
+/// evaluation order, then the residue (feedback + downstream) in
+/// comp-index order.
+///
+/// Dependency rule: comp B depends on every comp driving a net that B
+/// consumes. Consumed pins come from `Behavior::comb_input_deps`
+/// (register: none; RAM: `addr` only). Splitters consume every pin net
+/// that has a driver other than themselves (their direction is dynamic;
+/// static other-driver presence is the best DAG approximation — genuine
+/// both-ways usage lands in the residue and iterates to fixpoint).
+///
+/// Self-loops force self-fed components into the residue — EXCEPT a
+/// splitter's own driver listing (splitter pins are InOut, so a splitter
+/// is always nominally a driver of its own nets; that pseudo-loop is not
+/// feedback — its direction is resolved at evaluation, and treating it
+/// as one wrongly seeded static splitter cones to 0, B11).
+pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
+    let n = netlist.comps.len();
+    let mut indeg = vec![0usize; n];
+    let mut edges: Vec<Vec<u32>> = vec![Vec::new(); n];
+    let mut add_edge = |from: u32, to: u32| {
+        edges[from as usize].push(to);
+        indeg[to as usize] += 1;
+    };
+    for (ci, beh) in comps.iter().enumerate() {
+        let fc = &netlist.comps[ci];
+        let consumed_nets: Vec<NetId> = if beh.is_splitter() {
+            fc.pins
+                .iter()
+                .map(|p| p.net)
+                .filter(|net| {
+                    netlist.nets[net.idx()]
+                        .drivers
+                        .iter()
+                        .any(|(drv, _)| drv.idx() != ci)
+                })
+                .collect()
+        } else {
+            let in_positions: Vec<usize> = fc
+                .pins
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.dir == PinDir::In)
+                .map(|(i, _)| i)
+                .collect();
+            beh.comb_input_deps(in_positions.len())
+                .into_iter()
+                .map(|dep| fc.pins[in_positions[dep]].net)
+                .collect()
+        };
+        let splitter = beh.is_splitter();
+        for net in consumed_nets {
+            for (drv, _) in &netlist.nets[net.idx()].drivers {
+                // A splitter's pins are InOut, so it is always listed as a
+                // driver of its own nets — a *pseudo* self-loop that is
+                // not feedback (its drive direction is dynamic, resolved
+                // at evaluation). Real self-loops (a gate feeding itself)
+                // still force the residue.
+                if splitter && drv.idx() == ci {
+                    continue;
+                }
+                add_edge(drv.0, ci as u32);
+            }
+        }
+    }
+    // Kahn, seeded and processed deterministically.
+    let mut queue: std::collections::VecDeque<u32> =
+        (0..n as u32).filter(|&i| indeg[i as usize] == 0).collect();
+    let mut order = Vec::with_capacity(n);
+    let mut scheduled = vec![false; n];
+    while let Some(c) = queue.pop_front() {
+        if scheduled[c as usize] {
+            continue; // duplicate queue entries from multi-edge frees
+        }
+        scheduled[c as usize] = true;
+        order.push(c);
+        for &next in &edges[c as usize] {
+            indeg[next as usize] -= 1;
+            if indeg[next as usize] == 0 {
+                queue.push_back(next);
+            }
+        }
+    }
+    let residue: Vec<u32> = (0..n as u32).filter(|&i| !scheduled[i as usize]).collect();
+    (order, residue)
+}
+
+/// Construct a behavior per flattened component. Errors only if a
+/// component has no behavior — impossible for a validated document
+/// (subcircuits are inlined; unknown types are rejected at load).
 pub(crate) fn build_behaviors(netlist: &Netlist) -> Result<Vec<Behavior>, Vec<LoadError>> {
     let mut comps = Vec::with_capacity(netlist.comps.len());
     for fc in &netlist.comps {

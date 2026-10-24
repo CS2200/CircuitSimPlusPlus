@@ -311,15 +311,16 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   Through v5 the second case read `Z` as deasserted instead, which quietly made an *engine*
   rule load-bearing for the converter. The migration is what keeps an old file behaving as it
   did: the semantics changed, so the version did.
-- Combinational feedback is **not seeded at all**: power-on starts from nothing, exactly as
-  CircuitSim CE does. Every net holds `Z` ("no driver") and a part is evaluated only when a
-  value actually arrives, so a loop with no driven entry point stays inert — nothing invents
-  a state for it. (Through v6 the engine seeded every feedback net to `0` and evaluated each
-  loop part once from that snapshot. The seed was a guess, and for a symmetric latch
-  all-zeros is the *unstable* diagonal, so a cross-coupled pair flipped between its two
-  stable states for as long as the boot allowed — a converted datapath's `STATE` buffer ran
-  ~100k laps there.) Determinism is unchanged — nothing is ever resolved randomly (§4.5) —
-  but the deterministic answer is now "no value yet" rather than "zero".
+- Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
+  deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
+  carry values but never originate them. This is load-bearing rather than a convenience: the
+  engine is *delay-aware*, so a loop it has to evaluate from `Z` settles at `X` — a fixed
+  point of every combinational function here — and every consumer of that loop inherits the
+  `X`. A definite seeded start is what gives feedback logic somewhere deterministic to begin
+  (CircuitSim CE, being zero-delay, settles such a loop at a definite value by coalescing the
+  floating read instead; that is the same model difference the floating-consume table below
+  describes). Removing the seed was tried on 2026-10-24 and reverted: 154 rows that had been
+  passing came back all-`X`.
 - RAM `depth` must be a power of two (validation), and its `addr` pin is
   `ceil(log2 depth)` wide by default; `addrBits` overrides that (`mem.rom` too), so the
   address width belongs to the design rather than to the word count. Fewer bits than the

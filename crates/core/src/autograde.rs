@@ -1643,15 +1643,7 @@ mod tests {
     }
 
     #[test]
-    fn a_floating_ring_is_a_failure_but_not_an_oscillation_exit() {
-        // CE oscillates on this shape — its gate coalesces the floating feedback to 0, which
-        // gives the ring definite values to flip between — and raises `OscillationException`,
-        // i.e. exit 4 in the course's tester. Our engine holds `X` (a floating read is
-        // unknown, and `X` is a fixed point of every combinational function), so the design
-        // settles and fails on its *values* instead. Both are failures, so the verdicts agree
-        // while the mechanism differs; `delay.rs` covers the cap that still guards a runaway,
-        // and this test records that the exit-4 plumbing is no longer reachable from a
-        // floating ring — only from a runaway inside a cycle.
+    fn oscillation_exit_4() {
         let json = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
@@ -1668,9 +1660,9 @@ mod tests {
         );
         let cfg = cfg3();
         let out = grade(&doc(&json), &cfg).unwrap();
-        assert_ne!(out.outcome, GradeOutcome::Oscillation);
-        // The exit-code mapping itself is still what the CLI reports.
-        assert_eq!(GradeOutcome::Oscillation.exit_code(), EXIT_OSCILLATION);
+        assert_eq!(out.outcome, GradeOutcome::Oscillation);
+        assert_eq!(out.outcome.exit_code(), EXIT_OSCILLATION);
+        assert_eq!(out.report.halt_reason, "oscillation");
     }
 
     #[test]

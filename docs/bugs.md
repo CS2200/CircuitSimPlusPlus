@@ -6,35 +6,45 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
-## Round — done (2026-10-24, engine semantics aligned with CE)
+## Round — done (2026-10-24, splitter and enable semantics; a third change tried and reverted)
 
-Three engine rules were ours rather than the old tool's, and each invented something a design
-never said. All three came out of tracing the corpus's oscillation rows against the old tool
-with the new tunnel probe (below).
+Two engine rules were ours rather than the old tool's, and each invented something a design
+never said. Both came out of tracing the corpus's oscillation rows against the old tool.
 
-- **A splitter no longer withdraws.** On a fanout net that another part also drove, the
-  engine drove `Z`; CE's `Splitter.valueChanged` pushes every slice unconditionally and lets
-  the net merge judge. Besides inventing a value, the withdrawal *hid* shorts — a slice that
-  disagrees with another writer is exactly what `Value::contention_merge` reports (the role
-  CE's `WireValue.merge` and short detector play). Two splitters tapping one bus withdrew
-  precisely when the other drove, so there was no fixed point: a converted 4200 pipeline
-  ping-ponged `Z ↔ 0` for ~100k laps *during boot* and tripped the event cap, while the old
-  tool merged equal bits and stopped. The *bus* half of the old rule stays (a pure tap still
-  drives nothing), which is the half `…no short…` below was actually about.
+- **A splitter no longer withdraws.** On a fanout net another part also drove, the engine
+  drove `Z`; CE's `Splitter.valueChanged` pushes every slice unconditionally and lets the net
+  merge judge. Besides inventing a value, the withdrawal *hid* shorts — a slice that disagrees
+  with another writer is exactly what `Value::contention_merge` reports, the role CE's
+  `WireValue.merge` and short detector play. Two splitters tapping one bus withdrew precisely
+  when the other drove, so there was no fixed point: a converted 4200 pipeline ping-ponged
+  `Z ↔ 0` for ~100k laps *during boot* and tripped the event cap, while the old tool merged
+  equal bits and stopped. The *bus* half of the old rule stays (a pure tap still drives
+  nothing), which is the half the `…no short…` entry below was actually about.
 - **A controlled buffer and a transistor enable only on a driven `1`.** CE compares the
   control against the enable bit and pushes `Z` otherwise, so a floating enable means
   *disabled* — the part drives nothing and its net belongs to its other writers — and a
-  floating transistor gate means the switch is open. We consumed those into `X`, which turned
-  "this driver is off" into "this driver might be on with an unknown value".
-- **Power-on starts from nothing.** No seed, no one-shot evaluation of the residue. A
-  symmetric latch's all-zeros state is its *unstable* diagonal, so seeding it walked that
-  loop between its two stable states until the cap fired; CE evaluates a part only when one of
-  its inputs changes, so a loop with no driven entry point is inert and a loop that has one is
-  driven into its state by the real signal.
+  floating transistor gate means the switch is open. We consumed those into `X`, turning "this
+  driver is off" into "this driver might be on with an unknown value".
 
-`csim`'s own `--tunnels` probe is what made this measurable rather than inferable: it reads
-the *old* tool's named wires per cycle, so "which net carries `PC+1`" is answered by the old
-tool instead of by argument.
+**A third change — removing the boot seed — was tried and reverted, and the numbers are the
+record.** Power-on used to seed every feedback net to `0` and evaluate each loop part once
+from that snapshot. That seed is a guess, and for a symmetric latch all-zeros is its
+*unstable* diagonal, so a converted datapath's `STATE` buffer flipped between its two stable
+states (~100k laps) until the per-boot event cap fired. Starting from nothing instead — every
+net at `Z`, nothing evaluated until a value arrives, exactly as CE does — looked like the
+faithful answer, and the row it targeted did settle. The corpus disagreed: **154 rows** that
+had been passing came back with an all-`X` state (87 disagreements in the 4200 half alone,
+against 16 before). The reason is a model difference, not a bug in that change: our engine is
+*delay-aware* and CE is zero-delay, so CE settles a floating loop at a definite value by
+coalescing the read, while ours settles it at `X` — a fixed point of every combinational
+function we have — and every consumer of that loop inherits it. The seed is load-bearing
+exactly as its comment said, and the symmetric-latch row needs a *targeted* fix (deterministic
+ordering where two parts commit at the same timestamp, the way CE's link order breaks the tie)
+rather than the blanket removal.
+
+`csim`'s `--tunnels` probe is what made the diagnosis measurable rather than inferable: it
+reads the *old* tool's named wires per cycle, so "which net carries `PC + 1`" is answered by
+the old tool instead of by argument.
 
 ## Latest round — done (2026-10-23, third pass)
 
@@ -132,13 +142,6 @@ gives), so the conversion is faithful where it can be seen; the pipelines still 
 later in the run (`PC-IF` parks at `0x12` for the reference), which is the next thing to
 chase. All 199 core + 9 golden tests pass unchanged.
 
-**Superseded (2026-10-24).** The mechanism changed: there is no seed to iterate any more.
-Power-on starts from nothing (above), so a loop part is driven by a real arrival — a
-register's committed output, a constant, a clock edge — and the failure this section
-describes cannot recur, because a net starts at `Z` and *any* committed value is a change.
-The diagnostic aid and the `csim nets` recipe below are still how this was found and are
-still worth reading.
-
 ## The reset pin's semantics (decided 2026-10-21)
 
 `mem.register`/`mem.ram` have `rst` and `clk` again, hidden unless `showClk`/`showRst`
@@ -203,14 +206,6 @@ frontend planning docs, and the source comments that restated them.
 (sizeable) · **?** needs info.
 
 ---
-
-**Half superseded (2026-10-24).** The *bus* conclusion stands and is still the rule: a
-splitter that passes its own bus through is a second writer on a net it only taps, and that
-is what put `X` on the instruction bus. The second half — "each split reads the bus where
-nothing else drives it", i.e. withdrawing `Z` on a slice someone else drives — was itself too
-careful and is gone: CE pushes every slice unconditionally, and the withdrawal made two
-splitters sharing a bus oscillate `Z ↔ 0` forever during boot. Disagreement on a slice is
-reported by the net merge, which is what it is for; see the 2026-10-24 round above.
 
 ## Latest round — done (2026-10-19)
 
