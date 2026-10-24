@@ -76,7 +76,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 5,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 6,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],
@@ -88,10 +88,16 @@ def const(c, value, bitsize=1):
 
 
 def clocked_register(c, clk, one, zero, name=None, bitsize=32):
-    """A register with en=1 wired; returns its id."""
+    """A register with en=1 and a driven 0 on `rst`; returns its id.
+
+    The reset is wired because a floating one is `X` since v6 — the engine does not decide
+    what an unwired control means, so a schematic either drives one or says so. A constant 0
+    is the faithful translation of the old "unwired, therefore never resets" default.
+    """
     r = c.add("mem.register", name=name, bitsize=bitsize if bitsize != 1 else None)
     c.wire(clk, "out", r, "clk")
     c.wire(one, "out", r, "en")
+    c.wire(zero, "out", r, "rst")
     return r
 
 

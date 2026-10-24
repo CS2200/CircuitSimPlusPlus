@@ -23,6 +23,13 @@
 //! architectural checks (`cpu_fixtures_compute_the_program`, `fixture_alu_computes`)
 //! still pass — the drift is events, not results.
 //!
+//! Re-blessed again by **v6** (a floating `rst` is `X`, not a deasserted reset). Every
+//! fixture now *drives* its reset — the generator wires one, and the engine stopped
+//! reading a floating control as a value — so four traces move: new parts, new nets, new
+//! event ids. Again `t_obs` did not move at all (39/40/0/205/205) and the architectural
+//! checks (`fixture_fsm_alternates`, `fixture_alu_computes`, `cpu_fixtures_compute_the_program`)
+//! pass, so the drift is events, not results.
+//!
 //! Re-blessed again by the idle-bus fix: a part now waits for a `Z` input only if its own
 //! consume table reads it *and* the value is still on its way (`net_in_flight`), so a `Z`
 //! on a pin a part never reads no longer stalls it. Only `alu.csx` moved — its 8-way mux
@@ -54,7 +61,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 3,
         pokes: &[],
         t_obs: 39,
-        trace_hash: 0x44a3_115d_908c_aa32,
+        trace_hash: 0xdfab_86c7_4402_f0a1,
     },
     Scenario {
         fixture: "fsm.csx",
@@ -62,7 +69,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 40,
-        trace_hash: 0xfa28_bcbe_f38e_aeaf,
+        trace_hash: 0x09b5_f93b_ac5d_4854,
     },
     Scenario {
         fixture: "alu.csx",
@@ -78,7 +85,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0xb009_1cba_432c_f5c7,
+        trace_hash: 0x7036_620e_a9fb_8d04,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -86,7 +93,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 205,
-        trace_hash: 0x3221_6d5d_e6c2_3e29,
+        trace_hash: 0x7d53_0798_67cc_4dfd,
     },
 ];
 

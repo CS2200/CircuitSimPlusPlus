@@ -841,6 +841,7 @@ mod tests {
                 "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
                 "circuits": [{{ "name": "main", "components": [
                     {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                    {{"id":"rst","type":"wiring.reset","pos":[0,0]}},
                     {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
                     {{"id":"zw","type":"wiring.constant","pos":[0,0]}},
                     {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":4}}}},
@@ -855,6 +856,8 @@ mod tests {
                 ], "wires": [
                     {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r1","pin":"clk"}}}},
                     {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r2","pin":"clk"}}}},
+                    {{"a":{{"comp":"rst","pin":"out"}},"b":{{"comp":"r1","pin":"rst"}}}},
+                    {{"a":{{"comp":"rst","pin":"out"}},"b":{{"comp":"r2","pin":"rst"}}}},
                     {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},
                     {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r2","pin":"en"}}}},
                     {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"a1","pin":"in1"}}}},

@@ -736,11 +736,15 @@ impl Behavior {
                 // handling — the engine calls this on its 0→1 edge.
                 let (d, en, rst) = (ins[0], ins[2], ins[3]);
                 consume(en, "en")?;
-                // The reset pin is optional (UI_OVERHAUL §93): a register that
-                // never wires it reads `Z`, which is treated as **deasserted**
-                // — exactly the state it was in before the pin came back. (A
-                // wired reset is consumed like any other input: `X` propagates.)
-                let rst_bit = if rst.has_z() { Bit::Zero } else { ctl(rst) };
+                // The reset is consumed like **every** other input: the engine does not
+                // decide what a floating control means — the *transpiler* writes CE's value
+                // in (a converted old design carries an explicit driver, `rst` → 0, because
+                // CE defines it). An unwired reset therefore reads `X` and the register
+                // holds `X`, which is the honest answer: nobody said what it is. This used
+                // to read `Z` as deasserted, which quietly made an engine rule
+                // load-bearing for the converter.
+                consume(rst, "rst")?;
+                let rst_bit = ctl(rst);
                 let w = state.width();
                 match rst_bit {
                     // Synchronous reset wins over enable.
@@ -770,9 +774,12 @@ impl Behavior {
                 // needs no handling here — the engine calls this on its 0→1 edge.
                 let (addr, din, we, rst) = (ins[0], ins[1], ins[2], ins[4]);
                 consume(we, "we")?;
-                // An unwired reset reads `Z`, treated as deasserted — a RAM that
-                // drives only we/clk keeps working (UI_OVERHAUL §93).
-                let rst_bit = if rst.has_z() { Bit::Zero } else { ctl(rst) };
+                // Consumed like every other input (see the register above): a floating reset
+                // is `X`, not a deasserted one, and a converted design carries the explicit
+                // driver. A RAM that drives only we/clk is a design the transpiler has to
+                // finish, not one the engine may guess about.
+                consume(rst, "rst")?;
+                let rst_bit = ctl(rst);
                 match rst_bit {
                     // Synchronous reset: clears every word, and wins over a write.
                     Bit::One => {
@@ -1779,13 +1786,20 @@ mod tests {
     }
 
     fn reg_ins(d: Value, en: Value) -> [Value; 4] {
-        // clk=1 (the engine calls rising_edge on the edge); rst UNWIRED (`Z`) —
-        // the optional pin's absent state, which reads as deasserted (§93).
-        [d, k(1, 1), en, Value::z(1)]
+        // clk=1 (the engine calls rising_edge on the edge); rst a **driven 0**. A reset is
+        // something a design states: since v6 the engine does not read a floating one as
+        // deasserted (the transpiler writes CE's value in; the loader materialises one for
+        // a file written under the old rule), so a test that wants a deasserted reset says so.
+        [d, k(1, 1), en, k(1, 0)]
     }
 
     fn reg_ins_rst(d: Value, en: Value, rst: Value) -> [Value; 4] {
         [d, k(1, 1), en, rst]
+    }
+
+    /// RAM edge inputs (addr, din, we, clk, rst) with the same driven deasserted reset.
+    fn ram_ins(addr: Value, din: Value, we: Value) -> [Value; 5] {
+        [addr, din, we, k(1, 1), k(1, 0)]
     }
 
     #[test]
@@ -1873,10 +1887,13 @@ mod tests {
         r.rising_edge(&refs(&reg_ins_rst(k(8, 1), k(1, 1), Value::x(1))))
             .unwrap();
         assert_eq!(r.eval(&[]).unwrap(), vec![Value::x(8)]);
-        // An unwired rst never halts: the pin is optional (§93).
-        r.rising_edge(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::z(1))))
-            .unwrap();
-        assert_eq!(r.eval(&[]).unwrap(), vec![k(8, 7)]);
+        // A floating rst halts like a floating `d`: nobody said what it is, and the engine
+        // will not guess (v6 — it used to read `Z` as deasserted, which made an engine rule
+        // load-bearing for the converter).
+        assert_eq!(
+            r.rising_edge(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::z(1)))),
+            Err(FloatingRead::at("rst"))
+        );
     }
 
     // ---- RAM / ROM -------------------------------------------------------
@@ -1892,8 +1909,8 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)]
         );
-        // Write 77 @ 5 on the edge (ins order: addr, din, we, clk).
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 77), k(1, 1), k(1, 1), Value::z(1)]))
+        // Write 77 @ 5 on the edge (ins order: addr, din, we, clk, rst).
+        ram.rising_edge(&refs(&ram_ins(k(4, 5), k(8, 77), k(1, 1))))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1901,7 +1918,7 @@ mod tests {
             vec![k(8, 77)]
         );
         // we=0: no write.
-        ram.rising_edge(&refs(&[k(4, 5), k(8, 99), k(1, 0), k(1, 1), Value::z(1)]))
+        ram.rising_edge(&refs(&ram_ins(k(4, 5), k(8, 99), k(1, 0))))
             .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 5), k(8, 0), k(1, 0), k(1, 0)]))
@@ -1910,23 +1927,18 @@ mod tests {
         );
         // din floats during a write → halt; din floats with we=0 → fine.
         assert_eq!(
-            ram.rising_edge(&refs(&[
-                k(4, 5),
-                Value::z(8),
-                k(1, 1),
-                k(1, 1),
-                Value::z(1)
-            ])),
+            ram.rising_edge(&refs(&ram_ins(k(4, 5), Value::z(8), k(1, 1)))),
             Err(FloatingRead::at("din"))
         );
-        ram.rising_edge(&refs(&[
-            k(4, 5),
-            Value::z(8),
-            k(1, 0),
-            k(1, 1),
-            Value::z(1),
-        ]))
-        .unwrap();
+        ram.rising_edge(&refs(&ram_ins(k(4, 5), Value::z(8), k(1, 0))))
+            .unwrap();
+        // A floating rst halts too (v6): it is an input like any other, and nobody said what
+        // it is. A design that wants a deasserted reset drives a 0 — what the transpiler
+        // writes, and what the loader materialises for a file written under the old rule.
+        assert_eq!(
+            ram.rising_edge(&refs(&[k(4, 5), k(8, 1), k(1, 1), k(1, 1), Value::z(1)])),
+            Err(FloatingRead::at("rst"))
+        );
         // addr floats during read → halt (async read is always accessing).
         assert_eq!(
             ram.eval(&refs(&[Value::z(4), k(8, 0), k(1, 0), k(1, 0)])),
@@ -1938,28 +1950,16 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)]
         );
-        ram.rising_edge(&refs(&[
-            k(4, 6),
-            k(8, 42),
-            Value::x(1),
-            k(1, 1),
-            Value::z(1),
-        ]))
-        .unwrap();
+        ram.rising_edge(&refs(&ram_ins(k(4, 6), k(8, 42), Value::x(1))))
+            .unwrap();
         assert_eq!(
             ram.eval(&refs(&[k(4, 6), k(8, 0), k(1, 0), k(1, 0)]))
                 .unwrap(),
             vec![Value::x(8)]
         );
-        // we floats at the edge → halt (the unwired rst rides along as Z).
+        // we floats at the edge → halt (we is consumed before rst, which is driven here).
         assert_eq!(
-            ram.rising_edge(&refs(&[
-                k(4, 5),
-                k(8, 1),
-                Value::z(1),
-                k(1, 1),
-                Value::z(1)
-            ])),
+            ram.rising_edge(&refs(&ram_ins(k(4, 5), k(8, 1), Value::z(1)))),
             Err(FloatingRead::at("we"))
         );
         // rst=1 on the edge clears every word, and wins over a write.
@@ -1983,7 +1983,7 @@ mod tests {
                 .unwrap(),
             vec![Value::x(8)] // read past end → X
         );
-        ram.rising_edge(&refs(&[k(2, 3), k(8, 9), k(1, 1), k(1, 1), Value::z(1)]))
+        ram.rising_edge(&refs(&ram_ins(k(2, 3), k(8, 9), k(1, 1))))
             .unwrap(); // write dropped
         assert_eq!(
             ram.eval(&refs(&[k(2, 3), k(8, 0), k(1, 0), k(1, 0)]))

@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 5,
+  "version": 6,
   "name": "multicycle",
   "settings": {
     "clockHz": 1,
@@ -13,6 +13,14 @@
         {
           "id": "clk",
           "type": "wiring.clock",
+          "pos": [
+            0,
+            0
+          ]
+        },
+        {
+          "id": "rst",
+          "type": "wiring.reset",
           "pos": [
             0,
             0
@@ -50,7 +58,8 @@
           "name": "pc",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -63,7 +72,8 @@
           "name": "ir",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -75,7 +85,8 @@
           ],
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -87,7 +98,8 @@
           ],
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -99,7 +111,8 @@
           ],
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -111,7 +124,8 @@
           ],
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -124,7 +138,8 @@
           "name": "ustate",
           "attrs": {
             "bitsize": 4,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -154,7 +169,8 @@
             "bitsize": 32,
             "depth": 256,
             "contents": "256-0",
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -317,7 +333,8 @@
           "name": "r0",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -330,7 +347,8 @@
           "name": "r1",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -343,7 +361,8 @@
           "name": "r2",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -356,7 +375,8 @@
           "name": "r3",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -369,7 +389,8 @@
           "name": "r4",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -382,7 +403,8 @@
           "name": "r5",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -395,7 +417,8 @@
           "name": "r6",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -408,7 +431,8 @@
           "name": "r7",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -421,7 +445,8 @@
           "name": "r8",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -434,7 +459,8 @@
           "name": "r9",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -447,7 +473,8 @@
           "name": "r10",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -460,7 +487,8 @@
           "name": "r11",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -473,7 +501,8 @@
           "name": "r12",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -486,7 +515,8 @@
           "name": "r13",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -499,7 +529,8 @@
           "name": "r14",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -512,7 +543,8 @@
           "name": "r15",
           "attrs": {
             "bitsize": 32,
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -1287,12 +1319,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register0",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register1",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register1",
+            "pin": "rst"
           }
         },
         {
@@ -1307,12 +1359,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register2",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register3",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register3",
+            "pin": "rst"
           }
         },
         {
@@ -1327,6 +1399,16 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register4",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -1337,12 +1419,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register5",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register6",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register6",
+            "pin": "rst"
           }
         },
         {
@@ -1417,6 +1519,16 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "ram0",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "ram0",
             "pin": "dout"
           },
@@ -1447,12 +1559,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register7",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register8",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register8",
+            "pin": "rst"
           }
         },
         {
@@ -1467,12 +1599,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register9",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register10",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register10",
+            "pin": "rst"
           }
         },
         {
@@ -1487,12 +1639,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register11",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register12",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register12",
+            "pin": "rst"
           }
         },
         {
@@ -1507,12 +1679,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register13",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register14",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register14",
+            "pin": "rst"
           }
         },
         {
@@ -1527,12 +1719,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register15",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register16",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register16",
+            "pin": "rst"
           }
         },
         {
@@ -1547,12 +1759,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register17",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register18",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register18",
+            "pin": "rst"
           }
         },
         {
@@ -1567,12 +1799,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register19",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register20",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register20",
+            "pin": "rst"
           }
         },
         {
@@ -1587,12 +1839,32 @@
         },
         {
           "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register21",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
           "b": {
             "comp": "register22",
             "pin": "clk"
+          }
+        },
+        {
+          "a": {
+            "comp": "rst",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register22",
+            "pin": "rst"
           }
         },
         {

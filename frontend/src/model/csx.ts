@@ -17,7 +17,7 @@
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
 /** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
-export const CSX_VERSION = 5;
+export const CSX_VERSION = 6;
 
 export interface CsxSettings {
   clockHz: number;

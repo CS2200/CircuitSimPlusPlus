@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 5,
+  "version": 6,
   "name": "neg-floating-read",
   "settings": {
     "clockHz": 1,
@@ -57,7 +57,8 @@
           ],
           "name": "r",
           "attrs": {
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         }
       ],
@@ -100,6 +101,16 @@
           "b": {
             "comp": "register0",
             "pin": "en"
+          }
+        },
+        {
+          "a": {
+            "comp": "constant1",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register0",
+            "pin": "rst"
           }
         },
         {

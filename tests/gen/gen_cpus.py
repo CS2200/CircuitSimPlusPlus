@@ -132,7 +132,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 5,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 6,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],
@@ -145,6 +145,12 @@ class Ctx:
     def __init__(self):
         self.c = Circuit()
         self.clk = self.c.add("wiring.clock", id="clk")
+        # The design's reset source (DESIGN.md §4.3). Every clocked part wires it: since v6
+        # a floating `rst` is `X`, not a deasserted reset — the engine does not decide what
+        # an unwired control means, which is why the transpiler writes one in and why the
+        # editor places this part. Released means deasserted, so a generated fixture behaves
+        # exactly as before.
+        self.rst = self.c.add("wiring.reset", id="rst")
         self.one = self._const(1)
         self.zero = self._const(0)
 
@@ -161,6 +167,7 @@ class Ctx:
         wires it; (comp, pin) -> driven. (Never wire en twice — X!)"""
         r = self.c.add("mem.register", name=name, bitsize=bitsize if bitsize != 1 else None)
         self.c.wire(self.clk, "out", r, "clk")
+        self.c.wire(self.rst, "out", r, "rst")
         if en == "tie":
             self.c.wire(self.one, "out", r, "en")
         elif en == "open":
@@ -203,6 +210,7 @@ def register_file(ctx, n=16):
     for i in range(n):
         r = c.add("mem.register", name=f"r{i}", bitsize=32)
         c.wire(ctx.clk, "out", r, "clk")
+        c.wire(ctx.rst, "out", r, "rst")
         # en wired later (write decode); $0 never writes.
         regs.append(r)
     return regs
@@ -293,6 +301,7 @@ def gen_multicycle():
     ao_lo = low_bits(ctx, aluout, "q", 8)
     c.wire(ao_lo, "lo", dmem, "addr")
     c.wire(ctx.clk, "out", dmem, "clk")
+    c.wire(ctx.rst, "out", dmem, "rst")
     c.wire(dmem, "dout", mdr, "d")
 
     # -- instruction fields ---------------------------------------------------
@@ -554,6 +563,7 @@ def gen_pipeline5():
     ao_lo = low_bits(ctx, exmem_alu, "q", 8)
     c.wire(ao_lo, "lo", dmem, "addr")
     c.wire(ctx.clk, "out", dmem, "clk")
+    c.wire(ctx.rst, "out", dmem, "rst")
     c.wire(exmem_b, "q", dmem, "din")
     memod = c.add("plexers.decoder", inputBits=3)
     c.wire(exmem_op, "q", memod, "in")

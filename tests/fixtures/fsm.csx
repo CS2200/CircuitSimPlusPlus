@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 5,
+  "version": 6,
   "name": "fsm",
   "settings": {
     "clockHz": 1,
@@ -58,7 +58,8 @@
           ],
           "name": "s0",
           "attrs": {
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -70,7 +71,8 @@
           ],
           "name": "s1",
           "attrs": {
-            "showClk": true
+            "showClk": true,
+            "showRst": true
           }
         },
         {
@@ -190,6 +192,16 @@
         },
         {
           "a": {
+            "comp": "constant1",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register0",
+            "pin": "rst"
+          }
+        },
+        {
+          "a": {
             "comp": "clk",
             "pin": "out"
           },
@@ -206,6 +218,16 @@
           "b": {
             "comp": "register1",
             "pin": "en"
+          }
+        },
+        {
+          "a": {
+            "comp": "constant1",
+            "pin": "out"
+          },
+          "b": {
+            "comp": "register1",
+            "pin": "rst"
           }
         },
         {

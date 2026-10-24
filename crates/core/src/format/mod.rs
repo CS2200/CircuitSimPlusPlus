@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value as Json};
+use serde_json::{json, Map, Value as Json};
 
 use crate::api::{LoadError, LoadErrorKind};
 
@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 /// A whole `.csx` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -265,10 +265,13 @@ pub struct JoinRef {
 ///
 /// Documents written before the current [`FORMAT_VERSION`] are migrated
 /// first (§5.1 versioning): v2 → v3 drops the removed `settings.delayModel`
-/// field (there is only one engine now, the delay-aware one), and every
-/// document below v5 gains the `showClk`/`showRst` display flags of §93 —
-/// marked visible on the parts that actually wire those pins. Files that
-/// already match the current version parse directly.
+/// field (there is only one engine now, the delay-aware one), every document
+/// below v5 gains the `showClk`/`showRst` display flags of §93 — marked visible
+/// on the parts that actually wire those pins — and v5 → v6 gives every
+/// register/RAM whose `rst` nothing wires the constant-0 driver that v5's
+/// "a floating reset is deasserted" rule stood in for (the engine no longer
+/// reads a floating control as a value; see `materialise_unwired_resets`).
+/// Files that already match the current version parse directly.
 pub fn load_document(bytes: &[u8]) -> Result<Document, Vec<LoadError>> {
     let mut raw: Json = match serde_json::from_slice(bytes) {
         Ok(v) => v,
@@ -300,9 +303,9 @@ fn parse_error(message: String) -> LoadError {
 
 /// Apply the version-migration chain in place (§5.1). Each step upgrades a
 /// document **one** version and the steps run in order, so a file several
-/// versions behind is walked forward (a v2 file also predates v3 and v5 —
-/// v2 → v3 → v5 is the real path). Unknown or newer versions match no step and
-/// are left untouched, for `validate` to report.
+/// versions behind is walked forward (a v2 file also predates v3, v5 and v6 —
+/// v2 → v3 → v5 → v6 is the real path). Unknown or newer versions match no step
+/// and are left untouched, for `validate` to report.
 ///
 /// v4 is skipped on purpose: it was the version that *removed* the `rst` pin,
 /// and v5 has it back (UI_OVERHAUL §93). A v3 or v4 file therefore keeps every
@@ -321,8 +324,103 @@ fn migrate(v: &mut Json) {
         reveal_wired_control_pins(v);
         version = 5;
     }
+    if version == 5 {
+        materialise_unwired_resets(v);
+        version = 6;
+    }
     if version != start {
         v["version"] = Json::from(version);
+    }
+}
+
+/// The v5 → v6 step: **materialise a reset nobody wrote.**
+///
+/// Through v5 the engine read a floating `rst` as *deasserted* — it decided what an
+/// unwired control meant, which is the one thing it is not allowed to do (the clock and
+/// reset pins are optional in a *schematic*, never in the model). v6 does not: an unwired
+/// reset is `X`, exactly like any other floating input, and a design that wants a
+/// deasserted reset says so with a driver.
+///
+/// So a file written under the old rule gets the driver the rule stood in for. A
+/// `wiring.constant` with value 0 — a **constant**, deliberately, not the `wiring.reset`
+/// button: the old semantics was "this part is never reset", and a button can be pressed.
+/// One constant per circuit, fanned out to every register/RAM whose `rst` pin no wire
+/// names, so the graphic stays one source rather than a scatter of parts.
+fn materialise_unwired_resets(v: &mut Json) {
+    let Some(circuits) = v.get_mut("circuits").and_then(Json::as_array_mut) else {
+        return;
+    };
+    for circuit in circuits {
+        // Every component whose `rst` pin a wire already names.
+        let mut wired: BTreeSet<String> = BTreeSet::new();
+        if let Some(wires) = circuit.get("wires").and_then(Json::as_array) {
+            for w in wires {
+                for end in [w.get("a"), w.get("b")].into_iter().flatten() {
+                    if end.get("pin").and_then(Json::as_str) != Some("rst") {
+                        continue;
+                    }
+                    if let Some(c) = end.get("comp").and_then(Json::as_str) {
+                        wired.insert(c.to_string());
+                    }
+                }
+            }
+        }
+        let Some(comps) = circuit.get("components").and_then(Json::as_array) else {
+            continue;
+        };
+        let mut taken: BTreeSet<String> = BTreeSet::new();
+        let mut needing: Vec<(String, Json)> = Vec::new();
+        for comp in comps {
+            let Some(id) = comp.get("id").and_then(Json::as_str) else {
+                continue;
+            };
+            taken.insert(id.to_string());
+            let ty = comp.get("type").and_then(Json::as_str);
+            if !matches!(ty, Some("mem.register") | Some("mem.ram")) || wired.contains(id) {
+                continue;
+            }
+            let pos = comp
+                .get("pos")
+                .cloned()
+                .unwrap_or_else(|| Json::from(vec![0, 0]));
+            needing.push((id.to_string(), pos));
+        }
+        if needing.is_empty() {
+            continue;
+        }
+        // A unique id, and a position just off the first part that needs it (the old
+        // format had no geometry for a reset bus; anywhere legal will do).
+        let mut src = "rstTie".to_string();
+        let mut n = 1;
+        while taken.contains(&src) {
+            n += 1;
+            src = format!("rstTie{n}");
+        }
+        let mut pos = needing[0].1.clone();
+        if let Some(arr) = pos.as_array_mut() {
+            for c in arr.iter_mut() {
+                if let Some(x) = c.as_i64() {
+                    *c = Json::from((x - 2).max(0)); // integers: `pos` is [i32; 2]
+                }
+            }
+        }
+        let Some(comps) = circuit.get_mut("components").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        comps.push(json!({
+            "id": src, "type": "wiring.constant", "pos": pos,
+            "attrs": { "bitsize": 1, "value": "0" },
+        }));
+        let Some(wires) = circuit.get_mut("wires").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for (id, _) in needing {
+            wires.push(json!({
+                "a": { "comp": src, "pin": "out" },
+                "b": { "comp": id, "pin": "rst" },
+                "points": [],
+            }));
+        }
     }
 }
 

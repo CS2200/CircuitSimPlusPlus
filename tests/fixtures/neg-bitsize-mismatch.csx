@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 5,
+  "version": 6,
   "name": "neg-bitsize-mismatch",
   "settings": {
     "clockHz": 1,

@@ -1105,9 +1105,12 @@ mod tests {
             ]}"#,
         );
         let nl = build_json(&json).unwrap();
-        assert_eq!(nl.comps.len(), 3);
-        // clk net + q→probe net + one singleton net per unwired register
-        // pin (d, en, rst).
+        // 4, not 3: the v5 → v6 migration adds the constant that drives the register's
+        // otherwise-unwired `rst` (the engine no longer reads a floating reset as
+        // deasserted, so the file has to say so).
+        assert_eq!(nl.comps.len(), 4);
+        // clk net + q→probe net + a singleton net per unwired register pin (d, en) + the
+        // rst net the migration's constant drives.
         assert_eq!(nl.nets.len(), 5);
 
         let clk_net = &nl.nets[nl.comps[0].pins[0].net.idx()];
@@ -1154,8 +1157,9 @@ mod tests {
             ]}"#,
         );
         let nl = build_json(&json).unwrap();
-        // 1 shared clk net + 4 unwired pin nets per register (d, en, q, rst).
-        assert_eq!(nl.nets.len(), 1 + 4 * 3);
+        // 1 shared clk net + d/en/q per register + **one** rst net the migration's constant
+        // drives for all three (a register's `rst` is no longer allowed to float, v6).
+        assert_eq!(nl.nets.len(), 1 + 3 * 3 + 1);
         let clk_net = &nl.nets[nl.comps[0].pins[0].net.idx()];
         assert_eq!(clk_net.sinks.len(), 3);
         assert_eq!(clk_net.drivers.len(), 1);
