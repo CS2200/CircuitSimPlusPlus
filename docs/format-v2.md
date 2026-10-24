@@ -48,6 +48,13 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   forward whole. A part whose clock or reset pin a wire names is marked visible;
   a part the file never wired keeps both pins hidden. (v4 is skipped rather than
   rewritten: its documents are exactly v5's minus the two flags.)
+- **v5 → v6** materialises an unwired reset. Through v5 the engine read a floating `rst` as
+  *deasserted*; v6 reads it as `X` (§9), so a file that relied on the old reading gets the
+  driver it stood in for: a `wiring.constant` with value 0 on every `mem.register`/`mem.ram`
+  whose `rst` no wire names — one per circuit, fanned out to all of them. A **constant**, not
+  the `wiring.reset` button, because the old semantics was "never resets" and a button can be
+  pressed. The semantics changed, so the version did; a converted design never needs the step
+  because the transpiler writes the reset itself.
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -290,12 +297,20 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   is what CircuitSim CE's `Clear` does. A reset can also be expressed by the session
   (`sim_reset`, which re-applies memory autoload), so the pin is optional (below).
 - The **clock and reset pins are optional in a schematic, never in the model** (§4:
-  `showClk`/`showRst` are display-only). A part that never wires one reads its default: `rst`
-  floats → deasserted (never resets), and `clk` floats → the part follows the **circuit's
-  clock**, i.e. it ticks on the same rising edge the `wiring.clock` component rides. That is
-  what makes an old-format schematic — which always has both pins wired — and a new schematic
-  drawn without them behave the same way, and it keeps a lone `rst` pin from halting a design
-  that never wanted one.
+  `showClk`/`showRst` are display-only). What a part does with one it never wires is a
+  *binding* question, not a value:
+  - `clk` floats → the part follows the **circuit's clock**, i.e. it ticks on the same rising
+    edge the `wiring.clock` component rides. That is the circuit's own model (one oscillator
+    toggling every clocked part), so nothing is assumed about a value;
+  - `rst` floats → **`X`** (v6). It is consumed like any other input, and the register or RAM
+    holds `X`: nobody said what this reset is, and the engine will not invent a deasserted
+    one. Whoever wants a deasserted reset says so — a `wiring.reset` button (what the editor
+    places), or a constant 0 (what the transpiler writes for a converted design, and what the
+    v5 → v6 migration adds for a file that relied on the old default).
+
+  Through v5 the second case read `Z` as deasserted instead, which quietly made an *engine*
+  rule load-bearing for the converter. The migration is what keeps an old file behaving as it
+  did: the semantics changed, so the version did.
 - Combinational feedback (feedback loop nets) is **seeded to 0 at power-on** —
   deterministic (§4.5: nothing is ever resolved randomly). Splitters are excepted: they
   carry values but never originate them.
