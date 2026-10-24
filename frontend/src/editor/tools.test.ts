@@ -836,3 +836,31 @@ describe("context menu (§75)", () => {
     expect([...sel.wires]).toEqual([0]); // the wire became the selection
   });
 });
+
+describe("momentary buttons", () => {
+  it("holds the general button and the design's reset while pressed (§4.3)", () => {
+    const { doc, tool, sync } = setup();
+    const btn = doc.addComponent(0, { type: "io.button", pos: [30, 10] });
+    const rst = doc.addComponent(0, { type: "wiring.reset", pos: [40, 10] });
+    sync();
+    const presses: Array<[string, boolean]> = [];
+    tool.onButton = (id, down) => presses.push([id, down]);
+
+    // Both are 3×2 momentary parts: a press in the body asserts, releasing deasserts. The
+    // reset is a *square* button, but it is momentary exactly like the round one — which is
+    // what makes a graded run see it deasserted.
+    for (const [id, at] of [
+      [btn, { x: 31.5, y: 11 }],
+      [rst, { x: 41.5, y: 11 }],
+    ] as const) {
+      presses.length = 0;
+      tool.down(at, PI());
+      expect(presses).toEqual([[id, true]]);
+      tool.up(PI());
+      expect(presses).toEqual([
+        [id, true],
+        [id, false],
+      ]);
+    }
+  });
+});
