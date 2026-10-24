@@ -789,7 +789,14 @@ impl DelayEngine {
             for (_, net) in &eng.cdata[c as usize].out_pins {
                 let width = eng.netlist.nets[net.idx()].width;
                 eng.net_values[net.idx()] = Value::zero(width);
-                eng.net_scheduled[net.idx()] = Value::zero(width);
+                // NOT `net_scheduled`: the seed gives the net a *value* so its consumers do
+                // not stall on a `Z` view, but nothing has been *committed* on it yet. The
+                // commit happens when the loop part evaluates, and it is the change test
+                // (`resolved != net_scheduled`) that fires the arrivals its consumers need.
+                // Seeding `net_scheduled` to the same 0 made that commit invisible — no
+                // `Net`, no `Deliver` — so a part inside the loop that was seeded a view but
+                // never got an arrival (a splitter on a loop-driven bus) sat on its initial
+                // `Z` for the whole run while every wire was correct.
                 for sp in &eng.net_sinks[net.idx()] {
                     eng.views[sp.comp as usize][sp.slot as usize] = Value::zero(width);
                 }
