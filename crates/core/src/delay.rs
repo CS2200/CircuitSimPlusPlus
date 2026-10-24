@@ -820,10 +820,14 @@ impl DelayEngine {
         // reading 0 forever while every wire was correct. So evaluate each loop
         // component once from the seeded state; the boot queue then iterates the loop
         // to its fixed point, and a genuine oscillator still trips the storm cap.
+        // Splitters included. A splitter is exempt from the *seed* above — it originates
+        // no value, so seeding one would phantom-contend with the other side of a chain —
+        // but it is not exempt from being *evaluated*, and skipping it left a slicing
+        // splitter on its initial `Z` for the whole run. Its output then never *changed*,
+        // so no arrival was ever delivered to the parts reading it: a converted datapath's
+        // memory address line stayed floating while every wire was correct. `wiring.constant`
+        // masked it, because a source is evaluated at power-on whatever loops it sits in.
         for c in &residue {
-            if eng.comps[*c as usize].is_splitter() {
-                continue;
-            }
             if let Err(h) = eng.eval_and_schedule(*c, 0, None) {
                 eng.halted = Some(h);
                 break;
