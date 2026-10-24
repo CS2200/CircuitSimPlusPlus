@@ -59,6 +59,17 @@
 //!   "unknown", and it cannot corrupt state — it propagates).
 //! - **Mux with X select** outputs the data value if all data inputs are
 //!   equal, else `X` (the classic three-valued-logic rule).
+//!
+//! ## What a behavior is *not* responsible for
+//!
+//! Every behavior here is a pure function of its inputs, so no behavior can
+//! break a tie between two parts that commit at the same instant — and none
+//! may try: a per-component "prefer 0" would be a model decision made in the
+//! wrong place, and it would make the same circuit behave differently
+//! depending on who wrote the gate. Ordering, including the deterministic
+//! tie-break for a symmetric settle in a feedback loop, belongs to the
+//! event engine and is stated there (`delay.rs`, "Same-timestamp
+//! tie-break": propagation before commit, and only for a part *on* a cycle).
 
 use serde_json::{Map, Value as Json};
 

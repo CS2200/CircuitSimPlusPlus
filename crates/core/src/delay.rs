@@ -1,10 +1,11 @@
 //! Delay-aware event-driven engine (DESIGN.md §4.3, §4.4; BACKEND.md task
 //! B6) — the teaching + grading engine.
 //!
-//! Events are processed from a `(time, seq)`-ordered queue; `seq` is a
-//! monotonic counter assigned at schedule time, and same-timestamp
-//! reactions run in component-index order — runs are bit-for-bit
-//! reproducible (§4.6).
+//! Events are processed from a `(time, prio, seq)`-ordered queue; `seq` is a
+//! monotonic counter assigned at schedule time, `prio` is 0 for every event
+//! but the commit of a part that lies on a combinational cycle (see
+//! "Same-timestamp tie-break" below), and same-timestamp reactions run in
+//! component-index order — runs are bit-for-bit reproducible (§4.6).
 //!
 //! ## The delay model (resolved D1, per-path since contract v1.1 / F14)
 //!
@@ -90,6 +91,42 @@
 //! `width` + mask words (`Value::fold_bytes`), never as rendered text —
 //! rendering three hex `String`s per event cost ~8% of a run to hash the
 //! same bits.
+//!
+//! ## Same-timestamp tie-break (a symmetric settle)
+//!
+//! Two parts that commit at the same timestamp are *simultaneous* in the
+//! model, and inside a **feedback loop** that simultaneity can be a fixed
+//! point of the race: a cross-coupled NAND pair at power-on has both
+//! outputs seeded `0`, recomputes `1,1` from the same stale views, then
+//! `0,0` again — a 20 ns limit cycle, not a zero-delta one, so a design the
+//! zero-delay old tool runs to completion trips our storm cap. Both parts
+//! have the same delay and both commit together, so nothing in delay order
+//! ever breaks the symmetry.
+//!
+//! The tie is broken deterministically, by **propagation before commit**:
+//! within one timestamp, the commit of a component that lies **on a
+//! combinational feedback cycle** (`engine_common::on_cycle`, DESIGN.md
+//! §4.5's SCC analysis) is applied *after* every other event at that
+//! timestamp. The transport arrival a same-instant commit produces is
+//! therefore delivered to its sinks first; the recipient re-evaluates from
+//! the freshly arrived value, the ordinary inertial mechanism invalidates
+//! its pending commit (generation bump), and it is rescheduled one `t_pd`
+//! later. The part the queue commits first wins and the loop settles to one
+//! definite state — exactly the role CircuitSim CE's link order plays in
+//! `Simulator.step` (it moves one link out of a `LinkedHashSet` per step,
+//! so a symmetric settle is decided by insertion order). Nothing here is
+//! random and nothing is a tolerance (§4.5, §4.6): the winner is
+//! `(time, prio, seq)` order with `seq` the schedule order, i.e. component
+//! (document) order.
+//!
+//! **Narrow by construction.** Only a `Fire` of a component that is *on a
+//! cycle* is promoted to class 1; every other event — including a `Fire` of
+//! a part that is merely *downstream* of a loop, and every `Deliver`/`Net`/
+//! `Clock`/`Poke` — keeps its plain `(time, seq)` order. A design with no
+//! combinational feedback therefore has no class-1 event and its event
+//! trace is bit-identical to before. A genuine oscillator is unaffected as
+//! well: its stages are one `t_pd` apart, so no two of their commits share a
+//! timestamp and the cap below still fires on it.
 
 use std::collections::BinaryHeap;
 
@@ -178,14 +215,23 @@ enum EvKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Ev {
     time: u64,
+    /// Priority class within one timestamp (see `Ev::cmp`): 0 for every
+    /// event except a commit of a component **in a combinational loop**,
+    /// which is 1. It defers the loop commit until every same-timestamp
+    /// transport arrival has been applied — the deterministic tie-break
+    /// for a symmetric settle (module docs, "Same-timestamp tie-break").
+    prio: u8,
     seq: u64,
     kind: EvKind,
 }
 
 impl Ord for Ev {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Min-heap: earlier time, then smaller seq first.
-        (other.time, other.seq).cmp(&(self.time, self.seq))
+        // Min-heap: earlier time, then lower priority class, then smaller
+        // seq. `prio` is 0 for everything but a loop component's commit, so
+        // for a design with no combinational feedback this key is exactly
+        // the old `(time, seq)` — the tie-break cannot touch it.
+        (other.time, other.prio, other.seq).cmp(&(self.time, self.prio, self.seq))
     }
 }
 impl PartialOrd for Ev {
@@ -345,6 +391,9 @@ impl SnapEv {
         };
         Ok(Ev {
             time: self.time,
+            // Re-derived from the engine's cycle set by `restore` after the
+            // queue is rebuilt; a snapshot does not have to carry it.
+            prio: 0,
             seq: self.seq,
             kind,
         })
@@ -563,6 +612,11 @@ pub struct DelayEngine {
     /// `breakpoints_enabled` this is caller configuration, so it is not part of a
     /// savestate.
     watch: Vec<WatchState>,
+    /// Per component: does it lie **on** a combinational feedback cycle
+    /// (DESIGN.md §4.5's SCC analysis — `engine_common::on_cycle`)? A commit
+    /// of such a part is the only event whose priority class is raised, so
+    /// the same-timestamp tie-break is confined to genuine loops.
+    cycle_comp: Vec<bool>,
     /// The stop that last held (contract v1.3) — reported as `Report::stop`, and what
     /// makes a cycle count to completion reportable without a fixed budget.
     stop: Option<crate::api::StopInfo>,
@@ -772,6 +826,7 @@ impl DelayEngine {
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
             halted: None,
             watch: Vec::new(),
+            cycle_comp: vec![false; n],
             stop: None,
             in_boot: true,
         };
@@ -782,6 +837,10 @@ impl DelayEngine {
         // with the other side of a splitter chain). The seed must reach
         // every sink's *view* (gates read views, F14).
         let (_, residue) = crate::engine_common::levelize(&eng.netlist, &eng.comps);
+        // The precise subset of the residue that is *feedback*: the parts a
+        // same-timestamp tie-break may reorder (module docs).
+        let cycle_comp = crate::engine_common::on_cycle(&eng.netlist, &eng.comps);
+        eng.cycle_comp = cycle_comp;
         for c in residue.iter().copied() {
             if eng.comps[c as usize].is_splitter() {
                 continue;
@@ -911,12 +970,12 @@ impl DelayEngine {
     // -- Snapshot/restore (§8.1) ------------------------------------------
 
     /// Full engine state as deterministic JSON (savestate; §8.1). The
-    /// queue is serialized in (time, seq) order; restoring into an engine
-    /// built from the same circuit + table continues bit-identically
+    /// queue is serialized in pop order `(time, prio, seq)`; restoring into
+    /// an engine built from the same circuit + table continues bit-identically
     /// (§4.6 — see the test). Snapshot version 2 (F14): per-sink views.
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
-        queue.sort_by_key(|e| (e.time, e.seq));
+        queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
             version: 2,
             half_period: self.half_period,
@@ -1079,6 +1138,16 @@ impl DelayEngine {
             .collect::<Result<_, _>>()?;
         self.now = snap.now;
         self.seq = snap.seq;
+        // Re-derive the priority class of every queued commit from this
+        // engine's own cycle set, so a restored heap pops in exactly the
+        // order a fresh build would have.
+        let mut queue: Vec<Ev> = std::mem::take(&mut self.queue).into_vec();
+        for ev in queue.iter_mut() {
+            if let EvKind::Fire { comp, .. } = ev.kind {
+                ev.prio = u8::from(self.cycle_comp[comp as usize]);
+            }
+        }
+        self.queue = queue.into_iter().collect();
         self.next_rising = snap.next_rising;
         self.rising_seen = snap.rising_seen;
         self.next_boundary = snap.next_boundary;
@@ -1669,11 +1738,21 @@ impl DelayEngine {
         })
     }
 
-    /// Schedule an event (assigns the deterministic sequence number).
+    /// Schedule an event (assigns the deterministic sequence number and
+    /// priority class). A commit of a component **on a combinational cycle**
+    /// goes in class 1, so at an equal timestamp every transport arrival is
+    /// applied first; everything else is class 0 and keeps plain
+    /// `(time, seq)` order. See `Ev::cmp` and the module docs' "Same-
+    /// timestamp tie-break".
     fn schedule(&mut self, time: u64, kind: EvKind) {
         self.seq += 1;
+        let prio = match &kind {
+            EvKind::Fire { comp, .. } if self.cycle_comp[*comp as usize] => 1,
+            _ => 0,
+        };
         self.queue.push(Ev {
             time,
+            prio,
             seq: self.seq,
             kind,
         });
@@ -3004,6 +3083,132 @@ mod tests {
         eng.events_per_cycle_cap = 200;
         eng.poke_at("src", k(1, 1), 10);
         let halt = eng.run(1).expect_err("storm must halt");
+        assert_eq!(halt.reason, HaltReason::Oscillation);
+    }
+
+    #[test]
+    fn a_cross_coupled_nand_pair_settles_by_link_order_not_a_storm() {
+        // The smallest symmetric settle: two NANDs wired output-to-input (a
+        // bistable latch), nothing else. Both have the same delay, so both
+        // commit at the same timestamp for ever — every net flips `0 ↔ 1` with
+        // nothing to break the symmetry. The power-on seed puts both loop nets
+        // at 0, which is exactly the *unstable* diagonal of this pair, so the
+        // seeded boot lands in the tie. CircuitSim CE breaks it by link order
+        // (`Simulator.step` moves one link per step); the delay engine must
+        // break it deterministically too, or the boot storm cap fires.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"c1","type":"gate.nand","pos":[0,0]}},
+                {{"id":"c2","type":"gate.nand","pos":[0,0]}},
+                {{"id":"q","type":"wiring.probe","pos":[0,0],"name":"q"}},
+                {{"id":"qn","type":"wiring.probe","pos":[0,0],"name":"qn"}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"c1","pin":"in0"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"c2","pin":"in0"}}}},
+                {{"a":{{"comp":"c2","pin":"out"}},"b":{{"comp":"c1","pin":"in1"}}}},
+                {{"a":{{"comp":"c1","pin":"out"}},"b":{{"comp":"c2","pin":"in1"}}}},
+                {{"a":{{"comp":"c1","pin":"out"}},"b":{{"comp":"q","pin":"in"}}}},
+                {{"a":{{"comp":"c2","pin":"out"}},"b":{{"comp":"qn","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        // The build runs the boot settle; a storm here would already have made
+        // `engine` fail its `expect("test engine builds")`.
+        let mut eng = engine(&json, 500);
+        let rep = eng
+            .run(2)
+            .expect("a cross-coupled pair must settle, not storm the cap");
+        let q = eng.named_value("q").expect("q probe");
+        let qn = eng.named_value("qn").expect("qn probe");
+        assert!(q.is_fully_known() && qn.is_fully_known(), "{q} / {qn}");
+        assert_ne!(q, qn, "the pair settles to its two opposite values");
+        // A settle, not a storm: a handful of events, not a million.
+        assert!(
+            rep.events_processed < 100,
+            "settling should take a few events, took {}",
+            rep.events_processed
+        );
+    }
+
+    #[test]
+    fn only_feedback_members_are_on_a_cycle_not_downstream_parts() {
+        // The narrowness claim, pinned directly: the tie-break's cycle set is
+        // the *feedback* members only. `d` reads the latch and is therefore in
+        // the levelize residue (it depends on a loop), but it is not *on* a
+        // cycle, so it must not be promoted.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"c1","type":"gate.nand","pos":[0,0]}},
+                {{"id":"c2","type":"gate.nand","pos":[0,0]}},
+                {{"id":"d","type":"gate.and","pos":[0,0]}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"c1","pin":"in0"}}}},
+                {{"a":{{"comp":"c2","pin":"out"}},"b":{{"comp":"c1","pin":"in1"}}}},
+                {{"a":{{"comp":"c1","pin":"out"}},"b":{{"comp":"c2","pin":"in1"}}}},
+                {{"a":{{"comp":"c1","pin":"out"}},"b":{{"comp":"d","pin":"in0"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"d","pin":"in1"}}}}
+            ]}}]
+        }}"##
+        );
+        let eng = engine(&json, 500);
+        let on = crate::engine_common::on_cycle(&eng.netlist, &eng.comps);
+        let (_, residue) = crate::engine_common::levelize(&eng.netlist, &eng.comps);
+        let idx = |id: &str| {
+            eng.netlist()
+                .comps
+                .iter()
+                .position(|c| c.def_id == id)
+                .expect("comp")
+        };
+        // `d` is downstream of the loop (residue) but not on it.
+        assert!(residue.contains(&(idx("d") as u32)), "d is in the residue");
+        assert!(!on[idx("d")], "d must not be promoted");
+        assert!(on[idx("c1")] && on[idx("c2")], "the pair is the cycle");
+        let promoted: Vec<&str> = (0..eng.comps.len())
+            .filter(|&i| on[i])
+            .map(|i| eng.netlist().comps[i].type_.as_str())
+            .collect();
+        assert_eq!(promoted, ["gate.nand", "gate.nand"]);
+    }
+
+    #[test]
+    fn a_ring_of_an_odd_number_of_nots_still_trips_the_storm_cap() {
+        // The guarantee the tie-break must not weaken: a **genuine**
+        // oscillator — a feedback ring with inverted parity, which has no
+        // stable state — keeps changing with definite values and must still
+        // halt with `Oscillation`. Its stages are one propagation delay
+        // apart, so no two commits ever share a timestamp and the tie-break
+        // never fires: the cap is what stops it, exactly as before.
+        let mut comps = String::new();
+        let mut wires = String::new();
+        const N: usize = 3;
+        for i in 0..N {
+            comps.push_str(&format!(
+                r#"{{"id":"n{i}","type":"gate.not","pos":[0,0]}},"#
+            ));
+        }
+        for i in 0..N {
+            let j = (i + 1) % N;
+            wires.push_str(&format!(
+                r#"{{"a":{{"comp":"n{i}","pin":"out"}},"b":{{"comp":"n{j}","pin":"in"}}}},"#
+            ));
+        }
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [{comps}{{"id":"x","type":"wiring.probe","pos":[0,0]}}],
+              "wires": [{wires}{{"a":{{"comp":"n0","pin":"out"}},"b":{{"comp":"x","pin":"in"}}}}]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 5000);
+        eng.events_per_cycle_cap = 50;
+        let halt = eng.run(2).expect_err("an odd inverter ring must storm");
         assert_eq!(halt.reason, HaltReason::Oscillation);
     }
 

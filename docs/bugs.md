@@ -6,6 +6,54 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Round — done (2026-10-24, the symmetric-settle tie-break)
+
+**A cross-coupled latch seeded onto its unstable diagonal no longer storms.** The
+row the previous round diagnosed — `submission_374535898` (LC-4200b), the
+`StateBuffer`'s two cross-coupled NAND pairs — ran to completion in the old tool
+in **1833 cycles** and in ours halted at boot with
+`oscillation event storm: more than 1000000 events in one cycle`. Both NANDs of a
+pair have equal delay and both commit at the *same* timestamp, and the power-on
+seed puts both loop nets at `0` — the unstable diagonal of the pair — so every net
+flipped `0 ↔ 1` with a 20 ns half-lap and nothing in delay order ever broke the
+symmetry. It is the third face of the same model difference the two reverted
+changes ran into, and this is the *targeted* fix the boot round said it wanted:
+deterministic ordering where two parts commit at the same timestamp, which is how
+CircuitSim CE's link order breaks the tie (`Simulator.step` moves one link out of a
+`LinkedHashSet` per step; CE is zero-delay, so a part whose input has not moved is
+never evaluated).
+
+**The rule — propagation before commit, and only for a part on a cycle.** The event
+queue's key becomes `(time, prio, seq)`. `prio` is `0` for every event *except* the
+commit (`Fire`) of a component that lies **on** a combinational feedback cycle, which
+is `1`; `seq` is the existing monotonic schedule counter, so `prio = 0` reduces the
+key to exactly the old `(time, seq)`. A same-timestamp commit that produces a
+transport arrival therefore delivers it to its sinks *before* any other commit at
+that instant: the recipient re-evaluates from the freshly arrived value, the ordinary
+inertial mechanism bumps its generation, and its already-scheduled commit moves one
+`t_pd` later. The first committer in queue order wins and the loop settles to one
+definite state. Nothing is random and nothing is a tolerance (format-v2 §9, DESIGN.md
+§4.5/§4.6). The cycle set is `engine_common::on_cycle` (Kosaraju SCCs over the same
+dependency edges `levelize` orders by), i.e. the precise subset of the levelize
+*residue* that is feedback rather than merely downstream of it.
+
+**Narrow by construction.** Only a `Fire` of a part *on* a cycle is promoted; a part
+merely downstream of a loop, and every `Deliver`/`Net`/`Clock`/`Poke`, keep their
+plain `(time, seq)` order. A design with no combinational feedback has no class-1
+event, so its event trace is bit-identical — the whole existing golden suite
+(`golden_traces_are_pinned`, `t_obs` 39/40/0/205/205) and all **211** core lib tests
+pass unchanged, with no re-bless. A **genuine** oscillator is unaffected for the same
+reason: an odd-parity ring's stages are one `t_pd` apart, so no two of their commits
+share a timestamp and the cap still fires (`event_storm_halts_with_oscillation`, plus
+a new odd-inverter-ring test).
+
+**Measured (this round).** `submission_374535898`: storm → `ok=True cycles=1832`
+(the old tool's 1833). Controls unchanged: `374174555` 1853, `372649919` 5237,
+`373027353` 6683. `373713172` (the other storming row) no longer storms but now fails
+with a wrong final state — `$at`/`$v0` read `X` at cycle 3, a different question from
+the symmetry, so it is left for its own round.
+
+
 ## Round — done (2026-10-24, CE's enable and splitter rules; the boot change reverted)
 
 **One engine rule was ours rather than the old tool's, and it is fixed.** A controlled buffer

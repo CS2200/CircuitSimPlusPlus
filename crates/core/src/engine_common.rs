@@ -23,9 +23,9 @@ pub struct Halt {
     pub details: String,
 }
 
-/// Levelize (Kahn) over the flattened netlist: DAG components in
-/// evaluation order, then the residue (feedback + downstream) in
-/// comp-index order.
+/// The component dependency edges (`drv → consumer`) that [`levelize`]
+/// orders by: for every component, each *driver* of a net the component
+/// consumes.
 ///
 /// Dependency rule: comp B depends on every comp driving a net that B
 /// consumes. Consumed pins come from `Behavior::comb_input_deps`
@@ -39,14 +39,12 @@ pub struct Halt {
 /// is always nominally a driver of its own nets; that pseudo-loop is not
 /// feedback — its direction is resolved at evaluation, and treating it
 /// as one wrongly seeded static splitter cones to 0, B11).
-pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
+///
+/// Shared with [`on_cycle`] so the acyclic order and the cycle analysis can
+/// never disagree about what "feedback" means.
+fn dep_edges(netlist: &Netlist, comps: &[Behavior]) -> Vec<Vec<u32>> {
     let n = netlist.comps.len();
-    let mut indeg = vec![0usize; n];
     let mut edges: Vec<Vec<u32>> = vec![Vec::new(); n];
-    let mut add_edge = |from: u32, to: u32| {
-        edges[from as usize].push(to);
-        indeg[to as usize] += 1;
-    };
     for (ci, beh) in comps.iter().enumerate() {
         let fc = &netlist.comps[ci];
         let consumed_nets: Vec<NetId> = if beh.is_splitter() {
@@ -84,8 +82,94 @@ pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<
                 if splitter && drv.idx() == ci {
                     continue;
                 }
-                add_edge(drv.0, ci as u32);
+                edges[drv.0 as usize].push(ci as u32);
             }
+        }
+    }
+    edges
+}
+
+/// Which components lie **on** a combinational feedback cycle (DESIGN.md
+/// §4.5's SCC analysis) — i.e. are members of a strongly connected
+/// component of size > 1, or feed themselves directly.
+///
+/// This is the precise subset of [`levelize`]'s residue that is *feedback*
+/// rather than merely *downstream of* it. The delay engine reads it to
+/// break a same-timestamp settle deterministically ([`crate::delay`]): only
+/// a part that is genuinely in a loop gets CE's link-order tie-break, so a
+/// combinational DAG — every design without feedback — is untouched.
+pub(crate) fn on_cycle(netlist: &Netlist, comps: &[Behavior]) -> Vec<bool> {
+    let edges = dep_edges(netlist, comps);
+    let n = edges.len();
+    // Kosaraju: finish order over the graph, then DFS the reverse graph in
+    // reverse finish order. Each reverse tree is one SCC.
+    let mut visited = vec![false; n];
+    let mut order: Vec<u32> = Vec::with_capacity(n);
+    for s in 0..n {
+        if visited[s] {
+            continue;
+        }
+        visited[s] = true;
+        let mut stack: Vec<(usize, usize)> = vec![(s, 0)];
+        while let Some(top) = stack.last_mut() {
+            let v = top.0;
+            if top.1 < edges[v].len() {
+                let w = edges[v][top.1] as usize;
+                top.1 += 1;
+                if !visited[w] {
+                    visited[w] = true;
+                    stack.push((w, 0));
+                }
+            } else {
+                order.push(v as u32);
+                stack.pop();
+            }
+        }
+    }
+    let mut rev: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for (v, outs) in edges.iter().enumerate() {
+        for &w in outs {
+            rev[w as usize].push(v as u32);
+        }
+    }
+    let mut comp_of = vec![usize::MAX; n];
+    let mut comp_size: Vec<usize> = Vec::new();
+    for &s in order.iter().rev() {
+        if comp_of[s as usize] != usize::MAX {
+            continue;
+        }
+        let id = comp_size.len();
+        let mut size = 0usize;
+        let mut stack = vec![s];
+        comp_of[s as usize] = id;
+        while let Some(v) = stack.pop() {
+            size += 1;
+            for &w in &rev[v as usize] {
+                if comp_of[w as usize] == usize::MAX {
+                    comp_of[w as usize] = id;
+                    stack.push(w);
+                }
+            }
+        }
+        comp_size.push(size);
+    }
+    (0..n)
+        .map(|v| {
+            comp_size[comp_of[v]] > 1 || edges[v].contains(&(v as u32)) // self-loop
+        })
+        .collect()
+}
+
+/// Levelize (Kahn) over the flattened netlist: DAG components in
+/// evaluation order, then the residue (feedback + downstream) in
+/// comp-index order. The dependency edges come from [`dep_edges`].
+pub(crate) fn levelize(netlist: &Netlist, comps: &[Behavior]) -> (Vec<u32>, Vec<u32>) {
+    let n = netlist.comps.len();
+    let mut indeg = vec![0usize; n];
+    let edges = dep_edges(netlist, comps);
+    for outs in &edges {
+        for &to in outs {
+            indeg[to as usize] += 1;
         }
     }
     // Kahn, seeded and processed deterministically.

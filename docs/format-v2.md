@@ -321,6 +321,16 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   floating read instead; that is the same model difference the floating-consume table below
   describes). Removing the seed was tried on 2026-10-24 and reverted: 154 rows that had been
   passing came back all-`X`.
+- A **symmetric settle** — two or more parts on one feedback cycle committing at the *same*
+  timestamp — is broken deterministically, by propagation before commit: within one
+  timestamp a commit of a part that lies **on** a combinational cycle (the SCC analysis of
+  DESIGN.md §4.5) is applied after every other event at that instant, so the value a
+  same-instant commit produces reaches its sinks first, the recipient re-evaluates from it and
+  its already-scheduled commit is rescheduled one `t_pd` later. The part the queue commits
+  first (component/document order) therefore wins, which is what CircuitSim CE's link order
+  (`Simulator.step`) does. Nothing is random or a tolerance (§4.5). A part merely
+  *downstream* of a loop is not included, so a combinational DAG's event trace is unchanged;
+  a genuine (odd-parity) oscillator still keeps changing and trips the event cap below.
 - RAM `depth` must be a power of two (validation), and its `addr` pin is
   `ceil(log2 depth)` wide by default; `addrBits` overrides that (`mem.rom` too), so the
   address width belongs to the design rather than to the word count. Fewer bits than the
