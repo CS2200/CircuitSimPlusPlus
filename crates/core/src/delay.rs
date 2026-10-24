@@ -1716,7 +1716,7 @@ impl DelayEngine {
                         .iter()
                         .position(|&(slot, _)| self.netlist.comps[c].pins[slot].pin == "addr")
                 };
-                let waiting = wakes.map_or(false, |i| {
+                let waiting = wakes.is_some_and(|i| {
                     let (_slot, net) = cd.in_pins[i];
                     ins[i].has_z()
                         && !self.netlist.nets[net.idx()].floating
@@ -1783,10 +1783,10 @@ impl DelayEngine {
             .out_pins
             .iter()
             .position(|&(s, _)| s == slot)
-            .map_or(false, |i| {
+            .is_some_and(|i| {
                 self.pending_val[c]
                     .get(i)
-                    .map_or(false, |pending| pending != &self.drives[c][slot])
+                    .is_some_and(|pending| pending != &self.drives[c][slot])
             })
     }
 
@@ -3047,7 +3047,8 @@ mod tests {
         }}"##
         );
         let mut eng = engine(&json, 500);
-        eng.run(1).expect("an idle bus on a pin the part does not read is not a fault");
+        eng.run(1)
+            .expect("an idle bus on a pin the part does not read is not a fault");
         assert_eq!(
             eng.named_value("out"),
             Some(k(8, 0)),
@@ -3092,7 +3093,11 @@ mod tests {
             Some(k(32, 1)),
             "the enable shares the clock's net, so the edge sees enable = 1 (as CE reads it)"
         );
-        assert_eq!(eng.named_value("sep"), Some(k(32, 1)), "separate enable, for contrast");
+        assert_eq!(
+            eng.named_value("sep"),
+            Some(k(32, 1)),
+            "separate enable, for contrast"
+        );
     }
 
     /// F11: the RAM write-enable is tracked like din/addr — a `we`
