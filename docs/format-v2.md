@@ -419,6 +419,16 @@ halt — F6).
   cycle at run end so its settle counts toward `T_obs` (F7).
 - Wire delay is **per-path** per sink (F14; junctions attach at segment midpoints;
   Manhattan fallback for empty `points` — all in docs/delay-table.md).
+- **A component's pins that share a net arrive together.** Per-path transport is per *pin*, so
+  two pins of one component on the same net can be a path-delay apart in that component's
+  views; the engine closes that gap when an event handler reads another of its own pins
+  (`arrive_together`). CE has no gap to begin with — it pushes a net's new value to every port
+  on the net, and a handler reads another port's *last received* value. CE's `Register` is
+  exactly this: it detects the edge on `CLK` (`PORT_CLK` = 2) and reads
+  `getLastReceived(ENABLE) != ZERO` (`PORT_ENABLE` = 1) right there, so a register whose enable
+  shares a net with its clock **is enabled at the edge**. Sampling our own not-yet-updated
+  enable view left such a register disabled forever — a converted PC clocked that way froze at
+  power-on. Pins on *other* nets are untouched, so per-path behaviour elsewhere is unchanged.
 - Inertial gates: an input change reschedules the pending commit; if the recomputed
   outputs equal the already-scheduled ones, the commit keeps its original time (no defer).
 - Setup/hold boundaries: a change `d` is a **setup** violation iff

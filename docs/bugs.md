@@ -6,6 +6,20 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Latest round — done (2026-10-23, second pass)
+
+- **A register whose enable shares a net with its clock now latches** (`arrive_together`).
+  CE's `Register.valueChanged` fires on the edge of `CLK` (`PORT_CLK` = 2) and reads
+  `getLastReceived(ENABLE) != ZERO` (`PORT_ENABLE` = 1) at that instant — and because a net's
+  new value is pushed to *every* port on the net, the enable is already updated when the clock
+  handler runs. The engine delivers per *pin* (F14), so the enable's view could still hold the
+  pre-edge `0` and the register never latched. Submissions wire a PC's clock into both its
+  `clk` and its `en` port (the copper crosses both), so those PCs froze at power-on and the
+  program "completed" at cycle 0. Regression test `en_on_clk_net_latches`; narrow by
+  construction — only pins on the same net are touched — so the golden hashes and the
+  reference trajectories did not move. It accounts for one of the nine remaining
+  `wrong-value` rows.
+
 ## Latest round — done (2026-10-23)
 
 - **An idle tri-state bus no longer deadlocks the part reading around it** (fixed @ `983cff2`).

@@ -1790,6 +1790,36 @@ impl DelayEngine {
             })
     }
 
+    /// Everything a component has on one net arrives **together**.
+    ///
+    /// The engine delivers per pin (F14), so two pins of the same component that sit on the
+    /// same net can be a path-delay apart in that component's views. CE has no such gap: it
+    /// pushes a net's new value to every port on it, and a handler that reads another port of
+    /// its own component reads that port's *last received* value. CE's `Register` is exactly
+    /// this case — it detects the edge on `CLK` (`PORT_CLK` = 2) and reads
+    /// `getLastReceived(ENABLE)` (`PORT_ENABLE` = 1) right there — so a register whose enable
+    /// shares a net with its clock **is enabled at the edge**. Sampling our own
+    /// not-yet-updated enable view instead left it disabled forever, which froze a converted
+    /// design whose PC is clocked that way at power-on (see `en_on_clk_net_latches`).
+    ///
+    /// Only pins on the *same* net are touched, so per-path transport everywhere else is
+    /// unchanged.
+    fn arrive_together(&mut self, c: usize, slot: usize, net: u32) {
+        let slots: Vec<usize> = self.cdata[c]
+            .in_pins
+            .iter()
+            .filter(|&&(s, n)| n.idx() == net as usize && s != slot)
+            .map(|&(s, _)| s)
+            .collect();
+        if slots.is_empty() {
+            return;
+        }
+        let value = self.views[c][slot].clone();
+        for s in slots {
+            self.views[c][s] = value.clone();
+        }
+    }
+
     /// The index (into a component's `in_pins`/input list) whose pin is named `pin` —
     /// `consume`'s error names the pin, and the caller needs the slot to substitute for.
     fn input_index_for(&self, c: usize, pin: &str) -> Option<usize> {
@@ -2082,6 +2112,7 @@ impl DelayEngine {
                         .map(|(v, _)| v.bit(0))
                         .unwrap_or(Bit::Z);
                     if cur == Bit::One {
+                        self.arrive_together(c, slot, net);
                         self.clock_edge(comp, time)?;
                     }
                 }
@@ -2097,6 +2128,7 @@ impl DelayEngine {
                         .map(|(v, _)| v.bit(0))
                         .unwrap_or(Bit::Z);
                     if cur == Bit::One {
+                        self.arrive_together(c, slot, net);
                         self.clock_edge(comp, time)?;
                     }
                 }
@@ -3021,6 +3053,46 @@ mod tests {
             Some(k(8, 0)),
             "sel=0 passes in0 through; the disabled buffer on in1 is not read"
         );
+    }
+
+    /// A register whose **enable is wired to the same net as its clock** must latch at the
+    /// edge. CE does: `Register.valueChanged` fires on `CLK` (`PORT_CLK` = 2) and reads
+    /// `getLastReceived(ENABLE)` (`PORT_ENABLE` = 1), and a net change reaches every port on
+    /// that net, so the enable is already 1 when the clock handler runs.
+    ///
+    /// The engine sampled its own `en` *view* instead, which per-pin transport (F14) may not
+    /// have updated yet — so the register read the pre-edge 0 and never latched at all.
+    /// Converted submissions wire a PC's clock into both its `clk` and its `en` port (the
+    /// copper crosses both), and it froze at power-on.
+    #[test]
+    fn en_on_clk_net_latches() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0],"name":"CLOCK"}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":32,"value":"01"}}}},
+                {{"id":"one1","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":1,"value":"1"}}}},
+                {{"id":"tied","type":"mem.register","pos":[0,0],"name":"tied","attrs":{{"bitsize":32}}}},
+                {{"id":"sep","type":"mem.register","pos":[0,0],"name":"sep","attrs":{{"bitsize":32}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"tied","pin":"clk"}}}},
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"tied","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"tied","pin":"d"}}}},
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"sep","pin":"clk"}}}},
+                {{"a":{{"comp":"one1","pin":"out"}},"b":{{"comp":"sep","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"sep","pin":"d"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(2).expect("no fault");
+        assert_eq!(
+            eng.named_value("tied"),
+            Some(k(32, 1)),
+            "the enable shares the clock's net, so the edge sees enable = 1 (as CE reads it)"
+        );
+        assert_eq!(eng.named_value("sep"), Some(k(32, 1)), "separate enable, for contrast");
     }
 
     /// F11: the RAM write-enable is tracked like din/addr — a `we`
