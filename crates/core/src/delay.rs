@@ -412,6 +412,9 @@ struct CompData {
     in_pins: Vec<(usize, NetId)>,
     /// Driven pins: (pin slot, net). For splitters: all pins.
     out_pins: Vec<(usize, NetId)>,
+    /// Pin slot of the component's `clk` pin, if it has one. Precomputed so a
+    /// clock delivery reads it directly instead of scanning every pin's name.
+    clk_slot: Option<usize>,
     timing: Timing,
 }
 
@@ -735,6 +738,7 @@ impl DelayEngine {
                 class,
                 in_pins,
                 out_pins,
+                clk_slot: fc.pins.iter().position(|p| p.pin == "clk"),
                 timing: beh.timing(table),
             });
         }
@@ -1952,15 +1956,22 @@ impl DelayEngine {
     /// Only pins on the *same* net are touched, so per-path transport everywhere else is
     /// unchanged.
     fn arrive_together(&mut self, c: usize, slot: usize, net: u32) {
+        // Most components have no *other* pin on the clock's net (the whole
+        // point of the tie is the rare register whose enable shares the clock
+        // net). Scan first so the common case does not allocate a slot list.
+        if !self.cdata[c]
+            .in_pins
+            .iter()
+            .any(|&(s, n)| n.idx() == net as usize && s != slot)
+        {
+            return;
+        }
         let slots: Vec<usize> = self.cdata[c]
             .in_pins
             .iter()
             .filter(|&&(s, n)| n.idx() == net as usize && s != slot)
             .map(|&(s, _)| s)
             .collect();
-        if slots.is_empty() {
-            return;
-        }
         let value = self.views[c][slot].clone();
         for s in slots {
             self.views[c][s] = value.clone();
@@ -2255,11 +2266,9 @@ impl DelayEngine {
                 SinkKind::Din => self.track_hold(c, TrackField::Din, time),
                 SinkKind::We => self.track_hold(c, TrackField::We, time),
                 SinkKind::Clk => {
-                    let cur = self.views[c]
-                        .iter()
-                        .zip(&self.netlist.comps[c].pins)
-                        .find(|(_, p)| p.pin == "clk")
-                        .map(|(v, _)| v.bit(0))
+                    let cur = self.cdata[c]
+                        .clk_slot
+                        .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
                     if cur == Bit::One {
                         self.arrive_together(c, slot, net);
@@ -2271,11 +2280,9 @@ impl DelayEngine {
             Class::Register => match pin {
                 SinkKind::D => self.track_hold(c, TrackField::D, time),
                 SinkKind::Clk => {
-                    let cur = self.views[c]
-                        .iter()
-                        .zip(&self.netlist.comps[c].pins)
-                        .find(|(_, p)| p.pin == "clk")
-                        .map(|(v, _)| v.bit(0))
+                    let cur = self.cdata[c]
+                        .clk_slot
+                        .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
                     if cur == Bit::One {
                         self.arrive_together(c, slot, net);
