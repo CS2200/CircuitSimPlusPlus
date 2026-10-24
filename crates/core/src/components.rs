@@ -46,8 +46,12 @@ pub fn index_bits(n: u32) -> u32 {
     addr_width(n)
 }
 
-/// Every component type string the registry knows (sorted). Delay-table
-/// validation (task B7) rejects table keys outside this list.
+/// Every component type string the registry knows (sorted) — it really is the whole
+/// registry: the loader's `analyze` match, the palette, and the frontend's `REGISTRY` are
+/// held to it (a test diffs this list against the frontend's, so adding a part on one side
+/// only fails the build). Delay-table validation (task B7) also rejects table keys outside
+/// it, which is why `misc.text` — a pin-less annotation with no timing — is here too: the
+/// docstring used to claim completeness this list did not have.
 pub const KNOWN_TYPES: &[&str] = &[
     "arith.adder",
     "arith.bit-extender",
@@ -72,6 +76,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "mem.ram",
     "mem.register",
     "mem.rom",
+    "misc.text",
     "plexers.decoder",
     "plexers.demux",
     "plexers.mux",

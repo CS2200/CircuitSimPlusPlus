@@ -1012,6 +1012,16 @@ export function isKnownType(type: string): boolean {
   return type in REGISTRY;
 }
 
+/**
+ * Every type string this catalogue knows, sorted. Exists so a test can hold it against the
+ * engine's own `KNOWN_TYPES` (`crates/core/src/components.rs`): the two registries are
+ * hand-mirrored, and a type added on one side only is exactly the drift that produces a
+ * palette tile the loader rejects (or a part the palette cannot place).
+ */
+export function knownTypes(): string[] {
+  return Object.keys(REGISTRY).sort();
+}
+
 // ---- property editing (double-click dialog, FRONTEND.md U3 UX) ----
 
 export type AttrField =
@@ -1402,7 +1412,12 @@ function baseFields(type: string): AttrField[] {
     case "io.hexdisplay":
       return [HEX_BITSIZE_FIELD];
     case "io.button":
-      return [BITSIZE_FIELD];
+      // No fields: the button's pin is fixed at 1 bit and the engine permits **no** attrs on
+      // it (`AttrCheck::new(attrs, &[])` + `finish`), so offering a `bitsize` here let the
+      // Inspector write one and the loader then rejected the file with
+      // "unknown attr 'bitsize'". `wiring.reset` is the same part and falls through to the
+      // default (also empty).
+      return [];
     case "io.led":
       // LED look + glow (UI_OVERHAUL §49). The LED is a 1-bit indicator — it
       // has no bit-size field (UI_OVERHAUL §55).

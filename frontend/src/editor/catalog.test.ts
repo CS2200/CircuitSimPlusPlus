@@ -7,6 +7,7 @@ import {
   compSpec,
   defaultAttrs,
   editableAttrs,
+  knownTypes,
   memAddrBits,
   typeDisplayName,
   type AttrField,
@@ -110,7 +111,9 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("mem.rom")).toEqual(["addrBits", "bitsize"]);
     // The register shows its stored value, so it carries a base chooser (§57).
     expect(keys("mem.register")).toEqual(["bitsize", "radix"]);
-    expect(keys("io.button")).toEqual(["bitsize"]);
+    // A button is 1 bit and takes no attrs (the engine's `AttrCheck::new(attrs, &[])`), so
+    // the panel offers nothing — a `bitsize` field here wrote a file the loader rejected.
+    expect(keys("io.button")).toEqual([]);
     expect(keys("subcircuit")).toEqual(["circuit", "width", "height"]);
   });
 
@@ -405,5 +408,31 @@ describe("showsBodyCaption (§17 rule 3 / §83)", () => {
       expect(gateShape(type, 0, 0, 3, 2)).not.toBeNull();
       expect(compSpec(type).caption({})).not.toBe("");
     }
+  });
+});
+
+describe("the registry mirrors the engine's", () => {
+  it("knows exactly the types the engine does", async () => {
+    // Hand-mirrored registries drift: a type on one side only is a palette tile the loader
+    // rejects, or a part the palette cannot place. Parse the engine's list rather than
+    // restating it, so adding a part forces both sides (that is how `wiring.reset` landed).
+    const fs = await import("node:fs");
+    const url = await import("node:url");
+    const src = fs.readFileSync(
+      url.fileURLToPath(new URL("../../../crates/core/src/components.rs", import.meta.url)),
+      "utf8",
+    );
+    const block = /pub const KNOWN_TYPES: &\[&str\] = &\[([\s\S]*?)\];/.exec(src);
+    expect(block, "could not find KNOWN_TYPES in components.rs").not.toBeNull();
+    const engine = [...block![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(engine.length).toBeGreaterThan(20);
+    expect(knownTypes()).toEqual(engine);
+  });
+
+  it("offers no editable attrs for a part the engine allows none on", () => {
+    // `io.button`/`wiring.reset` permit no attrs (`AttrCheck::new(attrs, &[])` + `finish`),
+    // so a `bitsize` field here wrote a file the loader rejected with "unknown attr".
+    expect(editableAttrs("io.button")).toEqual([]);
+    expect(editableAttrs("wiring.reset")).toEqual([]);
   });
 });

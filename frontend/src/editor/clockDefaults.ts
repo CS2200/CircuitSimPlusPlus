@@ -1,6 +1,7 @@
 /**
  * Wire a newly placed part's `clk`/`rst` pins to the circuit's clock and reset — the UI's
- * half of the rule in DESIGN.md §4.3 ("one clock source, custom wiring allowed").
+ * half of the rule in DESIGN.md §4.3 ("Clock — one source, by default"; the reset source is
+ * the bullet below it).
  *
  * CircuitSim CE's parts follow **one global clock**, so no course design ever has an
  * unwired clock. In the new model the pins are always in the part (format-v2 §4), so a
