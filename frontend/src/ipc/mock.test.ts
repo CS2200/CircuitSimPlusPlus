@@ -267,8 +267,11 @@ describe("mock core (U9)", () => {
       expect(lastVal(diffs, MOCK_NET.bus)).toEqual({ v: "00", x: "00", z: "ff" });
     });
 
-    it("consuming the bus while it floats halts with floating-read (§4.1)", async () => {
-      // clk is low after load → bus is Z.
+    it("consuming the bus while it floats reads X, and pauses when asked (§4.1)", async () => {
+      // clk is low after load → bus is Z. Contract v1.4: that read is `X`, **not** a fault,
+      // so the run stops only because the editor's "stop when a part reads an unknown value"
+      // preference is on — the halt reason is the same one a fault would report.
+      await mock.api.setPauseOnUnknown(true);
       await mock.api.poke(MOCK_COMP.buffer, "consume", { v: "0", x: "0", z: "0" });
       expect(halts).toHaveLength(1);
       expect(halts[0]).toMatchObject({ cycle: 0, reason: "floating-read" });

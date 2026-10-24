@@ -115,9 +115,13 @@ describe("SimController", () => {
   });
 
   it("haltHighlight resolves the offending component from details", async () => {
-    const ctl = makeController();
+    // The run only stops on a floating read when the preference asks (contract v1.4), so
+    // this needs the core handle the helper otherwise hides.
+    const core = createMockCore();
+    const ctl = new SimController(core, (cb) => cb());
     await ctl.load(buildMockDemoDoc());
     expect(ctl.haltHighlight()).toBeNull();
+    await core.api.setPauseOnUnknown(true);
     await ctl.poke(MOCK_DEMO_COMPS.buffer, "consume", { v: "0", x: "0", z: "0" });
     expect(ctl.store.halted?.reason).toBe("floating-read");
     expect(ctl.haltHighlight()).toBe(MOCK_DEMO_COMPS.buffer);

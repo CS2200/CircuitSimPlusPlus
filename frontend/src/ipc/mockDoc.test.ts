@@ -126,10 +126,12 @@ describe("mock core: demo document mode (U5)", () => {
     expect(Number(BigInt(`0x${changed.get(pcQ)!.v}`))).toBe(42);
   });
 
-  it("consuming the floating bus halts, naming the document's buffer comp", async () => {
+  it("consuming the floating bus pauses when asked, naming the document's buffer comp", async () => {
     const { core } = await loadDemo();
     const halts: SimHalted[] = [];
     core.events.on(IpcEvents.SimHalted, (h) => halts.push(h));
+    // v1.4: the floating read is `X`, not a fault; the preference is what turns it into a stop.
+    await core.api.setPauseOnUnknown(true);
     await core.api.poke(MOCK_DEMO_COMPS.buffer, "consume", { v: "0", x: "0", z: "0" });
     expect(halts).toHaveLength(1);
     expect(halts[0].reason).toBe("floating-read");
