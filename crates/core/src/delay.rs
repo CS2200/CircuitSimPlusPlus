@@ -128,6 +128,7 @@
 //! well: its stages are one `t_pd` apart, so no two of their commits share a
 //! timestamp and the cap below still fires on it.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
@@ -1843,7 +1844,7 @@ impl DelayEngine {
         let cd = &self.cdata[c];
         let beh = &self.comps[c];
         let outs = if beh.is_splitter() {
-            let nets: Vec<Value> = cd
+            let nets: Vec<Cow<Value>> = cd
                 .in_pins
                 .iter()
                 .map(|(_, net)| {

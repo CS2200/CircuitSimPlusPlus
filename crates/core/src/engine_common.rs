@@ -3,6 +3,8 @@
 //! the autograder and the interactive session can never disagree on these
 //! basics (DESIGN.md §3: one engine, one set of semantics).
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NetId};
@@ -276,19 +278,19 @@ pub(crate) fn resolve(
 
 /// As [`resolve`], but skipping one component's contribution (splitters
 /// read *other* drivers' contributions on their pins' nets).
-pub(crate) fn resolve_except(
+pub(crate) fn resolve_except<'a>(
     netlist: &Netlist,
     net_drivers: &[Vec<(u32, usize)>],
-    drives: &[Vec<Value>],
+    drives: &'a [Vec<Value>],
     net: crate::api::NetId,
     except: u32,
-) -> Value {
+) -> Cow<'a, Value> {
     let n = &netlist.nets[net.idx()];
     let drivers = &net_drivers[net.idx()];
-    // Fast path: 0 or 1 non-excepted driver. A splitter reads its pins' nets this way on
-    // every evaluation and most nets have a single driver, so allocating a `Vec` for that
-    // case is pure overhead. Only a genuinely contended net needs the merge buffer.
-    let mut first: Option<&Value> = None;
+    // Fast path: 0 or 1 non-excepted driver — the overwhelmingly common case for a
+    // splitter's pins. Borrow the one driver's value instead of deep-copying it into a
+    // fresh `Value` (the merge/undriven cases, which must own, are rare).
+    let mut first: Option<&'a Value> = None;
     for &(c, slot) in drivers {
         if c == except {
             continue;
@@ -303,12 +305,12 @@ pub(crate) fn resolve_except(
                         acc.push(drives[c2 as usize][slot2].clone());
                     }
                 }
-                return Value::contention_merge(n.width, &acc);
+                return Cow::Owned(Value::contention_merge(n.width, &acc));
             }
         }
     }
     match first {
-        None => Value::z(n.width),
-        Some(v) => v.clone(),
+        None => Cow::Owned(Value::z(n.width)),
+        Some(v) => Cow::Borrowed(v),
     }
 }

@@ -97,6 +97,12 @@ pub struct Value {
     zs: Limbs,
 }
 
+impl AsRef<Value> for Value {
+    fn as_ref(&self) -> &Value {
+        self
+    }
+}
+
 /// Limb storage: one inline limb for width ≤ 64 (the universal case —
 /// `MAX_BITSIZE` is 32 and multiplier outputs are 64), heap Vec beyond
 /// (the API stays arbitrary-width). Engine hot paths clone `Value`s

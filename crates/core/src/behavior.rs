@@ -846,7 +846,7 @@ impl Behavior {
     /// show up as `X` on *both* sides of the short.
     ///
     /// Never errors: `Z` and `X` flow through to the eventual consumer.
-    pub fn eval_splitter(&self, nets: &[Value]) -> Vec<Value> {
+    pub fn eval_splitter<T: AsRef<Value>>(&self, nets: &[T]) -> Vec<Value> {
         let BehaviorKind::Splitter { splits, bus_width } = &self.kind else {
             panic!("eval_splitter on non-splitter (engine bug)");
         };
@@ -868,13 +868,31 @@ impl Behavior {
         //  * split drive — the bus's value (others' drive merged with what we
         //    assemble), for splits nothing else drives; a split that has a writer
         //    of its own keeps it.
-        let mut bus_drive: Vec<Bit> = vec![Bit::Z; *bus_width as usize];
-        // The bus's *received* value, read once per evaluation: split outputs slice it and
-        // the old code re-read `nets[0].bit(bb)` for every mapped fanout bit. This buffer
-        // replaces a dead `bus_value` that was merged per bit and then never read.
-        let bus_bits: Vec<Bit> = (0..*bus_width).map(|i| nets[0].bit(i)).collect();
+        let bus = nets[0].as_ref();
+        let n = *bus_width as usize;
+        // A splitter bus is at most the format's widest part (<= 64 bits), so the two
+        // per-evaluation scratch buffers live on the stack; the heap path exists only for
+        // a width validation would have rejected anyway.
+        let mut drive_stack = [Bit::Z; 64];
+        let mut bits_stack = [Bit::Z; 64];
+        let mut drive_heap: Vec<Bit>;
+        let bits_heap: Vec<Bit>;
+        // `bus_drive` is the value this splitter *drives* on the bus (only the bits an
+        // externally driven split claims; everything else `Z`). `bus_bits` is the bus's
+        // own received value, read once — the fanouts slice it (CE's `Splitter.valueChanged`
+        // `PORT_JOINED` branch), rather than re-reading `bus.bit(bb)` per mapped bit.
+        let (bus_drive, bus_bits): (&mut [Bit], &[Bit]) = if n <= 64 {
+            for (i, slot) in bits_stack[..n].iter_mut().enumerate() {
+                *slot = bus.bit(i as u32);
+            }
+            (&mut drive_stack[..n], &bits_stack[..n])
+        } else {
+            drive_heap = vec![Bit::Z; n];
+            bits_heap = (0..*bus_width).map(|i| bus.bit(i)).collect();
+            (&mut drive_heap[..], &bits_heap[..])
+        };
         for (si, (_, map)) in splits.iter().enumerate() {
-            let v = &nets[1 + si];
+            let v = nets[1 + si].as_ref();
             if v.is_fully_z() {
                 continue; // nothing else drives this split: the bus is the authority for its bits
             }
@@ -892,17 +910,12 @@ impl Behavior {
             }
         }
         let mut out = Vec::with_capacity(nets.len());
-        out.push(Value::from_bits(&bus_drive));
+        out.push(Value::from_bits(bus_drive));
         for (_, map) in splits.iter() {
             out.push(Value::from_bits_iter(
                 map.len() as u32,
                 map.iter().map(|&bb| {
                     if bb < *bus_width {
-                        // CE pushes a fanout from the value *it received on the bus*
-                        // (`Splitter.valueChanged`, `PORT_JOINED` branch: it slices the
-                        // incoming `value`). That is what other parts drive on the bus —
-                        // **not** the fold of the fanouts' own drives, which manufactured
-                        // an `X` here and then drove it back onto the fanout net.
                         bus_bits[bb as usize]
                     } else {
                         Bit::Z
