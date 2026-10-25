@@ -128,7 +128,7 @@
 //! well: its stages are one `t_pd` apart, so no two of their commits share a
 //! timestamp and the cap below still fires on it.
 
-use std::collections::BinaryHeap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
@@ -229,18 +229,67 @@ struct Ev {
     kind: EvKind,
 }
 
-impl Ord for Ev {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Min-heap: earlier time, then lower priority class, then smaller
-        // seq. `prio` is 0 for everything but a loop component's commit, so
-        // for a design with no combinational feedback this key is exactly
-        // the old `(time, seq)` — the tie-break cannot touch it.
-        (other.time, other.prio, other.seq).cmp(&(self.time, self.prio, self.seq))
+/// The event queue: one bucket per timestamp, each split by priority class.
+///
+/// Ordering is exactly `Ev`'s old `(time, prio, seq)` key — times come out in
+/// `BTreeMap` order, and inside one timestamp priority 0 before priority 1,
+/// each in insertion (`seq`) order, which is `VecDeque` order. It replaces a
+/// `BinaryHeap`, whose every push/pop was `O(log N)` comparisons and swaps of
+/// a whole `Ev`; here a same-timestamp push/pop is amortized `O(1)`, and the
+/// only logarithmic part is the number of *distinct future times*.
+#[derive(Debug, Default)]
+struct EventQueue {
+    buckets: BTreeMap<u64, [VecDeque<Ev>; 2]>,
+}
+
+impl EventQueue {
+    fn push(&mut self, ev: Ev) {
+        self.buckets
+            .entry(ev.time)
+            .or_default()[usize::from(ev.prio.min(1))]
+        .push_back(ev);
+    }
+
+    fn peek(&self) -> Option<&Ev> {
+        let (_, b) = self.buckets.iter().next()?;
+        b[0].front().or_else(|| b[1].front())
+    }
+
+    fn pop(&mut self) -> Option<Ev> {
+        let time = *self.buckets.keys().next()?;
+        let b = self.buckets.get_mut(&time).expect("keys() said it exists");
+        let ev = if let Some(e) = b[0].pop_front() {
+            e
+        } else {
+            b[1].pop_front().expect("bucket is never empty")
+        };
+        if b[0].is_empty() && b[1].is_empty() {
+            self.buckets.remove(&time);
+        }
+        Some(ev)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Ev> {
+        self.buckets
+            .values()
+            .flat_map(|b| b.iter().flat_map(|d| d.iter()))
+    }
+
+    fn into_vec(self) -> Vec<Ev> {
+        self.buckets
+            .into_values()
+            .flat_map(|b| b.into_iter().flat_map(|d| d.into_iter()))
+            .collect()
     }
 }
-impl PartialOrd for Ev {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+
+impl FromIterator<Ev> for EventQueue {
+    fn from_iter<I: IntoIterator<Item = Ev>>(iter: I) -> Self {
+        let mut q = EventQueue::default();
+        for ev in iter {
+            q.push(ev);
+        }
+        q
     }
 }
 
@@ -593,7 +642,7 @@ pub struct DelayEngine {
     /// Scratch for `apply`'s `Fire` arm: the distinct output nets a commit
     /// touches. Reused so a commit does not allocate a `Vec` every time.
     scratch_affected: Vec<u32>,
-    queue: BinaryHeap<Ev>,
+    queue: EventQueue,
     now: u64,
     seq: u64,
     half_period: u64,
@@ -833,7 +882,7 @@ impl DelayEngine {
             pending_cause: vec![None; n],
             pending_net_cause: Vec::new(),
             scratch_affected: Vec::new(),
-            queue: BinaryHeap::new(),
+            queue: EventQueue::default(),
             now: 0,
             seq: 0,
             half_period: clock_half_period,
