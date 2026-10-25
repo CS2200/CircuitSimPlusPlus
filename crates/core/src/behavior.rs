@@ -983,6 +983,19 @@ impl Behavior {
                     Some(value.z_to(Bit::Zero))
                 }
             }
+            // A priority decoder's line reads as **0**, not as a floating halt: CE's
+            // `PriorityEncoder.valueChanged` scans for `== State.ONE` and skips everything
+            // else, so a `Z` line is "not asserted", exactly like a 0. Substituting 0 lets
+            // the eval's scan run; when *no* line is ONE it takes the `highest == -1`
+            // branch and drives index=`Z`, valid=0, en_out=1 — CE's definite "no hit"
+            // (which `all_z_outputs` would get wrong, driving valid/en_out `Z` too).
+            // A genuine `X` (contention) is *not* substituted: `consume` only errors on
+            // `Z`, so an `X` line never reaches this arm and still leaves the result
+            // unknown. `en_in` is read without `consume` and treats `Z` as enabled
+            // (the module-header rule), so only the `in{i}` lines are handled here.
+            BehaviorKind::PriorityDecoder { .. } if pin.starts_with("in") => {
+                Some(value.z_to(Bit::Zero))
+            }
             _ => None,
         }
     }
@@ -2086,6 +2099,17 @@ mod tests {
         let cmp = mk("arith.comparator", json!({"bitsize": 4}));
         let z4 = Value::z(4);
         assert_eq!(cmp.z_compat("a", &z4, &[&z4, &z4]), None);
+        // A priority decoder's line reads as **0**, not as a floating halt: CE's
+        // `PriorityEncoder.valueChanged` scans for `== State.ONE` and skips everything
+        // else, so a `Z` line is "not asserted", exactly like a 0. Substituting 0 lets the
+        // eval's scan run to the `highest == -1` branch when nothing asserts — which is a
+        // *definite* valid=0, en_out=1, not the all-`Z` `all_z_outputs` would push.
+        let pd = mk("plexers.priority-decoder", json!({"inputBits": 4}));
+        let pd_ins = [&z1, &z1, &z1, &z1, &Value::zero(1)];
+        assert_eq!(pd.z_compat("in0", &z1, &pd_ins), Some(Value::zero(1)));
+        // The enable is a separate pin: `en_in` does not start with `in`, and it never
+        // consumes anyway, so it is not a coalescing case.
+        assert_eq!(pd.z_compat("en_in", &z1, &pd_ins), None);
     }
 
     // ---- RAM / ROM -------------------------------------------------------

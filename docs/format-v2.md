@@ -396,13 +396,23 @@ To tell them apart, `csim run --compat` (and `GradeConfig::compat`; the corpus h
 it with `CSIM_COMPAT=1`) makes the engine read a *consumed* floating pin as CE's
 `valueChanged` does — the same rules the converter's `_ce_coalesce_pin` writes as drivers,
 applied at run time instead: a controlled-buffer `en` reads `0`, any other `en` reads `1`, a
-register/RAM `clk`/`rst` and a RAM `we` read `0`, a gate input reads `0`. Where CE
+register/RAM `clk`/`rst` and a RAM `we` read `0`, a gate input reads `0`, and a priority
+decoder's line reads `0` (CE's `PriorityEncoder.valueChanged` scans for `== State.ONE` and
+skips everything else, so a `Z` line is "not asserted" — and when nothing asserts, the
+`highest == -1` branch is a *definite* index `Z`, `valid` 0, `en_out` 1, which is why a
+floating line must be substituted rather than left to `all_z_outputs`). Where CE
 *propagates* the `Z` rather than reading it (a comparator with an invalid input), the part
 drives `Z`. This is a **debug switch, off by default** — the graded engine still never
 invents a value — and it is deliberately approximate in two places, both documented and
 pinned by tests: a gate is exact only when *every* input bit is `Z` (CE's `isX`), so a
 bit-wise mix coalesces the whole pin to `0`; and the register edge path reads a floating
 `d`/`din` as `X` where CE stores `Z`. Use it to bin a disagreement, not to grade.
+
+Measured on the 357-submission corpus, `--compat` now **strictly dominates** production
+(349 vs 342 agreements, 15 vs 8 disagreements): every row production passes, compat also
+passes, and 7 more (`374615381`, `400529372`, `409149875`, `409962158`, `410196872`,
+`410291406`, `410843919`) pass only under compat. The one remaining `x-cascade`-vs-`wrong-value`
+split is in `docs/bugs.md`.
 
 | Component                       | Consumes                                                                                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
