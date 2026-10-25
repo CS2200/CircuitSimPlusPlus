@@ -293,10 +293,16 @@ behaves the same in both, which is how the old schematic is drawn and how the co
 LC-5200 uses it. Recorded here rather than "fixed", because the synchronous behaviour is
 deliberate.
 
-**Backlog (P3): more register types in the Memory palette.** A D *latch* (level-sensitive,
-transparent while enabled) and possibly a transparent-latch RAM variant would cover designs
-that want asynchronous/level behaviour instead of ours (and would make an asynchronous
-reset a property of a *type* rather than of the flag). Nothing depends on it yet.
+**Backlog (P3): more register/latch types in the Memory palette — *after this semester, not now*.**
+A reset is a property of the *part*, and real parts disagree: an edge-triggered register with
+**no** clear (74LS374/377), one with an **asynchronous** clear (74LS273/174/175 — what the register
+now is, and what CE's part is), one with a **synchronous** clear (what we shipped until 2026-10-25),
+and a level-sensitive transparent **D latch** (74LS373/573), plus possibly a transparent-latch RAM.
+A future term may want these as *selectable types* (a type selector, so a design says which part it
+assumes) — but **not this semester**: the current tool must match CE on this term's submissions, and
+CE exposes exactly one register part, so a converted design carries no signal to pick among them
+(that is exactly why the register itself had to move to the async clear). Deferred deliberately;
+nothing depends on it yet.
 
 ## Correction: the old file has no short — my splitter was echoing its own bus (2026-10-21)
 
