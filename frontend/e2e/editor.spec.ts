@@ -431,9 +431,10 @@ test("placement wires a part's clock and reset (one clock source)", async ({ pag
     }[];
   };
   const c = doc.circuits[0];
-  // The design's clock is the circuit's global clock (never a pin), and the reset is a pin.
+  // The design's clock and reset are source *parts* at the root, not pins: a root
+  // CLK/RST pin would have nothing driving it (DESIGN.md §4.3).
   expect(c.components.some((x) => x.type === "wiring.clock")).toBe(true);
-  expect(c.components.some((x) => x.type === "wiring.pin" && x.name === "RST")).toBe(true);
+  expect(c.components.some((x) => x.type === "wiring.reset")).toBe(true);
   const reg = c.components.find((x) => x.type === "mem.register");
   expect(reg).toBeDefined();
   const mine = c.wires.filter((w) => w.a.comp === reg?.id || w.b.comp === reg?.id);
