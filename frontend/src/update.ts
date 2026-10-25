@@ -11,11 +11,8 @@ import pkg from "../package.json" with { type: "json" };
  * The public github.com mirror to poll, "owner/name". Releases live there and
  * are read with no auth — GT's GHES cannot serve them (it forbids public repos,
  * so an anonymous read gets a 404). See docs/distribution.md.
- *
- * TODO(setup): replace OWNER with the github.com account/org once the mirror
- * repo exists. Until then the check 404s and silently skips.
  */
-export const GITHUB_REPO = "OWNER/CircuitSimPlusPlus";
+export const GITHUB_REPO = "Mr-Thack/CircuitSimPlusPlus";
 
 /** Where releases are served: the public github.com mirror, not GT's GHES. */
 export const RELEASES_HOST = "github.com";

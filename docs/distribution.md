@@ -1,11 +1,10 @@
 # Distribution & Updates — plan
 
-> **Status: in progress (2026-10-22).** Steps 3–4 below are **done** — the CI
-> workflows are restored (gated so they only run on github.com) and the update
-> nudge points at github.com. Still pending: **create + push the public mirror
-> repo, then tag a release**. Until that repo exists the nudge 404s and silently
-> skips. [`releasing.md`](releasing.md) describes the local three-machine
-> process that still works today.
+> **Status: live (2026-10-25).** The public mirror exists
+> (`github.com/Mr-Thack/CircuitSimPlusPlus`) and its CI runs; the update nudge
+> now points at it. Remaining: tag a `v*` release.
+> [`releasing.md`](releasing.md) still describes the local three-machine
+> process.
 
 ## The problem, in one paragraph
 
