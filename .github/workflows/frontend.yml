@@ -50,12 +50,6 @@ jobs:
       - name: Unit tests
         run: npm --prefix frontend run test
 
-      - name: E2E (chromium, Linux only)
-        if: runner.os == 'Linux'
-        run: |
-          npx --prefix frontend playwright install --with-deps chromium
-          npm --prefix frontend run test:e2e
-
       - name: Tauri build (unsigned)
         working-directory: crates/app
         run: ../../frontend/node_modules/.bin/tauri build
@@ -71,3 +65,33 @@ jobs:
             target/release/bundle/rpm/*.rpm
             target/release/bundle/appimage/*.AppImage
           if-no-files-found: warn
+
+  # E2E runs in the PINNED Playwright image, not on the bare runner: the
+  # committed `*-chromium-linux.png` canvas baselines are pixel-exact only for a
+  # known font+browser environment, and the bare Ubuntu runner renders them
+  # differently (system font stack). Baselines must be regenerated inside this
+  # exact image:
+  #   docker run --rm --ipc=host -v "$PWD:/work" -w /work/frontend \
+  #     mcr.microsoft.com/playwright:v1.63.0-noble \
+  #     bash -lc 'npm ci && npx playwright test --update-snapshots'
+  # Bump the image tag whenever @playwright/test is bumped, then regenerate.
+  e2e:
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      # Chromium wants a real /dev/shm; the runner default is small.
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install frontend deps
+        run: npm --prefix frontend ci
+      - name: E2E (Playwright, pinned image)
+        run: npm --prefix frontend run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          if-no-files-found: ignore
