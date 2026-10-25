@@ -31,8 +31,16 @@ export interface NetChangeEvent {
 export class SimStore {
   /** Latest value per engine net. Mutated in place; `version` signals. */
   readonly netValues = new Map<NetId, WireValue>();
-  /** Document wire index → engine net (inverted LoadResult.net_map). */
+  /** ROOT-sheet document wire index → engine net (contract v1.4: only the
+   *  `instance === ""` entries of LoadResult.net_map). */
   wireToNet: ReadonlyMap<WireIdx, NetId> | null = null;
+  /**
+   * Per-instance wire → net, keyed by instance path (`""` = root). A
+   * subcircuit sheet opened as a *specific instance* uses its own path here,
+   * so its wires read the values of that instance — never another instance's,
+   * and never a definition's (which has no values).
+   */
+  wireToNetByInstance: ReadonlyMap<string, ReadonlyMap<WireIdx, NetId>> = new Map();
   /** Engine net → document wire indices (U7 pulses; built in onLoaded). */
   netToWires: ReadonlyMap<NetId, WireIdx[]> | null = null;
   named: readonly NamedComponent[] = [];
@@ -92,10 +100,13 @@ export class SimStore {
    * netValues — the initial full-state batch arrives DURING loadCircuit
    * (before the result), so clearing belongs to the load path's reset().
    */
-  onLoaded(wireToNet: Map<WireIdx, NetId>, named: NamedComponent[]): void {
-    this.wireToNet = wireToNet;
+  onLoaded(wireToNetByInstance: Map<string, Map<WireIdx, NetId>>, named: NamedComponent[]): void {
+    this.wireToNetByInstance = wireToNetByInstance;
+    // The root sheet keeps the flat map the rest of the UI (waveform, pulses)
+    // already keys on.
+    this.wireToNet = wireToNetByInstance.get("") ?? new Map();
     const reverse = new Map<NetId, WireIdx[]>();
-    for (const [wire, net] of wireToNet) {
+    for (const [wire, net] of this.wireToNet) {
       const list = reverse.get(net);
       if (list === undefined) reverse.set(net, [wire]);
       else list.push(wire);
@@ -178,6 +189,7 @@ export class SimStore {
     this._contended.clear();
     this.lastChanged = [];
     this.wireToNet = null;
+    this.wireToNetByInstance = new Map();
     this.netToWires = null;
     this.named = [];
     this.loadErrors = [];

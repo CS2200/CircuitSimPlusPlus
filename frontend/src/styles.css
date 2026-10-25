@@ -3137,6 +3137,24 @@ body {
   font-weight: 600;
 }
 
+/* Inside a specific INSTANCE (not the class). CE's own cue was red, so the
+   frame and chips go red — and the frame is dashed as well, so "instance" can
+   never be mistaken for just another scope hue. */
+.scope-frame--instance {
+  box-shadow: inset 0 0 0 2px hsl(0 78% 55% / 0.8);
+  border: 1px dashed hsl(0 78% 62% / 0.65);
+}
+.statusbar-scope--instance {
+  color: hsl(0 78% 62%);
+}
+.scope-bar--instance {
+  border-color: hsl(0 78% 55% / 0.7);
+}
+.scope-bar--instance .scope-name,
+.scope-bar--instance .scope-back:hover {
+  color: hsl(0 78% 62%);
+}
+
 .sheet-tab-wrap[data-scope="subcircuit"] .sheet-tab.active {
   border-bottom: 2px solid hsl(var(--scope-hue) 65% 55%);
 }

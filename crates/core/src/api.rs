@@ -77,11 +77,25 @@ pub struct LoadError {
 
 /// Maps a derived net to the wires (by index) that belong to it, so the UI
 /// can highlight net extents without knowing anything about net derivation.
+///
+/// One entry is emitted per *(instance, circuit, net)*: `wires` are indices
+/// into `circuit`'s own `wires` array, and `instance` is the instance path
+/// (contract v1.4). The root circuit is `instance == ""`. This is what lets the
+/// UI resolve values on a subcircuit sheet viewed *as a specific instance*
+/// rather than as a definition — the same wire index means a different net in
+/// each instance, so the pair is the key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetMapEntry {
     /// The derived net.
     pub net: NetId,
-    /// Wires (by index) that belong to this net.
+    /// Instance path of the subcircuit whose circuit holds `wires` (`""` at
+    /// root), e.g. `"c0"` or `"c0/c3"`.
+    #[serde(default)]
+    pub instance: String,
+    /// Name of the circuit `wires` indices belong to.
+    #[serde(default)]
+    pub circuit: String,
+    /// Wires (by index into `circuit.wires`) that belong to this net.
     pub wires: Vec<WireIdx>,
 }
 

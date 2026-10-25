@@ -21,10 +21,11 @@
 //! name* — the plain `name` at root level, `"instance/id/.../name"` when
 //! nested (DESIGN.md §8.2; instance ids guarantee global uniqueness).
 //!
-//! `net_map` covers the **root circuit's** wires only (the frontend's
-//! net-extent highlighting works on the top-level canvas; inlined
-//! subcircuit wires have circuit-relative indices the IPC contract does not
-//! carry).
+//! `net_map` covers **every** expansion: one entry per *(instance path,
+//! circuit, net)*, with circuit-relative wire indices (contract v1.4). The
+//! root circuit is `instance == ""`. The frontend keys on the pair, so a
+//! subcircuit sheet opened *as a specific instance* resolves to that instance's
+//! nets — not the definition's, and not another instance's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -265,7 +266,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
     let Expander {
         mut uf,
         insts,
-        root_wire_nodes,
+        inst_wire_nodes,
         wire_len_nodes,
         wire_recs,
         ..
@@ -426,20 +427,29 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         }
     }
 
-    // ---- net_map: root circuit wires → nets (for UI net highlighting).
-    let mut by_net: BTreeMap<NetId, Vec<WireIdx>> = BTreeMap::new();
-    for (widx, node) in root_wire_nodes.iter().enumerate() {
-        if let Some(node) = node {
-            let class = uf.find(*node);
-            if let Some(&net) = net_of_root.get(&class) {
-                by_net.entry(net).or_default().push(WireIdx(widx as u32));
+    // ---- net_map: (instance, circuit) wires → nets (UI net highlighting and,
+    // for a subcircuit sheet opened as a specific instance, its values). One
+    // entry per (instance, circuit, net); `wires` are circuit-relative.
+    let mut net_map: Vec<NetMapEntry> = Vec::new();
+    for (instance, circuit, nodes) in &inst_wire_nodes {
+        let mut by_net: BTreeMap<NetId, Vec<WireIdx>> = BTreeMap::new();
+        for (widx, node) in nodes.iter().enumerate() {
+            if let Some(node) = node {
+                let class = uf.find(*node);
+                if let Some(&net) = net_of_root.get(&class) {
+                    by_net.entry(net).or_default().push(WireIdx(widx as u32));
+                }
             }
         }
+        for (net, wires) in by_net {
+            net_map.push(NetMapEntry {
+                net,
+                instance: instance.clone(),
+                circuit: circuit.clone(),
+                wires,
+            });
+        }
     }
-    let net_map = by_net
-        .into_iter()
-        .map(|(net, wires)| NetMapEntry { net, wires })
-        .collect();
 
     Ok(Netlist {
         comps,
@@ -536,7 +546,10 @@ struct Expander<'a> {
     cap: usize,
     cap_hit: bool,
     errors: Vec<LoadError>,
-    root_wire_nodes: Vec<Option<u32>>,
+    /// Per expansion: `(instance path, circuit name, wire-index → UF node)`.
+    /// One record per circuit expansion (root included), so every wire in every
+    /// instance can be mapped to its net for the UI (`NetMapEntry`, v1.4).
+    inst_wire_nodes: Vec<(String, String, Vec<Option<u32>>)>,
     /// (UF node, drawn length) per processed wire, for per-net transport
     /// delays (§4.3) — attributed to nets after union-find completes.
     wire_len_nodes: Vec<(u32, u32)>,
@@ -592,7 +605,7 @@ impl<'a> Expander<'a> {
             cap,
             cap_hit: false,
             errors: Vec::new(),
-            root_wire_nodes: Vec::new(),
+            inst_wire_nodes: Vec::new(),
             wire_len_nodes: Vec::new(),
             wire_recs: Vec::new(),
         }
@@ -707,6 +720,10 @@ impl<'a> Expander<'a> {
             }
         }
 
+        // This circuit's own wire → UF-node vector (circuit-relative indices),
+        // recorded for `net_map` so the UI can resolve values even when the
+        // sheet is a subcircuit opened as a specific instance (contract v1.4).
+        let mut local_wire_nodes: Vec<Option<u32>> = Vec::with_capacity(circuit.wires.len());
         for wire in &circuit.wires {
             let rec_base = self.wire_recs.len();
             let na = endpoint_node(circuit, &comp_idx_by_id, &local, &wire.a);
@@ -727,10 +744,10 @@ impl<'a> Expander<'a> {
                     self.wire_len_nodes.push((node, len));
                 }
             }
-            if is_root {
-                self.root_wire_nodes.push(na.or(nb));
-            }
+            local_wire_nodes.push(na.or(nb));
         }
+        self.inst_wire_nodes
+            .push((path.join("/"), circuit.name.clone(), local_wire_nodes));
 
         pin_terminals
     }
@@ -1246,6 +1263,24 @@ mod tests {
         // Signal flow: const.out net == buffer.in net; buffer.out net == probe.in net.
         assert_eq!(konst.pins[0].net, buf.pins[0].net);
         assert_eq!(buf.pins[1].net, probe.pins[0].net);
+        // `net_map` covers **every** expansion (contract v1.4), keyed by
+        // (instance path, circuit) with circuit-relative wire indices — so a
+        // subcircuit sheet opened as a specific instance resolves to that
+        // instance's nets, not the definition's or another instance's.
+        let mut saw: BTreeMap<(String, String), BTreeSet<u32>> = BTreeMap::new();
+        for e in &nl.net_map {
+            saw.entry((e.instance.clone(), e.circuit.clone()))
+                .or_default()
+                .extend(e.wires.iter().map(|w| w.0));
+        }
+        let keys: Vec<(&str, &str)> = saw.keys().map(|(i, c)| (i.as_str(), c.as_str())).collect();
+        assert_eq!(
+            keys,
+            vec![("", "main"), ("c1", "a"), ("c1/c2", "b"), ("c1/c2/c2", "c")]
+        );
+        for wires in saw.values() {
+            assert_eq!(wires, &BTreeSet::from([0u32, 1u32]));
+        }
     }
 
     #[test]

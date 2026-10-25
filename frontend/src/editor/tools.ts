@@ -210,7 +210,8 @@ export class ToolMachine {
   /** Fired by Shift+click on a clock: step the simulation one tick (§47). */
   onTick?: () => void;
   /** Right-click on a subcircuit instance: jump to its definition (App switches tabs). */
-  onOpenSubcircuit?: (circuit: string) => void;
+  /** `compId` is the instance that was opened, so the app can enter *it*. */
+  onOpenSubcircuit?: (circuit: string, compId?: string) => void;
   /** A right-click opened the canvas context menu (§75). */
   onCanvasMenu?: (menu: CanvasMenuState) => void;
   /**
@@ -323,7 +324,7 @@ export class ToolMachine {
             .components.find((c) => c.id === hit.compId);
           const target = comp?.type === "subcircuit" ? comp.attrs?.circuit : undefined;
           if (typeof target === "string" && target !== "") {
-            this.onOpenSubcircuit?.(target);
+            this.onOpenSubcircuit?.(target, comp?.id);
             return;
           }
         }
@@ -771,7 +772,7 @@ export class ToolMachine {
     this.selection.set([comp.compId], []);
     const hit = this.doc.circuit(this.circuitIdx()).components.find((x) => x.id === comp.compId);
     const target = hit?.type === "subcircuit" ? hit.attrs?.circuit : undefined;
-    if (typeof target === "string" && target !== "") this.onOpenSubcircuit?.(target);
+    if (typeof target === "string" && target !== "") this.onOpenSubcircuit?.(target, comp.compId);
     else {
       const focus =
         hit?.type === "wiring.constant" || hit?.type === "debug.breakpoint" ? "value" : undefined;

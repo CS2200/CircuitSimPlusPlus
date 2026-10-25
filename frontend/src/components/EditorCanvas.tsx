@@ -79,10 +79,17 @@ export default forwardRef<
     themeName: string;
     /** Index of the sheet being edited (subcircuits are separate sheets). */
     sheetIdx?: number;
+    /**
+     * Instance path of the subcircuit being viewed (`""` = root / definition).
+     * Non-empty means the open sheet is a **specific instance**: `wireToNet`
+     * comes from that instance's map, and the scope chrome turns red (CE's own
+     * "you are inside an instance" cue) so it is never mistaken for the class.
+     */
+    instancePath?: string;
     onStatus?: (s: EditorStatus) => void;
     onEditComponent?: (compId: string, focusField?: string) => void;
-    /** Right-click a subcircuit instance: jump to its definition tab. */
-    onOpenSubcircuit?: (circuit: string) => void;
+    /** Right-click a subcircuit instance: enter it (definition or instance view). */
+    onOpenSubcircuit?: (circuit: string, compId?: string) => void;
     /** A right-click on the canvas opened the context menu (§75). */
     onCanvasMenu?: (menu: CanvasMenuState) => void;
     /** User-facing messages (toasts). */
@@ -109,6 +116,7 @@ export default forwardRef<
     doc,
     themeName,
     sheetIdx = 0,
+    instancePath = "",
     onStatus,
     onEditComponent,
     onOpenSubcircuit,
@@ -235,17 +243,32 @@ export default forwardRef<
         setWarningLive(hasWarning);
       }
       let simOverlay: SimOverlay | undefined;
-      // net_map is root-sheet-only (contract v1.1): no sim overlay on
-      // subcircuit sheets.
-      if (sim !== undefined && sim.store.loaded && sheetRef.current === 0) {
-        const store = sim.store;
+      // Values belong to an *instance*, never to a class: draw the overlay on
+      // the root sheet, or on a subcircuit sheet opened as a specific instance
+      // (non-empty `instancePath`). A bare definition sheet has none — which is
+      // exactly why it used to read "no sim loaded" everywhere.
+      const viewInstance = instancePath;
+      const showOverlay =
+        sim !== undefined && sim.store.loaded && (viewInstance !== "" || sheetRef.current === 0);
+      if (showOverlay) {
+        const store = sim.store!;
+        const viewCircuitIdx = viewInstance === "" ? 0 : sheetRef.current;
+        const viewCircuit = doc.circuit(viewCircuitIdx);
+        const wireMap =
+          viewInstance === ""
+            ? store.wireToNet
+            : (store.wireToNetByInstance.get(viewInstance) ?? null);
         const highlight = sim.haltHighlight();
         // Pulse spawn: once per flushed frame at low speed (manual steps
         // always qualify — that's the teaching view); gated by the
         // Settings → Canvas toggle.
         const st = store.status;
+        // Pulses ride the root sheet's wire map only (net ids are global, the
+        // wire map here is not), so an instance view draws none.
         const pulseOk =
-          pulsesOn && (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
+          viewInstance === "" &&
+          pulsesOn &&
+          (!(st?.running ?? false) || (st?.eff_hz ?? 0) <= PULSE_MAX_EFF_HZ);
         if (pulseOk && store.lastChanged !== lastPulseChanges.current) {
           lastPulseChanges.current = store.lastChanged;
           if (store.lastChanged.length > 0) {
@@ -258,16 +281,22 @@ export default forwardRef<
         // Named components' value nets (contract v1.2), keyed by document id.
         // The engine nets every pin, so this answers even for a value pin with
         // nothing wired to it — a register with `q` open, say.
+        // A named component's value net, matched to the *view*: on the root its
+        // name is the plain label; in an instance the engine names it
+        // `"<instancePath>/<label>"`, so the same circuit's components in two
+        // instances never collide.
         const namedValueNets = new Map<string, number>();
         for (const n of store.named) {
-          if (n.circuit !== doc.circuit(0).name || n.value_net === undefined) continue;
-          const comp = doc.circuit(0).components[n.comp_id];
-          if (comp !== undefined) namedValueNets.set(comp.id, n.value_net);
+          if (n.value_net === undefined || n.circuit !== viewCircuit.name) continue;
+          const comp = viewCircuit.components[n.comp_id];
+          if (comp === undefined || comp.name === undefined) continue;
+          const wanted = viewInstance === "" ? comp.name : `${viewInstance}/${comp.name}`;
+          if (n.name === wanted) namedValueNets.set(comp.id, n.value_net);
         }
         simOverlay = {
           cycle: store.cycle,
           valueForWire: (i) => {
-            const net = store.wireToNet?.get(i);
+            const net = wireMap?.get(i);
             return net === undefined ? undefined : store.netValues.get(net);
           },
           valueForNamed: (id) => {
@@ -276,16 +305,23 @@ export default forwardRef<
           },
           pokedRegister: (id) => sim?.pokedRegister(id),
           editingValue: sim?.registerEdit() ?? null,
+          // Halt/path/violation markers carry ROOT-sheet ids today; only show
+          // them on the root, so an instance view is never mis-annotated.
           haltCompId:
-            highlight === null ? null : (doc.circuit(0).components[highlight]?.id ?? null),
-          path: pathIds ?? null,
-          violations: violations ?? null,
-          pulses: activePulses?.flatMap((p) =>
-            (store.netToWires?.get(p.net) ?? []).map((wireIdx) => ({
-              wireIdx,
-              phase: p.phase,
-            })),
-          ),
+            viewInstance === "" && highlight !== null
+              ? (viewCircuit.components[highlight]?.id ?? null)
+              : null,
+          path: viewInstance === "" ? (pathIds ?? null) : null,
+          violations: viewInstance === "" ? (violations ?? null) : null,
+          pulses:
+            viewInstance === ""
+              ? activePulses?.flatMap((p) =>
+                  (store.netToWires?.get(p.net) ?? []).map((wireIdx) => ({
+                    wireIdx,
+                    phase: p.phase,
+                  })),
+                )
+              : null,
         };
       }
       scene.draw(
@@ -315,6 +351,7 @@ export default forwardRef<
       pulsesOn,
       gridOn,
       showValues,
+      instancePath,
     ],
   );
 

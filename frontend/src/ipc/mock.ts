@@ -234,7 +234,14 @@ export class MockCore implements CoreApi {
       // (same union-find semantics as the engine's netlist builder, B3).
       this.circuitName = circuit.name;
       const derivation = deriveNets(circuit);
-      const net_map = derivation.nets.map((n) => ({ net: n.id, wires: n.wires }));
+      // The mock simulates one sheet (the root), so every entry is root-scoped
+      // (contract v1.4: `instance`/`circuit` name where the wires live).
+      const net_map = derivation.nets.map((n) => ({
+        net: n.id,
+        instance: "",
+        circuit: circuit.name,
+        wires: n.wires,
+      }));
       const named = namedComponents(doc, derivation);
       for (const comp of circuit.components) {
         if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
@@ -268,12 +275,14 @@ export class MockCore implements CoreApi {
       ok: true,
       errors: [],
       net_map: [
-        { net: MOCK_NET.clk, wires: [0] },
-        { net: MOCK_NET.pcQ, wires: [1, 2] }, // fan-out: adder input + gate bank
-        { net: MOCK_NET.nextPc, wires: [3] },
-        { net: MOCK_NET.bus, wires: [4] },
+        { net: MOCK_NET.clk, instance: "", circuit: "main", wires: [0] },
+        { net: MOCK_NET.pcQ, instance: "", circuit: "main", wires: [1, 2] }, // fan-out: adder input + gate bank
+        { net: MOCK_NET.nextPc, instance: "", circuit: "main", wires: [3] },
+        { net: MOCK_NET.bus, instance: "", circuit: "main", wires: [4] },
         ...Array.from({ length: MOCK_GATE_COUNT }, (_, i) => ({
           net: MOCK_NET.gateBase + i,
+          instance: "",
+          circuit: "main",
           wires: [MOCK_NET.gateBase + i],
         })),
       ],

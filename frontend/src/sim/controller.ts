@@ -198,11 +198,19 @@ export class SimController {
       this.store.onLoadFailed(result.errors);
       return false;
     }
-    const wireToNet = new Map<WireIdx, NetId>();
+    // One wire → net map per instance path (contract v1.4). The root (`""`)
+    // is the flat map the rest of the UI keys on; the nested maps let a
+    // subcircuit sheet opened as a specific instance resolve its own values.
+    const wireToNetByInstance = new Map<string, Map<WireIdx, NetId>>();
     for (const entry of result.net_map) {
-      for (const w of entry.wires) wireToNet.set(w, entry.net);
+      let m = wireToNetByInstance.get(entry.instance);
+      if (m === undefined) {
+        m = new Map<WireIdx, NetId>();
+        wireToNetByInstance.set(entry.instance, m);
+      }
+      for (const w of entry.wires) m.set(w, entry.net);
     }
-    this.store.onLoaded(wireToNet, result.named);
+    this.store.onLoaded(wireToNetByInstance, result.named);
     this.loadedSig = netlistSignature(doc);
     return true;
   }

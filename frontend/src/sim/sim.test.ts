@@ -94,7 +94,7 @@ describe("SimStore", () => {
     const store = new SimStore();
     let seen = 0;
     store.subscribe(() => seen++);
-    store.onLoaded(new Map([[0, 7]]), []);
+    store.onLoaded(new Map([["", new Map([[0, 7]])]]), []);
     expect(store.loaded).toBe(true);
     expect(store.wireToNet?.get(0)).toBe(7);
     const v0 = store.getVersion();
@@ -106,9 +106,26 @@ describe("SimStore", () => {
     expect(seen).toBe(2);
   });
 
+  it("keeps a per-instance wire map, rooting the flat map at \"\" (v1.4)", () => {
+    const store = new SimStore();
+    store.onLoaded(
+      new Map([
+        ["", new Map([[0, 7]])],
+        ["c0", new Map([[0, 9], [1, 10]])],
+      ]),
+      [],
+    );
+    // The root keeps the flat map the rest of the UI already keys on…
+    expect(store.wireToNet?.get(0)).toBe(7);
+    // …and the instance map is separate, so the same wire index resolves to a
+    // different net inside the instance (the whole point of the v1.4 change).
+    expect(store.wireToNetByInstance.get("c0")?.get(0)).toBe(9);
+    expect(store.wireToNetByInstance.get("c0")?.get(1)).toBe(10);
+  });
+
   it("a full (initial-paint) frame updates values but spawns no pulses", () => {
     const store = new SimStore();
-    store.onLoaded(new Map([[0, 7]]), []);
+    store.onLoaded(new Map([["", new Map([[0, 7]])]]), []);
     store.applyDiffs(new Map([[7, stamped("00", 0)]]), 0, /* full */ true);
     expect(store.netValues.get(7)).toEqual(val("00"));
     expect(store.lastChanged).toEqual([]); // nothing "changed" — no U7 pulses
@@ -116,7 +133,7 @@ describe("SimStore", () => {
 
   it("onLoadFailed surfaces errors and clears the loaded state", () => {
     const store = new SimStore();
-    store.onLoaded(new Map([[0, 7]]), [
+    store.onLoaded(new Map([["", new Map([[0, 7]])]]), [
       { name: "pc", kind: "register", comp_id: 1, circuit: "main" },
     ]);
     store.onLoadFailed([{ kind: "parse", message: "bad json", circuit: "main", wire_idx: 3 }]);
@@ -129,7 +146,7 @@ describe("SimStore", () => {
 
   it("reset() returns to the pre-load state", () => {
     const store = new SimStore();
-    store.onLoaded(new Map(), []);
+    store.onLoaded(new Map([["", new Map()]]), []);
     store.onStatus({ running: true, cycle: 10, eff_hz: 1000 });
     store.onHalted({ cycle: 10, reason: "oscillation", details: "comp 2" });
     store.reset();
@@ -141,7 +158,7 @@ describe("SimStore", () => {
 
   it("tracks shorted nets from the diffs (contract v1.2)", () => {
     const store = new SimStore();
-    store.onLoaded(new Map([[0, 7]]), []);
+    store.onLoaded(new Map([["", new Map([[0, 7]])]]), []);
 
     // The engine flags `contended` only when a net's X is a genuine short —
     // an X that merely flowed in stays unflagged, so the warning cannot misfire.

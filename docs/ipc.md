@@ -49,6 +49,12 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `resume` | `{ path: string }` | — |
 
 `LoadResult` = `{ ok, errors: LoadError[], net_map: NetMapEntry[], named: NamedComponent[] }`.
+`NetMapEntry` = `{ net, instance, circuit, wires }` — **v1.4:** one entry per
+*(instance path, circuit, net)*. `wires` index into `circuit`'s own `wires` array, and `instance`
+is the instance path (`""` at the root, `"c0"` / `"c0/c3"` when nested). The pair is the key: the
+same circuit-relative wire index means a different `net` in each instance, which is what lets the
+UI show a subcircuit sheet opened *as a specific instance*. (Through v1.3 the map was
+root-circuit-only and carried neither field.)
 `NamedComponent` = `{ name, kind: ram|rom|register|probe, circuit, comp_id, value_net? }` —
 **v1.2:** `value_net` is the engine net carrying the component's watchable value (register `q`,
 RAM `dout`, ROM `out`, probe `in`). The engine nets **every pin**, so it is present even when
@@ -80,8 +86,8 @@ truth).
   in the **referenced circuit's** `components` array — never a post-flatten engine index.
   Messages that can reference non-root circuits carry an explicit `circuit` field
   (`TimingViolation`, `TimingPath`, `NamedComponent`); `LoadError.comp_id` is document-order
-  within `LoadError.circuit`. **v1 limitation:** `LoadResult.net_map` covers the root circuit
-  only (the UI edits one sheet at a time).
+  within `LoadError.circuit`. **v1.4:** `LoadResult.net_map` carries an explicit `circuit` and
+  `instance` per entry, so every instance's wires resolve to their own nets (see §2).
 - **`sim_halted.details` shape:** for component-attributable halts (floating-read, contention,
   oscillation, setup/hold, breakpoint), `details` starts with `comp <CompId> pin "<name>": <message>` so
   the UI can ring the offending component on the canvas. The CompId is the **root-sheet**

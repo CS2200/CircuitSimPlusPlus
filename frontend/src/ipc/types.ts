@@ -14,8 +14,9 @@ export type NetId = number;
  * engine index. Messages that can reference non-root circuits carry an
  * explicit `circuit` field (`TimingViolation`, `TimingPath`,
  * `NamedComponent`); `LoadError.comp_id` is document-order within
- * `LoadError.circuit`. `LoadResult.net_map` remains root-circuit-only in
- * v1 (the UI edits one sheet at a time).
+ * `LoadError.circuit`. `LoadResult.net_map` carries an explicit `circuit`
+ * and `instance` (v1.4), so the same circuit-relative wire index in two
+ * instances resolves to different nets.
  */
 export type CompId = number;
 /** Index of a wire within its circuit's `wires` array. */
@@ -52,9 +53,18 @@ export interface LoadError {
   wire_idx?: WireIdx;
 }
 
-/** Derived net → member wires, for net-extent highlighting in the UI. */
+/**
+ * Derived net → member wires, for net-extent highlighting and value
+ * resolution. One entry per *(instance, circuit, net)* (contract v1.4):
+ * `wires` index into `circuit`'s own `wires` array, and `instance` is the
+ * instance path (`""` at the root; `"c0"`, `"c0/c3"` when nested). Keying on
+ * the pair is what makes a subcircuit sheet opened *as a specific instance*
+ * resolve to that instance's nets instead of a definition's.
+ */
 export interface NetMapEntry {
   net: NetId;
+  instance: string;
+  circuit: string;
   wires: WireIdx[];
 }
 

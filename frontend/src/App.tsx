@@ -338,6 +338,22 @@ export default function App() {
   const [filePath, setFilePath] = useState<string | null>(null);
   // Current sheet (circuit) index — subcircuits live on their own sheets.
   const [sheet, setSheet] = useState(0);
+  /**
+   * Instance path of the sheet being VIEWED (`""` = root, or a bare definition
+   * sheet opened from a tab). Entering a subcircuit instance from the canvas
+   * sets this, so the values drawn are *that instance's* — and the scope chrome
+   * turns red, the same "you are inside an instance, not the class" cue the old
+   * tool used. Switching sheets from the tabs clears it, because a definition
+   * has no values of its own.
+   */
+  const [instancePath, setInstancePath] = useState("");
+  const inInstance = instancePath !== "";
+  const instanceLeaf = instancePath.slice(instancePath.lastIndexOf("/") + 1);
+  /** Tab switch: a definition view — never an instance. */
+  const switchSheet = useCallback((i: number) => {
+    setSheet(i);
+    setInstancePath("");
+  }, []);
 
   /**
    * Canvas context menu (UI_OVERHAUL §75). The editor reports what a right-click
@@ -1420,15 +1436,39 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [docRevision, doc, sim]);
 
-  /** Right-click a subcircuit instance → jump to its definition tab. */
+  /**
+   * Open a subcircuit instance. With a `compId` this ENTERS the instance
+   * (extending the instance path), so the sheet shows that instance's values
+   * with the red chrome; without one it just opens the definition tab (a
+   * class view). This mirrors CE: you drill into a specific instance, not the
+   * definition, to watch it run.
+   */
   const onOpenSubcircuit = useCallback(
-    (circuit: string) => {
+    (circuit: string, compId?: string) => {
       const idx = doc.circuitIdxByName(circuit);
-      if (idx >= 0) setSheet(idx);
-      else toast(`Subcircuit "${circuit}" is not in this file`);
+      if (idx < 0) {
+        toast(`Subcircuit "${circuit}" is not in this file`);
+        return;
+      }
+      setSheet(idx);
+      if (compId !== undefined) {
+        setInstancePath((p) => (p === "" ? compId : `${p}/${compId}`));
+      } else {
+        setInstancePath("");
+      }
     },
     [doc, toast],
   );
+
+  /** Step back out of the current instance (to its parent sheet). */
+  const exitInstance = useCallback(() => {
+    setInstancePath((p) => {
+      const i = p.lastIndexOf("/");
+      return i < 0 ? "" : p.slice(0, i);
+    });
+    const parent = doc.circuitIdxByName(scopeParentName ?? "");
+    if (parent >= 0) setSheet(parent);
+  }, [doc, scopeParentName]);
 
   /**
    * New subcircuit (UI_OVERHAUL §60): the tab is created immediately with a
@@ -2034,7 +2074,7 @@ export default function App() {
               <SheetTabs
                 sheets={doc.circuits.map((c) => c.name)}
                 active={sheet}
-                onSwitch={setSheet}
+                onSwitch={switchSheet}
                 onNew={onNewSheet}
                 onRename={onRenameSheet}
                 onDelete={onDeleteSheet}
@@ -2054,6 +2094,7 @@ export default function App() {
                   onStatus={onStatus}
                   onEditComponent={(_id, focus) => setInspectorFocus(focus ?? null)}
                   onOpenSubcircuit={onOpenSubcircuit}
+                  instancePath={instancePath}
                   onCanvasMenu={setCanvasMenu}
                   onNotify={toast}
                   sim={sim}
@@ -2066,30 +2107,42 @@ export default function App() {
                 />
                 {/* §80: inside a definition, the way out — named after a sheet that
                     really instantiates it — and where it is used. */}
-                {scope !== null && sheetName !== undefined && (
+                {(scope !== null || inInstance) && sheetName !== undefined && (
                   <div
-                    className="scope-bar"
-                    style={{ "--scope-hue": String(scope) } as CSSProperties}
+                    className={`scope-bar${inInstance ? " scope-bar--instance" : ""}`}
+                    style={{ "--scope-hue": String(scope ?? 0) } as CSSProperties}
                   >
                     <button
                       className="scope-back"
                       onClick={() => {
+                        if (inInstance) {
+                          exitInstance();
+                          return;
+                        }
                         const i = doc.circuitIdxByName(scopeParentName ?? "");
                         if (i >= 0) setSheet(i);
                       }}
                     >
-                      ‹ {scopeParentName}
+                      ‹ {inInstance ? "out" : scopeParentName}
                     </button>
-                    <span className="scope-name">{sheetName}</span>
-                    <span className="scope-note">{usedByText(doc.circuits, sheetName)}</span>
+                    <span className="scope-name">
+                      {inInstance ? `instance ${instanceLeaf} · ${sheetName}` : sheetName}
+                    </span>
+                    <span className="scope-note">
+                      {inInstance
+                        ? `a specific INSTANCE (${instancePath}) — these are its values, red means instance`
+                        : usedByText(doc.circuits, sheetName)}
+                    </span>
                   </div>
                 )}
                 {/* §77: the scope frame. A subcircuit sheet is a different scope,
-                    and this says so without touching a single drawing. */}
-                {scope !== null && (
+                    and this says so without touching a single drawing. Inside an
+                    INSTANCE it goes red (CE's own cue that you are watching one
+                    instance, not the class). */}
+                {(scope !== null || inInstance) && (
                   <div
-                    className="scope-frame"
-                    style={{ "--scope-hue": String(scope) } as CSSProperties}
+                    className={`scope-frame${inInstance ? " scope-frame--instance" : ""}`}
+                    style={{ "--scope-hue": String(scope ?? 0) } as CSSProperties}
                     aria-hidden="true"
                   />
                 )}
@@ -2194,12 +2247,14 @@ export default function App() {
         )}
       </main>
       <footer className="app-statusbar">
-        {scope !== null && (
+        {(scope !== null || inInstance) && (
           <span
-            className="statusbar-scope"
-            style={{ "--scope-hue": String(scope) } as CSSProperties}
+            className={`statusbar-scope${inInstance ? " statusbar-scope--instance" : ""}`}
+            style={{ "--scope-hue": String(scope ?? 0) } as CSSProperties}
           >
-            in {sheetName} — instances follow this definition
+            {inInstance
+              ? `inside INSTANCE ${instancePath} of ${sheetName} — showing this instance's live values`
+              : `in ${sheetName} — instances follow this definition`}
           </span>
         )}
         {status?.placing && (

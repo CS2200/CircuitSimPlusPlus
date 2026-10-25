@@ -54,7 +54,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 
 | Command | Args | Returns |
 |---|---|---|
-| `load_circuit` | `{ path }` or `{ bytes }` | `{ ok, errors: [LoadError], net_map: [{ net: u32, wires: [u32] }], named: [{ name, kind, comp_id, value_net? }] }` |
+| `load_circuit` | `{ path }` or `{ bytes }` | `{ ok, errors: [LoadError], net_map: [{ net: u32, instance: string, circuit: string, wires: [u32] }], named: [{ name, kind, comp_id, value_net? }] }` (`instance`/`circuit` top the net's wires: one entry per instance path, `""` at root — v1.4) |
 | `save_circuit` | `{ path, document }` | `{ ok, errors }` — a document that fails validation still saves (`ok: true`) and returns the problems as warnings; only an unparseable document is refused (version snapshots stay strict) |
 | `sim_play` / `sim_pause` | `{ hz }` / `{}` | — |
 | `sim_step_tick` / `sim_step_cycles` | `{}` / `{ n }` | — |
