@@ -391,7 +391,7 @@ impl Value {
     /// Build from per-bit states, `bits[0]` = least significant.
     pub fn from_bits(bits: &[Bit]) -> Self {
         let width = bits.len() as u32;
-        if width >= 1 && width <= LIMB_BITS {
+        if (1..=LIMB_BITS).contains(&width) {
             let (ones, xs, zs) = fold_bits_inline(bits.iter().copied());
             return Value {
                 width,
@@ -420,7 +420,7 @@ impl Value {
     /// splitter builds one `Value` per fanout on every evaluation, and the `Vec<Bit>` it
     /// used to collect first was pure allocation churn.
     pub fn from_bits_iter(width: u32, bits: impl IntoIterator<Item = Bit>) -> Self {
-        if width >= 1 && width <= LIMB_BITS {
+        if (1..=LIMB_BITS).contains(&width) {
             let (ones, xs, zs) = fold_bits_inline(bits);
             return Value {
                 width,
