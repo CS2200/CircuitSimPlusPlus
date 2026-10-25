@@ -6,6 +6,41 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Round — not done: the fixpoint ("zero-delay") engine does not fix the x-cascade class (2026-10-25)
+
+**Question.** The remaining `x-cascade` disagreements read `X` where CircuitSim CE has a
+value. CE models no time (ordered delta cycles to quiescence); the delay-aware engine
+added per-component propagation and per-sink transport on top of it. If the `X`s were a
+*propagation-order* artefact — a register sampling a value still in flight across the
+clock edge — a zero-delay functional mode would settle the cycle first and read the
+settled value, exactly as CE does.
+
+**Experiment.** A `--zero-delay` mode zeroed every component commit delay (`prop`/`access`)
+so a clock period ran to quiescence. Setup/hold recording had to be disabled in that mode:
+every same-timestamp change otherwise read as a violation, and the `violations` list is
+serialized, which produced a 658 MB report. Full-corpus diff against `report-1c4445c.json`:
+
+| | baseline | zero-delay |
+|---|---|---|
+| agree | 336/357 | 335/357 |
+| x-cascade | 14 | 14 |
+| gains | — | **0** |
+| regressions | — | **1** (`submission_409477240`, `oscillation event storm` in a combinational loop) |
+
+**Result.** Zero-delay flips **0 of the 14** x-cascades and regresses one. With
+`--pause-on-unknown`, the register-`en` rows — the ones the transpiler's x-cascade
+investigation called edge-path "transients" — *still* halt with "nothing drives that
+net" under zero delay. So those nets are genuinely undriven in the flattened circuit,
+not delayed-but-driven. The `X` is not an arrival-order race.
+
+**Conclusion.** The x-cascade class is two things, neither of which any ordering model
+fixes: (1) genuinely undriven nets, where CE coalesces `Z` per consumer and we read `X`;
+and (2) `X` propagating from contention/decoders. A fixpoint engine cannot drive an
+undriven net. The mode was reverted and the engine stays delay-aware. The open lead is
+**`COMPAT`** — make the *engine* mimic CE's per-consumer `Z` handling behind a debug flag,
+to separate engine `Z`-semantics from converter connectivity — together with the CE tracer
+(`tools/ce_trace.py`) to convict whichever side is wrong on the residual.
+
 ## Round — done (2026-10-24, the symmetric-settle tie-break)
 
 **A cross-coupled latch seeded onto its unstable diagonal no longer storms.** The

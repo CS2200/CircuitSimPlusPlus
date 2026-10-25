@@ -938,12 +938,20 @@ impl Value {
     /// (nothing). See `delay.rs`'s `eval_and_schedule` for why the engine never assumes a
     /// value here — the converter encodes CE's implied constants instead.
     pub fn z_to_x(&self) -> Value {
+        self.z_to(Bit::X)
+    }
+
+    /// Replace every `Z` bit with the definite bit `to`, leaving definite bits as they
+    /// are. `z_to_x` is the "the model does not know, so it will not guess" default; the
+    /// engine's `compat` diagnostic uses `z_to(Bit::Zero)`/`z_to(Bit::One)` to mimic CE's
+    /// per-consumer coalescence of a floating input.
+    pub fn z_to(&self, to: Bit) -> Value {
         if !self.has_z() {
             return self.clone();
         }
         let bits: Vec<Bit> = (0..self.width)
             .map(|i| match self.bit(i) {
-                Bit::Z => Bit::X,
+                Bit::Z => to,
                 b => b,
             })
             .collect();
@@ -1146,6 +1154,26 @@ mod tests {
         // An unknown compares neither way, signed or not.
         assert_eq!(Value::x(4).compare_signed(&one), None);
         assert_eq!(Value::z(4).compare_signed(&one), None);
+    }
+
+    #[test]
+    fn z_to_replaces_only_z_bits() {
+        let v = Value::from_bits(&[Bit::One, Bit::Z, Bit::Zero, Bit::X]);
+        assert_eq!(
+            v.z_to(Bit::Zero),
+            Value::from_bits(&[Bit::One, Bit::Zero, Bit::Zero, Bit::X])
+        );
+        assert_eq!(
+            v.z_to(Bit::One),
+            Value::from_bits(&[Bit::One, Bit::One, Bit::Zero, Bit::X])
+        );
+        // `z_to_x` is the production reading (`Z` ⇒ unknown); a fully-`Z` value coalesces
+        // wholly, which is what the engine's `compat` mode uses per pin.
+        assert_eq!(
+            v.z_to_x(),
+            Value::from_bits(&[Bit::One, Bit::X, Bit::Zero, Bit::X])
+        );
+        assert_eq!(Value::z(3).z_to(Bit::Zero), Value::zero(3));
     }
 
     use super::*;

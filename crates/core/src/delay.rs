@@ -665,6 +665,12 @@ pub struct DelayEngine {
     /// The editor turns this on to *ask*; a graded run leaves it off and lets the `X`
     /// surface in the verdict.
     pub pause_on_unknown: bool,
+    /// **CE-compatibility diagnostic mode.** When a component consumes a floating (`Z`)
+    /// input, use CE's own per-consumer reading (`Behavior::z_compat`) instead of the
+    /// engine's `X`. This is a *debug* switch to separate engine `Z`-semantics from
+    /// converter connectivity — the production engine never invents a value, and the
+    /// converter is what writes constants. Off by default.
+    pub compat: bool,
     /// Honour `debug.breakpoint`s (a pause) or ignore them. The editor wants the pause;
     /// a **graded** run does not — a breakpoint is a debug aid a submitter left in their
     /// schematic, and the old tool never let one end a graded run (DESIGN.md §8.1), so
@@ -752,6 +758,19 @@ impl DelayEngine {
         netlist: Netlist,
         clock_half_period: u64,
         table: &TimingTable,
+    ) -> Result<DelayEngine, Vec<LoadError>> {
+        Self::build(netlist, clock_half_period, table, false)
+    }
+
+    /// Like [`DelayEngine::new`], but the CE-compatibility diagnostic mode is known
+    /// *before* the boot settle: a floating read at power-on is then coalesced the way
+    /// CE reads it, rather than taken as `X` and never revisited (a purely combinational
+    /// part may not re-evaluate after boot).
+    pub(crate) fn build(
+        netlist: Netlist,
+        clock_half_period: u64,
+        table: &TimingTable,
+        compat: bool,
     ) -> Result<DelayEngine, Vec<LoadError>> {
         let comps = ec::build_behaviors(&netlist)?;
         let n = comps.len();
@@ -899,6 +918,7 @@ impl DelayEngine {
             events_per_cycle_cap: DEFAULT_EVENTS_PER_CYCLE_CAP,
             breakpoints_enabled: true,
             pause_on_unknown: false,
+            compat,
             events_this_cycle: 0,
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
@@ -1933,7 +1953,11 @@ impl DelayEngine {
                 Some(outs) => outs,
                 None => {
                     let beh_ref = beh;
-                    self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))?
+                    match self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))? {
+                        Some(outs) => outs,
+                        // `compat`: CE pushes `Z` on every output of this part.
+                        None => self.all_z_outputs(c),
+                    }
                 }
             }
         };
@@ -2046,23 +2070,49 @@ impl DelayEngine {
         c: usize,
         ins: &mut [Arc<Value>],
         mut run: impl FnMut(&[&Value]) -> Result<T, FloatingRead>,
-    ) -> Result<T, Halt> {
+    ) -> Result<Option<T>, Halt> {
         for _ in 0..=ins.len() {
             let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
             match run(&refs) {
-                Ok(outs) => return Ok(outs),
+                Ok(outs) => return Ok(Some(outs)),
                 Err(fr) => {
                     let Some(i) = self.input_index_for(c, &fr.pin) else {
-                        return Ok(T::default()); // not an input pin: nothing to substitute
+                        return Ok(Some(T::default())); // not an input pin: nothing to substitute
                     };
                     if self.pause_on_unknown {
                         return Err(self.halt_unknown(c as u32, &fr.pin));
                     }
-                    ins[i] = Arc::new(ins[i].z_to_x());
+                    if self.compat {
+                        let repl = {
+                            let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+                            self.comps[c].z_compat(&fr.pin, refs[i], &refs)
+                        };
+                        match repl {
+                            // CE reads this pin as a definite value: substitute and retry.
+                            Some(v) => ins[i] = Arc::new(v),
+                            // CE pushes `Z` on every output (a comparator with an invalid
+                            // input, an all-`Z` gate): the caller returns all-`Z`.
+                            None => return Ok(None),
+                        }
+                    } else {
+                        // Production: an unknown stays unknown.
+                        ins[i] = Arc::new(ins[i].z_to_x());
+                    }
                 }
             }
         }
-        Ok(T::default())
+        Ok(Some(T::default()))
+    }
+
+    /// Every output pin's value set to `Z`. CE's `valueChanged` pushes `Z` on all its
+    /// outputs when a consumed input is invalid and the part has no coalescing rule
+    /// (`compat` mode) — a comparator, a mux on a floating `sel`, and so on.
+    fn all_z_outputs(&self, c: usize) -> Vec<Value> {
+        self.cdata[c]
+            .out_pins
+            .iter()
+            .map(|&(slot, _)| Value::z(self.netlist.comps[c].pins[slot].width))
+            .collect()
     }
 
     /// The halt a **floating read** asks for (§4.1): a component read a net nothing
@@ -2442,7 +2492,17 @@ impl DelayEngine {
                     if self.pause_on_unknown {
                         return Err(self.halt_unknown(comp, &fr.pin));
                     }
-                    ins[i] = Arc::new(ins[i].z_to_x());
+                    // `compat`: CE's own reading of this pin (`Behavior::z_compat`) where
+                    // it has one; otherwise the production `X`. (CE would store `Z` for a
+                    // floating data pin and a register would hold `Z`; the edge path keeps
+                    // `X` — a documented limit of this diagnostic.)
+                    let repl = if self.compat {
+                        let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+                        self.comps[c].z_compat(&fr.pin, refs[i], &refs)
+                    } else {
+                        None
+                    };
+                    ins[i] = Arc::new(repl.unwrap_or_else(|| ins[i].z_to_x()));
                     if attempts > ins.len() {
                         break;
                     }
@@ -2704,6 +2764,14 @@ mod tests {
         let nl = netlist::build(&doc).expect("test doc netlists");
         let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
         DelayEngine::new(nl, half, &table).expect("test engine builds")
+    }
+
+    /// The same, with the `compat` diagnostic set *before* the boot settle.
+    pub(super) fn compat_engine(json: &str, half: u64) -> DelayEngine {
+        let doc = load_document(json.as_bytes()).expect("test doc parses");
+        let nl = netlist::build(&doc).expect("test doc netlists");
+        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        DelayEngine::build(nl, half, &table, true).expect("test engine builds")
     }
 
     /// The built-in table with wire propagation **on** (`wire.num = 1`).
@@ -3344,6 +3412,34 @@ mod tests {
         assert_eq!(halt.reason, HaltReason::FloatingRead);
         assert!(halt.details.contains("in1"), "got: {}", halt.details);
         assert!(halt.details.contains("gate.and"), "got: {}", halt.details);
+    }
+
+    #[test]
+    fn compat_reads_a_floating_gate_input_as_ce_does() {
+        // Same wiring as the test above: AND with in0 = 1 and in1 connected to nothing.
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"c","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"g","type":"gate.and","pos":[0,0]}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"p"}}
+            ], "wires": [
+                {{"a":{{"comp":"c","pin":"out"}},"b":{{"comp":"g","pin":"in0"}}}},
+                {{"a":{{"comp":"g","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        // Production: the floating `in1` is `X`, and it reaches the probe.
+        let mut prod = engine(&json, 500);
+        prod.run(1).unwrap();
+        assert!(prod.named_value("p").unwrap().has_x());
+        // `compat`: CE folds the floating `in1` as 0 while `in0` is definite, so the AND
+        // is a definite 0 — the diagnostic that separates CE's `Z` semantics from a
+        // converter gap.
+        let mut compat = compat_engine(&json, 500);
+        compat.run(1).unwrap();
+        assert_eq!(compat.named_value("p"), Some(Value::from_u64(1, 0)));
     }
 
     fn bus_json() -> String {

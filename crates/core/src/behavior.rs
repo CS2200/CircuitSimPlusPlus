@@ -926,6 +926,49 @@ impl Behavior {
         out
     }
 
+    /// CE's reading of a *floating* (`Z`) input on a consumed pin. `Some(v)` is the value
+    /// CE reads that pin as (the engine substitutes it and re-evaluates); `None` means CE
+    /// drives `Z` on every output of the part (its `valueChanged` bails — a comparator
+    /// with an invalid input, or a gate whose every input bit is `Z`).
+    ///
+    /// Mirrors the transpiler's `_ce_coalesce_pin` table, each entry quoted from CE's own
+    /// `valueChanged`. Used **only** by the engine's `compat` diagnostic mode — the
+    /// production engine never invents a value, so the converter is what writes
+    /// constants: a gate folds a `Z` bit as `0` (`Gate.valueChanged` compares against
+    /// `State.ONE`); an `en` reads as set (`!= State.ZERO`); a controlled-buffer enable,
+    /// `we`, `rst` or `clk` reads as clear (`== State.ONE` fails).
+    ///
+    /// A gate is **conditional** (`Gate.valueChanged`'s `isX`): a `Z` input bit behaves
+    /// as `0` while another input bit is definite, and the gate drives `Z` when every
+    /// input bit is `Z`. The all-`Z` case is handled exactly; a *bit-wise* mix (some
+    /// input bits `Z` while others are definite) coalesces the whole pin to `0` — a
+    /// documented approximation of this diagnostic, not of the production engine.
+    pub fn z_compat(&self, pin: &str, value: &Value, inputs: &[&Value]) -> Option<Value> {
+        match &self.kind {
+            BehaviorKind::ControlledBuffer { .. } if pin == "en" => Some(value.z_to(Bit::Zero)),
+            BehaviorKind::Register { .. } | BehaviorKind::Ram { .. } if pin == "en" => {
+                Some(value.z_to(Bit::One))
+            }
+            BehaviorKind::Register { .. } | BehaviorKind::Ram { .. }
+                if pin == "clk" || pin == "rst" =>
+            {
+                Some(value.z_to(Bit::Zero))
+            }
+            BehaviorKind::Ram { .. } if pin == "we" => Some(value.z_to(Bit::Zero)),
+            BehaviorKind::Gate { op, .. }
+                if pin.starts_with("in")
+                    && matches!(op, GateOp::And | GateOp::Nand | GateOp::Or | GateOp::Nor) =>
+            {
+                if inputs.iter().all(|v| v.is_fully_z()) {
+                    None // CE's `isX`: every input bit `Z` ⇒ the gate drives `Z`
+                } else {
+                    Some(value.z_to(Bit::Zero))
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Timing parameters (see [`Timing`]) from the delay table in force
     /// (task B7).
     pub fn timing(&self, table: &crate::timing_table::TimingTable) -> Timing {
@@ -1966,6 +2009,33 @@ mod tests {
             r.rising_edge(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::z(1)))),
             Err(FloatingRead::at("rst"))
         );
+    }
+
+    #[test]
+    fn z_compat_mirrors_ce_reads_and_refuses_the_unknown() {
+        let z1 = Value::z(1);
+        let one1 = Value::from_u64(1, 1);
+        // A controlled buffer reads a floating enable as disabled.
+        let cb = mk("wiring.controlled-buffer", json!({"bitsize": 1}));
+        assert_eq!(cb.z_compat("en", &z1, &[&z1]), Some(Value::zero(1)));
+        // A register reads a floating enable as enabled, and a floating clk/rst as clear.
+        let r = reg();
+        let ins = [&Value::z(8), &z1, &z1, &z1];
+        assert_eq!(r.z_compat("en", &z1, &ins), Some(one1.clone()));
+        assert_eq!(r.z_compat("rst", &z1, &ins), Some(Value::zero(1)));
+        // A gate folds `Z` as 0 while another input bit is definite...
+        let g = mk("gate.and", json!({}));
+        assert_eq!(
+            g.z_compat("in0", &z1, &[&z1, &one1]),
+            Some(Value::zero(1))
+        );
+        // ...and drives `Z` when every input bit is `Z` (CE's `isX`).
+        assert_eq!(g.z_compat("in0", &z1, &[&z1, &z1]), None);
+        // A propagator and an unknown part are left to the engine's `X` (None), exactly
+        // like the converter's `_ce_coalesce_pin`.
+        let cmp = mk("arith.comparator", json!({"bitsize": 4}));
+        let z4 = Value::z(4);
+        assert_eq!(cmp.z_compat("a", &z4, &[&z4, &z4]), None);
     }
 
     // ---- RAM / ROM -------------------------------------------------------

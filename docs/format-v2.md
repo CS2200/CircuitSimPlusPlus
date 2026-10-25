@@ -384,6 +384,21 @@ pinning a `0` there would activate a part CE leaves inert. Every other consuming
 a mux consumes only the input its `sel` picks, a disabled buffer consumes nothing, a register
 consumes `d` only on its enabled edge.
 
+**`compat`: a diagnostic that reads a floating pin the way CE does.** Because the
+production engine reads `Z` as `X`, a disagreement with the course's grader can come from
+either a converter that failed to drive a net or from the engine's stricter `Z` semantics.
+To tell them apart, `csim run --compat` (and `GradeConfig::compat`; the corpus harness sets
+it with `CSIM_COMPAT=1`) makes the engine read a *consumed* floating pin as CE's
+`valueChanged` does — the same rules the converter's `_ce_coalesce_pin` writes as drivers,
+applied at run time instead: a controlled-buffer `en` reads `0`, any other `en` reads `1`, a
+register/RAM `clk`/`rst` and a RAM `we` read `0`, a gate input reads `0`. Where CE
+*propagates* the `Z` rather than reading it (a comparator with an invalid input), the part
+drives `Z`. This is a **debug switch, off by default** — the graded engine still never
+invents a value — and it is deliberately approximate in two places, both documented and
+pinned by tests: a gate is exact only when *every* input bit is `Z` (CE's `isX`), so a
+bit-wise mix coalesces the whole pin to `0`; and the register edge path reads a floating
+`d`/`din` as `X` where CE stores `Z`. Use it to bin a disagreement, not to grade.
+
 | Component                       | Consumes                                                                                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | gates (incl. not/buffer)        | every input                                                                                                                                                                                                  |

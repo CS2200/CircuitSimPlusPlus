@@ -477,6 +477,10 @@ pub struct GradeConfig {
     /// truncated run. Off by default, so a graded run "force shuts them up"; set it
     /// when reproducing a pause by hand.
     pub pause_on_breakpoints: bool,
+    /// CE-compatibility diagnostic: read a consumed floating (`Z`) input as CE does
+    /// (`Behavior::z_compat`) instead of `X`. A debug switch to separate engine
+    /// `Z`-semantics from converter connectivity; **off** by default.
+    pub compat: bool,
 }
 
 impl Default for GradeConfig {
@@ -495,6 +499,7 @@ impl Default for GradeConfig {
             include_sta: false,
             rubric_full_credit_below: None,
             pause_on_breakpoints: false,
+            compat: false,
         }
     }
 }
@@ -901,7 +906,8 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
 
     // -- Engine (delay-aware only) ---------------------------------------
     let half = cfg.clock_half_period.max(1);
-    let mut eng = match DelayEngine::new(nl, half, &table) {
+    // `compat` is known at construction: the boot settle already reads floating inputs.
+    let mut eng = match DelayEngine::build(nl, half, &table, cfg.compat) {
         Ok(e) => e,
         Err(e) => return Ok(malformed(e, &table_name, started)),
     };

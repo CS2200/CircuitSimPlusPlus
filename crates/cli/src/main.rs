@@ -144,6 +144,11 @@ struct RunArgs {
     /// shows up in the assertion results.
     #[arg(long)]
     pause_on_unknown: bool,
+    /// CE-compatibility diagnostic: read a consumed floating (`Z`) input as CE does
+    /// instead of `X`. Isolates engine `Z`-semantics from converter connectivity; off
+    /// by default (a graded run must not invent values).
+    #[arg(long)]
+    compat: bool,
     /// Pause at `debug.breakpoint`s instead of ignoring them. Off by default: a
     /// breakpoint is a debug aid, and a graded run must not be cut short by one
     /// (§8.1).
@@ -327,6 +332,7 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
     }
     cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
     cfg.pause_on_unknown |= args.pause_on_unknown;
+    cfg.compat |= args.compat;
     if let Some(h) = args.clock_half_period_ns {
         cfg.clock_half_period = h;
     }
