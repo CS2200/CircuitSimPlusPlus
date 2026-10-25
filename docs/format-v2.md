@@ -293,9 +293,14 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   the value a student needs to see. **Registers still power on at 0** — a legacy
   compatibility choice under review (docs/bugs.md carries the question for the Head TA).
 - A register latches `d` on a rising edge while `en` is asserted and holds otherwise, and an
-  asserted `rst` clears it — synchronously, and **winning over a simultaneous enable**, which
-  is what CircuitSim CE's `Clear` does. A reset can also be expressed by the session
-  (`sim_reset`, which re-applies memory autoload), so the pin is optional (below).
+  asserted `rst` clears it — **level-sensitively (asynchronously)**, and **winning over a
+  simultaneous enable**. That is exactly CircuitSim CE's `Register.valueChanged`: while `rst`
+  is an exact `1` the register drives `0` immediately — output *and* stored value — not only
+  at the next rising edge. It is what lets a design use `rst` as a pipeline flush: a buffer is
+  cleared *within* the cycle, before the next buffer can latch the instruction in flight. A
+  RAM's `rst` is the same: it clears every word the moment it asserts (CE `RAM.java`'s
+  `PORT_CLEAR`). A reset can also be expressed by the session (`sim_reset`, which re-applies
+  memory autoload), so the pin is optional (below).
 - The **clock and reset pins are optional in a schematic, never in the model** (§4:
   `showClk`/`showRst` are display-only). What a part does with one it never wires is a
   *binding* question, not a value:
@@ -407,8 +412,8 @@ bit-wise mix coalesces the whole pin to `0`; and the register edge path reads a 
 | demux / decoder                 | all inputs                                                                                                                                                                                                   |
 | priority decoder                | its input lines, and only while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means _enabled_ rather than a floating-read halt (`en_in` driven `0` disables, `X` is conservative) |
 | arithmetic                      | all inputs                                                                                                                                                                                                   |
-| register (rising edge only)     | `en` always; `d` only when `en ≠ 0` and `rst ≠ 1`; a **floating `rst` reads deasserted** — the pin is optional (§4)                                                                                          |
-| RAM                             | `addr` continuously (async read); `we` and `rst` at the edge; `din` at the edge when `we ≠ 0`; a floating `rst` reads deasserted, so a memory that drives only `we`/`clk` keeps working                      |
+| register                        | `en` always; `d` only when `en ≠ 0` and `rst ≠ 1`; an exact `1` `rst` also resets **level-sensitively**, not only at the edge (§4) — the pin is optional                                                                                          |
+| RAM                             | `addr` continuously (async read); `we` and `rst` at the edge; `din` at the edge when `we ≠ 0`; an exact `1` `rst` also clears every word **level-sensitively** (§4), so a memory that drives only `we`/`clk` keeps working                      |
 | ROM                             | `addr` continuously                                                                                                                                                                                          |
 | pin / probe / LED / hex display | **nothing** — they _observe_; an idle bus displaying as `Z` is legal                                                                                                                                         |
 | breakpoint                      | **nothing** — it _observes_ too, and `en` gating the watch does not make it consume                                                                                                                          |

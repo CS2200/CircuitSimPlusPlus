@@ -245,10 +245,7 @@ struct EventQueue {
 
 impl EventQueue {
     fn push(&mut self, ev: Ev) {
-        self.buckets
-            .entry(ev.time)
-            .or_default()[usize::from(ev.prio.min(1))]
-        .push_back(ev);
+        self.buckets.entry(ev.time).or_default()[usize::from(ev.prio.min(1))].push_back(ev);
     }
 
     fn peek(&self) -> Option<&Ev> {
@@ -521,6 +518,7 @@ enum SinkKind {
     D,
     Clk,
     En,
+    Rst,
     Addr,
     Din,
     We,
@@ -534,6 +532,7 @@ impl SinkKind {
             "d" => SinkKind::D,
             "clk" => SinkKind::Clk,
             "en" => SinkKind::En,
+            "rst" => SinkKind::Rst,
             "addr" => SinkKind::Addr,
             "din" => SinkKind::Din,
             "we" => SinkKind::We,
@@ -817,12 +816,12 @@ impl DelayEngine {
             .into_iter()
             .map(|slots| slots.into_iter().map(Arc::new).collect())
             .collect(); // all-Z, same shape
-                                                                // Per-sink path delays (F14): grid units × the table's wire
-                                                                // constant; min per net for the shared "latest value" slot.
-                                                                // Per-sink path delays (F14): grid units × the table's wire constant; min per net
-                                                                // for the shared "latest value" slot. Wire propagation is currently **off** — the
-                                                                // table ships `wire.num = 0` — so this is 0 everywhere and only component delays
-                                                                // count (see `timing_table.rs`); the per-path shape is kept for when wires return.
+                        // Per-sink path delays (F14): grid units × the table's wire
+                        // constant; min per net for the shared "latest value" slot.
+                        // Per-sink path delays (F14): grid units × the table's wire constant; min per net
+                        // for the shared "latest value" slot. Wire propagation is currently **off** — the
+                        // table ships `wire.num = 0` — so this is 0 everywhere and only component delays
+                        // count (see `timing_table.rs`); the per-path shape is kept for when wires return.
         let net_sink_delay: Vec<Vec<u64>> = netlist
             .nets
             .iter()
@@ -2365,6 +2364,15 @@ impl DelayEngine {
                 }
                 SinkKind::Din => self.track_hold(c, TrackField::Din, time),
                 SinkKind::We => self.track_hold(c, TrackField::We, time),
+                // CE's `PORT_CLEAR` is level-sensitive too (`RAM.java`): while it is
+                // an exact `1` every word is cleared at once, not at the next edge.
+                SinkKind::Rst => {
+                    let rst = self.views[c][slot].clone();
+                    if !rst.has_z() && rst.bit(0) == Bit::One {
+                        self.comps[c].clear_ram();
+                    }
+                    self.eval_and_schedule(comp, time, Some(net))?;
+                }
                 SinkKind::Clk => {
                     let cur = self.cdata[c]
                         .clk_slot
@@ -2388,6 +2396,24 @@ impl DelayEngine {
                         self.arrive_together(c, slot, net);
                         self.clock_edge(comp, time)?;
                     }
+                }
+                // CE's reset (`ZERO`) is **level-sensitive and asynchronous**:
+                // asserting it pushes `0` to `q` and stores `0` at once, with
+                // priority over the clock (behavior.rs's `Register` eval forces the
+                // output low while `rst` is an exact 1). Doing it here — and then
+                // re-evaluating — makes the reset visible *within* the cycle rather
+                // than only at the next edge, which is what lets a design use `rst`
+                // as a pipeline flush (clear the buffer before the next buffer can
+                // latch the in-flight instruction). CE tests `== State.ONE`, so an
+                // `X`/`Z` reset does not reset (a converted design drives it).
+                SinkKind::Rst => {
+                    let rst = self.views[c][slot].clone();
+                    if !rst.has_z() && rst.bit(0) == Bit::One {
+                        if let Some(w) = self.comps[c].register_value().map(|v| v.width()) {
+                            self.comps[c].set_register(Value::zero(w));
+                        }
+                    }
+                    self.eval_and_schedule(comp, time, Some(net))?;
                 }
                 _ => {}
             },
@@ -2414,7 +2440,10 @@ impl DelayEngine {
                         let (data_slot, _) = self.cdata[c].in_pins[0];
                         let (en_slot, _) = self.cdata[c].in_pins[1];
                         let enabled = self.views[c][en_slot].bit(0) != Bit::Zero;
-                        if slot == data_slot && enabled && self.views[c][data_slot].as_ref() == target {
+                        if slot == data_slot
+                            && enabled
+                            && self.views[c][data_slot].as_ref() == target
+                        {
                             return Err(self.halt_breakpoint(comp));
                         }
                     }
@@ -2570,8 +2599,7 @@ impl DelayEngine {
             for &(slot, net) in &cd.in_pins {
                 if self.views[c][slot].has_z() {
                     any_z = true;
-                    if !(self.net_ever_driven[net.idx()]
-                        || !self.netlist.nets[net.idx()].floating)
+                    if !(self.net_ever_driven[net.idx()] || !self.netlist.nets[net.idx()].floating)
                     {
                         candidate = true;
                         break;
@@ -2852,6 +2880,48 @@ mod tests {
             .map(|c| eng.netlist().comps[c.idx()].def_id.as_str())
             .collect();
         assert_eq!(names, ["and", "n2", "r1"]);
+    }
+
+    /// A register's reset is level-sensitive (CE's `Register.valueChanged`): asserting it
+    /// *between* clock edges must drive `q` low and store 0 at once — that is what lets a
+    /// design use `rst` as a pipeline flush (the `wrong-value` rows that wrote back the
+    /// instruction after `halt`).
+    #[test]
+    fn register_reset_is_level_sensitive() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"rst","type":"wiring.pin","pos":[0,0],"name":"rst"}},
+                {{"id":"r1","type":"mem.register","pos":[0,0],"name":"r1"}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r1","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"d"}}}},
+                {{"a":{{"comp":"rst","pin":"pin"}},"b":{{"comp":"r1","pin":"rst"}}}},
+                {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.run(3).unwrap();
+        assert_eq!(eng.named_value("out"), Some(k(1, 1)), "latched `one`");
+        // Assert the reset *between* clock edges: no edge is consumed.
+        assert!(eng.poke_input_pin("rst", k(1, 1)));
+        eng.settle_cycle().unwrap();
+        assert_eq!(
+            eng.named_value("out"),
+            Some(k(1, 0)),
+            "reset drives q low within the cycle"
+        );
+        assert_eq!(
+            eng.named_value("r1"),
+            Some(k(1, 0)),
+            "and stores 0, as CE's putComponentProperty does"
+        );
     }
 
     #[test]

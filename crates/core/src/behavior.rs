@@ -31,8 +31,8 @@
 //! | demux / decoder | all inputs |
 //! | priority decoder | its input lines, while `en_in` is enabled; `en_in` **never** consumes, so an unconnected enable means enabled rather than a floating-read halt (DESIGN.md §6) |
 //! | arithmetic | all inputs |
-//! | register (rising edge only) | `en` always; `d` only when `en ≠ 0` and `rst ≠ 1`; a floating `rst` reads deasserted |
-//! | RAM | `addr` continuously (async read); `we`/`rst` at the edge (`din` only when `we ≠ 0`; a floating `rst` reads deasserted; reset clears to 0) |
+//! | register | `en` and `rst` always; `d` only when `en ≠ 0` and `rst ≠ 1`. `rst` is *also* read combinationally (level-sensitive reset, below) |
+//! | RAM | `addr` continuously (async read); `we`/`rst` at the edge (`din` only when `we ≠ 0`; a floating `rst` halts; reset clears to 0). `rst` is *also* level-sensitive (below) |
 //! | ROM | `addr` continuously |
 //! | pin / probe / LED / hex display | **nothing** — they *observe*; an idle bus displaying as `Z` is legal (§4.1) |
 //! | splitter | **nothing** — it is plumbing; `Z`/`X` flow through to the eventual consumer |
@@ -43,10 +43,16 @@
 //!
 //! ## Documented semantics decisions (flagged for review)
 //!
-//! - **A register has no reset input.** It latches `d` on a rising edge while
-//!   `en` is asserted and holds otherwise; restarting a circuit is the
-//!   session's job (`sim_reset`, which also re-applies memory autoload), never
-//!   a pin's — a canvas-side reset wire hid what the clock was doing.
+//! - **A register's reset is level-sensitive and asynchronous** (CE's
+//!   `Register.valueChanged`): while `rst` is an exact `1` the register holds
+//!   `0` — output *and* stored value — immediately, with priority over the
+//!   clock, not only at the next rising edge. That is what lets a design use
+//!   `rst` as a pipeline flush: the buffer is cleared *within* the cycle, before
+//!   the next buffer can latch the instruction in flight (this is the fix for
+//!   the `wrong-value` rows that wrote back the instruction after `halt`). A RAM
+//!   is the same (`RAM.java`'s `PORT_CLEAR`): the clear port clears every word
+//!   the moment it asserts. Restarting a whole circuit is still the session's
+//!   job (`sim_reset`, which also re-applies memory autoload).
 //! - **Registers and RAM power on at 0** (contents/autoload aside), not X
 //!   — matches legacy CircuitSim and keeps grading deterministic.
 //! - **RAM addressing:** `depth` is required to be a power of two at load
@@ -717,7 +723,19 @@ impl Behavior {
                     ExtendMode::Sign => ins[0].sign_extend(*out_bits),
                 }])
             }
-            BehaviorKind::Register { state } => Ok(vec![state.clone()]),
+            // CE's `Register.valueChanged` makes the reset **level-sensitive and
+            // asynchronous**: while `ZERO` is an exact `1` it pushes `0` to the output
+            // immediately, with priority over the clock — so `q` is forced low *within*
+            // the cycle rather than waiting for the next edge. A design leans on this when
+            // it uses `rst` as a pipeline flush: the buffer register is cleared before the
+            // next buffer can latch it, so the in-flight instruction dies instead of
+            // writing back. Only an exact `1` resets (CE tests `== State.ONE`); an `X`/`Z`
+            // reset does not — and for a converted design the transpiler writes a driven
+            // value in, so that is only the hand-written-doc edge case.
+            BehaviorKind::Register { state } => match ins.get(3).map(|rst| rst.bit(0)) {
+                Some(Bit::One) => Ok(vec![Value::zero(state.width())]),
+                _ => Ok(vec![state.clone()]),
+            },
             BehaviorKind::Ram { bitsize, words, .. } => {
                 let addr = ins[0];
                 consume(addr, "addr")?;
@@ -1034,6 +1052,20 @@ impl Behavior {
     pub fn set_pressed(&mut self, p: bool) {
         if let BehaviorKind::Button { pressed } = &mut self.kind {
             *pressed = p;
+        }
+    }
+
+    /// Clear a RAM to 0 (CE's level-sensitive `PORT_CLEAR`, `RAM.java`): the
+    /// engine calls this the moment the reset asserts, not at the next edge.
+    /// Returns false for non-RAMs.
+    pub fn clear_ram(&mut self) -> bool {
+        if let BehaviorKind::Ram { bitsize, words, .. } = &mut self.kind {
+            for w in words.iter_mut() {
+                *w = Value::zero(*bitsize);
+            }
+            true
+        } else {
+            false
         }
     }
 
@@ -1977,6 +2009,27 @@ mod tests {
     }
 
     #[test]
+    fn register_reset_is_level_sensitive() {
+        let mut r = reg();
+        r.rising_edge(&refs(&reg_ins(k(8, 42), k(1, 1)))).unwrap();
+        // Reset asserted **with no clock edge**: CE's `Register.valueChanged` pushes 0 at
+        // once, so the combinationally-read output is already low (the engine's `react`
+        // stores the 0 too — see delay.rs).
+        assert_eq!(
+            r.eval(&refs(&reg_ins_rst(k(8, 7), k(1, 1), k(1, 1))))
+                .unwrap(),
+            vec![k(8, 0)]
+        );
+        // Only an exact 1 resets (CE tests `== State.ONE`): X/Z leave the value alone.
+        let held = r.register_value().unwrap().clone();
+        assert_eq!(
+            r.eval(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::x(1))))
+                .unwrap(),
+            vec![held]
+        );
+    }
+
+    #[test]
     fn register_floating_and_unknown_controls() {
         let mut r = reg();
         // D floats while enabled at the edge → halt naming the pin (§4.1).
@@ -2025,10 +2078,7 @@ mod tests {
         assert_eq!(r.z_compat("rst", &z1, &ins), Some(Value::zero(1)));
         // A gate folds `Z` as 0 while another input bit is definite...
         let g = mk("gate.and", json!({}));
-        assert_eq!(
-            g.z_compat("in0", &z1, &[&z1, &one1]),
-            Some(Value::zero(1))
-        );
+        assert_eq!(g.z_compat("in0", &z1, &[&z1, &one1]), Some(Value::zero(1)));
         // ...and drives `Z` when every input bit is `Z` (CE's `isX`).
         assert_eq!(g.z_compat("in0", &z1, &[&z1, &z1]), None);
         // A propagator and an unknown part are left to the engine's `X` (None), exactly

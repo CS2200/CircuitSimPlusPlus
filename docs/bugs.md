@@ -6,6 +6,42 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Round — done (2026-10-25, a register's reset is level-sensitive, as CE's is)
+
+**A register's `rst` is now asynchronous (level-sensitive), matching CE's
+`Register.valueChanged`:** while `rst` is an exact `1` the register drives `0` — output
+*and* stored value — *within* the cycle, with priority over the clock, not only at the
+next rising edge. Our reset had been synchronous since the 2026-10-21 decision (below,
+"the reset pin's semantics"); the reasoning there — "a reset held across an edge behaves
+the same in both" — is true of the resetting register's *own* output but wrong for a
+**pipeline flush**, which is exactly how the submissions use it. The decode buffer is
+reset the cycle the `halt` is decoded; with a synchronous reset it kept the instruction it
+had just latched, so the instruction *after* `halt` (the program's own
+`addi $v0,$zero,-1` "failure" value) drained through EX/MEM/WB and wrote the register
+file. CE clears the buffer before the following buffer's edge, so the instruction dies.
+`RAM.java`'s `PORT_CLEAR` is level-sensitive the same way (it clears on the clear port's
+change, not at the edge), so the RAM's clear is level-sensitive too.
+
+Corpus (the plan: `wrong-value` first): **337 → 341 / 357, +4, 0 regressions**.
+
+| | baseline (`b3ea69a`) | level-sensitive reset |
+|---|---|---|
+| agree | 337/357 | **341/357** |
+| wrong-value | 5 | **1** |
+| x-cascade | 14 | 14 |
+| other | 1 | 1 |
+| fail-old/pass-new | 0 | 0 |
+
+The four gains — `submission_372341431`, `372845530`, `404930903`, `409775061` — all
+halted `pow` with `$v0 = 0xffffffff` (the post-`halt` instruction's value) instead of
+`0x100`, and now agree. The one remaining `wrong-value` row, `submission_374625393`, is a
+*different* failure (an LC-4200b **datapath** design that halts at cycle 2). Docs move with
+it (`format-v2.md` §4/§9, `DESIGN.md`, the `behavior.rs` header) and so do a behavior unit
+test and an engine test.
+
+The timing model is unchanged (still DTA; `--sta`/`t_sta` untouched): this is a *value*
+path, not an ordering one, so it is orthogonal to the reverted zero-delay experiment below.
+
 ## Round — not done: the fixpoint ("zero-delay") engine does not fix the x-cascade class (2026-10-25)
 
 **Question.** The remaining `x-cascade` disagreements read `X` where CircuitSim CE has a
@@ -241,7 +277,12 @@ gives), so the conversion is faithful where it can be seen; the pipelines still 
 later in the run (`PC-IF` parks at `0x12` for the reference), which is the next thing to
 chase. All 199 core + 9 golden tests pass unchanged.
 
-## The reset pin's semantics (decided 2026-10-21)
+## The reset pin's semantics (decided 2026-10-21) — **superseded 2026-10-25**
+
+> Superseded by "a register's reset is level-sensitive, as CE's is" (2026-10-25, top of
+> this file): the reset is now asynchronous, like CE's. The paragraph below is kept for
+> the trail; its "a reset held across an edge behaves the same in both" claim is the part
+> that turned out wrong for a pipeline flush.
 
 `mem.register`/`mem.ram` have `rst` and `clk` again, hidden unless `showClk`/`showRst`
 (UI_OVERHAUL §93). Our reset is **synchronous** — it clears on a rising edge, and wins over
