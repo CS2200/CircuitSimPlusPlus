@@ -761,6 +761,17 @@ impl DelayEngine {
         Self::build(netlist, clock_half_period, table, false)
     }
 
+    /// Like [`DelayEngine::new`], with the CE-compatibility diagnostic enabled from
+    /// construction — for a tool that only *inspects* the engine (`csim nets --compat`),
+    /// where the boot settle must already read floating inputs the way CE does.
+    pub fn new_compat(
+        netlist: Netlist,
+        clock_half_period: u64,
+        table: &TimingTable,
+    ) -> Result<DelayEngine, Vec<LoadError>> {
+        Self::build(netlist, clock_half_period, table, true)
+    }
+
     /// Like [`DelayEngine::new`], but the CE-compatibility diagnostic mode is known
     /// *before* the boot settle: a floating read at power-on is then coalesced the way
     /// CE reads it, rather than taken as `X` and never revisited (a purely combinational
@@ -1003,6 +1014,56 @@ impl DelayEngine {
         // breakpoint can never be the halt here: it does not fire in_boot.
         if let Err(h) = eng.boot() {
             eng.halted = Some(h);
+        }
+        // Final settle (power-on): a combinational part that tried to evaluate while an
+        // input was still *in flight* is left un-evaluated — and if that driver's commit
+        // turns out to be a `Z` **no-op** (a disabled tri-state buffer, a comparator on
+        // it), no delivery is ever produced, so the part never wakes. Its output then
+        // stays at the initial `Z` for the whole run: production reads it as `X`, and
+        // `compat` never gets to apply CE's per-consumer coalescence because the part is
+        // never re-evaluated. `boot()` has drained the queue, so nothing that will arrive
+        // is still outstanding — re-attempt every part that has not produced an output,
+        // to a fixpoint. (`net_in_flight` no longer reports the settled driver, so the
+        // retry does not wait again.)
+        if eng.halted.is_none() {
+            let mut rounds = 0usize;
+            loop {
+                rounds += 1;
+                if rounds > n + 1 {
+                    break;
+                }
+                let stuck: Vec<u32> = (0..n as u32)
+                    .filter(|&c| {
+                        eng.pending_gen[c as usize] == 0
+                            && matches!(
+                                eng.cdata[c as usize].class,
+                                Class::Comb | Class::Ram | Class::Rom
+                            )
+                    })
+                    .collect();
+                if stuck.is_empty() {
+                    break;
+                }
+                for c in &stuck {
+                    if let Err(h) = eng.eval_and_schedule(*c, 0, None) {
+                        eng.halted = Some(h);
+                        break;
+                    }
+                }
+                if eng.halted.is_some() {
+                    break;
+                }
+                if let Err(h) = eng.boot() {
+                    eng.halted = Some(h);
+                    break;
+                }
+                // Progress: at least one stuck part produced an output this round. A part
+                // that keeps waiting (a genuinely in-flight or oscillating input) makes no
+                // progress and ends the loop.
+                if stuck.iter().all(|&c| eng.pending_gen[c as usize] == 0) {
+                    break;
+                }
+            }
         }
         // Time restarts at 0; cycle accounting begins.
         eng.in_boot = false;

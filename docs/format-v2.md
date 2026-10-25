@@ -346,8 +346,12 @@ details in `crates/core/src/{behavior,delay}.rs` module docs and docs/autograder
   there is no word-count field), and an embedded image longer than the new size is trimmed
   to fit. The format keeps both attributes independent for hand-authored and autograder
   files that need the extra storage.
-- The defensive past-end path (reads `X`, writes drop) covers the `depth = 1` corner, an
-  over-wide `addrBits`, and the lenient post-validation path.
+- The defensive past-end path (reads `Z`, writes drop) covers the `depth = 1` corner, an
+  over-wide `addrBits`, and the lenient post-validation path. An **unknown** address also
+  leaves the memory *inert* — it drives all-`Z`, as CE's `ROM`/`RAM` do (`valueChanged`
+  pushes an all-`Z` word) — rather than `X`: an `X` beats a definite value in the net merge,
+  so on a shared microcode bus one addressed-off ROM would poison every stage's control
+  word, where CE's `Z` lets the active stage own the bus.
 - Divide by zero yields quotient and remainder `X`. A mux with an `X` select outputs the
   data value when all data inputs are equal, else `X`.
 - A **breakpoint** (`debug.breakpoint`) is the one halt that is not a fault. It fires when its

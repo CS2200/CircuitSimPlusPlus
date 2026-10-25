@@ -69,6 +69,11 @@ enum Cmd {
         /// Run this many cycles before dumping (default 1).
         #[arg(long, default_value_t = 1)]
         cycles: u64,
+        /// Read a consumed floating (`Z`) input as CE does (the `compat` diagnostic), so
+        /// the dump shows the engine's view under CE's rules — the same mode `run --compat`
+        /// grades with.
+        #[arg(long)]
+        compat: bool,
         /// Write the JSON output to this path instead of stdout.
         #[arg(long)]
         json: Option<PathBuf>,
@@ -704,12 +709,14 @@ fn main() -> ExitCode {
             pin,
             comp,
             cycles,
+            compat,
             json,
         } => nets(
             file,
             pin.as_deref(),
             comp.as_deref(),
             *cycles,
+            *compat,
             json.as_deref(),
         ),
         Cmd::Snapshot {
@@ -734,6 +741,7 @@ fn nets(
     pin: Option<&str>,
     comp: Option<&str>,
     cycles: u64,
+    compat: bool,
     json_out: Option<&Path>,
 ) -> ExitCode {
     let bytes = match std::fs::read(file) {
@@ -764,7 +772,12 @@ fn nets(
         }
     };
     let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
-    let mut eng = match DelayEngine::new(nl, 1000, &table) {
+    let built = if compat {
+        DelayEngine::new_compat(nl, 1000, &table)
+    } else {
+        DelayEngine::new(nl, 1000, &table)
+    };
+    let mut eng = match built {
         Ok(e) => e,
         Err(e) => {
             eprintln!("csim: {e:?}");

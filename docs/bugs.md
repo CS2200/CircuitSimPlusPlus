@@ -6,6 +6,46 @@ segment deletion, one Clear) and are open below. The trial tester's raw list was
 against the code; already-fixed, by-design, and out-of-scope entries live in the
 appendices so the active list stays honest._
 
+## Round — done (2026-10-25, the boot settle left parts stuck at `Z`; a memory's unknown address is inert)
+
+**Two engine fixes, found debugging `submission_374337181` (a 4200 pipeline).**
+
+*Root cause.* At cycle 0 the ALU-output tri-state buffer (`c353`) is disabled, so its net
+is `Z`; the comparator `ALUOutZero` propagates that `Z`, and CE's downstream `AND`/`OR`
+coalesce it (`AND(Z,0)=0`, `OR(0,Z)=0`), giving `flush = 0` — so the PC advances. Ours
+stalled: the comparator tried to evaluate while the buffer was still *in flight*, was left
+**un-evaluated**, and when the buffer finally committed its `Z` it produced **no delivery**
+(the value did not change), so the comparator never woke. Its output stayed at the initial
+`Z` for the whole run, and every consumer stayed `Z` too — production reads that as `X`
+(the whole datapath goes `X`), and `compat` never got to apply CE's coalescence because the
+part was never re-evaluated. `driver_in_flight` treats a part that produced no output as in
+flight, and "evaluated to a no-op `Z`" is indistinguishable from "never evaluated".
+
+*Fix 1 — final settle at power-on.* After the boot queue drains, nothing that will arrive is
+outstanding, so re-attempt every combinational part that has not produced an output, to a
+fixpoint (`DelayEngine::build`). `net_in_flight` no longer reports the settled driver, so
+the retry does not wait again.
+
+*Fix 2 — an unknown address leaves a memory inert (all-`Z`).* CE's `ROM.valueChanged` pushes
+a fresh all-`Z` `WireValue` for an address that is not valid, and `RAM.valueChanged` pushes
+`noValue`; ours drove `X`. On the **shared microcode bus** that is not equivalent — an `X`
+beats a definite value in the merge, so the addressed-off `MAIN ROM` in `submission_408346931`
+poisoned every stage's control word. Fix 1 exposed this (it forced that ROM to evaluate:
+before, it sat at a partially-`Z` value that happened to work). Fix 2 removes the
+regression and is the CE-faithful rule.
+
+*Corpus* (vs the `05fd1af` snapshot):
+
+| | baseline | after |
+|---|---|---|
+| production | 342/357 (15 disagreements) | **343/357 (14)** — +1, **0 regressions** |
+| `--compat` | 349/357 (8) | **353/357 (4)** — +4, **0 regressions** |
+
+Production's gain is `submission_410843919`; `compat` gains `submission_374337181`,
+`374593140`, `374625075`, `409848157`. Remaining under `compat`: `373713172`,
+`374299303` (never halts), `374625393`, `410460509`. A `csim nets --compat` flag was added
+(the dump and the graded run then agree on mode).
+
 ## Round — done (2026-10-25, a register's reset is level-sensitive, as CE's is)
 
 **A register's `rst` is now asynchronous (level-sensitive), matching CE's

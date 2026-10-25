@@ -57,10 +57,19 @@
 //!   — matches legacy CircuitSim and keeps grading deterministic.
 //! - **RAM addressing:** `depth` is required to be a power of two at load
 //!   (validation), so the `addr` pin's width exactly covers `0..depth`.
-//!   The defensive past-end path (reads `X`, writes drop) remains for the
+//!   The defensive past-end path (reads `Z`, writes drop) remains for the
 //!   `depth = 1` corner (a 1-bit address can still name word 1) and the
 //!   lenient post-validation path. A write with `X` in the address is
 //!   dropped (target unknown).
+//! - **An unknown address leaves a memory *inert* (drives all-`Z`).** CE's
+//!   `ROM.valueChanged` pushes a fresh `new WireValue(dataBits)` — all `Z` — when
+//!   the address is not a valid value, and `RAM.valueChanged` pushes `noValue` the
+//!   same way. Driving `X` instead is not equivalent on a **shared bus**: an `X`
+//!   beats a definite value in the net merge, so one addressed-off ROM would
+//!   poison every stage's microcode word, where CE's `Z` lets the active stage
+//!   own the bus. (`csxtrans`'s `_PROPAGATES_PINS` leaves a memory's `addr`
+//!   undriven for exactly this reason.)
+
 //! - **Divide by zero** → quotient and remainder are `X` (honest
 //!   "unknown", and it cannot corrupt state — it propagates).
 //! - **Mux with X select** outputs the data value if all data inputs are
@@ -751,7 +760,13 @@ impl Behavior {
                 consume(addr, "addr")?;
                 Ok(vec![match addr.to_u64() {
                     Some(a) if (a as usize) < words.len() => words[a as usize].clone(),
-                    _ => Value::x(*bitsize),
+                    // An address that is unknown or past the end leaves the ROM **inert**:
+                    // CE's `ROM.valueChanged` pushes `new WireValue(dataBits)` — all `Z` —
+                    // so it drives nothing and a shared microcode bus stays owned by the
+                    // active stage. Driving `X` here would *poison* that bus (an `X` beats a
+                    // definite value in the merge), which the `ce-propagates` converter rule
+                    // relies on this not doing.
+                    _ => Value::z(*bitsize),
                 }])
             }
             BehaviorKind::Button { pressed } => Ok(vec![Value::from_u64(1, u64::from(*pressed))]),
@@ -2227,7 +2242,9 @@ mod tests {
         );
         assert_eq!(rom.memory_word(0), Some(k(16, 0x10)));
         assert_eq!(rom.eval(&refs(&[k(2, 0)])).unwrap(), vec![k(16, 0x10)]);
-        assert_eq!(rom.eval(&refs(&[Value::x(2)])).unwrap(), vec![Value::x(16)]);
+        // An unknown address leaves the ROM **inert** (all-`Z`), matching CE's
+        // `ROM.valueChanged`; driving `X` would poison a shared microcode bus.
+        assert_eq!(rom.eval(&refs(&[Value::x(2)])).unwrap(), vec![Value::z(16)]);
         assert_eq!(
             rom.eval(&refs(&[Value::z(2)])),
             Err(FloatingRead::at("addr"))
