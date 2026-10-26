@@ -1776,3 +1776,67 @@ comparable — but `D`'s settled value at the edge and the clock's rise are both
 same edge, so the two can interleave, and here they do. Confirming it needs tracing **within**
 one tick (the per-cycle samplers run out), which is the next instrument; the state to explain
 is not a wrong value but a latching decision.
+### Round 20: a RAM holds its output on an invalid address — `374625393` unfrozen
+
+Round 19 left `374625393` frozen with `State` going `Z` at one edge, and the ordering question
+open. It was not ordering — it was a **value the old tool never produces**.
+
+The work started with the instrument the per-cycle samplers could not give: `CSIM_DEBUG_COMP`,
+which narrates one part's every evaluation with its **timestamp and what it read** (each input
+pin's *view*, i.e. `getLastReceived`), because a register's latch decision happens *inside* a
+cycle and the samplers only see its edges. Watching `State` and the clock gate through the
+failing tick:
+
+```
+t=4000  c3 reads [clk=0x1, in1=0x0, sel=0x0] -> 0x1        <- real clock rise
+t=4012  c0/c7 reads [d=0x0,   clk=0x1, en=0x1, rst=0x0] -> 0x0   <- correct latch
+t=4119  c3 reads [clk=0x1, in1=0x0, sel=0bz] -> 0bz        <- sel (HALT) glitches Z
+t=4189  c3 reads [clk=0x1, in1=0x0, sel=0x0] -> 0x1        <- back to 1 …
+t=4201  c0/c7 reads [d=0bzzzzzz, clk=0x1, …] -> 0bzzzzzz   <- … and the Z d is latched
+```
+
+so the shape was clear: something drives `Z`, `HALT` → the clock gate → `CLK` follows, and the
+recovery is an edge that latches a `Z` `d`. Every *rule* along the way checked out against the
+old tool's source (a `Comparator` with an invalid input drives all-`Z`; a `Multiplexer` with an
+invalid select drives all-`Z`; a disabled `ControlledBuffer` drives `Z`; `Register` latches
+`getLastReceived(PORT_IN)` verbatim on `== ONE`), and the control word matched CE bit for bit
+(`opSel`, `HALT`, `LdPC`, `Dr*` — measured in both engines, `opSel` is `1` during the fetch in
+both). So the fault had to be in a *value*, not in an order — and `trace_z`/the nets dump put
+it on the bus: with `DrMEM=1` the bus should carry the RAM's `dout`, and ours carried `X`/`Z`.
+
+The old tool never does that. `RAM.java`:
+
+```java
+case PORT_ENABLE:
+case PORT_LOAD:
+    if (!enabled || !load) { state.pushValue(getPort(PORT_DATA), noValue); }
+case PORT_ADDRESS:                                  // falls through — no break
+    if (enabled && load && address.isValidValue()) {
+        state.pushValue(getPort(PORT_DATA), WireValue.of(load(state, address.getValue()), …));
+    }
+    break;
+```
+
+With the enable asserted and the address **not a valid value**, it pushes *nothing at all*, so
+the link keeps what it was last given — a port's drive is **sticky**. Ours produced `X` (or let
+the floating-address `consume` fire), and one `X` on a memory output is enough to poison a
+control word: `opcode` → `HALT` → the clock gate → a spurious edge → a frozen FSM.
+
+`compat` now leaves the `dout` drive exactly as it stands when the address carries a `Z` or an
+`X` — i.e. schedules no `Fire`, which *is* CE pushing nothing. Measured on `374625393`:
+
+```
+                    State   IR          PC
+before   …          1C      9D000035    1
+                    ?       3DD00000    2     <- frozen, everything Z
+after    0→1→1→2→2→3→3→4→4   and State alternating 0 ↔ 1C
+```
+
+— it executes, on CE's own cadence (`PC` advancing every two cycles), where before it stopped
+at `PC=2` and stayed. It does not yet halt, so a further divergence remains; the point here is
+that the *freeze* is gone and the reason is a value the old tool cannot produce.
+
+Measured on the compat corpus, against `report-compat-boundary2.json` (357 rows, 209 agree,
+3 disagreements, 0 false passes): **0 flips**, so holding is verdict-neutral — as it should be,
+since it removes a value rather than supplying one. Production is gated off. Snapshot:
+`report-compat-ramhold.json`.

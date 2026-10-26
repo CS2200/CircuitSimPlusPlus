@@ -771,23 +771,49 @@ fn debug_boot() -> Option<u32> {
     })
 }
 
-/// `CSIM_DEBUG_SPLITTER`: which splitter(s) to narrate. Each comma-separated
-/// token is either an engine index (`12`) or a spelling — the component's
-/// document id (`c55`) or its `name` (`Opcode`) — because the index is not
-/// something a schematic tells you and guessing it wastes a run.
-fn debug_splitter_spec() -> Vec<String> {
-    static ON: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-    ON.get_or_init(|| {
-        std::env::var("CSIM_DEBUG_SPLITTER")
-            .map(|v| {
-                v.split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default()
+/// A comma-separated env var as a list of tokens, read once.
+fn debug_spec(var: &str) -> Vec<String> {
+    match var {
+        "CSIM_DEBUG_SPLITTER" => {
+            static ON: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+            ON.get_or_init(|| read_spec(var)).clone()
+        }
+        "CSIM_DEBUG_COMP" => {
+            static ON: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+            ON.get_or_init(|| read_spec(var)).clone()
+        }
+        _ => read_spec(var),
+    }
+}
+
+fn read_spec(var: &str) -> Vec<String> {
+    std::env::var(var)
+        .map(|v| {
+            v.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Does component `c` match any token? A token is an engine index (`12`), a document id
+/// (`c55`), the instance-qualified id (`c0/c7`), or the part's `name` (`Opcode`, `State`)
+/// — because an index is not something a schematic tells you and guessing it wastes a run.
+fn comp_matches(nl: &Netlist, c: usize, spec: &[String]) -> bool {
+    if spec.is_empty() {
+        return false;
+    }
+    let comp = &nl.comps[c];
+    let qualified = if comp.inst_path.is_empty() {
+        comp.def_id.clone()
+    } else {
+        format!("{}/{}", comp.inst_path, comp.def_id)
+    };
+    spec.iter().any(|t| match t.parse::<u32>() {
+        Ok(i) => i as usize == c,
+        Err(_) => qualified == *t || comp.def_id == *t || comp.name.as_deref() == Some(t.as_str()),
     })
-    .clone()
 }
 
 impl DelayEngine {
@@ -2065,6 +2091,30 @@ impl DelayEngine {
         let c = comp as usize;
         let cd = &self.cdata[c];
         let beh = &self.comps[c];
+        // `compat`: CE's `RAM.valueChanged` pushes **nothing at all** when the enable is
+        // asserted but the address is not a valid value —
+        //
+        //     case PORT_ENABLE: case PORT_LOAD:
+        //         if (!enabled || !load) { state.pushValue(getPort(PORT_DATA), noValue); }
+        //     case PORT_ADDRESS:                       // falls through, no break
+        //         if (enabled && load && address.isValidValue()) { ...push the word... }
+        //         break;
+        //
+        // — so the link simply keeps the value it was last given (a port's drive is
+        // *sticky*). Ours turned that into `X` (or let the floating-address `consume`
+        // fire), which the old tool never produces, and one `X` on a memory output is
+        // enough to poison a control word — `opcode` → `HALT` → the clock gate → a
+        // spurious clock edge, which is what freezes `374625393` (docs/bugs.md Round 20).
+        // Holding is therefore both faithful and conservative: the drive is left exactly
+        // as it stands, i.e. no `Fire` is scheduled.
+        if self.compat && matches!(cd.class, Class::Ram) {
+            if let Some((addr_slot, _)) = cd.in_pins.first() {
+                let addr = &self.views[c][*addr_slot];
+                if addr.has_z() || addr.has_x() {
+                    return Ok(());
+                }
+            }
+        }
         let outs = if beh.is_splitter() {
             let nets: Vec<Cow<Value>> = cd
                 .in_pins
@@ -2135,16 +2185,7 @@ impl DelayEngine {
             let outs = beh.eval_splitter(&nets);
             // `CSIM_DEBUG_SPLITTER=<comp idx>`: show what a splitter was handed and what
             // it drove. Env-gated, read once; inert otherwise.
-            let watch = {
-                let spec = debug_splitter_spec();
-                spec.iter().any(|t| match t.parse::<u32>() {
-                    Ok(i) => i == comp,
-                    Err(_) => {
-                        let k = &self.netlist.comps[c];
-                        k.def_id == *t || k.name.as_deref() == Some(t.as_str())
-                    }
-                })
-            };
+            let watch = comp_matches(&self.netlist, c, &debug_spec("CSIM_DEBUG_SPLITTER"));
             if watch {
                 let drv = |net: u32| {
                     self.net_drivers
@@ -2277,6 +2318,34 @@ impl DelayEngine {
         };
         if outs == self.pending_val[c] {
             return Ok(()); // already scheduled to commit exactly this
+        }
+        // `CSIM_DEBUG_COMP=<spec>`: narrate one part's every evaluation — the timestamp,
+        // what it **read** (each input pin's *view*, which is the old tool's
+        // `getLastReceived`), and what it drives. The per-cycle samplers stop at cycle
+        // boundaries, but a register's latch decision is made *inside* one, against the
+        // view it had at that instant; this is the instrument for "which value did it
+        // take, and in what order did the parts around it run".
+        if comp_matches(&self.netlist, c, &debug_spec("CSIM_DEBUG_COMP")) {
+            let k = &self.netlist.comps[c];
+            let qualified = if k.inst_path.is_empty() {
+                k.def_id.clone()
+            } else {
+                format!("{}/{}", k.inst_path, k.def_id)
+            };
+            let ins: Vec<String> = cd
+                .in_pins
+                .iter()
+                .map(|(slot, _)| self.views[c][*slot].to_string())
+                .collect();
+            eprintln!(
+                "FIRE t={now} {qualified} {} reads [{}] -> drives [{}]",
+                k.type_,
+                ins.join(", "),
+                outs.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
         self.pending_gen[c] += 1;
         let gen = self.pending_gen[c];
