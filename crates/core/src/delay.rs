@@ -2800,8 +2800,22 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("probe doc");
         let doc = crate::format::load_document(text.as_bytes()).expect("probe doc parses");
         let nl = crate::netlist::build(&doc).expect("probe netlist");
-        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
-        let mut eng = DelayEngine::new(nl, 1000, &table).expect("probe engine");
+        let table_name =
+            std::env::var("PROBE_TABLE").unwrap_or_else(|_| "cs2200-74ls-v1".to_string());
+        let table = TimingTable::builtin(&table_name).expect("probe table");
+        // `PROBE_COMPAT` builds the engine with CE's floating-read reading applied from
+        // construction (the boot settle included), so a trace can be diffed against CE in
+        // the mode the corpus is graded under.
+        let compat = matches!(
+            std::env::var("PROBE_COMPAT").as_deref(),
+            Ok(v) if v != "0" && !v.is_empty()
+        );
+        let mut eng = if compat {
+            DelayEngine::new_compat(nl, 1000, &table)
+        } else {
+            DelayEngine::new(nl, 1000, &table)
+        }
+        .expect("probe engine");
         let cycles: u64 = std::env::var("PROBE_CYCLES")
             .ok()
             .and_then(|v| v.parse().ok())

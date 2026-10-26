@@ -924,3 +924,103 @@ harness had been approximating the second with a cycle budget, and a budget is a
 a design's CPI: 30,000 was *below* what the recorded corpus legitimately needs (its longest
 run is 32,312), so working designs were reported as never halting. Counting PC moves is not
 a guess.
+
+## `compat` and the last four corpus rows (2026-10-26)
+
+Under `CSIM_COMPAT=1` the corpus stands at 353/357. The four that fail are
+`373713172` (4200 pipeline, X-cascade), `374299303` (4200 datapath, never halts),
+`374625393` (4200 datapath, wrong value) and `410460509` (5200 datapath, X-cascade).
+They are the same four that fail in production, which is why the earlier round concluded
+`compat` "does not touch them" — a conclusion this round had to revisit, because the
+evidence for it was gathered wrong.
+
+### The measurement trap: `--pause-on-unknown` masks `compat`
+
+`eval_comb` checks `pause_on_unknown` **before** the `compat` branch and returns early:
+
+```rust
+if self.pause_on_unknown { return Err(self.halt_unknown(c, &fr.pin)); }
+if self.compat { ... z_compat ... }
+```
+
+So `csim run --compat --pause-on-unknown` is *not* a compat run: every floating read
+halts instead. Anyone using `--pause-on-unknown` to find the first floating read must
+re-run without it before drawing conclusions about `compat`. Verified both ways: with
+a real `compat` run (no pause), all four produce byte-identical `cycles` to production
+(103 / 48331 / 102 / 160), so the four genuinely are not fixed by compat — but the
+first measurement of that was luck, not method.
+
+### The trajectory oracle now runs in either mode
+
+`probe_trace` gained `PROBE_COMPAT=1` (build the engine with `new_compat`, so the boot
+settle coalesces too) and `PROBE_TABLE=<name>`. `tools/diff_trajectory.py` inherits the
+environment, so
+
+```
+PROBE_COMPAT=1 uv run tools/diff_trajectory.py <design>.sim --program POW --cycles N
+```
+
+diffs CE's own per-cycle trace against the engine **in the graded mode**. That is the
+instrument this class of bug needs; everything below was read off it.
+
+### What the four actually do
+
+`374625393`, CE vs ours (`$sp`, aligned `ours[i] == old[i-1]`):
+
+```
+cycle   CE            ours
+1       sp=36         sp=0
+2       sp=36         sp=36   (PC reaches 2 in both)
+3       sp=A000       sp=36   <-- first difference, and ours never moves again
+```
+
+CE carries on (PC 1,2,3,4,5,6,7; `$sp` becomes `A000` at cycle 3). Ours **stops
+clocking at cycle 2**: the PC freezes at `0x2` and every register holds. `--pause-on-
+unknown` on this design names `plexers.mux (Datapath: c2), pin 'in0'` at cycle 1, whose
+net is driven by four controlled buffers **all disabled** (resolved all-`Z`), and the
+mux's `sel` is `Z` too. But that is a symptom: tracing the engine's own state shows
+`State` (the microcode address register, `c0/State`) holding `0x1C` at cycle 1 and
+**`X` from cycle 2 onward** — identical in production and compat. With the microcode
+address unknown, the ROMs drive all-`Z`, the control word (`c0/c12` splitter) is `Z`,
+the register enables read `Z` (`PC.en`, `IR.en` are `0bz`), and the machine stops.
+
+So the divergence is *not* at the mux. It is that **a floating `d` on a state element
+becomes `X` in our engine even under `compat`** — the limit the code already documents:
+
+```
+// CE would store `Z` for a floating data pin and a register would hold `Z`;
+// the edge path keeps `X` — a documented limit of this diagnostic.
+```
+
+CE's `Register.valueChanged` latches `getLastReceived(PORT_IN)` **verbatim**, so CE's
+register holds `Z` and CE's consumers then apply their own rules (`isValidValue()` →
+drive all-`Z`; a gate → treat `Z` as `0`). Once we store `X` instead, no later consumer
+can recover: `compat` only ever intervenes on a *`Z`* read, and `X` is not `Z`.
+
+### Ranked hypotheses
+
+1. **The state-element `d` fallback.** `z_compat` has no arm for a register/RAM data
+   pin, so the edge path falls back to `z_to_x()`. A faithful fix stores the `Z` (CE's
+   rule) and lets it propagate, with `compat`'s existing per-pin table deciding what each
+   consumer then does. This is the only divergence proven so far, and it is the reason
+   `X` appears at all.
+2. **Gaps in `z_compat`'s per-pin table.** It covers `ControlledBuffer.en`, `Register`/
+   `Ram` `en`/`clk`/`rst`, `Ram.we`, gate inputs for `And`/`Nand`/`Or`/`Nor`, and the
+   priority decoder's lines. Missing: `Xor`/`Xnor`/`Not`/`Buffer` gate inputs, every
+   arithmetic part (CE drives all-`Z` when `!isValidValue()`), `Multiplexer`'s data pins,
+   `Demultiplexer`, `Decoder`, `ROM`/`RAM` address and data pins (`RAM` stores `-1` when
+   the data is not a valid value), and `wiring.pin`. Each needs an arm quoted from CE's
+   `valueChanged`.
+3. **A spurious float (conversion or ordering).** If CE's register data pins are
+   *definite* here (CE's trace says they are — `$sp` reaches `A000`, the PC advances),
+   then a net we see as `Z` should be driven. That would put the bug in the converter's
+   tie pass rather than in the engine. Hypothesis 1 is cheaper to test first and is
+   proven to be at least *a* divergence; if storing `Z` does not move these rows, this
+   one is next.
+
+### Next
+
+Implement hypothesis 1 behind `compat` only (production stays byte-identical), measure
+the four and then the corpus, and take a snapshot per round. Then walk CE's component
+sources (`components/*/*.java` `valueChanged`) and complete `z_compat` arm by arm,
+measuring after each.
