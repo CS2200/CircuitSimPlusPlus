@@ -1686,3 +1686,50 @@ is recording only — and prod measured byte-identical.
 (`3DD00000 93000010 33300000 …` where it was `X` from cycle 1), it runs instead of stopping,
 and `event_storm_halts_with_oscillation` and the rest of the suite are untouched. The
 remaining three are `374299303`, `374625393` and `410460509`.
+
+### Round 18: a tool bug that hid the signal, and the Z-walker
+
+**The probe was hiding `Z`.** `probe_trace`'s renderer fell through to
+`format!("{:X}", v.to_u64().unwrap_or(0))`, so an all-`Z` value printed as **`0`** — the one
+distinction a register trace exists to make. Columns that read `0` in earlier rounds may
+therefore have been `Z`; nothing that mattered was decided on them (the bus work used
+`PROBE_RAW`/`PROBE_NETS`, which are four-state, and the aligned register comparisons held
+real numbers where they agreed), but the display was wrong and is now `?` for any value
+with a `Z` or `X`, exactly as the old tracer's `get()` prints `?`.
+
+**`tools/trace_z.py`** answers "why is this net `Z`?" by walking upstream to the part that
+*is* the cause. `csim nets` already reports every net's drivers, sinks and value with
+instance-qualified pin labels (`c0/c12.out8`), so the whole design's pin→net graph is one
+call and the walk is in memory — and it reaches parts **inside subcircuits**, which
+`csim nets --comp` cannot address at all (several of the dead ends below are exactly that).
+
+**What it found in `374625393`** (a multicycle datapath, `PC`/`IR`/`State`, stuck at `PC=2`).
+The control word — every one of `nets 12..31` (`opSel`, `SelB`, `LdPC`, `LdIR`, `WrREG`,
+`DrALU`, …) — is `Z`, all of it driven by one splitter inside the microcontrol unit
+(`c0/c12`). The walk reaches the bottom in one pass:
+
+```
+HALT (net 43)      <- c0/c3.eq comparator, a = opcode
+opcode (net 0)     <- c69.out0 splitter, bus = net 48 <- c5.out mux, sel = opSel (Z)
+opSel  (net 16)    <- c0/c12.out13  (the control word, Z)
+control word       <- c0/c3.out ROM(MAIN), addr = c0/c7.q = State
+State              <- c0/c34 next-state mux ...
+```
+
+and, watchable because `State` is a named register:
+
+```
+                       State   IR          (PC)
+after 0 cycles         0       0           0
+after 1 cycles         1C      9D000035    1     <- all definite
+after 2 cycles         ?       3DD00000    2     <- everything Z, and stays
+```
+
+Cycles 0–1 are **fully definite** — the control word is `0x19f5240` then `0x8206300`, `State`
+`0x0` then `0x1c`, `opcode` `0x9` — and at the tick into cycle 2 the ROM's output, the control
+word, `State`, the next-state mux, the decode mux and `HALT` all go `Z` **together**. So this
+is not a wrong value anywhere: the design is *frozen*, and the thing to find is what turns
+definite into `Z` at that one tick — most likely the clock mux (`c3`, `sel = HALT`), since
+`PC`, `IR` and `State` all stop together and none of them advances again.
+
+`374299303` and `410460509` are the other two.

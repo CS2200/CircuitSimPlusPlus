@@ -3198,9 +3198,13 @@ mod tests {
             if i > 0 {
                 let _ = eng.run(1);
             }
+            // A value that is not a clean number prints `?`, exactly as the old tracer's
+            // `get()` does when a `WireValue` has a `Z` (or here an `X`). Rendering an
+            // all-`Z` value as `0` — which `to_u64().unwrap_or(0)` silently did — hides the
+            // one thing a trace is for; the four-state detail is `PROBE_RAW`/`PROBE_NETS`.
             let render = |v: Option<Value>| match v {
                 None => "?".to_string(),
-                Some(v) if v.has_x() => "X".to_string(),
+                Some(v) if v.has_x() || v.has_z() => "?".to_string(),
                 Some(v) => format!("{:X}", v.to_u64().unwrap_or(0)),
             };
             let row: Vec<String> = std::iter::once(render(eng.named_value(&pc)))
