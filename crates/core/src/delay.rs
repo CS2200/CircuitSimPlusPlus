@@ -1980,7 +1980,7 @@ impl DelayEngine {
                     let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
                     // **Evaluate once**: in the common case every input has arrived, so
                     // keep this result instead of asking the behaviour a second time below.
-                    match beh.eval(&refs) {
+                    match beh.eval_with(&refs, false) {
                         Ok(outs) => {
                             first_eval = Some(outs);
                             None
@@ -2013,7 +2013,10 @@ impl DelayEngine {
                 Some(outs) => outs,
                 None => {
                     let beh_ref = beh;
-                    match self.eval_reading_unknowns(c, &mut ins, |refs| beh_ref.eval(refs))? {
+                    let compat = self.compat;
+                    match self.eval_reading_unknowns(c, &mut ins, |refs| {
+                        beh_ref.eval_with(refs, compat)
+                    })? {
                         Some(outs) => outs,
                         // `compat`: CE pushes `Z` on every output of this part.
                         None => self.all_z_outputs(c),
@@ -2690,7 +2693,7 @@ impl DelayEngine {
                 }
             }
             let ins_refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
-            match beh.eval(&ins_refs) {
+            match beh.eval_with(&ins_refs, self.compat) {
                 Ok(_) => {}
                 Err(fr) => {
                     if self.pause_on_unknown {

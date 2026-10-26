@@ -1093,3 +1093,38 @@ work from the per-pin floating table and should be attacked with `diff_trajector
 The other two have no cycle and need per-design work: `374299303` runs 48331 cycles and
 wanders (PC ends `0x3400001b`), `373713172`'s PC goes `X` at cycle 3 through the
 enable/selector chain.
+
+### Round 4: an invalid *select* drives all-Z in CE, not X — and where the X is really born
+
+Two more things, both from reading the engine's own eval rather than guessing.
+
+**The mux/demux invalid-select rule.** CE's `Multiplexer.valueChanged` drives
+`new WireValue(bitSize)` — all-`Z` — when the select is *not a valid value*; ours drove
+`Value::x`. A **`Z`** select was already handled (it is caught by `consume`, so `compat`
+substitutes), but an **`X`** select was not, and could never be: `compat` only ever
+intervenes on a **`Z` read**, and by the time the select is `X` the read has already
+succeeded. So `Behavior::eval_with(ins, compat)` was added — production keeps strict `X`
+propagation (`eval` delegates with `false`), and `compat` mirrors CE — with the mux
+(all-`Z`) and demux (all-`Z` on every output) arms. Measured: production unchanged
+(103/48331/102/160), compat unchanged on the four. Necessary for fidelity, not the fix.
+
+**Where `373713172`'s `X` is actually born.** Bisecting the net dump by cycle isolates it
+exactly:
+
+| cycle | unknown nets | the new ones |
+|---|---|---|
+| 0 | **1** | `c62/c12.out` — a *splitter* output, all-`Z` |
+| 1 | 84 | 83 new, and the new ones are `0bx` on **multi-driver** nets (`c133/c47.out, c133/c80.out1`) |
+| 2 | 159 | splitters in `c168` |
+| 3 | 211 | **`c158.q` — the PC-IF register — all-`X`** |
+| 4 | 273 | `c160.q`, more comparators |
+| 5 | 292 | the rest of the register file |
+
+So there is exactly **one** unknown net at power-on, a splitter output; **one cycle later
+the `X` is born in a multi-driver merge**; two cycles after that the PC register has
+latched it. `Z ∪ definite` is the definite value in both CE's `WireValue.merge` and our
+`contention_merge`, so an `X` there means **two definite drivers disagreeing** — which in
+CE is not an `X` at all, it is a `ShortCircuitException`. Either our splitter drives a
+value on a bit it does not own (its own doc says it must not re-assert bus bits), or a
+tri-state we read as enabled is disabled in CE. That is the next thing to look at, and it
+is now a *two-cycle* target (`--cycles 1` and `2`) rather than a whole design.

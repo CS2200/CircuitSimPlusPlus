@@ -426,6 +426,15 @@ impl Behavior {
     /// Pure — never mutates state. Errors per the floating-consume rule
     /// (module docs).
     pub fn eval(&self, ins: &[&Value]) -> Result<Vec<Value>, FloatingRead> {
+        self.eval_with(ins, false)
+    }
+
+    /// [`eval`] under the `compat` diagnostic. CircuitSim has **no `X` at all**, so any
+    /// `X` this engine produces is a divergence from CE by construction; the parts whose
+    /// `valueChanged` turns an *invalid* input into all-`Z` therefore need to be told
+    /// which mode they are in. Production keeps strict `X` propagation (the module
+    /// header's rule); only `compat` mirrors CE.
+    pub fn eval_with(&self, ins: &[&Value], compat: bool) -> Result<Vec<Value>, FloatingRead> {
         match &self.kind {
             BehaviorKind::Not => {
                 consume(ins[0], "in")?;
@@ -535,6 +544,11 @@ impl Behavior {
                     for (i, v) in data.iter().enumerate() {
                         consume(v, format!("in{i}"))?;
                     }
+                    // CE's `Multiplexer.valueChanged` drives `new WireValue(bitSize)`
+                    // — all-`Z` — when the select is not a valid value.
+                    if compat {
+                        return Ok(vec![Value::z(*bitsize)]);
+                    }
                     if data.iter().all(|v| v == &data[0]) {
                         Ok(vec![data[0].clone()])
                     } else {
@@ -555,6 +569,10 @@ impl Behavior {
                     let mut outs = vec![Value::zero(*bitsize); n];
                     outs[i] = data.clone();
                     Ok(outs)
+                } else if compat {
+                    // CE's `Demultiplexer`: an invalid select pushes all-`Z` on every
+                    // output (`new WireValue(getBitSize())`).
+                    Ok(vec![Value::z(*bitsize); n])
                 } else {
                     Ok(vec![Value::x(*bitsize); n])
                 }
