@@ -2138,3 +2138,26 @@ that the old tool's quiescence model never sees — so the next question is what
 re-rise 189 ns into the cycle, and after that which signal selects the next-state source (the
 `SEQ` output or the `CC` patch). `t_obs` for this design is 350, so a real second edge inside
 1000 ns of half-period is not a settling artefact: something is driving the clock net twice.
+
+##### And what re-rises the clock: a glitch on the gate's select
+
+`CSIM_DEBUG_COMP=c3` (the clock mux, `CLK`'s only driver) through that cycle:
+
+```
+t=54000  c3 reads [in0=0x1, in1=0x0, sel=0x0] -> drives 0x1   <- the clock rises, as it should
+t=54119  c3 reads [in0=0x1, in1=0x0, sel=0x1] -> drives 0x0   <- sel glitches high: the gate closes
+t=54189  c3 reads [in0=0x1, in1=0x0, sel=0x0] -> drives 0x1   <- sel recovers: 0 -> 1 is a NEW edge
+t=54201  c0/c7 latches d=0x1f   (12 ns later, its clk path)
+```
+
+So it is a **70 ns glitch on the clock gate's select**, and the recovery is a genuine rising edge
+as far as the register is concerned — the design relies on the old tool's quiescence model, where
+a transient mid-settle never re-clocks anything. `t_obs` for this design is 350, so this is not
+settling: the gate's select is a deep combinational chain (`sel` ← a comparator ← the decode
+mux ← the control word), and a single-bit transient in it re-clocks the whole machine.
+
+This is the same wall Round 19 hit on this same design, and Round 20 only removed one *cause* of
+it (a RAM driving `X`/`Z` where the old tool holds). The general shape is now pinned: a transient
+on a *gated clock's select* becomes a real second edge. The next step is to find what makes
+`c3.sel` move at t=54119 — it is a definite `1`, not an `X`, so something is genuinely driving
+it high and back within 70 ns, and that driver is the thing to name.
