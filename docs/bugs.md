@@ -1128,3 +1128,50 @@ CE is not an `X` at all, it is a `ShortCircuitException`. Either our splitter dr
 value on a bit it does not own (its own doc says it must not re-assert bus bits), or a
 tri-state we read as enabled is disabled in CE. That is the next thing to look at, and it
 is now a *two-cycle* target (`--cycles 1` and `2`) rather than a whole design.
+
+### Round 5: the splitter fixes were wrong — CE's source and a test both say so
+
+I proposed two splitter "authority" fixes. Both are **refuted**, and the refutation is
+worth recording because the reasoning looked solid and was not.
+
+`behavior.rs`'s own test `a_split_driving_a_bus_bit_is_a_short_the_net_merge_reports` pins the
+behaviour I wanted to change, with the reasoning in the test:
+
+> *"The splitter states its authority over the bits it assembles; the **net merge** is what
+> turns the disagreement into `X` … the splitter itself is not the place to decide that. …
+> CE does the same: it slices the bus value it **received**, and the net merge decides."*
+
+And CircuitSim's `Splitter.valueChanged` agrees with the test, not with me:
+
+```java
+if (portIndex == PORT_JOINED) {          // a bus change
+    for (int i = 0; i < getNumPorts()-1; i++) { result.setBit(..., value.getBit(j)); }
+    state.pushValue(getPort(i), result); // every split IS driven from the bus value
+} else {                                  // a split change
+    WireValue result = new WireValue(state.getLastPushed(getPort(PORT_JOINED)));
+    result.setBit(i, value.getBit(currBit++));
+    state.pushValue(getPort(PORT_JOINED), result);   // its own last bus value + this split's bits
+}
+```
+
+So **Fix A** (drive a split bit `Z` when something else drives it) was unfaithful: it moves
+the short decision *into* the splitter and hides a genuine short. Committed, the gate went
+red on exactly that test, and it has been reverted (`cb68b69`). **Fix B** (do not drive a bus
+bit another driver owns) dies to the same evidence: CE's splitter *does* re-assert the bits
+it assembles on the bus, and a genuine disagreement is a `ShortCircuitException` in CE, not a
+value the splitter declines to drive. The `eval_splitter` code was right.
+
+**What that leaves is more useful than the fix I wanted.** The design's control bus
+`c133/c55.bus` has three drivers — the splitter's assembled bits, the register `c153.q`, and a
+second splitter `c188.bus` — and the merged value is `0bx00x1101…`: **a genuine disagreement,
+which CE would throw on and does not**. The same overlap appears one level down, where
+`c133/c55.out4` *and* `c188.out4` both drive `c133/c83.in` (`0bx00x`). So two splitters are
+driving the same split net.
+
+The surviving explanation is **event semantics, not authority**: CE's splitter pushes its
+splits only when the **bus changes** (`PORT_JOINED`), so a splitter whose bus has not changed
+since power-on has *never* pushed and its splits are still `Z` — while our `eval_splitter`
+computes and drives the splits on *every* evaluation, boot included. A splitter that CE has
+never pushed from cannot be a second writer, and that is exactly the difference that would
+turn a benign overlap into a short. Next: determine, per splitter, whether its bus has
+"changed" since power-on (CE's condition) and drive the splits only then.
