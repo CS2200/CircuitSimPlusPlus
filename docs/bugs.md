@@ -1247,3 +1247,34 @@ That leaves exactly two possibilities, and they are distinguishable:
 
 Checking (1) is direct — read the format's wires at the two `out4` pins of the Selector's
 splitters and see whether they are one net or two — and it decides which side to fix.
+
+### Round 7, resolved: it is possibility 2 — the wiring is genuine, so the order is the bug
+
+The format says the two splitters really are on one net. The Selector's own wires:
+
+```
+{"a": {"comp": "c0",  "pin": "pin"},  "b": {"comp": "c55", "pin": "out4"}, "name": "Opcode"}
+{"a": {"comp": "c0",  "pin": "pin"},  "b": {"comp": "c83", "pin": "in"},   "name": "Opcode"}
+```
+
+`c0` is the Selector subcircuit's own input pin, named **`Opcode`**, and it fans out to
+`c55.out4` and `c83.in`. On the Datapath side that pin carries `c188.out4`. So `c188` (a
+Datapath splitter) and `c55` (the Selector's splitter) are genuinely wired together **and
+carry the identical map** (`out0=[0..3] … out4=[28..31]`), and **both slice the same bus** —
+`c133/c55.bus` and `c188.bus` are both net 43, the instruction bus, which `Instr` and both
+splitters drive.
+
+So the design wires it deliberately: the opcode field is sliced out and routed *into* the
+Selector, where it is sliced again. That means **CE's splitter would push the same feedback
+and CE's `WireValue.merge` would throw `ShortCircuitException` — and it does not**, so the
+difference cannot be wiring, and it cannot be authority (Round 5 settled that). It is the
+**order in which the two splitters and the register reach their values within a tick** — CE
+walks `CircuitState.propagate()`'s worklist, we walk `(time, prio, seq)`.
+
+**This is the same conclusion the two cycle-bound rows reached by a different road**
+(`374625393`, `410460509` are explicit combinational cycles; this is a splitter feedback pair
+— a combinational loop by another name, which is why `--sta` did not flag it: the loop runs
+*through splitters*, and `dep_edges` treats a splitter's pins as pseudo self-loops, not
+edges). Three of the four now point at one root: **CE's within-tick propagation order.**
+
+The remaining one, `374299303`, has no cycle at all and still needs its own trajectory.
