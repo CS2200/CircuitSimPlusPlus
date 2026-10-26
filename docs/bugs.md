@@ -1493,3 +1493,77 @@ Two things had to be right, and the first attempt got one wrong:
 Measured on the four: identical in both modes (`103 / 48331 / 102 / 160`), because their
 implicated bus is consumed by splitters, whose view already excluded them. So this is a general
 fidelity fix rather than their fix — the same shape as the Xor/Xnor and invalid-select arms.
+
+### Round 15: the wire names, and the first hard look at `Instr-FBUF`
+
+Three rounds of hypotheses were derived without a way to *see* the net they were about, so
+this round began by building the instrument (see the two commits `592ddbb` / `9449a61`).
+It produced the first hard evidence in five rounds, and four rounds of candidates that the
+evidence then killed.
+
+**The gap.** The engine dropped every wire name — 0 of `373713172`'s 371 nets carried a label
+— and `NamedKind` had no net variant, so there was no way to ask *"what is the net called
+`Instr-FBUF` carrying this cycle?"*, which is the only question that matters when two engines
+disagree about a bus. The name was in `circuit.wires[].name` all along and thrown away at
+build. `Netlist::labelled` now keeps every *(name, net)* pairing (instance-qualified, and
+deliberately **not** collapsed: a name is a label, not a merging rule, so one net carries
+several names and several nets share one). Surfaced as:
+
+- `csim nets --label <wire>` — one bus by name, with each driver's **pushed** value
+  (`NetDump::driver_values`: the net's value says `X`, only this says *which two pins fight*)
+- `PROBE_NETS` — every named net's value, per cycle; `PROBE_RAW` — `merged|ok|SHORT`
+- on the old side, `CircuitState.getMergedValue(link)` and `isShortCircuited(link)` are both
+  `public`, so `TraceTests` grew `TRACE_RAW` (`ce_trace.py --raw`): four-state
+  `received|pushed|merged|SHORT`. `WireValue.State` is `ONE`/`ZERO`/`Z` — the old tool has
+  no `X` at all — so any `x` is a divergence by construction.
+
+**What it showed.** `Instr-FBUF` is net 43, with three drivers. At the moment the fetch
+worked:
+
+```
+c153.q        (Instr)                   -> 0x3dd00000      fresh, correct
+c133/c55.bus  (the Selector's splitter) -> 0b1001zzzz…      stale: the *previous* instruction's nibble
+c188.bus      (the root splitter)       -> 0b0000zzzz…      stale: the boot instruction
+```
+
+and the bus merged `0bxxxx…|SHORT`. The old tool's trace of the same wire at the same cycle
+is `0011110111010000…|ok` — a clean instruction, not shorted. Our `Instr` then went `X` a
+cycle later and the program stopped executing at all.
+
+**The mechanism — a combinational cycle of length 2 between two splitters.** The
+`CSIM_DEBUG_SPLITTER` narration (now addressable by id or `name`, not just an index) shows
+both handed the *fresh* bus and parting on **order**. `bus → c188.out4 → net 48 (Opcode) →
+c55 → c55.bus → bus`: two splitters that share **one bus** *and* **one split net**. The old
+engine iterates `Simulator.step()` until nothing changes; an engine that evaluates each part
+**once** reads the sibling's *previous* split value —
+
+```
+c188 handed bus 0x9d000035 (clean), but reads c55's PREVIOUS out4 = 0x0 -> drives 0000
+c55  handed bus 0bx00x… (already X, from c188.bus = 0000)             -> drives 1001 (correct)
+```
+
+— so the first echoes a stale slice, the second is poisoned by `merge(fresh, stale)`, and
+`X` is absorbing, so the bus never recovers. This is the same shape as `374625393` and
+`410460509`, and it means `373713172` had a combinational cycle after all, contrary to the
+earlier note that it had none.
+
+**Four candidate rules, and what killed them.** All compat-gated, all measured on the compat
+corpus (baseline `report-compat-skip.json`: 357 rows, 208 agree, 4 disagreements, 0 false
+passes), and all reverted:
+
+| rule | idea | verdict |
+|---|---|---|
+| A | splitter drives `Z` on a split net whose only other drivers are splitters | **180 flips** pass→fail (28 agree) |
+| A′ | the same, restricted to *split* pins (`pin_i > 0`) | **141 flips** pass→fail (67 agree) |
+| B | for a split shared with a splitter on the **same bus**, take its bits from the bus | target not fixed: both splitters lock to `0000` (bus `0bx00x…`), so not measured |
+| — | (round 11) the same idea in production | already falsified: 138 flips |
+
+A and A′ are the same mistake at two widths: zeroing a driven bit throws away a value that
+nothing else drives. B fails for a subtler reason and it is the useful result: with the bus
+in the poisoned state, the splitter's **own incoming merge disagrees**, so `6a6ce08` skips its
+delivery, so it is never re-evaluated, so it never even reaches the code that would fix it —
+it keeps its old drive (`0000`) forever. Which is exactly what the old engine does *per step*
+too; it just keeps stepping. **A one-pass engine cannot express that fixpoint by changing one
+part's output rule.** The remaining question is therefore not "which value should a splitter
+drive" but "where does the iteration come from" — and that is the `374625393`/`410460509`
+work, now with a way to watch it.

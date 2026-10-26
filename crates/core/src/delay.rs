@@ -771,13 +771,23 @@ fn debug_boot() -> Option<u32> {
     })
 }
 
-fn debug_splitter() -> Option<u32> {
-    static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
+/// `CSIM_DEBUG_SPLITTER`: which splitter(s) to narrate. Each comma-separated
+/// token is either an engine index (`12`) or a spelling — the component's
+/// document id (`c55`) or its `name` (`Opcode`) — because the index is not
+/// something a schematic tells you and guessing it wastes a run.
+fn debug_splitter_spec() -> Vec<String> {
+    static ON: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ON.get_or_init(|| {
         std::env::var("CSIM_DEBUG_SPLITTER")
-            .ok()
-            .and_then(|v| v.parse().ok())
+            .map(|v| {
+                v.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
     })
+    .clone()
 }
 
 impl DelayEngine {
@@ -2104,7 +2114,17 @@ impl DelayEngine {
             let outs = beh.eval_splitter(&nets);
             // `CSIM_DEBUG_SPLITTER=<comp idx>`: show what a splitter was handed and what
             // it drove. Env-gated, read once; inert otherwise.
-            if debug_splitter() == Some(comp) {
+            let watch = {
+                let spec = debug_splitter_spec();
+                spec.iter().any(|t| match t.parse::<u32>() {
+                    Ok(i) => i == comp,
+                    Err(_) => {
+                        let k = &self.netlist.comps[c];
+                        k.def_id == *t || k.name.as_deref() == Some(t.as_str())
+                    }
+                })
+            };
+            if watch {
                 let drv = |net: u32| {
                     self.net_drivers
                         .get(net as usize)
@@ -2127,8 +2147,10 @@ impl DelayEngine {
                     .iter()
                     .map(|(_, n)| format!("{}:[{}]", drv(n.0), n.0))
                     .collect();
+                let k = &self.netlist.comps[c];
+                eprintln!("SPLIT #{comp}:{} at t={now} in-pin nets {pins:?}", k.def_id,);
                 eprintln!(
-                    "SPLIT comp {comp} in-pin nets {pins:?} nets [{}] -> drives [{}]",
+                    "            handed [{}] -> drives [{}]",
                     nets.iter()
                         .map(|v| format!("{v}"))
                         .collect::<Vec<_>>()
