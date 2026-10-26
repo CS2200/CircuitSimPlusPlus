@@ -1567,3 +1567,60 @@ too; it just keeps stepping. **A one-pass engine cannot express that fixpoint by
 part's output rule.** The remaining question is therefore not "which value should a splitter
 drive" but "where does the iteration come from" — and that is the `374625393`/`410460509`
 work, now with a way to watch it.
+
+### Round 16: the root is the **subcircuit boundary**, not the splitter
+
+Round 15's `TRACE_LINK` enumerated the old engine's own link state per port — who is asserting
+what, not just what the net merges to — and it ended the search. On `373713172`:
+
+```
+Instr-FBUF link, cycle 1:
+  Instr#4[Register/5] = 00111101110100000000000000000000     <- the ONLY driver
+  #0[/1]              = zzzz…  (r:00111101110100000000000000000000)   <- a Tunnel peer
+  #0[Pin/1]           = zzzz…                                  <- a wiring.pin tap
+  #0[Pin/1]           = zzzz…  (r:00111101110100000000000000000000)
+```
+
+**No splitter drives the instruction bus in the old tool.** Our net 43 has three drivers
+(`c153.q` = `Instr`, `c188.bus`, **`c133/c55.bus`** — and `c133` is the *Selector instance*);
+the old tool's link has one. The extra driver is inside a subcircuit, and that is the whole
+difference:
+
+- The Selector declares `Ins` as a 32-bit **input** pin (`{"bitsize":32}`, no `isOutput`).
+- In the old tool a subcircuit's inner nets live in a **separate `Circuit`/`CircuitState`**,
+  connected only by value-copies across the boundary. The boundary is therefore
+  **one-directional**: for an input pin, outer → inner only. Nothing inside can drive the
+  outer net, so the inner splitter's bus drive never reaches the bus and there is no cycle.
+- Our expander *flattens* the boundary with a directionless union
+  (`netlist.rs`: `self.uf.union(b, child_node)`, and a `wiring.pin` "dissolves when
+  inlined (they are pure connectivity bridges)"), so the inner splitter lands on the outer
+  bus as a driver. That is the cycle `Round 15` measured, and it is why **no splitter rule
+  could fix it**: the splitter was never the thing that was wrong — the *boundary* was.
+
+The same absence explains `Round 15`'s two falsified rules and it is the honest reading of
+their numbers: suppressing a splitter's bus drive flips 141–180 submissions because it
+changes a value that in most designs is real — nothing about the splitter is wrong there.
+It was only *this* driver that should not have reached the bus, and the reason is structural.
+
+The old tool's tunnels are the same idea at a smaller scale: `Tunnel.valueChanged` **pushes**
+the (merged, others-only) value onto each same-label peer's own port rather than sharing a
+link, and it `continue`s on a disagreement — so a tunnel is a one-way copy between separate
+links with the same deferral, never a merging rule. That also confirms, from the source, the
+`Round 14` per-port delivery work.
+
+**What is left, precisely.** The flat model needs the boundary to be directional:
+
+- an **input** pin: the inner net is driven by a copy of the outer, and the inner parts do
+  **not** drive the outer;
+- an **output** pin: the outer net is driven by a copy of the inner, and the outer does not
+  drive the inner;
+- a pin in neither direction (an inout) stays a union.
+
+Since a `wiring.pin` has one port and dissolves on inlining, this has to be a *synthetic
+copy element* inserted at the bridge (the old tool's copy is free — it happens within a
+step), which is why it is not a one-line change: it alters the flat topology of **every**
+design with a subcircuit, so it needs a full corpus run in both modes, and the element's
+delay has to be zero (or the boundary's own) or every timing shifts.
+
+The evidence is now unambiguous and the lever is identified; the change itself is the next
+piece of work, not a guess.
