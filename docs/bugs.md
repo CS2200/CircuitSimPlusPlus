@@ -1733,3 +1733,44 @@ definite into `Z` at that one tick — most likely the clock mux (`c3`, `sel = H
 `PC`, `IR` and `State` all stop together and none of them advances again.
 
 `374299303` and `410460509` are the other two.
+
+### Round 19: `374625393` is frozen by a `Z` latched at one edge — and what CE samples
+
+`Register.java` says exactly what a clock edge takes:
+
+```java
+if (state.getLastReceived(getPort(PORT_ZERO)).getBit(0) == State.ONE) { pushValue = WireValue.of(0, bitSize); }
+else if (state.getLastReceived(getPort(PORT_ENABLE)).getBit(0) != State.ZERO) {
+    if (portIndex == PORT_CLK && value.getBit(0) == State.ONE) {
+        WireValue pushValue = state.getLastReceived(getPort(PORT_IN));   // the D port's LAST RECEIVED
+        state.pushValue(getPort(PORT_OUT), pushValue);                    // pushed verbatim — Z included
+```
+
+- the edge test is the **clock port's incoming value** (`value.getBit(0) == ONE`), not a live read;
+- the value latched is `getLastReceived(PORT_IN)` — the D port's last **delivered** value — pushed
+  **verbatim**, so a `Z` there is latched as `Z`;
+- a `Z` enable reads **set** (`!= State.ZERO`) and a `Z` reset **clear** (`== State.ONE` fails).
+
+Our compat arms already match all three (`z_compat`: `en` → `One`, `clk`/`rst` → `Zero`; the
+`34e83b0` "a floating `d` latches `Z`"), and the engine reads the same `views[]` a pin
+*received*. So the rules are not in question — the question is the **ordering inside the tick**.
+
+The design's steady state for `State`'s `d` is `Z`, and its select is a control word bit that
+is itself derived from the ROM addressed by `State`:
+
+```
+State.d <- c0/c34 (next-state mux), sel = control bit  <- control word <- ROM(MAIN).addr = State
+```
+
+So the next-state mux's select and the state it proposes to move to depend on each other, and
+at the edge that matters the select is `Z` — our mux drives `Z` on an invalid select, the
+register latches it verbatim, and from then on the control word, the decode mux, `opcode`,
+`HALT`, the clock mux and every clocked part are `Z` together. It never advances again.
+
+There is a real candidate divergence here, and it is narrow: the old tool reads `D`'s
+`lastReceived`, which is the value delivered to the port *most recently*, so its answer depends
+on whether the `D` link propagated before the clock link in that step. Our engine should be
+comparable — but `D`'s settled value at the edge and the clock's rise are both derived from the
+same edge, so the two can interleave, and here they do. Confirming it needs tracing **within**
+one tick (the per-cycle samplers run out), which is the next instrument; the state to explain
+is not a wrong value but a latching decision.
