@@ -1670,8 +1670,10 @@ resolution path keeps its borrow (`resolve_except_visible` short-circuits to
 `resolve_except`).
 
 **Where it applies.** Both compat resolution sites: a splitter's view of its own pins, and
-the per-sink delivery (`resolve_except_visible`). Production is gated off — the netlist change
-is recording only — and prod measured byte-identical.
+the per-sink delivery (`resolve_except_visible`), which short-circuits to `resolve_except` on
+the nets that carry no boundary — almost all of them — so the common path keeps its borrow.
+Production is gated off, and prod measured **byte-identical**: 357 rows, 198 agree, 14
+disagreements, 0 false passes, **0 flips** (`report-prod-boundary.json`).
 
 **Measured.** `report-compat-boundary2.json`, against `report-compat-skip.json`:
 
