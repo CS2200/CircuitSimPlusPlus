@@ -864,6 +864,19 @@ impl Behavior {
                     _ => match ctl(we) {
                         Bit::Zero => Ok(()),
                         we_bit => {
+                            // CE's `RAM.valueChanged`: on a store it takes
+                            // `getLastReceived(PORT_DATA)` and, *if that is not a valid
+                            // value*, stores `WireValue.of(-1, dataBits)` — all ones, a
+                            // definite value — rather than propagating the float. So
+                            // `compat` stores all ones where production stores `X`.
+                            if latch_float && din.has_z() {
+                                if let Some(a) = addr.to_u64() {
+                                    if (a as usize) < words.len() {
+                                        words[a as usize] = Value::all_ones(*bitsize);
+                                    }
+                                }
+                                return Ok(());
+                            }
                             consume(din, "din")?;
                             // addr is already consumed continuously by eval
                             // (async read); a floating address halts there.
@@ -1007,9 +1020,22 @@ impl Behavior {
                 Some(value.z_to(Bit::Zero))
             }
             BehaviorKind::Ram { .. } if pin == "we" => Some(value.z_to(Bit::Zero)),
+            // `Gate.valueChanged`'s `isX` is "every input bit is `Z`" for *every* binary
+            // gate kind, and each `operate` treats a `Z` bit as `0` (`XorGate.operate`:
+            // `acc != Z && bit != Z && acc != bit ? ONE : ZERO`). So And/Nand/Or/Nor and
+            // Xor/Xnor share exactly this rule; `not`/`buffer` are single-input, and their
+            // all-`Z` case is the only one (`Z → Z`), which the `None` arm already gives.
             BehaviorKind::Gate { op, .. }
                 if pin.starts_with("in")
-                    && matches!(op, GateOp::And | GateOp::Nand | GateOp::Or | GateOp::Nor) =>
+                    && matches!(
+                        op,
+                        GateOp::And
+                            | GateOp::Nand
+                            | GateOp::Or
+                            | GateOp::Nor
+                            | GateOp::Xor
+                            | GateOp::Xnor
+                    ) =>
             {
                 if inputs.iter().all(|v| v.is_fully_z()) {
                     None // CE's `isX`: every input bit `Z` ⇒ the gate drives `Z`
