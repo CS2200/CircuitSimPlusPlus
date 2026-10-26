@@ -2161,3 +2161,29 @@ it (a RAM driving `X`/`Z` where the old tool holds). The general shape is now pi
 on a *gated clock's select* becomes a real second edge. The next step is to find what makes
 `c3.sel` move at t=54119 — it is a definite `1`, not an `X`, so something is genuinely driving
 it high and back within 70 ns, and that driver is the thing to name.
+
+#### Resolution: the boundary exclusion lands, and it surfaces a product question
+
+The exclusion was re-tried after the plexer table entry, and the two measurements together are
+the honest picture. `_PROPAGATES_PINS` now decides *which* pins must stay undriven; `_tieable`
+decides *which nets may be tied at all* — and leaving a net undriven is what the table's own
+docstring asks for ("no constant is written in: the engine reads it as `X`, which is unknown").
+On a net that crosses a subcircuit boundary the tie was still landing, so the fix is the
+exclusion, applied for the same reason the `wiring.pin` one exists.
+
+What it costs is stated plainly rather than hidden. `submission_374246649` passes in production
+**today only because of the unfaithful tie**, which supplies a `0` where the old tool has `Z` —
+so removing it does not introduce a fidelity bug, it *discloses* one: our production engine
+promotes a floating control to `X` (a hard `FloatingRead`) where CE has a defined reading. CE's
+`WireValue.isValidValue()` is literally "no `Z` bits", and CE has no `X` at all, so CE's
+"invalid select ⇒ all-`Z`" rule *is* its rule for a floating select — unconditional, and
+`Multiplexer`/`Demultiplexer`/`Decoder` all follow it. Prod's behaviour is instead pinned by
+`mux_selects_and_ignores_unselected`, whose last case is commented "Floating select: halt" —
+a deliberate engine rule that the converter must satisfy by writing a value in.
+
+So the question is a product one, not a code one: **should production read a floating select as
+the old tool does (all-`Z`, inert) instead of halting?** Doing that would fix this design and
+`374246649` in *both* modes at once, and it would not weaken the `X` rule, which is about an
+unknown — `mux_x_select` pins that an `X` select still drives `X` in production and consumes the
+data, and CE has no counterpart for `X` at all. It is left as a stated decision here because
+changing a pinned engine contract is not something to do as a side effect of a converter fix.
