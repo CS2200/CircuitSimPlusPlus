@@ -1059,6 +1059,32 @@ trajectory then matches becomes a *test* of the conversion rather than a guess a
 semantics. That is the next experiment: give `compat` a zero-delay table and see whether
 `374625393`/`410460509` stop freezing.
 
+### Round 3: zero delay unfreezes one, so the freeze is the cycle — but not CE's fixed point
+
+`ce-zero-delay-v1` (a DIAGNOSTIC table: every `prop`/`access`/`setup`/`hold` zero, i.e.
+CircuitSim's own model) is now published so a `compat` run can be evaluated the way CE
+actually evaluates. Result on the four:
+
+| submission | node + compat | **zero-delay + compat** |
+|---|---|---|
+| `374625393` | 102 cycles, PC frozen at `0x2` | **10000 cycles** (runs, misses the halt cap) |
+| `410460509` | 160, PC `X` | 160, unchanged |
+| `374299303` | 48331 | 48331 |
+| `373713172` | 103, PC `X` | 103 |
+
+So for `374625393` the freeze *is* the combinational cycle — remove the delays and it
+stops freezing. But it does not reach CE's fixed point (CE halts it at 2709 cycles), and
+`410460509`'s cycle is untouched. That is the expected shape if the difference is not the
+delays but **where the cycle starts**: our boot seeds the loop's nets to **`0`**, while
+CircuitSim's nets start as all-**`Z`** (its `WireValue(bitSize)` default) and its
+`CircuitState.propagate()` iterates to a fixed point from there. A cycle's fixed point
+depends on its starting state, so seeding `0` and seeding `Z` can and do differ.
+
+Hypothesis 3, and the next experiment: in `compat` only, seed the loop residue with `Z`
+rather than `0` and settle to a fixed point, mirroring CE's initial value. Production
+keeps `0` (it is what makes a boot deterministic without inventing values). Measured
+before and after, and only ever inside `compat`.
+
 The other two have no cycle and need per-design work: `374299303` runs 48331 cycles and
 wanders (PC ends `0x3400001b`), `373713172`'s PC goes `X` at cycle 3 through the
 enable/selector chain.

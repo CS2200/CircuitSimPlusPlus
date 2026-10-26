@@ -1,0 +1,31 @@
+{
+  "name": "ce-zero-delay-v1",
+  "status": "DIAGNOSTIC",
+  "units": "ns",
+  "wire": { "num": 0, "den": 10 },
+  "components": {
+    "gate.not": { "prop": 0, "source": "CircuitSim CE has no delay at all; this table reproduces its evaluation" },
+    "gate.buffer": { "prop": 0, "source": "CE: no delay" },
+    "gate.and": { "prop": 0, "source": "CE: no delay" },
+    "gate.or": { "prop": 0, "source": "CE: no delay" },
+    "gate.nand": { "prop": 0, "source": "CE: no delay" },
+    "gate.nor": { "prop": 0, "source": "CE: no delay" },
+    "gate.xor": { "prop": 0, "source": "CE: no delay" },
+    "gate.xnor": { "prop": 0, "source": "CE: no delay" },
+    "wiring.controlled-buffer": { "prop": 0, "source": "CE: no delay" },
+    "plexers.mux": { "prop": 0, "source": "CE: no delay" },
+    "plexers.demux": { "prop": 0, "source": "CE: no delay" },
+    "plexers.decoder": { "prop": 0, "source": "CE: no delay" },
+    "plexers.priority-decoder": { "prop": 0, "source": "CE: no delay" },
+    "arith.adder": { "prop": 0, "source": "CE: no delay" },
+    "arith.subtractor": { "prop": 0, "source": "CE: no delay" },
+    "arith.multiplier": { "prop": 0, "source": "CE: no delay" },
+    "arith.divider": { "prop": 0, "source": "CE: no delay" },
+    "arith.comparator": { "prop": 0, "source": "CE: no delay" },
+    "arith.negator": { "prop": 0, "source": "CE: no delay" },
+    "arith.shifter": { "prop": 0, "source": "CE: no delay" },
+    "mem.register": { "prop": 0, "setup": 0, "hold": 0, "source": "CE: no delay, no setup/hold" },
+    "mem.ram": { "access": 0, "setup": 0, "hold": 0, "source": "CE: no delay" },
+    "mem.rom": { "access": 0, "source": "CE: no delay" }
+  }
+}

@@ -97,6 +97,15 @@ const BUILTIN_74LS_V2: &str = include_str!("../data/cs2200-74ls-v2.json");
 /// part.
 const BUILTIN_R2000_2UM: &str = include_str!("../data/mips-r2000-2um-v1.json");
 
+/// **`ce-zero-delay-v1` — a diagnostic, not a technology.** CircuitSim CE has no delay at
+/// all: a net's value is whatever its drivers say the instant they say it, and a
+/// combinational cycle settles to a fixed point within the tick. This table is that model
+/// — every `prop`/`access`/`setup`/`hold` zero — so `compat` can be run the way CE
+/// actually evaluates, which is what designs containing a control-word/microcode-state
+/// loop need (docs/bugs.md, "`compat` and the last four corpus rows"). It is never the
+/// default: `t_obs` under it is 0 by construction, and grading needs real delays.
+const BUILTIN_CE_ZERO: &str = include_str!("../data/ce-zero-delay-v1.json");
+
 /// Component kinds a table must define — everything with a nonzero delay
 /// in the reference table. Kinds not listed here are ideal (no delay).
 const REQUIRED_KINDS: &[&str] = &[
@@ -233,6 +242,7 @@ impl TimingTable {
             "cs2200-74ls-v1" => TimingTable::from_json(BUILTIN_74LS_V1),
             "cs2200-74ls-v2" => TimingTable::from_json(BUILTIN_74LS_V2),
             "mips-r2000-2um-v1" => TimingTable::from_json(BUILTIN_R2000_2UM),
+            "ce-zero-delay-v1" => TimingTable::from_json(BUILTIN_CE_ZERO),
             _ => Err(TableError::Unknown {
                 name: name.to_string(),
                 available: Self::builtin_names().to_vec(),
@@ -242,7 +252,12 @@ impl TimingTable {
 
     /// The table names this build ships.
     pub fn builtin_names() -> &'static [&'static str] {
-        &["mips-r2000-2um-v1", "cs2200-74ls-v2", "cs2200-74ls-v1"]
+        &[
+            "mips-r2000-2um-v1",
+            "ce-zero-delay-v1",
+            "cs2200-74ls-v2",
+            "cs2200-74ls-v1",
+        ]
     }
 
     /// The table new designs should be created with.
@@ -453,8 +468,33 @@ mod tests {
         assert_eq!(TimingTable::default_name(), "mips-r2000-2um-v1");
         assert_eq!(
             TimingTable::builtin_names(),
-            ["mips-r2000-2um-v1", "cs2200-74ls-v2", "cs2200-74ls-v1"]
+            [
+                "mips-r2000-2um-v1",
+                "ce-zero-delay-v1",
+                "cs2200-74ls-v2",
+                "cs2200-74ls-v1"
+            ]
         );
+    }
+
+    /// `ce-zero-delay-v1` is CircuitSim's own model (no delay at all) and is a
+    /// *diagnostic*: it must load, be all-zero, and never be the default.
+    #[test]
+    fn zero_delay_table_is_the_diagnostic_not_the_default() {
+        let t = TimingTable::builtin("ce-zero-delay-v1").expect("embedded zero table is valid");
+        assert_eq!(t.status(), "DIAGNOSTIC");
+        assert_ne!(TimingTable::default_name(), "ce-zero-delay-v1");
+        for kind in REQUIRED_KINDS {
+            let tm = t.timing(kind, 32);
+            assert_eq!(
+                (tm.prop, tm.setup, tm.hold, tm.access),
+                (0, 0, 0, 0),
+                "'{kind}' must be zero"
+            );
+        }
+        assert_eq!(t.mem_access("mem.ram", 65536), 0);
+        assert_eq!(t.mem_access("mem.rom", 64), 0);
+        assert_eq!(t.wire_delay(10_000), 0);
     }
 
     /// The R2000 technology: 2.0 µm CMOS logic against board-level SRAM. The point of the
