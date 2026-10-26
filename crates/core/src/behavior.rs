@@ -994,23 +994,11 @@ impl Behavior {
         }
         let mut out = Vec::with_capacity(nets.len());
         out.push(Value::from_bits(bus_drive));
-        // A split bit the *bus* is the authority for is driven from the bus; a split bit
-        // **something else already drives keeps its writer** — the splitter drives `Z`
-        // there. Driving the bus value unconditionally made the splitter a second writer
-        // on a net it only taps, and `contention_merge` then reported the disagreement as
-        // `X` (docs/bugs.md: 373713172's `X` is born exactly this way at cycle 1, on nets
-        // whose drivers are a splitter bit plus another part). That is the rule this
-        // function's own header states — "a split that has a writer of its own keeps it" —
-        // and CE's `Splitter.valueChanged` never re-asserts a bit it does not own.
-        for (si, (_, map)) in splits.iter().enumerate() {
-            let own = nets[1 + si].as_ref();
+        for (_, map) in splits.iter() {
             out.push(Value::from_bits_iter(
                 map.len() as u32,
-                map.iter().enumerate().map(|(j, &bb)| {
-                    let written = (j as u32) < own.width() && own.bit(j as u32) != Bit::Z;
-                    if written {
-                        Bit::Z
-                    } else if bb < *bus_width {
+                map.iter().map(|&bb| {
+                    if bb < *bus_width {
                         bus_bits[bb as usize]
                     } else {
                         Bit::Z
