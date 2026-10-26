@@ -2109,3 +2109,32 @@ the next step is to compare ours against that list at each transition rather tha
 time. The last two bugs were both converter misreadings of an old-tool property, so the ROM
 addressing (`Address Shift`, the address width versus the contents length) is the first place to
 look, not the last.
+
+#### The latch itself: a second rising edge inside one cycle
+
+`CSIM_DEBUG_COMP=c0/c7` — the within-tick narrator — shows the `State` register firing **twice in
+the same cycle**:
+
+```
+t=48012  c0/c7 reads [d=0x0,  clk=0x1, en=0x1, rst=0x0] -> drives 0x0
+t=50012  c0/c7 reads [d=0x14, clk=0x1, en=0x1, rst=0x0] -> drives 0x14
+t=52012  c0/c7 reads [d=0x17, clk=0x1, en=0x1, rst=0x0] -> drives 0x17
+t=54012  c0/c7 reads [d=0x0,  clk=0x1, en=0x1, rst=0x0] -> drives 0x0
+t=54201  c0/c7 reads [d=0x1f, clk=0x1, en=0x1, rst=0x0] -> drives 0x1f    <- 189 ns later
+```
+
+Every other cycle fires once; this one fires twice, 189 ns apart, with different `d`. And the
+value it ends on is the *wrong* one: `State` was `0x17`, the sequencer's raw next state is
+`SEQ[7] = 0x1f`, but the design patches the next state with the `CC` ROM's output (`0x17`,
+`MAIN[0x17] = 0x16300` is a real control word) — and `MAIN[0x1f]` is **zero**, which is the
+microstate with no control word from the section above.
+
+So the two findings are one: a second edge inside the cycle latches a `d` that the design's
+microcode never intended to be the next state, the sequencer lands on an undefined state, the PC
+advances an extra time, and the PC then fetches at `E` where the old tool jumps to `F`.
+
+This is the same *family* as Round 19's finding on the same design — a transient inside a cycle
+that the old tool's quiescence model never sees — so the next question is what makes the clock
+re-rise 189 ns into the cycle, and after that which signal selects the next-state source (the
+`SEQ` output or the `CC` patch). `t_obs` for this design is 350, so a real second edge inside
+1000 ns of half-period is not a settling artefact: something is driving the clock net twice.
