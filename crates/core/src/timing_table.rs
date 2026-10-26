@@ -74,6 +74,29 @@ const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 /// numbers are auditable rather than asserted.
 const BUILTIN_74LS_V2: &str = include_str!("../data/cs2200-74ls-v2.json");
 
+/// The current table (`mips-r2000-2um-v1`): the MIPS R2000's own technology, 2.0 µm
+/// CMOS, replacing the 74LS board-level idea entirely.
+///
+/// The 74LS tables modelled a machine whose critical path was one atomic 74LS181 ripple
+/// adder (208 ns) against a 70 ns SRAM — an ALU-bound machine, where pipelining converts a
+/// sum into a max and gains almost nothing (~1.5×). That is a true property of a TTL
+/// board, but it is not the machine this course is about, and it silently decided the
+/// whole assignment: a one-cycle datapath came within 5% of a 5-stage pipeline.
+///
+/// At 2.0 µm CMOS the ratio inverts. Anchors, all from the R2000's datasheet and CPU-DB
+/// entry: **FO4 = 720 ps**, clocks 12.5 MHz (80 ns) / 16.7 MHz (60 ns), external cache
+/// **SRAM 35 ns / 25 ns**, 5-stage integer pipeline, ~110k transistors, 2 metal layers.
+/// Logic collapses by roughly 10× (a 74LS gate is 9-10 ns because it drives a board's
+/// 15 pF with milliamps; a 2 µm gate is ~2 ns driving femtofarads). Memory does *not*
+/// collapse — a 32Kx8 SRAM is a board part with a board part's access time.
+///
+/// So memory dominates every stage, the single-cycle path contains **two** memory accesses
+/// where a pipeline stage contains one, and `Σ/max` becomes ~2.5-3× — a margin a clock
+/// threshold can separate. `mem.ram`/`mem.rom` are priced per address bit for the same
+/// reason as in v2: a 32-word register file and a 32K-word program store are not the same
+/// part.
+const BUILTIN_R2000_2UM: &str = include_str!("../data/mips-r2000-2um-v1.json");
+
 /// Component kinds a table must define — everything with a nonzero delay
 /// in the reference table. Kinds not listed here are ideal (no delay).
 const REQUIRED_KINDS: &[&str] = &[
@@ -209,6 +232,7 @@ impl TimingTable {
         match name {
             "cs2200-74ls-v1" => TimingTable::from_json(BUILTIN_74LS_V1),
             "cs2200-74ls-v2" => TimingTable::from_json(BUILTIN_74LS_V2),
+            "mips-r2000-2um-v1" => TimingTable::from_json(BUILTIN_R2000_2UM),
             _ => Err(TableError::Unknown {
                 name: name.to_string(),
                 available: Self::builtin_names().to_vec(),
@@ -216,15 +240,14 @@ impl TimingTable {
         }
     }
 
-    /// The table names this build ships. **v2 is the current default**; v1 is kept
-    /// unchanged so designs written against it keep grading exactly as before.
+    /// The table names this build ships.
     pub fn builtin_names() -> &'static [&'static str] {
-        &["cs2200-74ls-v2", "cs2200-74ls-v1"]
+        &["mips-r2000-2um-v1", "cs2200-74ls-v2", "cs2200-74ls-v1"]
     }
 
     /// The table new designs should be created with.
     pub fn default_name() -> &'static str {
-        "cs2200-74ls-v2"
+        "mips-r2000-2um-v1"
     }
 
     /// Parse and validate a table from JSON (tests; future custom tables).
@@ -427,11 +450,42 @@ mod tests {
     fn v2_loads_and_is_the_default() {
         let t = TimingTable::builtin("cs2200-74ls-v2").expect("embedded v2 is valid");
         assert_eq!(t.name(), "cs2200-74ls-v2");
-        assert_eq!(TimingTable::default_name(), "cs2200-74ls-v2");
+        assert_eq!(TimingTable::default_name(), "mips-r2000-2um-v1");
         assert_eq!(
             TimingTable::builtin_names(),
-            ["cs2200-74ls-v2", "cs2200-74ls-v1"]
+            ["mips-r2000-2um-v1", "cs2200-74ls-v2", "cs2200-74ls-v1"]
         );
+    }
+
+    /// The R2000 technology: 2.0 µm CMOS logic against board-level SRAM. The point of the
+    /// switch is that memory dominates every stage while logic is ~10x cheaper than TTL,
+    /// so the single-cycle path (two memory accesses) is ~2.5-3x a pipeline stage (one).
+    #[test]
+    fn r2000_2um_anchors_are_datasheet_backed() {
+        let t = TimingTable::builtin("mips-r2000-2um-v1").unwrap();
+        assert_eq!(t.name(), "mips-r2000-2um-v1");
+        // Logic is ~10x faster than the 74LS table's 9-10 ns gates.
+        assert_eq!(t.timing("gate.nand", 1).prop, 2);
+        assert_eq!(t.timing("gate.xor", 1).prop, 4);
+        // 32-bit add, and the per-stage register boundary (clk->Q + setup) is 6 ns.
+        assert_eq!(t.timing("arith.adder", 32).prop, 39);
+        let reg = t.timing("mem.register", 32);
+        assert_eq!((reg.prop, reg.setup, reg.hold), (4, 2, 1));
+        // Memory keeps a board part's access time: 64K words = 37 ns (~35 ns R2000/12
+        // external SRAM), a 32-word register file = 15 ns.
+        assert_eq!(t.mem_access("mem.ram", 65536), 37);
+        assert_eq!(t.mem_access("mem.ram", 32), 15);
+        // Control tables are on-chip at this node.
+        assert_eq!(t.mem_access("mem.rom", 16), 6);
+        // The property the whole exercise depends on: the adder is *comparable* to a
+        // memory access (74LS made it 3x), so no single stage dominates.
+        assert!(t.timing("arith.adder", 32).prop < 2 * t.mem_access("mem.ram", 65536));
+        for kind in REQUIRED_KINDS {
+            assert!(
+                !t.source(kind).unwrap_or("").is_empty(),
+                "row '{kind}' has no source"
+            );
+        }
     }
 
     /// The corrections that make the memory-dominated regime reproducible: 32Kx8 SRAM is

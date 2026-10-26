@@ -1,0 +1,31 @@
+{
+  "name": "mips-r2000-2um-v1",
+  "status": "DRAFT",
+  "units": "ns",
+  "wire": { "num": 0, "den": 10 },
+  "components": {
+    "gate.not": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4 (FO4 = 720 ps, R2000 datasheet / CPU-DB)" },
+    "gate.buffer": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4" },
+    "gate.and": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4" },
+    "gate.or": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4" },
+    "gate.nand": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4" },
+    "gate.nor": { "prop": 2, "source": "2.0 um CMOS, ~2-3 FO4" },
+    "gate.xor": { "prop": 4, "source": "2.0 um CMOS, ~4-6 FO4" },
+    "gate.xnor": { "prop": 4, "source": "2.0 um CMOS, ~4-6 FO4" },
+    "wiring.controlled-buffer": { "prop": 2, "source": "2.0 um CMOS tri-state buffer" },
+    "plexers.mux": { "prop": 3, "source": "2.0 um CMOS 2:1 mux, ~4 FO4" },
+    "plexers.demux": { "prop": 5, "source": "2.0 um CMOS 2-to-4 decoder, ~7 FO4" },
+    "plexers.decoder": { "prop": 5, "source": "2.0 um CMOS 3-to-8 decoder, ~7 FO4" },
+    "plexers.priority-decoder": { "prop": 6, "source": "2.0 um CMOS 8-to-3 priority encoder, ~8 FO4" },
+    "arith.adder": { "prop": 8, "perBit": 1, "source": "2.0 um CMOS 32-bit adder with partial carry lookahead = 39 ns (~54 FO4); a ripple is ~80 FO4, a full CLA ~15-20" },
+    "arith.subtractor": { "prop": 8, "perBit": 1, "source": "2.0 um CMOS 32-bit adder, subtract mode" },
+    "arith.comparator": { "prop": 6, "source": "2.0 um CMOS equality comparator, ~8 FO4" },
+    "arith.negator": { "prop": 8, "source": "2.0 um CMOS negate (adder-based)" },
+    "arith.shifter": { "prop": 3, "source": "2.0 um CMOS, one mux level" },
+    "arith.multiplier": { "prop": 60, "source": "estimate, no published 2.0 um array (unused in the corpus)" },
+    "arith.divider": { "prop": 60, "source": "estimate, no published 2.0 um array (unused in the corpus)" },
+    "mem.register": { "prop": 4, "setup": 2, "hold": 1, "source": "2.0 um CMOS DFF: clk->Q ~5 FO4, setup ~3 FO4, hold ~1.5 FO4" },
+    "mem.ram": { "access": 5, "perAddrBit": 2, "setup": 5, "hold": 2, "source": "2.0 um CMOS SRAM: decoder + array = 5 ns + 2 ns/addr bit (32Kx8 external cache SRAM = 35 ns, matching the R2000/12 spec; a 32-word register file = 15 ns)" },
+    "mem.rom": { "access": 2, "perAddrBit": 1, "source": "2.0 um CMOS on-chip ROM/PLA: 16-word control table = 6 ns, 4K words = 14 ns" }
+  }
+}

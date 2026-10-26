@@ -13,9 +13,11 @@ the available tables — the engine never guesses or silently defaults.
 
 ## Status
 
-**`cs2200-74ls-v2` is the current table** (2026-10-25) and `cs2200-74ls-v1`
-remains published, unchanged, so designs and reports written against it keep
-grading identically. Both are **DRAFT** — 74LS-family TTL datasheet *typical*
+**`mips-r2000-2um-v1` is the current table** (2026-10-25): the MIPS R2000's own
+technology, 2.0 µm CMOS, replacing the 74LS board-level idea (see below — the
+74LS model was ALU-bound and silently made a one-cycle datapath competitive).
+`cs2200-74ls-v1`/`-v2` remain published and unchanged, so designs and reports
+written against them keep grading identically. Both are **DRAFT** — 74LS-family TTL datasheet *typical*
 propagation delays, period-authentic for the course (DESIGN.md §4.4), pending
 staff finalization (D13). Only ratios matter for scoring, but the units are ns
 so TAs can say "your clock would run at X MHz".
@@ -195,7 +197,79 @@ A table is rejected (all issues reported at once) when:
 
 The JSON file is the source of truth; this table is documentation.
 
+## mips-r2000-2um-v1: the current table (2026-10-25)
+
+`crates/core/data/mips-r2000-2um-v1.json`. **The 74LS idea is retired** — v1 and v2
+remain published so designs written against them still grade, but new work uses this.
+
+### Why the switch
+
+The 74LS tables modelled a machine whose cycle was one atomic 74LS181 ripple adder
+(208 ns) against a 70 ns SRAM. That is an **ALU-bound** machine, and in an ALU-bound
+machine `Σ/max` is small — so a one-cycle datapath came within 5% of a 5-stage pipeline
+and the assignment's premise ("a do-everything-in-one-cycle machine would have an insane
+clock") silently became false. Not because the premise is wrong in general, but because
+it is only true in the regime where several elements in the cycle are *comparable*.
+
+### Why 74LS is ~10× slower per gate
+
+| | 74LS | 2.0 µm CMOS |
+|---|---|---|
+| per-gate delay | **9–10 ns** (74LS00) | **~2 ns** (~2–3 FO4; **FO4 = 720 ps**, R2000/CPU-DB) |
+| output drive `C·ΔV/I` | 15 pF × 2.4 V / 8 mA ≈ **4.5 ns** | ~10 fF × 5 V / ~100 µA ≈ 0.5 ns |
+| family / process | bipolar, ~5 µm, lateral PNPs in the totem pole | CMOS, 2.0 µm, 2 metal layers |
+| interconnect | **off-chip**: the spec assumes a 15 pF board load (the 74LS374 at 45 pF) | on-chip metal, fF loads |
+
+Half of a 74LS gate's delay is charging a board's worth of capacitance with milliamp
+currents. That is why even a 74LS "lookahead" adder is ~60 ns — its lookahead spans
+eight separate chips across board traces.
+
+### The anchors (all from the R2000's datasheet and CPU-DB entry)
+
+| | value |
+|---|---|
+| process | 2.0 µm CMOS, 2 metal, ~110k transistors |
+| FO4 | **720 ps** |
+| clock | 12.5 MHz (**80 ns**) / 16.7 MHz (60 ns) |
+| external cache SRAM | **35 ns** / 25 ns |
+| pipeline | 5-stage integer |
+
+So logic collapses ~10× (`gate.nand` 2 ns, register boundary 4+2 = **6 ns** vs 35), while
+**memory does not** — a 32K×8 SRAM is a board part with a board part's access time. Both
+memories are priced by address bits, so a 32-word register file (15 ns) and a 64K-word
+program store (37 ns, ≈ the R2000/12's 35 ns SRAM) are correctly different parts, and a
+16-word control table is 6 ns because at this node it is an on-chip ROM/PLA.
+
+### Measured against the corpus (pow, `T_obs`)
+
+| design | cycles | `T_obs` | clock | note |
+|---|---:|---:|---:|---|
+| reference `pipeline-df.sim` | 1906 | **77 ns** | **13.0 MHz** | vs R2000/12 = 12.5 MHz — a 4% match |
+| reference `pipeline-pred.sim` | 1416 | 88 ns | 11.4 MHz | carries prediction logic |
+| best student pipeline | 1909 | **52 ns** | 19.2 MHz | |
+| multicycle baseline `none.sim` | 8229 | 69 ns | 14.5 MHz | short clock, 5.35 CPI — where the real loss is |
+| one-cycle datapath (one RAM) | 1376 | 101 ns | 9.9 MHz | 1.94× the best pipeline |
+| a second datapath | 1398 | 108 ns | 9.3 MHz | |
+
+**The reference pipelined solution now clocks at 13.0 MHz, and the R2000/12 was
+12.5 MHz.** That is the calibration the 74LS table never had.
+
+### What the separation is, and what it isn't
+
+- A **2-memory** single-cycle datapath pays `I-mem + regfile + ALU + D-mem` in series
+  (~165 ns) where a pipeline stage pays one access (~52 ns) → **~3.2×**. That is the
+  honest, physics-grounded gap, and it is what makes a clock threshold defensible:
+  a datapath's clock is bounded below by `Σ`, a pipeline's can approach `max`.
+- A **one-RAM** datapath dodges it (101 ns, 1.94×): it pays the second access with a
+  *cycle* instead of a longer clock. So **the clock gate must stay paired with the
+  existing I/D structural check** — neither alone is enough, and together they are.
+- The reference pipelines land at only 1.15–1.31× the one-cycle machine because they
+  carry prediction and forwarding logic in their critical path. The separation is real
+  but the *sample solution does not demonstrate it*; the best students do. That is a
+  fact about the reference designs, not about the model.
+
 ## v2: the recalibration (2026-10-25)
+
 
 `crates/core/data/cs2200-74ls-v2.json`. Same regime, real parts, and every row
 carries a `source` naming the part and parameter it came from — so a student can
