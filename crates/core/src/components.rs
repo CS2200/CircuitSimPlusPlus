@@ -163,6 +163,16 @@ pub enum ShiftMode {
 pub enum ExtendMode {
     /// Zero-fill the new upper bits (`zero`).
     Zero,
+    /// Fill every new upper bit with `1` (`one`).
+    ///
+    /// CE's `BitExtender.ExtensionType.ONE`, whose body is
+    /// `for (i = inBits; i < outBits; i++) extended.setBit(i, State.ONE)` — it does
+    /// **not** look at the input at all. A design that wants "sign-extend" out of it
+    /// decides for itself, e.g. by comparing the input against zero and muxing `ONE`
+    /// and `ZERO` paths (the "Sign Extend" sheet of a converted datapath does exactly
+    /// that). Dropping the mode made every such path a zero-extension and silently
+    /// corrupted the offset of every negative immediate (docs/bugs.md, Round 24).
+    One,
     /// Replicate the input's top bit (`sign`).
     Sign,
 }
@@ -1047,7 +1057,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             let mut c = AttrCheck::new(attrs, &["inBits", "outBits", "mode"]);
             let in_bits = c.uint("inBits", 8, 1, MAX_BITSIZE);
             let out_bits = c.uint("outBits", 16, 1, MAX_BITSIZE);
-            let mode = c.enumeration("mode", &["zero", "sign"], "zero");
+            let mode = c.enumeration("mode", &["zero", "one", "sign"], "zero");
             c.finish();
             if out_bits <= in_bits {
                 c_issue(
@@ -1061,7 +1071,9 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                 CompKind::BitExtender {
                     in_bits,
                     out_bits,
-                    mode: if mode == "sign" {
+                    mode: if mode == "one" {
+                        ExtendMode::One
+                    } else if mode == "sign" {
                         ExtendMode::Sign
                     } else {
                         ExtendMode::Zero

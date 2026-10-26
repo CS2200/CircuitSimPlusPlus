@@ -1922,3 +1922,83 @@ very first register write, one row after the fetch of the first instruction.
 
 Compatibility corpus: 209 agree, 3 disagreements, 0 false passes, **0 flips** — every change this
 round removed a value the old tool cannot produce and broke nothing.
+### Round 24: the converter dropped CE's third bit-extender mode — `374299303`
+
+Round 22 left this one localised to a single bit: 79 rows identical to the old tool across the
+whole register file, then `$sp` = `109FFF` where CE has `9FFF` — `0x100000`, bit 20, on a
+`$sp − 1` whose previous value `A000` agreed in both. The instruments found the rest in one pass.
+
+Walking the value back:
+
+```
+$sp.d  <- net 64 (the write bus) <- c173 (DrALU buffer)
+       <- net 58 <- c27/c27, the ALU mux, sel=0 -> in0 <- c27/c30, an adder
+          a = 0xA000   b = 0x000FFFFF   cin = 0      ->  0xA000 + 0xFFFFF = 0x109FFF
+```
+
+The adder is right; **`b` is wrong**. It is the `B` register's output, and `B` is not loading
+now (`LdB = 0`), so it was loaded wrong earlier — at cycle 78, `B.d = 0xFFFFF` instead of
+`0xFFFFFFFF`. That is why every *architectural* register agreed: `B` is an internal latch and
+this add is the first thing to use it.
+
+`0xFFFFF` came from the **Sign Extend** sheet, whose input is already 20-bit:
+
+```
+pins & comps of 'Sign Extend':
+  'Input'                 wiring.pin        bitsize 20
+  POSITIVE  arith.bit-extender  inBits 20  outBits 32  mode: zero
+  NEGATIVE  arith.bit-extender  inBits 20  outBits 32  mode: zero   <- should be ONE
+  c7 comparate 20-bit signed vs 0, muxed by c14 on the sign
+```
+
+and the `.sim` says what those modes really are:
+
+```
+'Extension Type' = 'ZERO'      (POSITIVE)
+'Extension Type' = 'ONE'       (NEGATIVE)
+```
+
+CE's `BitExtender.ExtensionType` is `{ZERO, ONE, SIGN}`, and `ONE` is a mode of its own:
+
+```java
+case SIGN: if (extended.getBit(inputBitSize - 1) != State.ONE) break;   // sign bit 0 -> zeros
+case ONE:  for (int i = inputBitSize; i < outputBitSize; i++) extended.setBit(i, State.ONE);
+case ZERO: break;
+```
+
+`ONE` fills the new upper bits with `1` and **never looks at the input** — which is how a
+design builds a sign extender by hand, comparing and muxing `ONE` against `ZERO`. It is the
+mode this sheet uses on its NEGATIVE path, and the converter never produced it:
+
+```python
+attrs["mode"] = "sign" if str(p.get("Extension Type", "ZERO")) == "SIGN" else "zero"
+```
+
+`"SIGN"` is a name the old tool can write, but it is not the one designs actually use — so
+**every `ONE` became `zero`**, inverting the extension of every negative immediate. And the
+new format had no `one` mode at all, so `ONE` was not merely mis-read: it was **not
+expressible**. Both halves are fixed:
+
+- `arith.bit-extender`'s `mode` is now `zero`/`one`/`sign`, with `one` implemented exactly as
+  CE's `case ONE`;
+- the converter maps the three names, treats an *absent* property as CE's own default
+  (`ZERO`), and **reports** an unrecognised one instead of silently defaulting — the silent
+  default is what hid this for so long.
+
+Pinned on both sides: `bit_extender` in `behavior.rs` (including that `one` ignores the input,
+unlike `sign`) and `test_all_three_bit_extender_extension_types_are_carried` in the
+transpiler's suite.
+
+**Measured.** `report-compat-extend.json`, against `report-compat-ramhold.json`:
+
+| | before | after |
+|---|---|---|
+| agree | 209 | **210** |
+| disagreements | 3 | **2** |
+| false passes | 0 | 0 |
+| flips | — | **1: `374299303` pass → pass (fixed)** |
+
+`374299303` now halts with the expected state. The two left are `374625393` and `410460509`.
+Both halves of a design's `ONE` path are now expressible and converted, so this is not a fix
+for one submission: it was inverting the extension of every negative immediate in every
+converted design that used the mode.

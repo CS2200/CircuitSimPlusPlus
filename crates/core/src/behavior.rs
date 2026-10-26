@@ -747,6 +747,22 @@ impl Behavior {
                 consume(ins[0], "in")?;
                 Ok(vec![match mode {
                     ExtendMode::Zero => ins[0].zero_extend(*out_bits),
+                    // CE's `ONE`: fill bits `inBits..outBits` with 1, ignoring the input
+                    // (`BitExtender.valueChanged`'s `case ONE`). The low `inBits` are just
+                    // the zero-extended input.
+                    ExtendMode::One => {
+                        let in_bits = ins[0].width();
+                        Value::from_bits_iter(
+                            *out_bits,
+                            (0..*out_bits).map(|i| {
+                                if i >= in_bits {
+                                    Bit::One
+                                } else {
+                                    ins[0].bit(i)
+                                }
+                            }),
+                        )
+                    }
                     ExtendMode::Sign => ins[0].sign_extend(*out_bits),
                 }])
             }
@@ -1936,6 +1952,27 @@ mod tests {
             json!({"inBits": 1, "outBits": 4, "mode": "sign"}),
         );
         assert_eq!(sx2.eval(&refs(&[Value::x(1)])).unwrap(), vec![Value::x(4)]);
+
+        // `one`: fill the new upper bits with 1, **ignoring the input** — CE's
+        // `BitExtender.valueChanged` `case ONE` (`for (i = inBits; i < outBits; i++)
+        // extended.setBit(i, ONE)`), which falls through from `case SIGN` only when the
+        // sign bit is 1. A design that wants a sign extender out of it decides for itself
+        // (comparing and muxing against a `zero` path), so reading it as `zero` inverts
+        // every negative immediate — a real submission's `$sp` came out `0x109FFF` instead
+        // of `0x9FFF` that way (docs/bugs.md, Round 24).
+        let ox = mk(
+            "arith.bit-extender",
+            json!({"inBits": 8, "outBits": 16, "mode": "one"}),
+        );
+        assert_eq!(ox.eval(&refs(&[k(8, 0x81)])).unwrap(), vec![k(16, 0xFF81)]);
+        assert_eq!(
+            ox.eval(&refs(&[k(8, 0x71)])).unwrap(),
+            vec![k(16, 0xFF71)],
+            "unlike `sign`, `one` does not look at the input"
+        );
+        assert_eq!(ox.eval(&refs(&[k(8, 0x00)])).unwrap(), vec![k(16, 0xFF00)]);
+        // The low `inBits` are still the input's own bits.
+        assert_eq!(ox.eval(&refs(&[k(8, 0xAB)])).unwrap(), vec![k(16, 0xFFAB)]);
     }
 
     // ---- Splitter ------------------------------------------------------
