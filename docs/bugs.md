@@ -1840,3 +1840,40 @@ Measured on the compat corpus, against `report-compat-boundary2.json` (357 rows,
 3 disagreements, 0 false passes): **0 flips**, so holding is verdict-neutral — as it should be,
 since it removes a value rather than supplying one. Production is gated off. Snapshot:
 `report-compat-ramhold.json`.
+
+### Round 21: `374625393` now executes — where it parts next
+
+With the RAM hold in, the design tracks the old tool **exactly** for 26 cycles: the whole
+register file is identical row for row (`$at..$ra`, `$sp = A000`) and `PC` advances on CE's own
+cadence. The first difference is a branch:
+
+```
+CE[ 24] PC=  D  IR= 56700001        ours[ 25] PC=  D  IR= 56700001
+CE[ 26] PC=  F  IR= 61F00000        ours[ 27] PC=  E  IR= 61F00000   <- CE takes it, we don't
+```
+
+`56700001` is a `bne` (opcode `5`) with immediate `1`, so CE's target is `PC+1+1 = F` (the delay
+slot) and ours is the fall-through `E`. The register file at that row is *identical*, so the
+operands agree and the decision logic is what differs — and `--sta` had already named this
+design's critical path **"Comparison Logic"**, a subcircuit whose output steers the
+microsequencer's ROM (`c100/c30.out → c0/c38.addr`).
+
+Reading that sheet's own nets around the branch:
+
+```
+cycle 25   c21.eq=1 (opcode==5)  c23.eq=1 (A-B==0)  c24.out=0  c31.out(Jump)=1
+cycle 26   c21.eq=1              c23.eq=0           c24.out=1  c31.out(Jump)=0
+cycle 27   c23.*=Z  (A-B, net 38, is Z)
+```
+
+so `Jump` is `1` at cycle 25 and `0` at cycle 26, the branch is *not* taken, and the comparison's
+operand (`A - B`, the shared bus net 38) is `Z` by cycle 27. The branch is decided from a signal
+that pulses at one microstep and is stale at the next — the same *family* as the RAM hold: a bus
+that CE keeps at its last value and ours drops to `Z` once the enabled driver stops. That is the
+thread to pull next, and it is now localised to a sheet, a net and two cycles.
+
+Instrumentation added this round: `CSIM_DEBUG_COMP` (one part's every evaluation, with its
+timestamp and what it *read* — the per-cycle samplers cannot see a latch decision made inside a
+cycle), and `probe_trace`'s name matching now trims whitespace, because the old tool's labels
+routinely carry leading or trailing spaces (`" $a0"`) and one stray space silently turns a whole
+trace column into `?`.

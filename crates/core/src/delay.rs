@@ -3204,13 +3204,19 @@ mod tests {
             "$at", "$v0", "$a0", "$a1", "$a2", "$t0", "$t1", "$t2", "$s0", "$s1", "$s2", "$k0",
             "$sp", "$fp", "$ra",
         ];
+        // Match on the *trimmed* name: the old tool's labels routinely carry leading or
+        // trailing spaces (`" $a0"`, `"IR "`), and the suffix is what identifies the part,
+        // so a stray space silently turning a whole column into `?` is a trap.
         let pick = |suffix: &str| -> Option<String> {
             eng.netlist()
                 .named
                 .iter()
                 .filter(|n| n.kind == crate::api::NamedKind::Register)
                 .map(|n| n.name.clone())
-                .find(|n| n.as_str() == suffix || n.ends_with(&format!("/{suffix}")))
+                .find(|n| {
+                    let bare = n.rsplit('/').next().unwrap_or(n).trim();
+                    bare == suffix.trim()
+                })
         };
         // `PROBE_NAMES` (comma-separated suffixes) overrides the default register list,
         // so any named part can be traced: pipeline latches, control words, memories.
