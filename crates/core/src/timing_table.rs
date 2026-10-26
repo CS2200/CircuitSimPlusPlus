@@ -59,11 +59,16 @@ const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 /// - **Memory was ~40% too fast.** v1 charged SRAM/ROM 50 ns; the real parts are a
 ///   62256-70 (`tAA` 70 ns) and a 27C256-120 (`tACC` 120 ns). This is the term that
 ///   makes the memory-dominated MIPS regime reproducible — see `docs/delay-table.md`.
-/// - **The adder was charged as a ripple chain.** v1's `prop 15 + perBit 4` is 139 ns for
-///   32 bits; a real 74LS181 slice is 22 ns typ and a board uses the 74LS182 lookahead,
-///   so 32 bits is ~53 ns. v1 therefore paired its worst-case ALU with its best-case
-///   memory, maximizing the ALU's share of the critical path — the opposite of the
-///   R2000, whose clock was set by its external SRAM (`R2000/12` 12.5 MHz @ 35 ns).
+/// - **The adder was charged as a ripple chain — kept.** v1's `prop 15 + perBit 4` is
+///   139 ns for 32 bits; a real 74LS181 slice is 22 ns typ and inter-slice carry is
+///   ~25 ns, so a 32-bit ripple add is **208 ns**. v1 therefore paired its worst-case
+///   ALU with its best-case memory (50 ns), maximizing the ALU's share of the critical
+///   path — the opposite of the R2000, whose clock was set by its external SRAM
+///   (`R2000/12` 12.5 MHz @ 35 ns). v2 charges both honestly: memory 70/120 ns, ripple
+///   adder 208 ns. The adder is the term a *single-cycle* machine serializes twice
+///   (PC+4 and the ALU op) and a pipeline only once per stage, which is what makes
+///   pipelining pay (see `docs/delay-table.md` for the measurement). A lookahead
+///   variant (`74LS182`, 53 ns @ 32) flips that — kept as a documented staff option.
 ///
 /// Every entry carries a `source` naming the part and parameter it came from, so the
 /// numbers are auditable rather than asserted.
@@ -395,20 +400,21 @@ mod tests {
         );
     }
 
-    /// The two corrections that make the memory-dominated regime reproducible:
-    /// 32Kx8 SRAM is a 62256-70, EPROM is a 27C256-120, and a 32-bit add is a
-    /// 74LS181 slice chain with a 74LS182 lookahead, not a ripple chain.
+    /// The corrections that make the memory-dominated regime reproducible: 32Kx8 SRAM is
+    /// a 62256-70, EPROM is a 27C256-120, and a 32-bit add is a **ripple** 74LS181 chain
+    /// (208 ns) — the term a single-cycle machine serializes twice.
     #[test]
     fn v2_anchors_are_datasheet_backed() {
         let t = TimingTable::builtin("cs2200-74ls-v2").unwrap();
         assert_eq!(t.timing("mem.ram", 32).access, 70);
         assert_eq!(t.timing("mem.ram", 32).setup, 30);
         assert_eq!(t.timing("mem.rom", 32).access, 120);
-        assert_eq!(t.timing("arith.adder", 32).prop, 53);
+        assert_eq!(t.timing("arith.adder", 32).prop, 208);
         let reg = t.timing("mem.register", 32);
         assert_eq!((reg.prop, reg.setup, reg.hold), (15, 20, 5));
-        // A 32-bit add no longer costs more than a memory access.
-        assert!(t.timing("arith.adder", 32).prop < t.timing("mem.ram", 32).access);
+        // A 32-bit add costs more than a memory access: that asymmetry is what makes a
+        // pipeline (one add per stage) beat a one-cycle machine (two adds per cycle).
+        assert!(t.timing("arith.adder", 32).prop > t.timing("mem.ram", 32).access);
         // Every row names where its numbers came from.
         for kind in REQUIRED_KINDS {
             let src = t.source(kind).unwrap_or("");

@@ -207,8 +207,8 @@ check any number against a datasheet instead of guessing what the grader thinks.
 |---|---:|---:|---|
 | `mem.ram.access` | 50 | **70** | 62256‑70, `tAA` 70 ns (write `tSD` 30, so `setup` 15→30) |
 | `mem.rom.access` | 50 | **120** | 27C256‑120, `tACC` 120 ns |
-| `arith.adder` | `15 + 4/bit` = 139 @32 | **`22 + 1/bit` = 53 @32** | 74LS181 slice (22 ns typ) + 74LS182 carry lookahead |
-| `arith.subtractor` | 139 @32 | **53 @32** | same, subtract mode |
+| `arith.adder` | `15 + 4/bit` = 139 @32 | **`22 + 6/bit` = 208 @32** | 74LS181 ripple chain (22 ns slice + 25 ns/slice carry) |
+| `arith.subtractor` | 139 @32 | **208 @32** | same, subtract mode |
 | `arith.comparator` | 15 | **26** | 74LS688 8-bit identity comparator |
 | `arith.negator` | 15 | **22** | 74LS181 in `0 − B` mode |
 | `plexers.mux` | 12 | **9** | 74LS157 data→Y 9 ns typ (select→Y 15–23) |
@@ -229,19 +229,21 @@ exists, and neither appears in the corpus. They are marked as estimates in their
 
 ### The two things this fixes
 
-1. **Memory is no longer the cheap element.** A 32-bit add (53 ns) now costs
-   *less* than one SRAM access (70 ns), which is the R2000's own proportion:
-   its 60–80 ns cycle was ~45% external SRAM. A design that does fetch and
-   execute in one cycle must therefore pay two accesses in series; a pipeline
-   pays one per stage. That is the historical argument for pipelining, and it
-   is now visible in `t_obs` rather than asserted in a rubric.
-2. **The lookahead adder is the default.** The 74LS181 datasheet offers ripple
-   ("when speed requirements are not stringent") and, with the 9342/74LS182,
-   lookahead ("for high speed operation … over extremely long word lengths").
-   v2 charges the lookahead, because that is what a board replicating MIPS
-   would use — and because it stops the adder from being an artefactual floor
-   that no amount of pipelining can remove. A ripple design is still slower and
-   the path report will say so.
+1. **Memory and the adder are both charged honestly.** The 32Kx8 SRAM is a
+   62256‑70 (70 ns) and the EPROM a 27C256‑120 (120 ns); a 32-bit add is a
+   real 74LS181 ripple chain at 208 ns. v1 paired a *best-case* memory (50 ns)   with a *worst-case* ALU (ripple, 139 ns), which is the one combination that
+   maximizes the ALU's share of the critical path.
+2. **The adder asymmetry is what makes pipelining pay.** A one-cycle machine
+   serializes **two** adds (PC+4 and the ALU op) into a single clock period; a
+   pipeline does one per stage. With a 208 ns ripple adder that serialization is
+   expensive (467 vs 250 ns on the measured pair below) — which is the
+   historical argument for pipelining, now visible in `t_obs` rather than
+   asserted in a rubric. The 74LS181 datasheet offers ripple ("when speed
+   requirements are not stringent") and, with the 9342/74LS182, lookahead ("for
+   high speed operation … over extremely long word lengths"); the MIPS team's
+   own boards used ripple, so v2 charges ripple. A **lookahead variant**
+   (`22 + 1/bit` = 53 ns @ 32) is the documented alternative — see the
+   measurement below for why it changes who wins.
 
 ### Calibration targets
 
@@ -253,37 +255,49 @@ Published machines to sanity-check a design against, rather than a made-up scale
 | MIPS R2000/16 | **16.7 MHz** (60 ns) | external SRAM 25 ns |
 | Harvey Mudd / MOSIS student MIPS (AMI 0.5 µm) | **7.25 MHz** (138 ns) | 34 undergrads, 160k transistors |
 
-### Measured: the adder choice, not the memory, decides whether pipelining pays
+### Measured: the adder choice decides whether pipelining pays
 
-`T_obs` (ns) for the same design under the two tables, and under a v2 variant whose
-only difference is a **ripple** adder (`22 + 6/bit` = 208 ns @ 32 bits — the 74LS181's
-"when speed requirements are not stringent" mode):
+`T_obs` (ns, pow), measured on the corpus's design families. **v2 ships the ripple
+adder**; the last column is the lookahead variant (`22 + 1/bit` = 53 ns @ 32 bits):
 
-| design | v1 | v2 (lookahead) | v2 (ripple) |
+| design | v1 | **v2 (ripple, shipped)** | v2 (lookahead variant) |
 |---|---:|---:|---:|
-| `none.sim` — multicycle baseline | 282 | 327 | 415 |
-| `pipeline-df.sim` — reference 5-stage | 290 | 224 | 379 |
-| `pipeline-pred.sim` — reference 5-stage + prediction | 322 | 272 | 449 |
-| single-cycle datapath (corpus) | 346 | **216** | **467** |
-| fastest-clock 5-stage (corpus) | 195 | 227 | 250 |
-| a real field design | 494 | 460 | 690 |
+| `none.sim` — multicycle baseline | 282 | 415 | 327 |
+| `pipeline-df.sim` — reference 5-stage | 290 | 379 | 224 |
+| `pipeline-pred.sim` — reference 5-stage + prediction | 322 | 449 | 272 |
+| fastest-clock 5-stage (corpus) | 195 | **250** | 227 |
+| one-cycle datapath (corpus) | 346 | **467** | 216 |
+| a real field design | 494 | 690 | 460 |
 
-Two things this measured, both worth knowing before choosing:
+With ripple the pipeline wins by ~1.9×; with the lookahead the one-cycle machine
+wins and would be the fastest submission in the corpus. So the adder is the lever,
+not the memory.
 
-1. **The memory fix alone does not separate a one-cycle machine from a pipeline.**
-   The one-cycle design's critical path is `PC → mux → RAM → mux → PC`: **one**
-   memory access, not two (its fetch and execute share the same small RAM and
-   overlap). Raising RAM 50→70 lengthens both designs by about the same amount.
-2. **The adder is the lever.** A one-cycle machine serializes *two* adds (PC+4 and
-   the ALU op); a pipeline does one per stage. So a cheap adder removes the very
-   term that penalizes serialization: with the lookahead adder the one-cycle
-   machine wins (216 vs 227); with the **ripple** adder it loses by ~1.9× (467 vs
-   250). The RISC argument for pipelining in this table is therefore carried by the
-   adder, which is exactly why the MIPS team's choice of adder matters more than
-   their choice of memory.
+Why the memory fix alone does *not* separate them: the one-cycle design's critical
+path is `PC → mux → RAM → mux → PC` — **one** memory access, not two (its fetch and
+execute share the same RAM and overlap), so raising RAM 50→70 lengthens both sides
+about equally.
 
-This is a **staff decision** (D13): shipping the lookahead makes a well-built
-one-cycle machine the fastest design in the corpus; shipping the ripple restores
-the pipeline's advantage and matches the 74LS181 in its slow mode. Either is
-self-consistent — the table states which, and every row names its part.
+### Measured: cycles per instruction (why a "one-cycle" design is competitive at all)
+
+Cycles per PC change (a `changes:` stop), i.e. cycles per instruction issued:
+
+| design | CPI | note |
+|---|---:|---|
+| multicycle baseline `none.sim` | **5.35** | microcoded; this is what pipelining/one-cycle buys back |
+| reference `pipeline-pred.sim` | **1.01** | 5 stages, prediction |
+| fastest-clock 5-stage (corpus) | **1.01** | BTFNT + careful paths |
+| one-cycle datapath (corpus) | **1.10** | hardwired control, no pipeline latches |
+
+So the one-cycle design is *not* free lunch: it issues at 1.10 cycles/instruction
+against the best pipeline's 1.01. It wins the clock because it carries two costs a
+pipeline does not — a **control ROM** in a stage (a 16-entry ROM on the critical
+path, 120 ns at real ROM timing) and **forwarding/hazard logic**. A pipeline whose
+stage is longer than a one-cycle machine's whole instruction path cannot win, no
+matter how many stages it has. That is the CISC-vs-RISC lesson arriving on its own,
+and it is the whole reason the adder choice matters: a cheap adder makes the
+one-cycle machine's only real penalty (serialized adds) free.
+
+This is a **staff decision** (D13). Either table is self-consistent; v2 states which
+it is, and every row names its part.
 
