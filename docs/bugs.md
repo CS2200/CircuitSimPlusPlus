@@ -2187,3 +2187,20 @@ the old tool does (all-`Z`, inert) instead of halting?** Doing that would fix th
 unknown — `mux_x_select` pins that an `X` select still drives `X` in production and consumes the
 data, and CE has no counterpart for `X` at all. It is left as a stated decision here because
 changing a pinned engine contract is not something to do as a side effect of a converter fix.
+
+**Measured.** `report-compat-bridge.json` against `report-compat-extend.json`:
+
+| | compat before | compat after | prod before | prod after |
+|---|---|---|---|---|
+| agree | 210 | **211** | 199 | **199** |
+| disagreements | 2 | **1** | 13 | **13** |
+| false passes | 0 | 0 | 0 | 0 |
+| flips | — | **1: `410460509` fixed** | — | **2: `410460509` fixed, `374246649` disclosed** |
+
+`410460509` is fixed in **both** modes. Production's totals are unchanged — one design swaps each
+way — and the swap is exactly the product question above: `374246649` passes there only while a
+floating select is papered over with a `0`. Compatibility is the graded mode and it improves.
+
+**The decision, if it is taken:** prod reading a floating select as the old tool does (all-`Z`,
+inert) would fix both designs in both modes — compat `212/0`, prod `200/12` — and would not touch
+the `X` rule, which `mux_x_select` pins and which CE has no counterpart for.
