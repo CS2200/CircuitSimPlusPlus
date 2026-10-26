@@ -747,6 +747,15 @@ pub struct NetDump {
     pub view: Option<String>,
 }
 
+fn debug_boot() -> Option<u32> {
+    static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("CSIM_DEBUG_BOOT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    })
+}
+
 fn debug_splitter() -> Option<u32> {
     static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -1084,6 +1093,27 @@ impl DelayEngine {
             .for_each(|t| *t = ClockTrack::default());
         if eng.halted.is_none() {
             eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
+        }
+        // `CSIM_DEBUG_BOOT=<net idx>`: what every driver of that net had committed when the
+        // boot settle finished. Env-gated; inert otherwise.
+        if let Some(net) = debug_boot() {
+            let ds = &eng.net_drivers[net as usize];
+            eprintln!(
+                "BOOT net {net} = {} | drivers [{}]",
+                eng.net_values[net as usize],
+                ds.iter()
+                    .map(|&(c, slot)| {
+                        let k = &eng.netlist.comps[c as usize];
+                        format!(
+                            "#{c}:{}({})= {}",
+                            k.name.clone().unwrap_or_else(|| k.type_.clone()),
+                            k.type_,
+                            eng.drives[c as usize][slot]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
         }
         Ok(eng)
     }
@@ -2072,6 +2102,18 @@ impl DelayEngine {
                 }
             }
         };
+        let mut outs = outs;
+        // `compat`: CE's registers **drive nothing at power-on** — `Component.init` is a
+        // no-op, `Register` does not override it, and `CircuitState.reset()` replaces every
+        // link with a fresh `LinkState` (all-`Z`), so a register's output port holds `Z`
+        // until its first clock edge. We drive the power-on *state* (`0`), and in a
+        // combinational loop that definite `0` is a value CE never has: it is exactly the
+        // seed that makes a splitter pair assemble `0` and then fight the instruction bus
+        // (docs/bugs.md, `CSIM_DEBUG_BOOT`). Internal state is untouched.
+        if self.compat && self.in_boot && matches!(self.cdata[c].class, Class::Register) {
+            let w = self.netlist.comps[c].pins[self.cdata[c].out_pins[0].0].width;
+            outs = vec![Value::z(w)];
+        }
         if outs == self.pending_val[c] {
             return Ok(()); // already scheduled to commit exactly this
         }
