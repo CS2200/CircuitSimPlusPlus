@@ -2572,7 +2572,14 @@ impl DelayEngine {
         let mut attempts = 0;
         loop {
             let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
-            match self.comps[c].rising_edge(&refs) {
+            // `compat` uses CE's edge (docs/bugs.md): a floating data pin is latched as
+            // `Z` rather than promoted to `X`, which no consumer can recover from.
+            let edge = if self.compat {
+                self.comps[c].rising_edge_compat(&refs)
+            } else {
+                self.comps[c].rising_edge(&refs)
+            };
+            match edge {
                 Ok(()) => break,
                 Err(fr) => {
                     attempts += 1;

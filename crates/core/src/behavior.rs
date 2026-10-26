@@ -778,6 +778,21 @@ impl Behavior {
     /// module-header table. The engine calls this only when it observed a
     /// 0→1 transition on the `clk` net.
     pub fn rising_edge(&mut self, ins: &[&Value]) -> Result<(), FloatingRead> {
+        self.rising_edge_inner(ins, false)
+    }
+
+    /// `compat`'s edge (docs/bugs.md, "`compat` and the last four corpus rows"): the same
+    /// as [`rising_edge`] except that a floating **data** pin is *latched* rather than
+    /// consumed. CE's `Register.valueChanged` pushes `state.getLastReceived(PORT_IN)`
+    /// verbatim, so a `Z` data input leaves a CE register holding `Z` — and CE's consumers
+    /// then apply their own rules to it (`isValidValue()` drives all-`Z`; a gate reads `Z`
+    /// as `0`). Promoting it to `X` instead is unrecoverable: the diagnostic only ever
+    /// intervenes on a `Z` read, and `X` is not `Z`.
+    pub fn rising_edge_compat(&mut self, ins: &[&Value]) -> Result<(), FloatingRead> {
+        self.rising_edge_inner(ins, true)
+    }
+
+    fn rising_edge_inner(&mut self, ins: &[&Value], latch_float: bool) -> Result<(), FloatingRead> {
         match &mut self.kind {
             BehaviorKind::Register { state } => {
                 // Pin signature (input order): d, clk, en, rst. `clk` needs no
@@ -798,18 +813,22 @@ impl Behavior {
                     // Synchronous reset wins over enable.
                     Bit::One => *state = Value::zero(w),
                     Bit::X => {
-                        if ctl(en) != Bit::Zero {
+                        if ctl(en) != Bit::Zero && !latch_float {
                             consume(d, "d")?;
                         }
                         *state = Value::x(w);
                     }
                     _ => match ctl(en) {
                         Bit::One => {
-                            consume(d, "d")?;
+                            if !latch_float {
+                                consume(d, "d")?;
+                            }
                             *state = d.clone();
                         }
                         Bit::X => {
-                            consume(d, "d")?;
+                            if !latch_float {
+                                consume(d, "d")?;
+                            }
                             *state = Value::x(w);
                         }
                         _ => {} // hold

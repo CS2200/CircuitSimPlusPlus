@@ -1024,3 +1024,41 @@ Implement hypothesis 1 behind `compat` only (production stays byte-identical), m
 the four and then the corpus, and take a snapshot per round. Then walk CE's component
 sources (`components/*/*.java` `valueChanged`) and complete `z_compat` arm by arm,
 measuring after each.
+
+### Round 2: hypothesis 1 is necessary but not sufficient; the four split in two
+
+Implemented hypothesis 1 behind `compat` only (`Behavior::rising_edge_compat`, called from
+the engine's edge path when `compat`): a floating **data** pin is latched as `Z` instead of
+promoted to `X`. Production is byte-identical (verified: the four still run 103 / 48331 /
+102 / 160 cycles and `t_obs` is unchanged); under `compat` it is active — `374625393`'s
+microcode address register `State` holds `X` at cycle 2 before and **`Z`** after, and the
+design's `t_obs` moves 350 → 340. The machine still freezes, so the X was a *symptom*: the
+next-state logic is `Z` upstream of the register.
+
+The four are not one bug. `csim timing --sta` splits them cleanly:
+
+| submission | `t_sta` | `sta_note` |
+|---|---|---|
+| `374625393` | none | **combinational cycle**: no fixed point through 33 components |
+| `410460509` | none | **combinational cycle**: no fixed point through 25 components |
+| `374299303` | 275 | normal structural bound |
+| `373713172` | 226 | normal structural bound |
+
+So **two of the four contain a combinational cycle** (control word ↔ microcode state) whose
+fixed point **CE resolves and we do not**: CircuitSim has *no delay at all*, so its cycle
+settles instantly to a definite value, while our delay-aware settle leaves it `Z` — and
+`compat`'s per-pin table cannot recover it, because every arm assumes the value *arrived*.
+
+That reframes the fix. `compat` is described as "CE's per-consumer floating-read reading",
+but the thing the last rows actually need is **CE's zero-delay settle**, not a per-pin
+reading rule. The team already built and reverted a zero-delay/fixpoint engine (measured 0
+gains / 1 regression, in *production*). As a **`compat`-only** mode — where `t_obs` is not
+wanted, only CE's trajectory — it is the unfaithful half: production stays delay-aware and
+graded; `compat` iterates each cycle to a fixed point the way CE does, and whether the
+trajectory then matches becomes a *test* of the conversion rather than a guess about `Z`
+semantics. That is the next experiment: give `compat` a zero-delay table and see whether
+`374625393`/`410460509` stop freezing.
+
+The other two have no cycle and need per-design work: `374299303` runs 48331 cycles and
+wanders (PC ends `0x3400001b`), `373713172`'s PC goes `X` at cycle 3 through the
+enable/selector chain.
