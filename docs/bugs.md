@@ -1211,3 +1211,39 @@ gather on every evaluation, so a split driven by *another splitter* (here the tw
 share both the bus and a split net) is gathered back and re-asserted on the bus, where `Instr`
 already drives it. **Next: make the bus drive stateful the way CE is — own last value plus the
 changed split's bits — behind measurement (it touches both modes).**
+
+### Round 7: the short is a two-splitter feedback pair, name by name
+
+`CSIM_DEBUG_SPLITTER=<comp idx>` (env-gated, inert) prints a splitter's in-pin nets with
+their **drivers** and values, and what it drove. Following `373713172`'s short gives:
+
+```
+SPLIT comp 147 in-pin nets [
+  "#28:wiring.splitter+#59:Instr+#147:wiring.splitter:[43]",   <- the instruction bus
+  "#147+#237:[242]", "#147+#237:[243]", "#147:[244]", "#147:[245]",
+  "#28:wiring.splitter+#147:wiring.splitter:[48]"]             <- out4, shared
+  nets [0x0, z, z…, z, z, 0x0] -> drives [0b0000zzzz…, 0x5, 0x3, 0x0, 0xd, 0x9]
+```
+
+So `#147`'s `out4` (net 48) is driven by **`#28` and `#147` — and nothing else** — and it
+reads `0x0`. `#147` therefore claims bus bits 28–31 as `0`, and `Instr` drives `0x9` there:
+bits 28 and 31 disagree, and `contention_merge` reports `X`.
+
+**Two splitters, `#28` and `#147`, share *both* the instruction bus (net 43) and a split net
+(net 48).** Each one reads the other's drive on net 48 (its pins' nets exclude its own
+contribution) and gathers it back onto the shared bus — a two-splitter feedback pair whose
+settled value (`0x0`) then fights `Instr`.
+
+That leaves exactly two possibilities, and they are distinguishable:
+
+1. **The design does not wire those two `out4`s together** — then the conversion/netlist merge
+   (union-find over the format's wires) has joined two nets CE keeps apart, and every
+   downstream symptom follows. That would be a *converter* bug, and the fix is in the
+   transpiler/netlist, not the engine.
+2. **The design does wire them together** — then CE's `Splitter.valueChanged` would push the
+   same feedback and CE's `WireValue.merge` would throw `ShortCircuitException`, which it did
+   not. In that case the difference is *load order*: CE's `propagate()` processes changes in
+   its own order, and ours in `(time, prio, seq)`.
+
+Checking (1) is direct — read the format's wires at the two `out4` pins of the Selector's
+splitters and see whether they are one net or two — and it decides which side to fix.

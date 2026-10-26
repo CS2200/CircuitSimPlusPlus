@@ -747,6 +747,15 @@ pub struct NetDump {
     pub view: Option<String>,
 }
 
+fn debug_splitter() -> Option<u32> {
+    static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("CSIM_DEBUG_SPLITTER")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    })
+}
+
 impl DelayEngine {
     /// Build the engine. `clock_half_period` is in delay-table units
     /// (ns); it should exceed the design's true critical path or setup
@@ -1920,6 +1929,7 @@ impl DelayEngine {
     /// inertial cancellation (module docs). `cause` is the input net
     /// whose change triggered this evaluation (path tracking).
     fn eval_and_schedule(&mut self, comp: u32, now: u64, cause: Option<u32>) -> Result<(), Halt> {
+        let _ = cause;
         let c = comp as usize;
         let cd = &self.cdata[c];
         let beh = &self.comps[c];
@@ -1931,7 +1941,45 @@ impl DelayEngine {
                     ec::resolve_except(&self.netlist, &self.net_drivers, &self.drives, *net, comp)
                 })
                 .collect();
-            beh.eval_splitter(&nets)
+            let outs = beh.eval_splitter(&nets);
+            // `CSIM_DEBUG_SPLITTER=<comp idx>`: show what a splitter was handed and what
+            // it drove. Env-gated, read once; inert otherwise.
+            if debug_splitter() == Some(comp) {
+                let drv = |net: u32| {
+                    self.net_drivers
+                        .get(net as usize)
+                        .map(|ds| {
+                            ds.iter()
+                                .map(|&(c, _)| {
+                                    let k = &self.netlist.comps[c as usize];
+                                    format!(
+                                        "#{c}:{}",
+                                        k.name.clone().unwrap_or_else(|| k.type_.clone())
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("+")
+                        })
+                        .unwrap_or_default()
+                };
+                let pins: Vec<String> = self.cdata[c]
+                    .in_pins
+                    .iter()
+                    .map(|(_, n)| format!("{}:[{}]", drv(n.0), n.0))
+                    .collect();
+                eprintln!(
+                    "SPLIT comp {comp} in-pin nets {pins:?} nets [{}] -> drives [{}]",
+                    nets.iter()
+                        .map(|v| format!("{v}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    outs.iter()
+                        .map(|v| format!("{v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            outs
         } else {
             // Each input pin reads its own *view* of its net (per-path
             // transport, F14).
