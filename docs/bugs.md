@@ -1603,10 +1603,12 @@ changes a value that in most designs is real — nothing about the splitter is w
 It was only *this* driver that should not have reached the bus, and the reason is structural.
 
 The old tool's tunnels are the same idea at a smaller scale: `Tunnel.valueChanged` **pushes**
-the (merged, others-only) value onto each same-label peer's own port rather than sharing a
-link, and it `continue`s on a disagreement — so a tunnel is a one-way copy between separate
-links with the same deferral, never a merging rule. That also confirms, from the source, the
-`Round 14` per-port delivery work.
+onto each same-label peer's own port rather than sharing a link, and for three or more peers
+the value it pushes is the merge of **every peer except the receiver** (`if (tunnel !=
+otherTunnel)`, including the sender) — which is exactly `LinkState.getIncomingValue(port)` —
+`continue`ing on a disagreement, so a tunnel is a one-way copy between separate links with
+the same deferral and never a merging rule. That is a third independent confirmation of the
+`Round 14` per-port, others-only delivery work (after `getIncomingValue` and the splitter).
 
 **What is left, precisely.** The flat model needs the boundary to be directional:
 
