@@ -747,6 +747,11 @@ pub struct NetDump {
     pub view: Option<String>,
 }
 
+fn debug_splitter_shape() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CSIM_DEBUG_SPLITTER_SHAPE").is_ok())
+}
+
 fn debug_boot() -> Option<u32> {
     static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -1974,6 +1979,33 @@ impl DelayEngine {
                     ec::resolve_except(&self.netlist, &self.net_drivers, &self.drives, *net, comp)
                 })
                 .collect();
+            // `CSIM_DEBUG_SPLITTER_SHAPE=1`: print every splitter's authored flags once.
+            // A split whose only other drivers are splitters is the shape Round 11's
+            // falsified rule targeted — count it before changing anything.
+            if debug_splitter_shape() {
+                static SEEN: std::sync::Mutex<Option<std::collections::BTreeSet<usize>>> =
+                    std::sync::Mutex::new(None);
+                let mut g = SEEN.lock().unwrap();
+                let set = g.get_or_insert_with(std::collections::BTreeSet::new);
+                if set.insert(c) {
+                    let flags: Vec<String> = cd
+                        .in_pins
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (_, net))| {
+                            let n = self.net_drivers[net.idx()]
+                                .iter()
+                                .filter(|&&(d, _)| d as usize != c)
+                                .count();
+                            let auth = self.net_drivers[net.idx()].iter().any(|&(d, _)| {
+                                d as usize != c && !self.comps[d as usize].is_splitter()
+                            });
+                            format!("{i}:{n}d{}", if auth { "A" } else { "-" })
+                        })
+                        .collect();
+                    eprintln!("SPLITSHAPE #{c} pins[{}]", flags.join(" "));
+                }
+            }
             let outs = beh.eval_splitter(&nets);
             // `CSIM_DEBUG_SPLITTER=<comp idx>`: show what a splitter was handed and what
             // it drove. Env-gated, read once; inert otherwise.
