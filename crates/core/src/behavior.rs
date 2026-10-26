@@ -919,6 +919,25 @@ impl Behavior {
         }
     }
 
+    /// The number of bus bits a splitter pin is mapped to (`None` for non-splitters and
+    /// the bus pin). Used by the shape diagnostic to compare it with the pin's net width —
+    /// CE builds each split output at the **port's** width (`Splitter.valueChanged`:
+    /// `new WireValue(getPort(i).getLink().getBitSize())`), ours at the map length.
+    /// The number of bus bits a splitter pin is mapped to (`None` for non-splitters and
+    /// the bus pin). The shape diagnostic compares it with the pin's net width, because
+    /// CE builds each split output at the **port's** width (`Splitter.valueChanged`:
+    /// `new WireValue(getPort(i).getLink().getBitSize())`) while `eval_splitter` builds it
+    /// at the map length — a difference that would be silenced wherever a split's net has
+    /// a single driver, since `contention_merge` only asserts widths when there are two.
+    pub fn split_map_len(&self, pin_index: usize) -> Option<usize> {
+        match &self.kind {
+            BehaviorKind::Splitter { splits, .. } if pin_index >= 1 => {
+                splits.get(pin_index - 1).map(|(_, m)| m.len())
+            }
+            _ => None,
+        }
+    }
+
     /// Splitter resolution (bidirectional bus plumbing — not a gate).
     /// `nets[i]` is the value driven onto pin `i`'s net by *other*
     /// components (all-`Z` = nothing else drives); pin order is

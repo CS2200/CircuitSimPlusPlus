@@ -2000,7 +2000,18 @@ impl DelayEngine {
                             let auth = self.net_drivers[net.idx()].iter().any(|&(d, _)| {
                                 d as usize != c && !self.comps[d as usize].is_splitter()
                             });
-                            format!("{i}:{n}d{}", if auth { "A" } else { "-" })
+                            let port_w = self.netlist.nets[net.idx()].width as usize;
+                            let map_len = beh.split_map_len(i).unwrap_or(port_w);
+                            format!(
+                                "{i}:{n}d{}w{}{}",
+                                if auth { "A" } else { "-" },
+                                port_w,
+                                if map_len != port_w {
+                                    format!("!M{map_len}")
+                                } else {
+                                    String::new()
+                                }
+                            )
                         })
                         .collect();
                     eprintln!("SPLITSHAPE #{c} pins[{}]", flags.join(" "));
