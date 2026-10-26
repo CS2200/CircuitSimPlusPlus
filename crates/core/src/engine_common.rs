@@ -255,6 +255,11 @@ pub(crate) fn net_drivers(netlist: &Netlist) -> Vec<Vec<(u32, usize)>> {
 
 /// Resolve a net's current value by contention-merging its drivers' pin
 /// slots (`Value::contention_merge`, DESIGN.md §4.1).
+fn debug_shorts() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CSIM_DEBUG_SHORTS").is_ok())
+}
+
 pub(crate) fn resolve(
     netlist: &Netlist,
     net_drivers: &[Vec<(u32, usize)>],
@@ -271,7 +276,39 @@ pub(crate) fn resolve(
                 .iter()
                 .map(|&(c, s)| drives[c as usize][s].clone())
                 .collect();
-            Value::contention_merge(n.width, &vals)
+            let merged = Value::contention_merge(n.width, &vals);
+            // `CSIM_DEBUG_SHORTS=1`: name every net whose `X` came from drivers that
+            // disagree — a short. CE throws `ShortCircuitException` on one, so a short we
+            // report and CE does not is a fidelity bug (docs/bugs.md). Env-gated and
+            // read once; inert otherwise.
+            if debug_shorts() && merged.has_x() {
+                let (_, shorted) = Value::contention_merge_detail(n.width, &vals);
+                if shorted {
+                    let ids: Vec<String> = many
+                        .iter()
+                        .map(|&(c, s)| {
+                            let comp = &netlist.comps[c as usize];
+                            format!(
+                                "{}:{}({})",
+                                c,
+                                comp.name.clone().unwrap_or_else(|| comp.type_.clone()),
+                                comp.type_
+                            )
+                        })
+                        .collect();
+                    eprintln!(
+                        "SHORT net {} width {} drivers [{}] values [{}]",
+                        net.idx(),
+                        n.width,
+                        ids.join(", "),
+                        vals.iter()
+                            .map(|v| format!("{v}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+            }
+            merged
         }
     }
 }

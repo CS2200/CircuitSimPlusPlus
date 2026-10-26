@@ -1175,3 +1175,39 @@ computes and drives the splits on *every* evaluation, boot included. A splitter 
 never pushed from cannot be a second writer, and that is exactly the difference that would
 turn a benign overlap into a short. Next: determine, per splitter, whether its bus has
 "changed" since power-on (CE's condition) and drive the splits only then.
+
+### Round 6: the short is named — the instruction bus, and a splitter claiming bits it does not own
+
+An env-gated diagnostic (`CSIM_DEBUG_SHORTS=1`, inert otherwise) now prints every net whose
+`X` came from drivers that **disagree** — the `contention_merge_detail` "shorted" flag.
+Running `373713172` for two cycles names it immediately:
+
+```
+SHORT net 43 width 32
+drivers [28:wiring.splitter, 59:Instr(mem.register), 147:wiring.splitter]
+values  [0bzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz, 0x9d000035, 0b0000zzzzzzzzzzzzzzzzzzzzzzzzzzzz]
+```
+
+So the **instruction bus** is co-driven by the instruction register `Instr` and **two
+splitters**. `Instr` drives the fetched instruction (`0x9d000035`, bits 0–3 = `0x5`); the
+splitters drive bits 0–3 as **`0`** and `Z` elsewhere. Bits 0 and 2 disagree, so the merge
+reports `X` — and CE, which throws `ShortCircuitException` on a genuine disagreement, would
+have thrown. It did not, so **our splitter is claiming bits it does not own**.
+
+Where that comes from is now specific. `eval_splitter` is a *stateless whole-value* function:
+it gathers a bus bit from **every** split whose net is not fully `Z`, every time it runs.
+CE's splitter is **stateful and event-driven** — on a *split* change it pushes the bus with
+**its own last-pushed bus value** plus **only the bits of the split that changed**:
+
+```java
+WireValue result = new WireValue(state.getLastPushed(getPort(PORT_JOINED)));
+result.setBit(i, value.getBit(currBit++));
+state.pushValue(getPort(PORT_JOINED), result);
+```
+
+Its own last value starts all-`Z` and only ever accumulates the bits it has actually
+assembled, so it cannot re-assert a bus bit that another part owns. Ours re-derives the whole
+gather on every evaluation, so a split driven by *another splitter* (here the two splitters
+share both the bus and a split net) is gathered back and re-asserted on the bus, where `Instr`
+already drives it. **Next: make the bus drive stateful the way CE is — own last value plus the
+changed split's bits — behind measurement (it touches both modes).**
