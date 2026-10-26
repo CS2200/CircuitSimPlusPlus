@@ -2493,10 +2493,21 @@ impl DelayEngine {
                                     .filter(|&&(d, sl)| !(d == sp.comp && sl as u32 == sp.slot))
                                     .map(|&(d, sl)| self.drives[d as usize][sl].clone())
                                     .collect();
-                                Arc::new(Value::contention_merge(
+                                let (merged, shorted) = Value::contention_merge_detail(
                                     self.netlist.nets[nidx].width,
                                     &others,
-                                ))
+                                );
+                                // CE: a port whose own incoming merge disagrees is simply
+                                // **not notified** (`LinkState.propagate` catches the
+                                // `ShortCircuitException` and `continue`s), so it keeps the
+                                // view it had; only the all-drivers merge — used for the
+                                // short check and the final throw at quiescence — is ever
+                                // "short". Delivering the disagreement as `X` instead is what
+                                // made an `X` stick: CE has no `X` to undo it with.
+                                if shorted {
+                                    continue;
+                                }
+                                Arc::new(merged)
                             } else {
                                 Arc::clone(&resolved)
                             };
