@@ -286,7 +286,7 @@ pub(crate) fn resolve(
                 if shorted {
                     let ids: Vec<String> = many
                         .iter()
-                        .map(|&(c, s)| {
+                        .map(|&(c, _s)| {
                             let comp = &netlist.comps[c as usize];
                             format!(
                                 "{}:{}({})",
