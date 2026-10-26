@@ -1338,3 +1338,39 @@ too), so a splitter *does* gather the opcode field and re-assert it on the bus, 
 `0`-versus-`0x9` disagreement arises in the window where `Instr` has moved and the splitter has
 not. `resolve` judges drivers regardless of `driver_in_flight`; that is still where the next
 look is.
+
+### Round 11: the "plumbing" rule is wrong too — 138 production flips
+
+Hypothesis: a split whose net only other **splitters** drive is the splitter's own plumbing, so
+its bits come from the bus; re-asserting them should therefore use the bus's **own** value
+rather than the split's merged net (which can hold a sibling splitter's tick-stale drive).
+
+Implemented as `eval_splitter_with(nets, authored)` — `authored[i]` = pin `i`'s net has a driver
+that is not a splitter — with the engine computing the flags from `net_drivers`.
+
+Measured, and it is **not** a narrow change:
+
+| | rows | agree | disagreements | false passes | flips |
+|---|---:|---:|---:|---:|---:|
+| before | 357 | 198 | 14 | 0 | — |
+| this change, production | 357 | **60** | 152 | 0 | **138** |
+| this change, compat | 357 | **67** | 145 | 0 | **141** |
+
+On the four it was mixed (`410460509` unfroze 160 → runs; `374299303` 102 → 100; `373713172`
+unchanged), which is exactly the kind of local movement that looks like progress and is not.
+Reverted; the four are back to `103 / 48331 / 102 / 160`.
+
+**The blast radius is the interesting part.** The rule only *should* touch a split whose other
+drivers are all splitters — a shape that seemed rare — yet it moved 138 designs. So my model of
+the splitter's two idioms ("split" vs "assemble") is wrong somewhere: either `authored` is
+false far more often than expected (many splits are co-driven only by splitters, or the flag
+misses a driver), or the *bus* gather is load-bearing for the common path in a way that reading
+`eval_splitter` did not make obvious. That question is worth settling **before** any further
+splitter change: instrument `authored`/`from_bus` counts over the corpus rather than reasoning
+about them.
+
+Three hypotheses have now been killed by measurement (authority, register power-on, plumbing),
+each by a different oracle — the unit test, the CE source, and the corpus. Every one of them
+was derived by reading a function and reasoning about the common case; none of them was
+derived by *measuring the shape of the common case first*. That is the methodological lesson
+this round, and it is cheap to fix: count before changing.
