@@ -1278,3 +1278,26 @@ walks `CircuitState.propagate()`'s worklist, we walk `(time, prio, seq)`.
 edges). Three of the four now point at one root: **CE's within-tick propagation order.**
 
 The remaining one, `374299303`, has no cycle at all and still needs its own trajectory.
+
+### Round 8: CE's registers drive Z at power-on — a real divergence, and still not the fix
+
+From CE's source: `Component.init(CircuitState, Object)` is a **no-op**, `Register` does not
+override it, and `CircuitState.reset()` replaces every link with a fresh `LinkState` (all-`Z`).
+So **a CE register's output port holds `Z` until its first clock edge** promotes
+`getLastReceived(d)`. Our engine drives every register's power-on *state* (`0`) at `T=0`
+(§4.3's "sources and state elements commit their initial outputs"), which is a definite `0`
+CE never has.
+
+Tried (under `compat` only, state untouched): drive `Z` instead of the state during the boot
+settle. Measured: `373713172` 103→**104** cycles, `374625393` 102→103, `410460509` 160→161,
+`374299303` 48331→48332 — i.e. nothing, and the same short survives with the same values
+(`[0bzzzz…, 0x9d000035, 0b0000zzzz…]`). Reverted.
+
+The reason is worth keeping: the `0` the splitters assemble is a **self-consistent fixed point
+of their own loop** (`out4` ← bus ← `out4`), not a value seeded from a register. The loop has
+two consistent states — `{bus bits 28–31 = 0}` and `{= Instr's 0x9}` — and CircuitSim lands in
+the second because it starts from `Z` and only ever asserts what a driver gives it, while our
+boot settle reaches the first. It really is the **settle order / initial state**, which is the
+same conclusion Rounds 7 and 3 reached from three different directions. The remaining work is
+to make `compat` settle a loop the way CE does — from `Z`, asserting only what arrives — which
+is a within-tick fixpoint pass in CE's component order, not a per-pin rule.
