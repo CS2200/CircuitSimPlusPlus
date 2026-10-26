@@ -1080,10 +1080,15 @@ CircuitSim's nets start as all-**`Z`** (its `WireValue(bitSize)` default) and it
 `CircuitState.propagate()` iterates to a fixed point from there. A cycle's fixed point
 depends on its starting state, so seeding `0` and seeding `Z` can and do differ.
 
-Hypothesis 3, and the next experiment: in `compat` only, seed the loop residue with `Z`
-rather than `0` and settle to a fixed point, mirroring CE's initial value. Production
-keeps `0` (it is what makes a boot deterministic without inventing values). Measured
-before and after, and only ever inside `compat`.
+Hypothesis 3, tried and **falsified**: seeding the loop residue with `Z` under `compat`
+(CE's initial value) changes none of the four — `102 / 160 / 48331 / 103` cycles either
+way, on all three tables. It has been reverted; the reasoning was sound and the
+measurement says the fixed-point difference is elsewhere. What that leaves is that the
+two cycle-bound rows differ from CE in the *iteration*, not the starting value: CE's
+`CircuitState.propagate()` walks its own worklist order, and ours walks `(time, prio,
+seq)`. Matching CE's fixed point means matching its order, which is a different piece of
+work from the per-pin floating table and should be attacked with `diff_trajectory` on a
+*single* cycle (the first divergent one) rather than from the outside.
 
 The other two have no cycle and need per-design work: `374299303` runs 48331 cycles and
 wanders (PC ends `0x3400001b`), `373713172`'s PC goes `X` at cycle 3 through the
