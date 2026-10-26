@@ -1459,3 +1459,37 @@ thing **only if a driver does commit again** — where none does, the net stays 
 which is a new failure mode rather than CE's. So the finding stands (`X` on a transient
 disagreement is wrong) but this implementation of it is not the fix; a faithful one has to
 re-attempt the merge at quiescence, not merely skip it.
+
+### Round 14: CE delivers the *others'* merge, per port — gated to `compat`
+
+`LinkState.propagate()` computes each port's incoming value as the merge of the **other**
+participants:
+
+```java
+WireValue getIncomingValue(Port port) {
+    WireValue newValue = new WireValue(link.getBitSize());
+    participants.forEach((p, info) -> { if (p != port) newValue.merge(info.lastPropagated); });
+    return newValue;
+}
+```
+
+So a part that both drives and consumes a net reads the **others'** value for it, and the
+exclusion is by **port** — not by part. The engine already did this for splitters
+(`resolve_except`), which is why `373713172`'s shared bus was unaffected when this was added:
+its consumers there are splitters. Every *other* consumer was being handed the all-drivers
+merge.
+
+Two things had to be right, and the first attempt got one wrong:
+
+- **Exclude the port, not the part.** Excluding the whole part turns `nand(a=src, b=self)` from
+  a storm into a self-ignore — which `event_storm_halts_with_oscillation` pins, correctly: with
+  port-level exclusion `g.out` is still a participant on `g.in1`'s link, so the loop still has
+  no stable state. The first patch excluded `sp.comp` and broke both oscillation tests; the fix
+  filters `(comp, slot)`.
+- **Gate it to `compat`.** The self-loop storm is a *production* behaviour with a test behind
+  it, and changing it is a separate decision from CE fidelity. Production keeps the all-drivers
+  merge; `compat` gets CE's reading.
+
+Measured on the four: identical in both modes (`103 / 48331 / 102 / 160`), because their
+implicated bus is consumed by splitters, whose view already excluded them. So this is a general
+fidelity fix rather than their fix — the same shape as the Xor/Xnor and invalid-select arms.

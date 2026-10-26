@@ -2472,6 +2472,34 @@ impl DelayEngine {
                         // twice.
                         for i in 0..self.net_sinks[nidx].len() {
                             let sp = self.net_sinks[nidx][i];
+                            // `compat`: CE delivers **`getIncomingValue(port)`** — the
+                            // merge of the *other* participants on the link, excluding the
+                            // receiving **port** (`LinkState.propagate`:
+                            // `participants.forEach((p, info) -> { if (p != port) ... })`).
+                            // So a part that both drives and consumes a net reads the
+                            // *others'* value for it — excluding its own **pin**, not the
+                            // whole part: a gate feeding its own input still sees its own
+                            // output (`g.out` is a different port), which is why that stays
+                            // an oscillation rather than becoming a self-ignore.
+                            // Production keeps the all-drivers merge until this is measured
+                            // on the corpus; `compat` is where CE's reading belongs.
+                            let value = if self.compat
+                                && self.net_drivers[nidx]
+                                    .iter()
+                                    .any(|&(d, sl)| d == sp.comp && sl as u32 == sp.slot)
+                            {
+                                let others: Vec<Value> = self.net_drivers[nidx]
+                                    .iter()
+                                    .filter(|&&(d, sl)| !(d == sp.comp && sl as u32 == sp.slot))
+                                    .map(|&(d, sl)| self.drives[d as usize][sl].clone())
+                                    .collect();
+                                Arc::new(Value::contention_merge(
+                                    self.netlist.nets[nidx].width,
+                                    &others,
+                                ))
+                            } else {
+                                Arc::clone(&resolved)
+                            };
                             self.schedule(
                                 ev.time + self.net_sink_delay[nidx][i],
                                 EvKind::Deliver {
@@ -2479,7 +2507,7 @@ impl DelayEngine {
                                     comp: sp.comp,
                                     slot: sp.slot,
                                     kind: sp.kind,
-                                    value: Arc::clone(&resolved),
+                                    value,
                                 },
                             );
                         }
