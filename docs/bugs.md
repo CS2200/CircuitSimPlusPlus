@@ -1895,3 +1895,30 @@ ours adds a stray bit 20 to the result. No `X` is involved (the drive is a clean
 is conflicting — a *source* is wrong at that bit, not a merge. Reported here rather than chased
 further: the instrument set now finds the exact row, value and bit in one pass on every design,
 which is what these three needed, and `410460509` is the same call away.
+
+### Round 23: `410460509` — the first store, same one-pass comparison
+
+Third design, same call (`--pc PC`, `--bufs IR`), and it parts almost immediately:
+
+```
+CE  [ 1..2]  PC=1  $sp=0            ours[2..3]  PC=1  $sp=0
+CE  [ 3]     PC=1  $sp=36           ours[4]     PC=1  $sp=0
+CE  [ 4..6]  PC=2  $sp=36           ours[5..7]  PC=2  $sp=0
+```
+
+`PC` tracks exactly, every other register is `0` in both, and `$sp` is `0` in both for the first
+two rows — so `0x36` is **written by the design**, not loaded by the tracer's `reg_init.csv`
+(which would show from row 0), and ours writes `0` instead. So the earliest divergence here is the
+very first register write, one row after the fetch of the first instruction.
+
+**All three, localised in one session of comparisons:**
+
+| design | state before | first divergence |
+|---|---|---|
+| `373713172` | frozen, bus `X` | **fixed** (Round 17) |
+| `374625393` | frozen, everything `Z` | un-frozen (Round 20); the `bne` at `PC=D`, Comparison Logic's `Jump` read a microstep late |
+| `374299303` | wandered 48 331 cycles | **79 rows identical**, then one stray bit 20 in `$sp` (`109FFF` vs `9FFF`) |
+| `410460509` | wandered 40 625 cycles | row 4, the first register write: `$sp` `0` vs the old tool's `36` |
+
+Compatibility corpus: 209 agree, 3 disagreements, 0 false passes, **0 flips** — every change this
+round removed a value the old tool cannot produce and broke nothing.
