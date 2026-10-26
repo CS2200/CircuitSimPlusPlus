@@ -1877,3 +1877,21 @@ timestamp and what it *read* — the per-cycle samplers cannot see a latch decis
 cycle), and `probe_trace`'s name matching now trims whitespace, because the old tool's labels
 routinely carry leading or trailing spaces (`" $a0"`) and one stray space silently turns a whole
 trace column into `?`.
+
+### Round 22: `374299303` — a single stray bit, found by the same comparison
+
+The same trajectory diff, on the second design: it matches the old tool across the **entire
+register file for 79 rows** (`$at..$ra`, `$sp = A000`, `PC` on CE's cadence) and then parts on
+one value:
+
+```
+CE  [79]  $sp =   9FFF
+ours[80]  $sp = 109FFF
+```
+
+`0x109FFF − 0x9FFF = 0x100000` — **one bit, bit 20**, set where the old tool has it clear. The
+previous row has `$sp = A000` in both, so that is a `$sp − 1` producing `A000 − 1 = 9FFF`, and
+ours adds a stray bit 20 to the result. No `X` is involved (the drive is a clean `1`), so nothing
+is conflicting — a *source* is wrong at that bit, not a merge. Reported here rather than chased
+further: the instrument set now finds the exact row, value and bit in one pass on every design,
+which is what these three needed, and `410460509` is the same call away.
