@@ -2007,3 +2007,65 @@ disagreements (was 14), 0 false passes, and the single flip is again `374299303`
 design was wrong in *both* modes, and the same one-line misreading of CE's enum explains it: it
 was inverting the extension of every negative immediate in every converted design that used the
 `ONE` mode.
+### Round 25: the undriven-net tie was one-sided — `410460509`
+
+The trajectory diff put this one at row 4: the old tool writes `$sp = 0x36` (its exact value,
+from the instruction the fetch had already produced) and ours writes nothing. The bus was
+*right* — the first thing to check, and it held `0x36` — so the fault was in the **enable**:
+
+```
+Register File, cycle 3, every register's enable:
+   $sp    en net 121 = 0bx        <- X
+   (all fifteen others = 0x0)
+```
+
+`$sp`'s enable is driven by **two** pins, and they disagree:
+
+```
+c83/c153.out13 = 0        (write port 1)
+c83/c154.out13 = 1        (write port 2 — c154.sel = 0xd = 13 = $sp, c154.in = 1)
+merge(0, 1) = X
+```
+
+`c153`/`c154` are the two write ports' **demultiplexers**. Port 1 is *dead*: its input is a
+constant `0` and its select is **floating in the old file**. In CE that matters more than it
+looks — `Demultiplexer.valueChanged` pushes **only the selected output** on an input change, and
+all of them only on a *select* change, so a demux whose select never changes a value never
+pushes anything and its outputs stay **`Z`**. `merge(Z, 1) = 1`, the register is written, and the
+design runs.
+
+Ours had port 1's select tied to `0`, so the demux evaluated with a *valid* select, drove `0` on
+every unselected output, and the merge became `X`.
+
+**Why the tie was there.** The select reaches port 1 through a **subcircuit interface pin**
+(`RegSel2`), and the net on the *parent* side of that pin has no driver — so the undriven-net tie
+fired. Two things were wrong, and both are fixed:
+
+- **`_PROPAGATES_PINS` was missing the plexers' select.** It already covers `arith.adder` /
+  `subtractor` / `comparator` and a memory's `addr` — parts whose CE `valueChanged` *propagates*
+  an invalid input instead of reading it as a value. CE's `Multiplexer`, `Demultiplexer` and
+  `Decoder` are exactly that shape (`new WireValue(getBitSize())` on every output when the select
+  is invalid), so `plexers.mux`/`plexers.demux`'s `sel` and `plexers.decoder`'s `in` are now
+  listed.
+- **`_tieable` was one-sided.** It refuses a net that touches a `wiring.pin`, with a precise
+  rationale: that is the *inside* of a bridge, driven from the parent, and tying it is
+  destructive. A `subcircuit` instance's pin is the *outside* of the same bridge — and tying
+  *that* writes a value into a circuit whose behaviour is not visible here, which is the same
+  mistake from the other end. Both ends are now refused, so the analysis does not have to look
+  through the boundary to be safe.
+
+Measured on the register file at cycle 3 afterwards: `c83/c153.sel = 0bzzzz` (untied, `Z` — the
+demux goes inert exactly as CE has it), and `$sp`'s enable `0x1`. The design runs to a halt at
+6355 cycles with `PC` stable at `0x12`, and `$sp` written.
+
+**Measured.** `report-compat-tie.json`, against `report-compat-extend.json`:
+
+| | before | after |
+|---|---|---|
+| agree | 210 | **211** |
+| disagreements | 2 | **1** |
+| false passes | 0 | 0 |
+| flips | — | **1: `410460509` pass → pass (fixed)** |
+
+Three of the four are now fixed (`373713172`, `374299303`, `410460509`) and only
+`374625393` is left. It is converter-side, so it reaches production too — measured separately.
