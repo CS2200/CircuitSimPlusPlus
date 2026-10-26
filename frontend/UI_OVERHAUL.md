@@ -2557,3 +2557,307 @@ no baseline churn. Four golden trace hashes were re-blessed (§93 adds a net per
 register/RAM, and the hash mixes net ids — every `t_obs` is unchanged and
 `cpu_fixtures_compute_the_program` still passes, so the drift is numbering, not behaviour).
 The fixtures were regenerated at v5, and `sanity.csx` (hand-authored) was edited by hand.
+
+## 94. The chrome gets a design system (2026-10-26)
+
+The canvas was already the DLS look; the chrome around it had grown one batch at a
+time — nine border radii, a dozen font sizes, a button style per dialog, white text
+on every accent. This pass gives the HTML side one vocabulary and spends it on the
+places people look first. Nothing in the drawing, the IPC contract or the format
+changes, and **every class name the components and the e2e suite use is kept** —
+`styles.css` restyles them, it does not rename them.
+
+- **Tokens, derived from the palettes.** The eleven theme blocks are still the only
+  data; everything else is computed from them with `color-mix` on `[data-theme]`
+  (surfaces `--surface-1..3`, `--hover`/`--pressed`, `--field-bg`, the three border
+  weights, `--accent-soft/-ring/-hover/-border`, `--ok/--warn/--danger`, three
+  shadows, a backdrop) plus a type scale (`--fs-xs..xl`), radii and one control
+  height. Mixing a little _text_ colour into the panel lifts a surface in a dark theme
+  and sinks it in a light one, so one rule reads right in all eleven. The light themes
+  override only the shadows and the hover alpha.
+- **Text on the accent is legible everywhere.** `--on-accent` is white on a deep
+  accent and near-black on a light one, per theme (OLED, Midnight, Nord, Dracula,
+  Gruvbox, High contrast) and per override (orange, amber, lime, green, teal, cyan,
+  slate). Filled buttons, the active bit-width cell, menu highlights and `::selection`
+  all read it — the yellow High-contrast play button used to carry white glyphs.
+- **One button and one field.** Unclassed buttons inside a dialog's action row are the
+  filled primary; `.secondary` and every panel button share the quiet bordered look;
+  every text field shares the same background, border, hover and focus ring; Settings
+  toggles and Inspector booleans are the same switch. Menus, dropdowns and context
+  menus are one translucent, blurred panel with a full-accent hover.
+- **Transport bar.** Play / tick / reset sit in one pill with real icons (play is the
+  only filled control and breathes while the clock runs); run-to is a joined
+  field + verb; the cycle counter is a chip whose dot lights green while running;
+  `T_obs` is a chip that turns amber-bordered when there are violations. Tooltips
+  carry the shortcuts (Ctrl+K / Ctrl+J / Ctrl+R). The accessible names are unchanged
+  (`tick`, `run to`, `Run`/`Pause`).
+- **Header.** The app mark sits in an accent tile; the save chip has a status dot (green
+  saved, amber pending, red failed, grey when autosave is off — the text is the same);
+  the action icons are separated into undo/redo, history/waveform, and a **Settings
+  gear** (Settings stays under File too).
+- **Palette.** A **search box** at the top of the body filters every group at once
+  (label, full name, type string or group name), the other sheets' subcircuits
+  included; results stack the group name under the label. **`/` jumps to it**, Escape
+  clears it. The rail's active group is an accent pill; Memory, Misc and Subcircuits
+  get drawn glyphs (a chip with legs, a text mark in a dotted frame, a module with
+  pins) instead of the bare box their representative part drew.
+- **Empty states that teach.** An empty sheet shows a centred card — the mark, "Start a
+  circuit" (or "This sheet is empty" inside a subcircuit), one sentence, and keycaps
+  for wheel-zoom, right-drag pan and `?` — with `pointer-events: none`, so the first
+  click lands exactly where it would have; it hides while a part is being placed. The
+  empty Inspector shows a pointer glyph, "Nothing selected", and three keycap tips.
+- **Sheet tabs** are flush chips with an accent (or scope-hue) stripe on the active
+  one; the close mark appears on hover/active only; `+` is a square icon button.
+- **Zoom control** gains `−` / `+` and a percentage readout that is also the way back to
+  100 %. The ± buttons are named by `title` only, so `getByLabel("Zoom")` still finds
+  exactly the slider.
+- **Dialogs** share a blurred backdrop, a 14 px card and an entrance animation
+  (`prefers-reduced-motion` turns every animation off). Theme cards preview the
+  workspace (canvas, panel strip, accent dot, lit wire) instead of four squares; the
+  `?` panel's key column wraps instead of truncating; the memory editor closes on
+  Escape like every other dialog; Settings' "Reset to defaults" is a quiet button.
+- **Inspector.** The header carries the part's own glyph in an accent tile and the id
+  as a chip; notes are callouts (amber nudge, red load-blocker, accent information);
+  read-only values (a delay, a file path) wrap instead of truncating.
+- **Status bar** items are separated by hairlines, the cursor reads in tabular
+  monospace, and the hint is `press ? for shortcuts` with a real keycap.
+
+**Chrome heights are fixed in pixels** — header 40 + 35 (+1 border), tab strip 32,
+status bar 25 = 133 — so the editor area is the same size in every font
+environment. That is what keeps the six committed `*-chromium-linux.png` canvas
+baselines at 834 × 587: they screenshot `.editor-wrap`, whose only chrome is the zoom
+pill (within the 2 % pixel budget) and the resize handles, which no longer draw a
+resting hairline (the panels draw their own border instead).
+
+**Acceptance:** frontend lint / 454 unit / build green; e2e 80 of 81 locally (macOS
+Chromium) — the one failure, `subcircuit.spec.ts` "a definition is a place you can enter
+and leave", fails identically on the tree before this pass (a double-click has opened the
+_instance_ view since the instance-scope change, and the test still expects the
+definition's "used by main" bar). The pinned-image Linux e2e run was not possible on the
+authoring machine (Docker Desktop's containerd store returned I/O errors), so the six
+canvas baselines are argued, not re-measured: `.editor-wrap` is 834 × 587 at the e2e
+viewport with the fixed chrome heights above.
+
+## 95. The clock moves when you press play, and the trace is a viewer (2026-10-26)
+
+**Play froze the clock (engine).** `Session::play` ran `play_hz / 60` _whole cycles_ per
+16 ms frame and emitted one diff batch per frame. A whole cycle ends at the level it
+started, so the clock net never appeared in a single batch while playing: the canvas
+clock never flipped, no pulse ran on the clock net, and the trace drew the clock as a flat
+line. It also ran every rate below 60 Hz at ~60 cycles/s (`max(1)` per frame). The loop is
+now **paced by wall time** (ticks owed carry over as a fraction, with a catch-up cap) and,
+up to 120 Hz, steps **tick by tick with one batch per tick**, so both edges of every cycle
+reach the UI. Above 120 Hz it runs whole cycles per frame as before, since the UI paints at
+most one batch per frame anyway. Test: `play_is_paced_and_emits_every_clock_edge`. No
+contract change: batches were always allowed to arrive at any granularity.
+
+**The waveform viewer (§89), reworked.**
+
+- **The newest value has width.** The view ended exactly at the last event, so the value
+  that is in effect _now_ was a zero-width sliver against the right edge. A single tick
+  showed nothing at all. The domain now runs half a tick past the newest event (a whole
+  cycle for a core with no `at`), and a short run is drawn from the left edge instead of
+  being pushed right.
+- **A window that opens before the first sample still draws.** `stepSegments` finds no
+  value in effect before the first sample, so the lanes were empty whenever the window
+  started a hair earlier. The view now starts each row's segments at its first sample.
+- **The open cycle is sized from its newest edge** (`Timebase.duration`). With one cycle
+  recorded there is no period to measure, and the old 1 ns fallback clamped every later
+  event in that cycle against its right edge.
+- **Moving through time:** drag the lanes; scroll sideways (trackpad, Shift+wheel, or a
+  plain wheel when all rows fit); Ctrl/⌘+wheel zooms at the pointer; ← / → (Shift: bigger
+  steps), Home, End, `+` / `−`, `F`. The listener is non-passive so Ctrl+wheel no longer
+  zooms the whole page. Panning away turns **Follow** off, and panning back to the live end
+  turns it on again. The scrollbar is taller.
+- **Values are always shown.** The name column shows each row's value under the pointer,
+  or else at the view's right edge (the live value while following), coloured like the
+  trace for X and Z.
+- **A cycle ruler is pinned on top** (labels never bleed into the name column), with a pill
+  that reads the pointer's cycle (`12½` on the falling half). Zoomed in, dashed half-cycle
+  ticks mark where the falling edges land.
+- **Buses are drawn as bands with slanted crossings** carrying the value (clipped with `…`
+  when narrow). Single bits fill under the high level, and X fills red.
+- **Rows:** hover a row for its × (remove); a bus has a chevron to expand its bits
+  (double-click still works). A watched signal keeps its ring and condition.
+- A fresh view shows ~12 cycles across the lanes. **Fit** shows the whole run.
+
+**Acceptance:** core tests green (the new session test included) with clippy and fmt
+clean; frontend lint / 455 unit / build green; e2e 80 of 81, with the same pre-existing
+`subcircuit.spec.ts` failure §94 records. The waveform e2e now presses "Zoom in" (the
+buttons are named, not `+`).
+
+## 96. A probe's true width, a themed clock, and a waveform you can find (2026-10-26)
+
+- **A 1-bit probe was traced as a 4-bit bus.** A named part's trace width came from
+  `attrs.bitsize` only. A fresh probe has no such attr (its width is the catalog default),
+  so the viewer fell back to the value's hex mask, which is a whole nibble, and drew a bus
+  with four bit lanes. The width now comes from the pin that carries the value
+  (`namedValueBits`, the engine's `value_net` pin: register `q`, RAM `dout`, ROM `out`,
+  probe `in`). That is the width the canvas draws. Unit-tested.
+- **The clock is themed.** The canvas clock body was a fixed dark/light green under a
+  white wave. It clashed with most palettes, and on the light fill the white wave all but
+  vanished. `clockColors` now mixes the theme's own "high" wire colour into the panel,
+  strongly while high and faintly while low. The wave is the theme's text or background,
+  whichever contrasts with that fill (`readableOn`).
+- **The waveform viewer is easy to find.** It was an unlabelled icon in the header's
+  corner, and it refused to open until the sim had run. Now there are four ways in, and
+  the viewer opens on any circuit:
+  - a labelled **Waveform** button in the transport bar, next to the controls that produce
+    the data (it becomes **Circuit** while the viewer is open);
+  - **View → Waveform viewer** (Ctrl+Alt+W) and **View → Show selection in waveform**;
+  - **Show in waveform** in the canvas right-click menu, for a part or a wire;
+  - a **Show in waveform** button in the Inspector.
+
+  The last three open the viewer with that signal already added. A part with no output
+  (a probe, an LED) is traced by the value it reads. Opening the viewer loads the circuit
+  itself, and an empty viewer says how to add signals. Picked rows are labelled by name
+  (`Adder.out`, a named wire's own name), not by internal id (`c3.out`). Default rows stay
+  in sync across reloads: they take the fresh net ids, named parts that appear later are
+  added, and a row the user removed stays removed.
+
+- The Settings panel fades in instead of sliding. Mid-slide, its box sat at a sub-pixel
+  offset, which made the "never resizes" e2e check flaky.
+
+**Acceptance:** frontend lint / 457 unit / build green; e2e 81 of 82 on three consecutive
+runs, plus a new test for the three entry points. The one failure is the pre-existing
+`subcircuit.spec.ts` case §94 records.
+
+## 97. Parts look like parts (2026-10-26)
+
+The parts were flat panel fills inside a 0.12 hairline in the panel-border colour, with
+square pin stubs and grey text, so every part read as a wireframe box. This pass gives
+them depth and identity without changing a single shape, size, pin position or hit area:
+
+- **A body primitive** (`Renderer.drawBody`, immediate-mode like `drawDashedPath`): a
+  vertical gradient over the shape's own extent, lit from above, and a soft drop shadow
+  whose blur and offset are world units scaled to device pixels (the canvas spec applies
+  shadows outside the transform). The outline is drawn after the shadow is reset, so it
+  stays crisp. Unit-tested against the fake context.
+- **Bodies** (`bodyLook` / `bodyFillOf`): the resting colour is the panel warmed by the
+  family tint (or by a little text colour for neutral parts), with a lighter top. The
+  outline takes the family colour at near full strength (neutral parts use a
+  border/text mix strong enough to read). A **selected** part glows in the accent instead
+  of casting a shadow. Every box body has rounded corners (`roundRectPath`), radius
+  ≤ 0.42 and tied to the shorter side. The hex display gets a dark bezel in every theme.
+  Light themes use a faint cool shadow and a strong white highlight; dark ones use a deep
+  shadow and a gentle highlight.
+- **Shadows switch off** when more than 500 parts are visible or the view is zoomed out
+  past 5 px per grid unit, so big datapaths stay fast. Measured on the mock demo while
+  running: ~0.6–0.8 ms per frame.
+- **Pins** are seated terminals. An input is a rounded square and an output a disc (the
+  §21 shape rule is kept), in brighter family colours, ringed in the canvas colour. Far
+  out (< 6 px per unit) they fall back to the cheap square blits.
+- **Text**: a readout is **data**. Values are set in a weighted monospace, and a single
+  bit takes its state's colour (`1` like a high wire, `X`/`Z` like unknown/floating) via
+  `valueColor`, contrast-checked against the body. Type marks (`+`, `MUX`, `REG`) are
+  semibold and a step brighter, and names are medium weight. `TextStyle` gains an
+  optional `weight`, and the font string is unchanged when it is absent.
+
+**Acceptance:** frontend lint / 459 unit / build green; e2e 81 of 82 locally (the
+pre-existing `subcircuit.spec.ts` failure); U1 bench unchanged (~1.7 ms avg on the
+stress scene, which has its own renderer path). **The six Linux canvas baselines
+(`demo-{oled,dark,light}`, `sim-lit`, `timing-path`, `timing-violation`) are now stale by
+design** and must be regenerated in the pinned image before CI can pass:
+
+    docker run --rm --ipc=host -v "$PWD:/work" -w /work/frontend \
+      mcr.microsoft.com/playwright:v1.63.0-noble \
+      bash -lc 'npm ci && npx playwright test --update-snapshots'
+
+The authoring machine's Docker store returned I/O errors, so that step is still owed.
+
+## 98. Red only means "instance", and a subcircuit's size is a slider (2026-10-26)
+
+- **A new subcircuit turned red.** A sheet's scope colour is a hash of its name (§77),
+  and two of the default names landed on red: `sub2` (336°) and `sub5` (29°). Red is the
+  colour reserved for "you are inside a specific INSTANCE", so a freshly made subcircuit
+  looked like an instance view. `scopeHue` now squeezes the wheel into 42°–292° (orange
+  round to purple). Unit-tested over 150 names.
+- **…and so did double-clicking an instance before anything had run.** A double-click
+  opened the instance view (red chrome, "these are its values") even when there were no
+  values to show, and someone double-clicking a just-placed instance wants to edit the
+  definition. The instance view now needs a run first (a status event or a cycle > 0);
+  before that, a double-click opens the definition. Making a new subcircuit also clears
+  any instance path. This also brings `subcircuit.spec.ts` back to green: it had been
+  failing on exactly this since the instance-scope change.
+- **Width and height were a grid of ~400 buttons.** They used the one-click picker built
+  for 1–32-bit widths, but a box runs to 400 units. Each is now a **slider** (track over
+  the useful range: width up to 48, height up to 64), a **number box** for any legal value
+  up to 400 (↑/↓ step by 1, Shift by 4), and an **Auto** pill that clears the explicit
+  size so the box follows its pins again. The minimum and resting value come from the
+  target's interface (`subcircuitSizeLimits`). Clearing writes nothing: the Inspector now
+  drops `null` attrs instead of saving `"width": null`, which also tidies the memory
+  editor's clear path.
+
+**Acceptance:** frontend lint / 460 unit / build green; e2e 82 of 82 (the size test now
+drives the slider, the number box and Auto).
+
+## 99. Ports that say what they are, an error that leaves, pins that arrive named, and a Circuits explorer (2026-10-26)
+
+- **Pins are labelled ports.** A `wiring.pin` was a 2×1 chip reading "PIN". It is now 2
+  units tall and as wide as its value needs (`pinBodyWidth`: the readout width, whole
+  units so the terminal stays on the grid, never under 3). It has **IN** / **OUT** across
+  the top in its family colour, and **the value it carries** beneath, in the data style of
+  §97 (`—` until there is one). Existing wires follow the moved terminal through the load
+  path's pin-end healing (§92), like any resized part.
+- **A new pin arrives named** (`in0`, `in1`, … / `out0`, …, the first free one on the
+  sheet, case-insensitive). The name is given in `CircuitDocument.addComponent`, so the
+  palette, a drop, a paste-free placement and any other path all get it. An unnamed pin
+  fails the whole load (it is the subcircuit interface), so every new pin used to arrive
+  broken, with a "Name this pin" nag and a load-failed banner. Unit-tested.
+- **The load-failed banner never went away.** A failed load leaves nothing loaded, and the
+  live re-sync only ran while something was loaded. So once the engine refused a document,
+  nothing retried even after the problem was fixed. `SimController.needsRetry` (the last
+  load failed AND the netlist has changed since) now drives the same debounced re-sync, so
+  fixing the problem clears the banner by itself. Unit-tested, and e2e against the mock,
+  which now refuses an unnamed pin with the engine's own message so the path can be
+  exercised. The banner also has a **×**. Dismissing hides _that_ message only; a
+  different problem shows again.
+- **Closing a tab keeps the circuit.** The tab's × used to **delete** the circuit. It now
+  closes the tab: the circuit stays in the file. The last open tab cannot close. Anything
+  that brings a closed circuit to the canvas reopens its tab: the explorer, a double-click
+  into an instance, the scope bar's way back. Which tabs are closed is view state for the
+  session, not saved in the file.
+- **Circuits explorer** (top of the palette rail, like VS Code's file explorer): every
+  circuit in the file with its part count and where it is used. The one on the canvas is
+  highlighted, and an open tab shows a dot. Click a row to open it, double-click to rename,
+  and hover for **×** (close its tab) and the trash (delete). "New subcircuit" is there too.
+- **Deleting asks, in the app's own dialog** (`ConfirmDialog`, replacing `window.confirm`),
+  every time, including for an empty circuit. It says how much goes, that Ctrl+Z brings it
+  back, and that closing the tab is the way to just hide it. The tab menu now reads
+  Rename… / Close / Delete….
+
+**Acceptance:** frontend lint / 462 unit / build green; e2e 85 of 85, including a new
+`explorer.spec.ts` for close-and-reopen, delete-asks, named pins, and the self-clearing,
+dismissible banner.
+
+## 100. A fixed load error really clears — in the desktop app too (2026-10-26)
+
+§99's retry worked in the browser, but the desktop app kept the banner up. There were two
+causes, both now fixed:
+
+- **A file-backed document re-synced from its stale disk copy.** `resync` reloaded a
+  document opened from a file by its _path_, and the engine re-read the file. Autosave
+  rewrites that file about a second after an edit, so the retry 140 ms after a fix loaded
+  the old, still-broken text, failed, and recorded the fixed netlist as "already failed".
+  From then on nothing retried. The browser has no real paths, so the browser tests never
+  saw it. Every re-sync of a file-backed document (and a save that has to load first) now
+  sends the **editor's text with the path** (`SimController.loadEditedAt`): memory
+  autoloads still resolve next to the file, but the file is not read. Open and Reload
+  from Disk still read the file, as they should. This needed an additive contract change,
+  **v1.5** (`docs/ipc.md`, needs sign-off): `load_circuit` with both `path` and `bytes`
+  loads the bytes as the document that lives at `path` (`Sim::load_circuit_bytes_at`;
+  the Tauri shell routes the pair to it). Before, `path` silently won.
+- **The banner never said where the problem was.** It showed the first message only,
+  "component 'c2': … must be named", with no sheet. An unnamed pin on another sheet (old
+  pins made before §99's auto-naming, or one in a closed tab) looked exactly like the one
+  just fixed, so the error seemed to refuse to clear. The banner now lists every problem
+  (up to three, then "…and N more") with **on “sheet”**, says that it clears by itself
+  once fixed, and gives each locatable problem a **Fix** button. Fix opens that sheet
+  (reopening a closed tab), selects the part (`EditorHandle.select`), and, for a naming
+  problem, puts the cursor in the Inspector's Name field.
+
+**Acceptance:** core tests green (new `bytes_at_a_path_resolve_autoloads_there_without_reading_the_file`),
+clippy/fmt clean, `cargo check -p csim-app` green; frontend lint / 463 unit / build green;
+e2e green, including a new test for an error on a closed sheet → Fix → name → banner gone.
+The desktop path itself was checked by unit test (the re-sync sends text + path), not by
+driving the native window.

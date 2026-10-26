@@ -5,6 +5,14 @@ Normative. Mirrors `docs/tasks/README.md` §3; implemented in Rust by `crates/co
 and in TypeScript by `frontend/src/ipc/types.ts`. Changes require human sign-off and a
 DESIGN.md note.
 
+**Changelog v1.4 → v1.5 (proposed 2026-10-26, needs sign-off):** `load_circuit` with **both**
+`path` and `bytes` loads the bytes as the document that lives at `path`: autoload paths resolve
+(and stay sandboxed) next to `path`, and the file itself is not read. Additive — `path` alone and
+`bytes` alone are unchanged (before, `path` silently won when both were given). The editor needs
+it to re-sync a file-backed document from its current text: re-reading the file picked up a stale
+copy that autosave had not rewritten yet, so a fixed load error stayed on screen. Rust:
+`Sim::load_circuit_bytes_at` (defaults to `load_circuit_bytes`).
+
 **Changelog v1.1 → v1.2:** `NamedComponent.value_net?` — the engine net carrying a named
 component's watchable value, so a UI readout works even when that pin is unwired (the engine
 nets every pin; `net_map` only covers wires); `NetChange.contended?` — the net's `X` is a
@@ -34,7 +42,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 
 | Command | Args | Returns |
 |---|---|---|
-| `load_circuit` | `{ path?: string, bytes?: Uint8Array }` | `LoadResult` |
+| `load_circuit` | `{ path?: string, bytes?: Uint8Array }` | `LoadResult` — **v1.5:** with both, `bytes` is the document and `path` only where it lives (autoloads resolve there; the file is not read) |
 | `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` — **writes even when the document fails validation**, returning those problems as warnings in `errors` (`ok: true`); only a document that cannot be parsed at all is refused (`ok: false`, nothing written). Losing a mid-edit draft is worse than saving one, and the previous clean state remains in version history. |
 | `sim_play` | `{ hz: number }` | — |
 | `sim_pause` | `{}` | — |

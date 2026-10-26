@@ -150,3 +150,24 @@ export function wirePath(
   }
   return out;
 }
+
+/**
+ * Closed rectangle with all four corners rounded (UI_OVERHAUL §97). Starts at
+ * the middle of the top edge so the path's own start is not a corner, which
+ * `roundedPath` would leave sharp.
+ */
+export function roundRectPath(x: number, y: number, w: number, h: number, r: number): PathCmd[] {
+  const cmds = roundedPath(
+    [
+      { x: x + w / 2, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h },
+      { x, y },
+      { x: x + w / 2, y },
+    ],
+    Math.max(0, Math.min(r, w / 2, h / 2)),
+  );
+  cmds.push({ t: "Z" });
+  return cmds;
+}

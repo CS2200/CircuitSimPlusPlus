@@ -22,7 +22,7 @@ class FakePath implements Path2DLike {
 
 /** Recording 2D context stand-in (only what Canvas2DRenderer touches). */
 class FakeCtx {
-  fillStyle = "";
+  fillStyle: unknown = "";
   strokeStyle = "";
   lineWidth = 1;
   lineCap: CanvasLineCap = "butt";
@@ -53,13 +53,25 @@ class FakeCtx {
     this.current = this.saved.pop() ?? [1, 0, 0, 1, 0, 0];
   }
   fillRect(): void {
-    this.clearedWith.push(this.fillStyle);
+    this.clearedWith.push(String(this.fillStyle));
   }
   stroke(): void {
     this.strokes.push(this.strokeStyle);
   }
   fill(): void {
-    this.fills.push(this.fillStyle);
+    this.fills.push(typeof this.fillStyle === "string" ? this.fillStyle : "gradient");
+    this.shadowsAtFill.push({ blur: this.shadowBlur, dy: this.shadowOffsetY });
+  }
+  shadowColor = "";
+  shadowBlur = 0;
+  shadowOffsetX = 0;
+  shadowOffsetY = 0;
+  readonly shadowsAtFill: { blur: number; dy: number }[] = [];
+  readonly gradients: { y0: number; y1: number; stops: [number, string][] }[] = [];
+  createLinearGradient(_x0: number, y0: number, _x1: number, y1: number) {
+    const g = { y0, y1, stops: [] as [number, string][] };
+    this.gradients.push(g);
+    return { addColorStop: (at: number, c: string) => g.stops.push([at, c]) };
   }
   readonly textCalls: { text: string; font: string; x: number; y: number }[] = [];
   fillText(text: string, x: number, y: number): void {
@@ -172,5 +184,48 @@ describe("Canvas2DRenderer", () => {
     renderer.endFrame();
     expect(paths).toHaveLength(0);
     expect(ctx.strokes).toHaveLength(0);
+  });
+});
+
+describe("component bodies (UI_OVERHAUL §97)", () => {
+  it("fills top-to-bottom, casts a zoom-scaled shadow, then outlines without one", () => {
+    const { ctx, renderer, view } = setup();
+    renderer.beginFrame(view); // 16 px/unit × dpr 2 = 32 device px per world unit
+    renderer.drawBody(line(0), {
+      fill: "#202020",
+      fillTop: "#404040",
+      y0: 2,
+      y1: 5,
+      stroke: "#888888",
+      lineWidth: 0.1,
+      shadow: { color: "rgba(0,0,0,0.5)", blur: 0.5, dy: 0.25 },
+    });
+    // The gradient runs over the body's own extent, lighter at the top.
+    expect(ctx.gradients).toEqual([
+      {
+        y0: 2,
+        y1: 5,
+        stops: [
+          [0, "#404040"],
+          [1, "#202020"],
+        ],
+      },
+    ]);
+    expect(ctx.fills).toEqual(["gradient"]);
+    // Shadow sizes are world units scaled to device pixels (the spec ignores
+    // the transform for shadows), so a shadow keeps its size relative to the part.
+    expect(ctx.shadowsAtFill).toEqual([{ blur: 16, dy: 8 }]);
+    // The outline comes after the restore: no shadow on the stroke.
+    expect(ctx.strokes).toEqual(["#888888"]);
+    expect(ctx.saved).toHaveLength(0);
+  });
+
+  it("is a flat fill with no gradient or shadow when none is asked for", () => {
+    const { ctx, renderer, view } = setup();
+    renderer.beginFrame(view);
+    renderer.drawBody(line(0), { fill: "#202020" });
+    expect(ctx.gradients).toEqual([]);
+    expect(ctx.fills).toEqual(["#202020"]);
+    expect(ctx.strokes).toEqual([]);
   });
 });

@@ -70,6 +70,8 @@ export interface EditorHandle {
   cut(): void;
   paste(): void;
   selectAll(): void;
+  /** Select exactly these parts (the load-error banner's Fix, §100). */
+  select(components: readonly string[]): void;
 }
 
 export default forwardRef<
@@ -484,8 +486,13 @@ export default forwardRef<
         tool.selectAll();
         bump();
       },
+      select: (components) => {
+        sel.set(components, []);
+        bump();
+        report();
+      },
     }),
-    [doc, tool, bump, report],
+    [doc, tool, sel, bump, report],
   );
 
   return (

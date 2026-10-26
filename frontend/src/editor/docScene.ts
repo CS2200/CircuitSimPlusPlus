@@ -12,8 +12,8 @@ import {
   type Rect,
   type Vec2,
 } from "../render/geom";
-import { polylinePath, rectPath, roundedPath, wirePath } from "../render/paths";
-import type { PathCmd, Renderer } from "../render/renderer";
+import { polylinePath, rectPath, roundRectPath, roundedPath, wirePath } from "../render/paths";
+import type { BodyStyle, PathCmd, Renderer } from "../render/renderer";
 import { UniformGrid } from "../render/spatial";
 import type { Theme } from "../render/theme";
 import type { ViolationKind, WireValue } from "../ipc/types";
@@ -125,7 +125,10 @@ function tintRoleOf(comp: CsxComponent): TintRole | null {
  * so the preview matches exactly what lands.
  */
 function pinBodyPath(r: Rect, isOutput: boolean): PathCmd[] {
-  if (!isOutput) return rectPath(r.x, r.y, r.w, r.h);
+  // Every box body has soft corners (§97): a sharp rectangle is what made the
+  // parts read as "just boxes". The radius tracks the smaller side so a thin
+  // part is not turned into a lozenge.
+  if (!isOutput) return roundRectPath(r.x, r.y, r.w, r.h, Math.min(0.42, Math.min(r.w, r.h) * 0.2));
   return roundedPath(
     [
       { x: r.x, y: r.y },
@@ -156,6 +159,78 @@ function tintColor(theme: Theme, role: TintRole): string {
   }
 }
 
+// ---- the body look (UI_OVERHAUL §97) ----
+
+/** Monospace stack for value readouts: digits line up and read as data. */
+const VALUE_FONT = "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace";
+
+/** More visible parts than this and the soft shadows switch off (blur is per-shape work). */
+const SHADOW_MAX_VISIBLE = 500;
+
+/** True when the theme is a light one (shadows and highlights invert their strength). */
+function isLightTheme(theme: Theme): boolean {
+  return luminance(theme.bg) > 0.45;
+}
+
+/**
+ * How a part's body is painted: lit from above (a gradient from a lighter top to
+ * the body colour), a soft shadow beneath it, and an outline in the part's own
+ * family colour — strong enough to read, unlike the old panel-border hairline.
+ * A selected part glows in the accent instead of casting a shadow.
+ */
+function bodyLook(
+  theme: Theme,
+  fill: string,
+  tint: string | null,
+  selected: boolean,
+  shadows: boolean,
+  rect: Rect,
+): BodyStyle {
+  const light = isLightTheme(theme);
+  const fillTop = mixHex(fill, "#ffffff", light ? 0.6 : 0.13);
+  const stroke = selected
+    ? theme.accent
+    : tint !== null
+      ? mixHex(tint, theme.panel, light ? 0.2 : 0.3)
+      : mixHex(theme.panelBorder, theme.text, light ? 0.3 : 0.28);
+  const shadow = !shadows
+    ? undefined
+    : selected && /^#[0-9a-f]{6}$/i.test(theme.accent)
+      ? { color: `${theme.accent}99`, blur: 0.9, dy: 0 }
+      : light
+        ? { color: "rgba(28, 32, 56, 0.2)", blur: 0.55, dy: 0.16 }
+        : { color: "rgba(0, 0, 0, 0.6)", blur: 0.6, dy: 0.2 };
+  return {
+    fill,
+    fillTop,
+    y0: rect.y,
+    y1: rect.y + rect.h,
+    stroke,
+    lineWidth: selected ? 0.16 : 0.1,
+    shadow,
+  };
+}
+
+/** A body's resting colour: the panel, warmed by its family tint when it has one. */
+function bodyFillOf(theme: Theme, tint: string | null): string {
+  const light = isLightTheme(theme);
+  if (tint === null) return mixHex(theme.panel, theme.text, light ? 0.035 : 0.07);
+  return mixHex(theme.panel, tint, light ? 0.13 : 0.2);
+}
+
+/**
+ * A readout's colour (§97): a lone bit in its state's colour — `1` like a high
+ * wire, `X`/`Z` like an unknown or floating one — kept readable on the body;
+ * anything wider in the text colour.
+ */
+function valueColor(theme: Theme, text: string, fill: string): string {
+  const t = text.trim();
+  if (t === "1") return readableOn(theme.wire.high, fill, theme.text);
+  if (t === "X" || /^0x[X]+$/i.test(t)) return readableOn(theme.wire.x, fill, theme.text);
+  if (t === "Z") return readableOn(theme.wire.z, fill, theme.text);
+  return theme.text;
+}
+
 /**
  * A DULL version of a wire's identity color (UI_OVERHAUL §35): mixed halfway
  * toward the background, so an idle wire reads as a subdued tint that the true
@@ -182,10 +257,22 @@ function mixHex(base: string, other: string, t: number): string {
     .join("")}`;
 }
 
-/** Clock rendering (UI decision): a white waveform on a body that flips green. */
-const CLOCK_WAVE = "#ffffff";
-const CLOCK_HIGH_FILL = "#1f7a3d"; // dark green: clock driving high
-const CLOCK_LOW_FILL = "#b9e6c6"; // light green: clock low
+/**
+ * Clock colours (UI_OVERHAUL §96): the body takes the THEME's "high" wire
+ * colour — strongly while the clock drives high, faintly while it is low — so a
+ * clock reads like the wires it drives in every theme. The old fixed greens
+ * (dark #1f7a3d / light #b9e6c6 under a white wave) clashed with most palettes,
+ * and the white wave all but vanished on the light fill.
+ */
+export function clockColors(
+  theme: Pick<Theme, "panel" | "text" | "bg" | "wire">,
+  high: boolean,
+): { fill: string; wave: string } {
+  const fill = mixHex(theme.panel, theme.wire.high, high ? 0.5 : 0.14);
+  // The wave in whichever of text / background contrasts with that fill.
+  const wave = readableOn(theme.text, fill, theme.bg);
+  return { fill, wave };
+}
 
 /**
  * A clock body's level: the value the engine drives when it is known
@@ -204,11 +291,16 @@ export function clockLevelOf(
 
 /**
  * A clock's square wave (UI_OVERHAUL §47): it shows the level the clock drives
- * AND the edge that just happened (▲ rising / ▼ falling). Drawn WHITE on the
- * clock's green body (UI decision); `high === null` (no sim value) draws a
+ * AND the edge that just happened (▲ rising / ▼ falling), in a colour that contrasts
+ * with the body (`clockColors`, §96); `high === null` (no sim value) draws a
  * neutral wave with no edge marker.
  */
-function drawClockWave(renderer: Renderer, rect: Rect, high: boolean | null): void {
+function drawClockWave(
+  renderer: Renderer,
+  rect: Rect,
+  high: boolean | null,
+  waveColor: string,
+): void {
   const x0 = rect.x + 0.3;
   const x1 = rect.x + rect.w - 0.3;
   const yHi = rect.y + rect.h * 0.34;
@@ -226,7 +318,7 @@ function drawClockWave(renderer: Renderer, rect: Rect, high: boolean | null): vo
     y = ny;
   }
   wave.push({ t: "L", x: x1, y });
-  renderer.drawPath(wave, { stroke: CLOCK_WAVE, lineWidth: 0.12 });
+  renderer.drawPath(wave, { stroke: waveColor, lineWidth: 0.12 });
   renderer.flush();
   if (high === null) return;
 
@@ -236,7 +328,7 @@ function drawClockWave(renderer: Renderer, rect: Rect, high: boolean | null): vo
       { t: "M", x: x0 + 2 * t, y: lastY },
       { t: "L", x: x1, y: lastY },
     ],
-    { stroke: CLOCK_WAVE, lineWidth: high ? 0.22 : 0.12, alpha: high ? 1 : 0.55 },
+    { stroke: waveColor, lineWidth: high ? 0.22 : 0.12, alpha: high ? 1 : 0.55 },
   );
 
   // ▲ on the rising edge / ▼ on the falling one, at the last transition.
@@ -253,7 +345,7 @@ function drawClockWave(renderer: Renderer, rect: Rect, high: boolean | null): vo
       { t: "M", x: edgeX + 0.16, y: tipY + back },
       { t: "L", x: edgeX, y: tipY },
     ],
-    { stroke: CLOCK_WAVE, lineWidth: 0.1, alpha: high ? 1 : 0.55 },
+    { stroke: waveColor, lineWidth: 0.1, alpha: high ? 1 : 0.55 },
   );
   renderer.flush();
 }
@@ -1409,6 +1501,13 @@ export class DocScene {
     }
 
     // Components layer.
+    // Soft shadows are per-shape work: a crowded or far-zoomed view goes flat
+    // rather than slow (§97).
+    let visibleParts = 0;
+    for (const layout of this.layouts.values()) {
+      if (rectIntersects(layout.rect, visible)) visibleParts++;
+    }
+    const shadowsOn = visibleParts <= SHADOW_MAX_VISIBLE && camera.scale >= 5;
     const inDots: Vec2[] = [];
     const outDots: Vec2[] = [];
     const otherDots: Vec2[] = [];
@@ -1565,11 +1664,11 @@ export class DocScene {
           hexText === null
             ? null
             : (Number.parseInt(hexText === "" ? "0" : hexText, 16) & 0xf).toString(16);
-        const body = rectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h);
-        renderer.drawPath(body, { fill: theme.panel });
-        renderer.drawPath(body, {
-          stroke: selected ? theme.accent : theme.panelBorder,
-          lineWidth: selected ? 0.22 : 0.12,
+        const body = roundRectPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h, 0.4);
+        // A dark bezel in every theme: the lit segments need the contrast.
+        renderer.drawBody(body, {
+          ...bodyLook(theme, "#15161c", null, selected, shadowsOn, layout.rect),
+          fillTop: "#24262f",
         });
         drawSevenSeg(renderer, layout.rect, digit, SEG_LIT, theme.panelBorder);
         renderer.flush();
@@ -1580,9 +1679,11 @@ export class DocScene {
       // apart at a glance without shouting.
       const role = tintRoleOf(comp);
       const tint = role === null ? null : tintColor(theme, role);
-      let bodyFill = tint === null ? theme.panel : mixHex(theme.panel, tint, 0.1);
-      // A clock's WHOLE body flips between two greens — dark while high, light
-      // while low (UI decision) — and its waveform is drawn white on top. Level
+      let bodyFill = bodyFillOf(theme, tint);
+      /** The colour the outline takes (the clock borrows its "high" colour). */
+      let edgeTint = tint;
+      // A clock's WHOLE body flips between a strong and a faint tint of the
+      // theme's "high" colour (§96), with its waveform drawn on top. Level
       // is the live `out` value, or the sim's phase so an unwired clock still
       // alternates as you tick (UI_OVERHAUL §51).
       let clockHigh: boolean | null = null;
@@ -1600,16 +1701,11 @@ export class DocScene {
             ? clkState === "high"
             : undefined;
         clockHigh = clockLevelOf(driven, sim?.cycle);
-        if (clockHigh !== null) bodyFill = clockHigh ? CLOCK_HIGH_FILL : CLOCK_LOW_FILL;
+        if (clockHigh !== null) bodyFill = clockColors(theme, clockHigh).fill;
+        edgeTint = theme.wire.high;
       }
-      const strokeStyle = {
-        stroke: selected
-          ? theme.accent
-          : tint === null
-            ? theme.panelBorder
-            : mixHex(theme.panelBorder, tint, 0.5),
-        lineWidth: selected ? 0.22 : 0.12,
-      };
+      const look = bodyLook(theme, bodyFill, edgeTint, selected, shadowsOn, layout.rect);
+      const strokeStyle = { stroke: look.stroke, lineWidth: look.lineWidth };
       // Distinctive shape (local EAST frame → rotated about the body's
       // center), or a box. The EAST-frame shape is built CENTERED on the
       // (possibly axis-swapped) body rect: for N/S the rect is h×w, so
@@ -1629,8 +1725,7 @@ export class DocScene {
         Array.isArray(comp.attrs?.negate) ? (comp.attrs.negate as number[]) : [],
       );
       if (shape !== null) {
-        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), { fill: bodyFill });
-        renderer.drawPath(rotatePath(shape.body, cx, cy, rot), strokeStyle);
+        renderer.drawBody(rotatePath(shape.body, cx, cy, rot), look);
         for (const extra of shape.extra) {
           renderer.drawPath(rotatePath(extra, cx, cy, rot), strokeStyle);
         }
@@ -1645,7 +1740,7 @@ export class DocScene {
           bubbles.push(rotPt(b.x, b.y, cx, cy, rot));
         }
         for (const b of bubbles) {
-          renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: theme.panel });
+          renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), { fill: bodyFill });
           renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R), strokeStyle);
         }
         // A plexer's trapezoid says "plexer", not WHICH plexer: the abbreviation
@@ -1656,18 +1751,20 @@ export class DocScene {
         if (showsBodyCaption(comp.type)) {
           const mark = spec.caption(comp.attrs ?? {});
           renderer.drawText(cx, cy, mark, {
-            color: theme.textDim,
+            color: mixHex(theme.textDim, theme.text, 0.35),
             size: fitTextSize(mark, local.w, local.h, spec.markSize ?? 1.0),
             align: "center",
+            weight: 600,
           });
         }
         // other shaped bodies have no caption — a named part shows its name beside it
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
-            color: theme.textDim,
+            color: mixHex(theme.textDim, theme.text, 0.35),
             size: 0.9,
             align: na.align,
+            weight: 500,
           });
         }
       } else {
@@ -1688,8 +1785,19 @@ export class DocScene {
             : comp.type === "mem.ram" || comp.type === "mem.rom"
               ? chipPath(layout.rect.x, layout.rect.y, layout.rect.w, layout.rect.h)
               : pinBodyPath(layout.rect, outPin);
-        renderer.drawPath(bodyPath, { fill: bodyFill });
-        renderer.drawPath(bodyPath, strokeStyle);
+        renderer.drawBody(bodyPath, look);
+        // A pin says which way it points (§99): IN / OUT across the top, in its
+        // family colour, so an interface reads at a glance — the value sits below.
+        const isPort = comp.type === "wiring.pin";
+        if (isPort) {
+          const tagColor = readableOn(tint ?? theme.textDim, bodyFill, theme.text);
+          renderer.drawText(cx, layout.rect.y + 0.5, outPin ? "OUT" : "IN", {
+            color: tagColor,
+            size: 0.55,
+            align: "center",
+            weight: 700,
+          });
+        }
         // The body ALWAYS shows the type mark: a symbol where the family has
         // one (arith: + − × ÷ = ~ «), otherwise a short abbreviation (REG, RAM,
         // MUX, …). A user-assigned name is drawn ABOVE the part and never
@@ -1854,6 +1962,11 @@ export class DocScene {
           );
         }
         if (valueText !== null && !isMemory) caption = valueText;
+        // A pin with nothing to read yet shows a dash, not the word "PIN" (§99).
+        else if (isPort) caption = "—";
+        /** The value sits under a pin's IN/OUT tag; everywhere else it is centred. */
+        const textY = isPort ? cy + 0.32 : cy;
+        const textH = isPort ? layout.rect.h - 0.75 : layout.rect.h;
         // A RAM/ROM's ADDRESS also reads its driver before a run (UI_OVERHAUL
         // §48), and over a stale Z/X (§51).
         if (isMemory && addrText === null) {
@@ -1862,9 +1975,10 @@ export class DocScene {
         if (comp.name !== undefined && comp.name !== "") {
           const na = labelAnchor(layout.rect, comp.namePos ?? "N");
           renderer.drawText(na.x, na.y, comp.name, {
-            color: theme.textDim,
+            color: mixHex(theme.textDim, theme.text, 0.35),
             size: 0.9,
             align: na.align,
+            weight: 500,
           });
         }
         // Memory readouts (UI_OVERHAUL §46/§50): the type word plus Addr/Data,
@@ -1878,9 +1992,11 @@ export class DocScene {
             const fit = fitValueLine(line, layout.rect.w, layout.rect.h, 0.9);
             if (!fit.full) cut = true;
             renderer.drawText(mc, mid + (i - 1) * 1.2, fit.text, {
-              color: theme.textDim,
+              color: i === 0 ? mixHex(theme.textDim, theme.text, 0.35) : theme.text,
               size: fit.size,
               align: "center",
+              font: i === 0 ? undefined : VALUE_FONT,
+              weight: i === 0 ? 600 : 500,
             });
           });
           // Hover reveals the full Address/Data readouts (§56).
@@ -1904,9 +2020,9 @@ export class DocScene {
             });
           }
         } else if (comp.type === "wiring.clock") {
-          // The body already flips green (dark high / light low, computed
-          // above). Track the level so a flip can flash, then draw the white
-          // waveform on top (UI decision).
+          // The body already flips between the theme's strong and faint
+          // "high" tint (computed above). Track the level so a flip can flash,
+          // then draw the waveform on top in a contrasting colour (§96).
           const high = clockHigh;
           if (high !== null) {
             const prev = this.clockLevel.get(comp.id);
@@ -1931,7 +2047,12 @@ export class DocScene {
               renderer.flush();
             }
           }
-          drawClockWave(renderer, layout.rect, high);
+          drawClockWave(
+            renderer,
+            layout.rect,
+            high,
+            high === null ? theme.textDim : clockColors(theme, high).wave,
+          );
         } else if (comp.type === "wiring.probe" && valueText === null) {
           // The probe shows only its value; with nothing to read it stays bare
           // (the pointed shape already says "probe", UI_OVERHAUL §36).
@@ -1957,23 +2078,28 @@ export class DocScene {
           // A live (or static) value line: keep it readable and shorten with an
           // ellipsis when a wide readout (e.g. 32-bit binary) would overrun the
           // body — hovering then reveals the whole thing (UI_OVERHAUL §56).
-          const line = fitValueLine(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0);
+          const line = fitValueLine(caption, layout.rect.w, textH, spec.markSize ?? 1.0);
           if (!line.full) this.truncated.set(comp.id, caption);
-          renderer.drawText(cx, cy, line.text, {
-            color: theme.textDim,
+          // Set as data (§97): monospace, and a single bit in its state's
+          // colour — a 1 lights up like a high wire.
+          renderer.drawText(cx, textY, line.text, {
+            color: valueColor(theme, caption, bodyFill),
             size: line.size,
             align: "center",
+            font: VALUE_FONT,
+            weight: 600,
           });
         } else {
           renderer.drawText(
             cx,
-            cy,
+            textY,
             caption,
             // Type marks/symbols are sized to fit the body (§18).
             {
-              color: theme.textDim,
-              size: fitTextSize(caption, layout.rect.w, layout.rect.h, spec.markSize ?? 1.0),
+              color: mixHex(theme.textDim, theme.text, 0.35),
+              size: fitTextSize(caption, layout.rect.w, textH, spec.markSize ?? 1.0),
               align: "center",
+              weight: 600,
             },
           );
         }
@@ -1999,14 +2125,33 @@ export class DocScene {
     renderer.flush();
     // Pin markers (UI_OVERHAUL §21): input pins are squares, output pins are
     // circles, and a muted colour says which side of the part they are on.
-    const inMark = mixHex(theme.panel, theme.bus[2], 0.55);
-    const outMark = mixHex(theme.panel, theme.bus[0], 0.6);
-    renderer.drawDots(inDots, PIN_R, inMark);
-    renderer.drawDots(otherDots, PIN_R, theme.textDim);
-    if (outDots.length > 0) {
+    // §97: terminals read as hardware — an input is a rounded square, an output
+    // a disc, both in a clear family colour with a ring in the canvas colour that
+    // seats them on the body's edge. (Zoomed far out, where a ring is sub-pixel,
+    // the cheap square blits are kept.)
+    const inMark = mixHex(theme.panel, theme.bus[2], 0.8);
+    const outMark = mixHex(theme.panel, theme.bus[0], 0.85);
+    if (camera.scale < 6) {
+      renderer.drawDots(inDots, PIN_R, inMark);
+      renderer.drawDots(otherDots, PIN_R, theme.textDim);
       for (const d of outDots) {
         renderer.drawPath(circlePath(d.x, d.y, PIN_R), { fill: outMark });
       }
+      renderer.flush();
+    } else {
+      const ring = { stroke: theme.bg, lineWidth: 0.07 };
+      const r = PIN_R * 1.05;
+      const squares = (dots: Vec2[]): PathCmd[] =>
+        dots.flatMap((d) => roundRectPath(d.x - r, d.y - r, 2 * r, 2 * r, r * 0.45));
+      const discs = outDots.flatMap((d) => circlePath(d.x, d.y, r * 1.08));
+      const ins = squares(inDots);
+      const others = squares(otherDots);
+      renderer.drawPath(ins, { fill: inMark });
+      renderer.drawPath(ins, ring);
+      renderer.drawPath(others, { fill: theme.textDim });
+      renderer.drawPath(others, ring);
+      renderer.drawPath(discs, { fill: outMark });
+      renderer.drawPath(discs, ring);
       renderer.flush();
     }
 

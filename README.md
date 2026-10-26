@@ -140,12 +140,15 @@ npm run build          # tsc --noEmit && vite build → frontend/dist
 
 The UI is a VS Code-style **top bar** (File / Edit / View / Help) over a
 **transport bar** (play-pause, step one tick, reset, run-to, speed presets, live
-`T_obs`), a **palette** rail of part families, a **right-dock Inspector** for the
+`T_obs`), a **palette** rail of part families with a **search box** (`/` jumps to
+it; it filters every group at once), a **right-dock Inspector** for the
 selection, and a **sheet-tab strip** with one tab per circuit. Preferences —
 theme, accent, grid, live values, default label side, 12-/24-hour timestamps,
-autosave — live in **File → Settings…** (the only path to theme, light or dark);
-byte-level history is **File → Version history…** (Ctrl+Alt+H). A zoom slider
-sits at the bottom edge of the canvas.
+autosave — live in **Settings** (the header's gear, or **File → Settings…**; the
+only path to theme, light or dark); byte-level history is **File → Version
+history…** (Ctrl+Alt+H). A zoom control (slider, ±, and a percentage that resets
+to 100 %) sits at the bottom edge of the canvas. The chrome's look is a small
+token layer derived from the theme palettes — see `frontend/UI_OVERHAUL.md` §94.
 
 A subcircuit's interface is its named **pin components** (`wiring.pin`): input
 pins face left by default, output pins (`isOutput`) face right. Instances are

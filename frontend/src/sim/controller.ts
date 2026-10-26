@@ -87,6 +87,13 @@ export class SimController {
    */
   private loadedSig: string | null = null;
   /**
+   * Netlist fingerprint of the last load that FAILED (null after a success). A
+   * failed load leaves nothing loaded, and the live re-sync only ran while
+   * something was — so after one failure the banner stayed up even once the
+   * problem was fixed (UI_OVERHAUL §99). `needsRetry` reads this.
+   */
+  private failedSig: string | null = null;
+  /**
    * Tail of the load chain — loads are serialized. Two overlapping loads would
    * interleave their initial full-state diff batches and both mutate the
    * store, leaving whichever finished last to win; chaining guarantees the
@@ -151,6 +158,21 @@ export class SimController {
   }
 
   /**
+   * Load the EDITOR's current text for a document that lives at `path`
+   * (contract v1.5): autoloads resolve next to the file, but the file itself —
+   * which autosave may not have rewritten yet — is not read. Every re-sync of a
+   * file-backed document goes through here; reading the disk copy instead is
+   * what kept a fixed load error on screen in the desktop app (§100).
+   */
+  loadEditedAt(doc: CircuitDocument, path: string): Promise<boolean> {
+    return this.loadInto(
+      doc,
+      () => this.core.api.loadCircuit({ path, bytes: encode(doc.toJson()) }),
+      path,
+    );
+  }
+
+  /**
    * Queue a load behind any in-flight one (see `loading`) and run it. Commands
    * and the live re-sync can both fire loads, so they must not overlap.
    */
@@ -192,12 +214,15 @@ export class SimController {
       result = await invokeLoad();
     } catch (err) {
       this.store.onLoadFailed([{ kind: "other", message: String(err), circuit: doc.name }]);
+      this.failedSig = netlistSignature(doc);
       return false;
     }
     if (!result.ok) {
       this.store.onLoadFailed(result.errors);
+      this.failedSig = netlistSignature(doc);
       return false;
     }
+    this.failedSig = null;
     // One wire → net map per instance path (contract v1.4). The root (`""`)
     // is the flat map the rest of the UI keys on; the nested maps let a
     // subcircuit sheet opened as a specific instance resolve its own values.
@@ -227,6 +252,17 @@ export class SimController {
   }
 
   /**
+   * The last load failed and the editor's netlist has changed since: worth
+   * trying again on its own, so fixing the problem (naming the pin, say) clears
+   * the error without a command (UI_OVERHAUL §99).
+   */
+  needsRetry(doc: CircuitDocument): boolean {
+    return (
+      !this.store.loaded && this.failedSig !== null && this.failedSig !== netlistSignature(doc)
+    );
+  }
+
+  /**
    * Bring the engine up to date with `doc`, reloading only when needed: a
    * no-op while the loaded document is current, a fresh load when nothing is
    * loaded or the editor changed since the last load. A document that came
@@ -239,7 +275,9 @@ export class SimController {
    */
   async resync(doc: CircuitDocument): Promise<boolean> {
     if (this.store.loaded && !this.isStale(doc)) return true;
-    return this.loadedPath !== null ? this.loadFromPath(doc, this.loadedPath) : this.load(doc);
+    // The editor is the truth: a file-backed document re-syncs from its CURRENT
+    // text, at its path (§100) — never from the possibly stale file.
+    return this.loadedPath !== null ? this.loadEditedAt(doc, this.loadedPath) : this.load(doc);
   }
 
   /**
@@ -249,7 +287,7 @@ export class SimController {
    */
   async save(doc: CircuitDocument, path: string): Promise<SaveResult> {
     if (!this.store.loaded) {
-      const ok = await this.load(doc);
+      const ok = await this.loadEditedAt(doc, path);
       if (!ok) return { ok: false, errors: [...this.store.loadErrors] };
     }
     return this.core.api.saveCircuit(path, doc.data);

@@ -58,6 +58,19 @@ const DEFAULT_HALF_PERIOD: u64 = 1000;
 /// Play loop frame time (diff batching granularity, §7.2).
 const FRAME: Duration = Duration::from_millis(16);
 
+/// Up to this clock rate the play loop steps **tick by tick** and emits a diff
+/// batch after every tick, so both edges of every cycle reach the UI: the
+/// canvas clock flips, pulses fire on the clock net, and the waveform trace
+/// sees a square wave instead of a flat line. A whole-cycle batch would never
+/// contain the clock at all — it ends each cycle at the level it started.
+/// Above this rate the loop runs whole cycles and emits once per frame (the UI
+/// paints at most one batch per frame anyway).
+const TICK_EMIT_MAX_HZ: u64 = 120;
+
+/// Ceiling on the work one frame may catch up on after a stall (a laptop
+/// sleep, a long GC pause in the webview): at most ~2 s of a 1 kHz clock.
+const MAX_TICKS_PER_FRAME: u64 = 4096;
+
 /// The session API over one open circuit. Construct with an
 /// [`EventSink`] (the Tauri shell's event emitter; the tests' recorder).
 pub struct Session {
@@ -297,6 +310,29 @@ impl SimState {
         sink.timing(&update);
     }
 
+    /// Run `n` ticks one at a time, emitting a diff batch after each, so every
+    /// clock edge reaches the UI (see `TICK_EMIT_MAX_HZ`). Halts like
+    /// `run_cycles`.
+    fn run_ticks(&mut self, n: u64, sink: &mut dyn EventSink) {
+        for _ in 0..n {
+            match self.engine.tick() {
+                Ok(rep) => {
+                    if rep.is_some() {
+                        self.last_report = rep;
+                    }
+                }
+                Err(h) => {
+                    self.running = false;
+                    self.emit_diffs(sink);
+                    self.emit_halted(sink, &h);
+                    self.emit_status(sink);
+                    return;
+                }
+            }
+            self.emit_diffs(sink);
+        }
+    }
+
     /// Run `n` cycles, emitting diffs and, on a halt, `sim_halted`.
     fn run_cycles(&mut self, n: u64, sink: &mut dyn EventSink) {
         match self.engine.run(n) {
@@ -534,6 +570,13 @@ impl Sim for Session {
         self.load_impl(bytes, None)
     }
 
+    fn load_circuit_bytes_at(&mut self, bytes: &[u8], path: &str) -> LoadResult {
+        // The document is `bytes`; `path` only says where it lives, so autoloads
+        // resolve (and stay sandboxed) next to it — contract v1.5.
+        let base = Path::new(path).parent().map(Path::to_path_buf);
+        self.load_impl(bytes, base)
+    }
+
     fn load_circuit_path(&mut self, path: &str) -> LoadResult {
         let p = Path::new(path);
         let base = p.parent().map(Path::to_path_buf);
@@ -587,6 +630,12 @@ impl Sim for Session {
         let join = std::thread::spawn(move || {
             let mut last_status = Instant::now();
             let mut status_base_cycle = 0u64;
+            let mut last_frame = Instant::now();
+            // Ticks owed but not yet run, carried frame to frame as a
+            // fraction — so a 10 Hz clock really runs 20 ticks a second,
+            // rather than one cycle per 16 ms frame (which made every rate
+            // below 60 Hz run at ~60).
+            let mut owed_ticks: f64 = 0.0;
             loop {
                 if stop2.load(Ordering::Relaxed) {
                     break;
@@ -598,8 +647,27 @@ impl Sim for Session {
                     if !st.running {
                         break;
                     }
-                    let chunk = (st.play_hz / 60).max(1);
-                    st.run_cycles(chunk, &mut **sink);
+                    let frame_now = Instant::now();
+                    let dt = frame_now.duration_since(last_frame).as_secs_f64();
+                    last_frame = frame_now;
+                    owed_ticks += st.play_hz as f64 * 2.0 * dt;
+                    let ticks = (owed_ticks.floor() as u64).min(MAX_TICKS_PER_FRAME);
+                    // Debt past the cap is forgiven: catching up a long stall
+                    // would freeze the UI, and nobody asked for that time.
+                    owed_ticks = (owed_ticks - ticks as f64).min(2.0);
+                    if ticks > 0 {
+                        if st.play_hz <= TICK_EMIT_MAX_HZ {
+                            st.run_ticks(ticks, &mut **sink);
+                        } else {
+                            // Whole cycles, one batch; an odd tick stays owed so
+                            // the run keeps landing on cycle boundaries.
+                            let cycles = ticks / 2;
+                            owed_ticks += (ticks % 2) as f64;
+                            if cycles > 0 {
+                                st.run_cycles(cycles, &mut **sink);
+                            }
+                        }
+                    }
                     let now = Instant::now();
                     if now.duration_since(last_status) >= Duration::from_secs(1) {
                         let done = st.engine.cycle().saturating_sub(status_base_cycle);
@@ -975,6 +1043,69 @@ mod tests {
         assert_eq!(rec.lock().unwrap().halts.len(), 1);
     }
 
+    /// Playing at a low rate runs at THAT rate (not one cycle per frame), and
+    /// every clock edge reaches the sink as its own diff batch, so the UI can
+    /// flip the clock and the trace can draw a square wave.
+    #[test]
+    fn play_is_paced_and_emits_every_clock_edge() {
+        let (mut s, rec) = session(&counter_doc(None));
+        s.play(10);
+        std::thread::sleep(Duration::from_millis(650));
+        s.pause();
+        let r = rec.lock().unwrap();
+        let last = r.statuses.last().expect("a status on pause");
+        assert!(!last.running);
+        // 10 Hz for ~0.65 s is ~6 cycles; the old loop would have run ~40. The
+        // floor is loose on purpose: under a loaded test run the play thread may
+        // get less than its share of the 0.65 s, never more.
+        assert!(
+            (1..=10).contains(&last.cycle),
+            "ran {} cycles in 0.65 s at 10 Hz",
+            last.cycle
+        );
+        // Each tick emitted its own batch: there are about two batches per
+        // cycle (an edge can be a quiet one only if nothing at all changed,
+        // and the clock itself changes at every edge).
+        let diff_batches = r.diffs.iter().filter(|d| !d.full).count() as u64;
+        assert!(
+            diff_batches >= last.cycle * 2 - 1,
+            "{diff_batches} batches for {} cycles",
+            last.cycle
+        );
+        // And the clock net is in them, alternating — the value a whole-cycle
+        // batch could never show.
+        let clk = r.diffs[0]
+            .changes
+            .iter()
+            .map(|c| c.net)
+            .find(|net| {
+                let mut seen = 0;
+                for d in r.diffs.iter().skip(1) {
+                    if d.changes.iter().any(|c| c.net == *net) {
+                        seen += 1;
+                    }
+                }
+                seen >= diff_batches.saturating_sub(1)
+            })
+            .expect("one net changes in (nearly) every tick batch: the clock");
+        let levels: Vec<String> = r
+            .diffs
+            .iter()
+            .skip(1)
+            .filter_map(|d| {
+                d.changes
+                    .iter()
+                    .find(|c| c.net == clk)
+                    .map(|c| c.val.v.clone())
+            })
+            .collect();
+        assert!(levels.len() >= 4, "{levels:?}");
+        assert!(
+            levels.windows(2).all(|w| w[0] != w[1]),
+            "the clock alternates every tick: {levels:?}"
+        );
+    }
+
     #[test]
     fn load_emits_one_full_batch_then_diffs_only() {
         let (mut s, rec) = session(&counter_doc(None));
@@ -1053,6 +1184,32 @@ mod tests {
         assert_eq!(s.mem_read("dmem", 1, 1)[0].v, "bb");
         // reset also restarts the clock.
         assert_eq!(last_cycle(&rec.0), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Contract v1.5: bytes loaded "at" a path are the document (the file on
+    /// disk is not read — it may be stale), and autoloads resolve next to the
+    /// path, as they would for a load from that path.
+    #[test]
+    fn bytes_at_a_path_resolve_autoloads_there_without_reading_the_file() {
+        let dir = std::env::temp_dir().join(format!("csim-session-at-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("img.hex"), "aa bb 2-00\n").unwrap();
+        let circuit = dir.join("c.csx");
+        // What is on disk is NOT a loadable document.
+        std::fs::write(&circuit, "not json").unwrap();
+
+        let rec = RecSink::default();
+        let mut s = Session::new(Box::new(rec.clone()));
+        let doc = counter_doc(Some("img.hex"));
+        let res = s.load_circuit_bytes_at(doc.as_bytes(), circuit.to_str().unwrap());
+        assert!(res.ok, "{:?}", res.errors);
+        // The relative autoload found the image beside the path.
+        assert_eq!(s.mem_read("dmem", 0, 1)[0].v, "aa");
+        assert!(
+            rec.0.lock().unwrap().halts.is_empty(),
+            "no autoload error was reported"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

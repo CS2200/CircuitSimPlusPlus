@@ -53,6 +53,30 @@ export interface TextStyle {
   readonly align?: CanvasTextAlign;
   /** CSS font-family (defaults to the app's system stack). */
   readonly font?: string;
+  /** CSS font-weight (400 when absent). */
+  readonly weight?: number;
+}
+
+/**
+ * A component body (UI_OVERHAUL §97): a filled, outlined shape with an optional
+ * vertical gradient (lit from above) and a soft drop shadow — what makes a part
+ * read as an object on the sheet instead of a wireframe box. Immediate-mode,
+ * like `drawDashedPath`: a gradient and a shadow are per-shape state the batched
+ * `drawPath` cannot carry.
+ */
+export interface BodyStyle {
+  /** Fill at the bottom of the shape (or the whole fill without `fillTop`). */
+  readonly fill: string;
+  /** Fill at the top of the shape: the gradient runs `fillTop` → `fill`. */
+  readonly fillTop?: string;
+  /** The shape's vertical extent in world units, for the gradient. */
+  readonly y0?: number;
+  readonly y1?: number;
+  readonly stroke?: string;
+  /** World units. */
+  readonly lineWidth?: number;
+  /** A soft shadow under the fill; sizes in world units (they scale with zoom). */
+  readonly shadow?: { readonly color: string; readonly blur: number; readonly dy: number };
 }
 
 export interface Viewport extends ViewSize {
@@ -92,6 +116,8 @@ export interface Renderer {
    * exactly as line widths do).
    */
   drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void;
+  /** Immediate-mode component body: gradient fill, soft shadow, outline (§97). */
+  drawBody(cmds: readonly PathCmd[], style: BodyStyle): void;
   /** Queue text (drawn after paths within the current layer). */
   drawText(x: number, y: number, text: string, style: TextStyle): void;
   /**

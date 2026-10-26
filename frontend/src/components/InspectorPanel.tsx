@@ -1,7 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
-import { editableAttrs, compPins, typeDisplayName, type AttrField } from "../editor/catalog";
+import {
+  editableAttrs,
+  compPins,
+  subcircuitSizeLimits,
+  typeDisplayName,
+  type AttrField,
+} from "../editor/catalog";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
@@ -10,6 +16,8 @@ import NumberPicker from "./NumberPicker";
 import { componentDelayText, wireDelayText } from "../editor/delayTable";
 import Select from "./Select";
 import { formatRadixValue, parseRadixValue } from "../lib/radix";
+import CompIcon, { PaletteGroupIcon } from "./CompIcon";
+import { CursorIcon, WaveIcon } from "./icons";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -74,6 +82,7 @@ export default function InspectorPanel({
   onEdit,
   onNotify,
   onOpenCircuit,
+  onShowInWaveform,
   focusField = null,
   onFocusHandled,
 }: {
@@ -100,6 +109,8 @@ export default function InspectorPanel({
   onNotify?: (message: string) => void;
   /** Open a subcircuit definition sheet (the panel's way into an instance, §80). */
   onOpenCircuit?: (name: string) => void;
+  /** Open the waveform viewer with the selection in it (§96). */
+  onShowInWaveform?: () => void;
   /** Attr key to focus on the next render (double-click a constant, §53). */
   focusField?: string | null;
   onFocusHandled?: () => void;
@@ -117,6 +128,14 @@ export default function InspectorPanel({
   // (the race that broke the e2e pin-rename flow). Stale drafts from other
   // components are always ignored by the `draft.key` checks anyway.
   const [draft, setDraft] = useState<{ key: string; text: string } | null>(null);
+  /** The Name field, so the load-error banner's Fix can land in it (§100). */
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusField !== "name") return;
+    nameRef.current?.focus();
+    nameRef.current?.select();
+    onFocusHandled?.();
+  }, [focusField, compId, onFocusHandled]);
   const [memOpen, setMemOpen] = useState(false);
   useEffect(() => {
     setDraft((d) => (d !== null && !d.key.startsWith(`${compId ?? ""}:`) ? null : d));
@@ -170,7 +189,11 @@ export default function InspectorPanel({
     return (
       <div className="inspector">
         <div className="inspector-head">
-          <span className="inspector-id">Wire</span>
+          <span className="inspector-glyph" aria-hidden="true">
+            <PaletteGroupIcon group="Wiring" height={18} />
+          </span>
+          <span className="inspector-id">{wireName !== "" ? "Tunnel" : "Wire"}</span>
+          {wireName !== "" && <span className="inspector-type">{wireName}</span>}
         </div>
         {/* A wire's NAME makes it a tunnel (UI_OVERHAUL §86/§87): its route is hidden
          * on the canvas and this label is the handle. Committed on Enter/blur, like a
@@ -228,18 +251,48 @@ export default function InspectorPanel({
             ))}
           </div>
         </div>
+        {onShowInWaveform !== undefined && (
+          <div className="inspector-buttons inspector-buttons-full">
+            <button className="secondary" onClick={onShowInWaveform}>
+              <WaveIcon />
+              Show in waveform
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   if (comp === undefined) {
+    // The empty dock teaches the three gestures that fill it (UI_OVERHAUL §94).
     return (
       <div className="inspector">
-        <p className="inspector-empty">
-          {selectionCount > 1
-            ? `${selectionCount} components selected — select exactly one to edit.`
-            : "Nothing selected. Click a component on the canvas to edit its properties here."}
-        </p>
+        <div className="inspector-empty">
+          <span className="inspector-empty-icon" aria-hidden="true">
+            <CursorIcon />
+          </span>
+          <p className="inspector-empty-title">
+            {selectionCount > 1 ? `${selectionCount} parts selected` : "Nothing selected"}
+          </p>
+          <p className="inspector-empty-text">
+            {selectionCount > 1
+              ? "Select exactly one part to edit its properties here."
+              : "Click a part or a wire on the canvas to edit it here."}
+          </p>
+          {selectionCount <= 1 && (
+            <ul className="inspector-tips">
+              <li>
+                <kbd>Click</kbd> a pin to start a wire
+              </li>
+              <li>
+                <kbd>R</kbd> rotates the selection
+              </li>
+              <li>
+                <kbd>?</kbd> lists every shortcut
+              </li>
+            </ul>
+          )}
+        </div>
       </div>
     );
   }
@@ -262,7 +315,8 @@ export default function InspectorPanel({
   };
   const commitAttr = (key: string, value: unknown) => {
     if ((comp.attrs ?? {})[key] === value) return;
-    commit({ attrs: { ...(comp.attrs ?? {}), [key]: value } }, `attr:${key}`);
+    if (value === null && !(key in (comp.attrs ?? {}))) return; // already absent
+    commit({ attrs: withoutNulls({ ...(comp.attrs ?? {}), [key]: value }) }, `attr:${key}`);
   };
   /**
    * Several attributes in ONE commit. Two `commitAttr` calls back to back would
@@ -273,21 +327,38 @@ export default function InspectorPanel({
     const current = comp.attrs ?? {};
     // A re-pick of the cell that is already selected must not touch the file.
     if (Object.entries(patch).every(([key, value]) => current[key] === value)) return;
-    commit({ attrs: { ...current, ...patch } }, `attr:${Object.keys(patch).sort().join("+")}`);
+    commit(
+      { attrs: withoutNulls({ ...current, ...patch }) },
+      `attr:${Object.keys(patch).sort().join("+")}`,
+    );
   };
 
   // Subcircuit instances pick their target from the file's circuits, not
   // free text (a typo would only surface as an engine load error).
-  const fields: AttrField[] = editableAttrs(comp.type).map((f) =>
-    comp.type === "subcircuit" && f.key === "circuit"
-      ? {
-          key: "circuit",
-          label: "Circuit",
-          kind: "select" as const,
-          options: circuits.map((c) => ({ value: c, label: c })),
-        }
-      : f,
-  );
+  const subLimits =
+    comp.type === "subcircuit" ? subcircuitSizeLimits(comp.attrs ?? {}, sheetCircuits) : null;
+  const fields: AttrField[] = editableAttrs(comp.type).map((f): AttrField => {
+    if (comp.type === "subcircuit" && f.key === "circuit") {
+      return {
+        key: "circuit",
+        label: "Circuit",
+        kind: "select" as const,
+        options: circuits.map((c) => ({ value: c, label: c })),
+      };
+    }
+    // The size sliders start at the smallest box the target's pins allow and
+    // rest at the size it derives (§98) — both depend on the target circuit.
+    if (subLimits !== null && f.kind === "slider" && (f.key === "width" || f.key === "height")) {
+      const w = f.key === "width";
+      return {
+        ...f,
+        min: w ? subLimits.minW : subLimits.minH,
+        dflt: w ? subLimits.autoW : subLimits.autoH,
+        max: subLimits.max,
+      };
+    }
+    return f;
+  });
 
   const unnamed = ADDRESSABLE.has(comp.type) && (comp.name ?? "") === "";
   /**
@@ -358,8 +429,12 @@ export default function InspectorPanel({
   return (
     <div className="inspector">
       <div className="inspector-head">
-        {/* The plain, full component name — "Multiplexer", not `plexers.mux`
-         * (UI_OVERHAUL §57); the id stays as quiet metadata. */}
+        {/* The part's own glyph, then the plain, full component name —
+         * "Multiplexer", not `plexers.mux` (UI_OVERHAUL §57); the id stays as
+         * quiet metadata. */}
+        <span className="inspector-glyph" aria-hidden="true">
+          <CompIcon type={comp.type} attrs={comp.attrs ?? {}} height={18} />
+        </span>
         <span className="inspector-id">{typeDisplayName(comp.type)}</span>
         <span className="inspector-type">{comp.id}</span>
       </div>
@@ -384,6 +459,7 @@ export default function InspectorPanel({
         <label className="inspector-row">
           <span>Name</span>
           <input
+            ref={nameRef}
             value={draft?.key === nameKey ? draft.text : (comp.name ?? "")}
             placeholder="(unnamed)"
             onChange={(e) => setDraft({ key: nameKey, text: e.target.value })}
@@ -528,6 +604,19 @@ export default function InspectorPanel({
         </div>
       )}
 
+      {/* The trace is one click from the part (§96): the value it drives (or,
+       *  for a probe or LED, the value it reads) over time. */}
+      {onShowInWaveform !== undefined &&
+        comp.type !== "misc.text" &&
+        compPins(comp, sheetCircuits).length > 0 && (
+          <div className="inspector-buttons inspector-buttons-full">
+            <button className="secondary" onClick={onShowInWaveform}>
+              <WaveIcon />
+              Show in waveform
+            </button>
+          </div>
+        )}
+
       {memOpen && isMemory && (
         <MemContentsDialog
           depth={memDepth}
@@ -549,6 +638,16 @@ export default function InspectorPanel({
       )}
     </div>
   );
+}
+
+/**
+ * `null` means "clear this attr" (Auto on a size, Clear on a memory image), so it
+ * is dropped rather than written into the file as `"width": null` (§98).
+ */
+function withoutNulls(attrs: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(attrs)) if (v !== null) out[k] = v;
+  return out;
 }
 
 /** One splitter-pin row in the editor's local state (UI_OVERHAUL §41). */
@@ -708,6 +807,81 @@ function FieldRow({
     inputRef.current?.select();
     onFocusHandled?.();
   }, [focusKey, field.key, onFocusHandled]);
+
+  if (field.kind === "slider" && field.typed === true) {
+    // A size (§98): a track over the useful range, a number box for any legal
+    // value, and — when the attr may be absent — Auto to derive it again.
+    const set = typeof value === "number";
+    const n = set ? Math.max(field.min, Math.min(field.max, value)) : field.dflt;
+    const trackMax = Math.max(field.trackMax ?? field.max, n, field.min + 1);
+    const pct = ((Math.min(n, trackMax) - field.min) / (trackMax - field.min)) * 100;
+    const text = draft?.key === key ? draft.text : String(n);
+    const commitTyped = (raw: string) => {
+      const v = Math.round(Number(raw));
+      if (raw.trim() !== "" && Number.isFinite(v)) {
+        const clamped = Math.max(field.min, Math.min(field.max, v));
+        if (clamped !== value) onCommitAttr(field.key, clamped);
+      }
+      onDraft(null);
+    };
+    return (
+      <div className="inspector-field">
+        <span className="inspector-field-label inspector-size-head">
+          {field.label}
+          {field.auto === true && (
+            <button
+              type="button"
+              className={`inspector-auto${set ? "" : " active"}`}
+              aria-pressed={!set}
+              title={
+                set
+                  ? "Go back to the size the pins give it"
+                  : "Following the pins — drag or type to set a size"
+              }
+              onClick={() => {
+                if (set) onCommitAttr(field.key, null);
+              }}
+            >
+              Auto
+            </button>
+          )}
+        </span>
+        <div className="inspector-slider inspector-size">
+          <input
+            type="range"
+            min={field.min}
+            max={trackMax}
+            value={Math.min(n, trackMax)}
+            aria-label={field.label}
+            style={{ "--fill": `${pct}%` } as CSSProperties}
+            onChange={(e) => onCommitAttr(field.key, Number(e.target.value))}
+          />
+          <input
+            className="inspector-size-input"
+            type="number"
+            min={field.min}
+            max={field.max}
+            value={text}
+            aria-label={`${field.label} (grid units)`}
+            onChange={(e) => onDraft({ key, text: e.target.value })}
+            onBlur={() => {
+              if (draft?.key === key) commitTyped(draft.text);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                // Step from the shown value, so ↑ on "Auto 8" sets 9.
+                e.preventDefault();
+                const next = n + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 4 : 1);
+                onCommitAttr(field.key, Math.max(field.min, Math.min(field.max, next)));
+                onDraft(null);
+              }
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (field.kind === "slider") {
     const n = typeof value === "number" ? value : field.dflt;

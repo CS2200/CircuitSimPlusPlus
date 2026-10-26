@@ -208,14 +208,20 @@ test("an unnamed wiring.pin warns that the file will not load", async ({ page })
   await page.keyboard.press("Escape");
   await expect(page.locator(".inspector-id")).toHaveText("Pin");
 
-  // The engine fails the whole load on a blank pin name, so say so up front —
-  // next to the Name field — instead of waiting for a generic load failure.
+  // A new pin arrives named (§99), so there is nothing to warn about yet…
   const note = page.locator('[data-note="unnamed-pin"]');
+  await expect(note).toHaveCount(0);
+  const name = page.locator(".inspector-row input").first();
+  await expect(name).toHaveValue("in0");
+
+  // …but clearing the name brings the warning: the engine fails the whole load
+  // on a blank pin name, so say so up front, next to the Name field.
+  await name.fill("");
+  await name.press("Enter");
   await expect(note).toBeVisible();
   await expect(note).toContainText("Name this pin");
 
   // Naming it clears the warning.
-  const name = page.locator(".inspector-row input").first();
   await name.fill("req");
   await name.press("Enter");
   await expect(note).toHaveCount(0);

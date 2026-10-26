@@ -1,6 +1,16 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { SimController } from "../sim/controller";
 import type { CircuitDocument } from "../model/document";
+import type { LoadError } from "../ipc/types";
+import {
+  CircuitIcon,
+  CloseIcon,
+  PauseIcon,
+  PlayIcon,
+  ResetIcon,
+  StepIcon,
+  WaveIcon,
+} from "./icons";
 
 /**
  * Slider notches at the "nice" clock values (slider exponents, where
@@ -11,9 +21,10 @@ const SPEED_NOTCHES = [0, 3, 7, 10, 13, 17, 20, 23, 27, 30];
 const DECADE_EXPS = new Set([0, 10, 20, 30]);
 
 /**
- * Simulation transport bar (FRONTEND.md U5): play/pause, step tick/cycle,
- * run-to-cycle-N, speed slider (log scale), plus cycle/eff-Hz telemetry.
- * Load errors and halts surface as banners.
+ * Simulation transport bar (FRONTEND.md U5; restyled UI_OVERHAUL §94): play /
+ * pause, step one tick, reset, run-to-cycle-N, the speed slider (log scale),
+ * and the cycle / effective-Hz telemetry. Load errors and halts surface as a
+ * banner under the header.
  *
  * Commands auto-load the current document into the core, and reload it when
  * the editor changed since the last load (the engine holds its own snapshot,
@@ -27,6 +38,9 @@ export default function SimBar({
   onTogglePath,
   hzExp,
   onHzExp,
+  waveOpen = false,
+  onToggleWave,
+  onLocateError,
 }: {
   ctl: SimController;
   doc: CircuitDocument;
@@ -39,6 +53,11 @@ export default function SimBar({
    *  Simulation menu's speed presets share the same state. */
   hzExp: number;
   onHzExp: (exp: number) => void;
+  /** The waveform viewer is showing (§96: its toggle lives here, beside Play). */
+  waveOpen?: boolean;
+  onToggleWave?: () => void;
+  /** Jump to the part a load error names (§100); absent = no Fix buttons. */
+  onLocateError?: (err: LoadError) => void;
 }) {
   useSyncExternalStore(ctl.store.subscribe, ctl.store.getVersion.bind(ctl.store));
   const s = ctl.store;
@@ -98,30 +117,60 @@ export default function SimBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, doc, hz, onReset]);
 
+  const violations = s.timing?.violations.length ?? 0;
+
+  /**
+   * What the banner is saying, as one string: dismissing it (×) hides THAT
+   * message only — a different problem, or the same one coming back after a
+   * fix, shows again (UI_OVERHAUL §99).
+   */
+  const bannerKey = JSON.stringify([
+    s.halted?.cycle,
+    s.halted?.reason,
+    s.halted?.details,
+    s.loadErrors[0]?.message,
+    s.loadErrors.length,
+    cmdError,
+    s.contendedNets.size,
+  ]);
+  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
+  const bannerUp =
+    (s.halted !== null ||
+      s.loadErrors.length > 0 ||
+      cmdError !== null ||
+      s.contendedNets.size > 0) &&
+    dismissedBanner !== bannerKey;
+
   return (
     <>
-      <div className="simbar">
-        <div className="sim-group">
+      <div className={`simbar${running ? " running" : ""}`}>
+        <div className="sim-group sim-transport">
           <button
             className="sim-play"
-            title={running ? "Pause" : "Run"}
+            aria-label={running ? "Pause" : "Run"}
+            aria-pressed={running}
+            title={running ? "Pause (Ctrl+K)" : "Run until a halt or a breakpoint (Ctrl+K)"}
             onClick={() => (running ? guard(ctl.pause()) : withLoadedDoc(() => ctl.play(hz)))}
           >
-            {running ? "⏸" : "⏵"}
+            {running ? <PauseIcon /> : <PlayIcon />}
           </button>
+          {/* The accessible name stays the bare verb the keyboard help uses. */}
           <button
-            className="secondary"
-            title="Step one tick (half clock cycle); stops the clock if running"
+            className="sim-btn"
+            aria-label="tick"
+            title="Step one tick — half a clock cycle; stops the clock if running (Ctrl+J)"
             onClick={() => void stepOneTick()}
           >
-            tick
+            <StepIcon />
+            <span className="sim-btn-label">Tick</span>
           </button>
           <button
-            className="secondary"
-            title="Reset: fresh engine state; memory autoload files re-apply (§5.2)"
+            className="sim-btn"
+            title="Reset: fresh engine state; memory autoload files re-apply (Ctrl+R)"
             onClick={() => void onReset()}
           >
-            reset
+            <ResetIcon />
+            <span className="sim-btn-label">Reset</span>
           </button>
         </div>
         <div className="sim-group sim-runto">
@@ -129,6 +178,7 @@ export default function SimBar({
             type="number"
             min={0}
             placeholder="cycle #"
+            aria-label="Run to cycle"
             value={runTo}
             onChange={(e) => setRunTo(e.target.value)}
             onKeyDown={(e) => {
@@ -138,11 +188,12 @@ export default function SimBar({
             }}
           />
           <button
-            className="secondary"
+            className="sim-btn"
             disabled={runTo === ""}
+            title="Run until the simulation reaches this cycle"
             onClick={() => withLoadedDoc(() => ctl.runUntil(Number(runTo)))}
           >
-            run to
+            Run to
           </button>
         </div>
         <label className="sim-group sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
@@ -176,7 +227,11 @@ export default function SimBar({
           </span>
           <span className="sim-speed-value">{hz.toLocaleString()} Hz</span>
         </label>
-        <span className="sim-status">
+        <span
+          className={`sim-status${running ? " live" : ""}`}
+          title={running ? "Running — the clock is advancing" : "Paused — the current cycle"}
+        >
+          <span className="sim-status-dot" aria-hidden="true" />
           {s.loaded ? (
             <>
               cycle {s.cycle}
@@ -186,11 +241,31 @@ export default function SimBar({
             "not loaded — any command loads the circuit"
           )}
         </span>
+        {onToggleWave !== undefined && (
+          // The trace is what a run PRODUCES, so its door sits with the run
+          // controls, labelled — it used to be an unlabelled icon in the
+          // header's top-right corner that nobody found (§96).
+          <button
+            className={`sim-wave${waveOpen ? " active" : ""}`}
+            aria-label={waveOpen ? "Back to the circuit" : "Waveform viewer"}
+            aria-pressed={waveOpen}
+            title={
+              waveOpen
+                ? "Back to the circuit (Ctrl+Alt+W)"
+                : "Waveform viewer — trace signals over time (Ctrl+Alt+W)"
+            }
+            onClick={onToggleWave}
+          >
+            {waveOpen ? <CircuitIcon /> : <WaveIcon />}
+            <span className="sim-btn-label">{waveOpen ? "Circuit" : "Waveform"}</span>
+          </button>
+        )}
         {s.timing !== null && (
           <button
-            className={`sim-tobs${pathOn ? " active" : ""}`}
+            className={`sim-tobs${pathOn ? " active" : ""}${violations > 0 ? " warn" : ""}`}
+            aria-pressed={pathOn}
             title={
-              s.timing.violations.length > 0
+              violations > 0
                 ? `Observed critical path (DTA) — click to highlight. Setup/hold: ${s.timing.violations
                     .map((v) => `${v.kind} @ comp ${v.comp_id} (${v.circuit})`)
                     .join(", ")}`
@@ -199,21 +274,30 @@ export default function SimBar({
             onClick={onTogglePath}
           >
             T_obs {s.timing.t_obs} ns
-            {s.timing.violations.length > 0 && (
+            {violations > 0 && (
               <span className="sim-violations">
                 {" "}
-                · ⚠ {s.timing.violations.length} violation
-                {s.timing.violations.length === 1 ? "" : "s"}
+                · ⚠ {violations} violation
+                {violations === 1 ? "" : "s"}
               </span>
             )}
           </button>
         )}
       </div>
-      {(s.halted !== null ||
-        s.loadErrors.length > 0 ||
-        cmdError !== null ||
-        s.contendedNets.size > 0) && (
+      {bannerUp && (
         <div className={`sim-banner${paused ? " breakpoint" : ""}`} role="alert">
+          <button
+            type="button"
+            className="sim-banner-close"
+            aria-label="Dismiss"
+            title="Dismiss — it comes back if the problem changes"
+            onClick={() => {
+              setDismissedBanner(bannerKey);
+              setCmdError(null);
+            }}
+          >
+            <CloseIcon />
+          </button>
           {s.halted !== null &&
             (paused ? (
               // A breakpoint is not a failure (docs/ipc.md §3): the run stopped
@@ -229,10 +313,34 @@ export default function SimBar({
               </span>
             ))}
           {s.loadErrors.length > 0 && (
-            <span>
-              ⛔ Load failed ({s.loadErrors.length} {s.loadErrors.length === 1 ? "error" : "errors"}
-              ): {s.loadErrors[0].message}
-            </span>
+            // Every problem, WHERE it is, and a way there (§100): the bare first
+            // message gave no sheet, so a problem on another sheet looked like
+            // one that refused to clear after the visible one was fixed.
+            <div className="sim-load-errors">
+              <span>
+                ⛔ Load failed ({s.loadErrors.length}{" "}
+                {s.loadErrors.length === 1 ? "error" : "errors"}) — it clears by itself once fixed:
+              </span>
+              <ul>
+                {s.loadErrors.slice(0, 3).map((e, i) => (
+                  <li key={i}>
+                    <span className="sim-err-msg">{e.message}</span>
+                    {e.circuit !== "" && <span className="sim-err-where"> on “{e.circuit}”</span>}
+                    {onLocateError !== undefined && locatable(e) && (
+                      <button
+                        type="button"
+                        className="sim-err-fix"
+                        onClick={() => onLocateError(e)}
+                        title="Go to the part this is about"
+                      >
+                        Fix
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {s.loadErrors.length > 3 && <span>…and {s.loadErrors.length - 3} more</span>}
+            </div>
           )}
           {cmdError !== null && <span>⛔ {cmdError}</span>}
           {s.contendedNets.size > 0 && (
@@ -246,6 +354,11 @@ export default function SimBar({
       )}
     </>
   );
+}
+
+/** A load error the editor can point at: it names a component, by id or index. */
+function locatable(e: LoadError): boolean {
+  return e.comp_id !== undefined || /component '[^']+'/.test(e.message);
 }
 
 /**
