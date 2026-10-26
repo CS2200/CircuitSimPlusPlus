@@ -1374,3 +1374,34 @@ each by a different oracle — the unit test, the CE source, and the corpus. Eve
 was derived by reading a function and reasoning about the common case; none of them was
 derived by *measuring the shape of the common case first*. That is the methodological lesson
 this round, and it is cheap to fix: count before changing.
+
+### The count (Round 12): splitter-to-splitter chaining *is* the corpus
+
+`tools/splitter_shapes.py` (new, in the transpiler repo) runs `CSIM_DEBUG_SPLITTER_SHAPE`
+over the 212-submission working set and tallies every splitter pin's shape — other-driver
+count, and whether any of those drivers is not a splitter:
+
+| pin shape (others, authored) | pins |
+|---|---:|
+| 0 other drivers — the splitter is the authority | 8887 |
+| **1 other driver, not authored — driven by another splitter** | **5948** |
+| 1 other driver, authored — a real component | 1628 |
+| 2+ | ~1000 |
+
+2646 splitters. **`>=1 other driver, none authored` — the exact shape Round 11's rule
+targeted — is 6297 pins, the majority of split pins**, and "1, not authored" means the single
+co-driver is another *splitter*. So **splitter-to-splitter chaining is the normal idiom in this
+corpus** (the `c55` → `c83` pattern), not a rare plumbing case, and `authored` does not separate
+"plumbing" from "assemble" at all — it is the whole common case. That is why a rule built on it
+moved 138 designs.
+
+It also settles the *opposite* question: since the common split pin is driven by a sibling
+splitter, the gather **must** read the split's net value (the sibling's drive) — the original
+`eval_splitter` is right, and the bug is that the sibling's value can be a tick **stale**. CE
+never has a stale sibling because `CircuitState` re-merges a link after every push and iterates
+to quiescence inside the tick. So the fix is the within-tick fixpoint, not the gather source —
+now the *measured* conclusion rather than a reasoned one.
+
+Lesson, reused: instrument, count, *then* change. Three hypotheses died from reading a
+function and reasoning about the common case; this one line of counting settled in a minute
+what three rounds of reasoning got backwards.
