@@ -195,6 +195,12 @@ export const IpcEvents = {
  *  - `src/ipc/tauri.ts`     (task U5 — Tauri command adapter over csim-core)
  */
 export interface CoreApi {
+  /**
+   * `path` alone reads the file; `bytes` alone is a document with no home
+   * (autoloads resolve against the CWD); **both** (v1.5) are the editor's
+   * current text for the document that lives at `path` — autoloads resolve next
+   * to it, and the file itself is not read.
+   */
   loadCircuit(src: { path?: string; bytes?: Uint8Array }): Promise<LoadResult>;
   saveCircuit(path: string, document: unknown): Promise<SaveResult>;
 

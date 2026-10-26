@@ -228,7 +228,7 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
 }) => {
   await page.goto("/");
 
-  // PIN placed world-anchored at [-6,0] → terminal at (-4,0.5).
+  // PIN placed world-anchored at [-6,0]; its terminal is read back below.
   await openPaletteGroup(page, "Wiring");
   await page.getByRole("button", { name: "INPUT", exact: true }).click();
   const pinSpot = await world(page, -6, 0);
@@ -248,7 +248,8 @@ test("Wiring: a pin terminal connects to a gate (regression: 'pin' not 'port')",
   const pinComp = placed.circuits[0].components.find((c) => c.type === "wiring.pin");
   const andComp = placed.circuits[0].components.find((c) => c.type === "gate.and");
   if (pinComp === undefined || andComp === undefined) throw new Error("placements missing");
-  const terminalWorld = { x: pinComp.pos[0] + 2, y: pinComp.pos[1] + 0.5 }; // terminal dx=2 dy=0.5
+  // A 1-bit pin is a 3×2 port (§99): its terminal sits at dx=3, dy=1.
+  const terminalWorld = { x: pinComp.pos[0] + 3, y: pinComp.pos[1] + 1 };
   const in0World = { x: andComp.pos[0], y: andComp.pos[1] + 1 }; // in0 dx=0 dy=1
   const terminal = await world(page, terminalWorld.x, terminalWorld.y);
   await page.mouse.click(terminal.x, terminal.y);
@@ -407,12 +408,15 @@ test("Sheet tabs: middle-click offers Rename and Delete", async ({ page }) => {
   await input.press("Escape");
   await expect(page.getByRole("tab", { name: "sub1" })).toBeVisible();
 
-  // Delete removes the sheet.
+  // Delete asks first (§99), in the app's own dialog, and then removes the sheet.
   await page.getByRole("tab", { name: "sub1" }).click({ button: "middle" });
   await page
     .getByRole("menu", { name: "sub1 actions" })
     .getByRole("menuitem", { name: "Delete" })
     .click();
+  const ask = page.getByRole("dialog", { name: 'Delete "sub1"?' });
+  await expect(ask).toBeVisible();
+  await ask.getByRole("button", { name: "Delete" }).click();
   await expect(page.getByRole("tab", { name: "sub1" })).toHaveCount(0);
 });
 

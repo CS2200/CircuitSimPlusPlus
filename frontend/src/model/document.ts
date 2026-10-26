@@ -274,6 +274,12 @@ export class CircuitDocument {
   addComponent(circuitIdx: number, init: ComponentInit, coalesceKey?: string): string {
     const c = this.circuit(circuitIdx);
     const id = allocComponentId(c);
+    // A `wiring.pin` MUST be named (it is the subcircuit interface, and an unnamed
+    // one fails the whole load), so a new pin arrives named — `in0`, `out0`, … —
+    // instead of arriving broken and asking to be fixed (UI_OVERHAUL §99).
+    if (init.type === "wiring.pin" && (init.name === undefined || init.name === "")) {
+      init = { ...init, name: freePinName(c, init.attrs?.isOutput === true) };
+    }
     const comp: CsxComponent = {
       id,
       type: init.type,
@@ -1263,4 +1269,20 @@ export function reprojectJunctionDependents(
     }
   }
   return out;
+}
+
+/**
+ * The first free default name for a new pin on `c`: `in0`, `in1`, … for an input,
+ * `out0`, … for an output. Compared case-insensitively — the names are labels a
+ * person reads, and `IN0` beside `in0` would be a trap (UI_OVERHAUL §99).
+ */
+export function freePinName(
+  c: { components: readonly { name?: string }[] },
+  isOutput: boolean,
+): string {
+  const taken = new Set(c.components.map((x) => (x.name ?? "").toLowerCase()));
+  const prefix = isOutput ? "out" : "in";
+  let n = 0;
+  while (taken.has(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
 }

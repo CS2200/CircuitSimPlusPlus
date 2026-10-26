@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { resolveTheme, type Theme } from "../render/theme";
+import { resolveTheme } from "../render/theme";
 import type { SimController } from "../sim/controller";
 import {
   bitLaneIndices,
@@ -16,35 +16,47 @@ import {
 } from "../sim/waveform";
 import { wireValueState } from "../lib/value";
 import type { WireValue } from "../ipc/types";
+import { MinusIcon, PlusIcon } from "./icons";
 
 /**
- * Waveform viewer (UI_OVERHAUL §89): a full-view trace of the running sim.
+ * Waveform viewer (UI_OVERHAUL §89; reworked §95): a full-view trace of the
+ * running sim.
  *
- * It draws what the engine already streams — no new IPC.  `SimController.waves`
- * records every net, one sample per cycle, from the *pre-merge* diff tap, so a
- * trace is complete even at speed; this view never asks the engine for anything
- * it is not already sending.
+ * It draws what the engine already streams — no new IPC. `SimController.waves`
+ * records every change from the *pre-merge* diff tap, so a trace is complete
+ * even at speed; this view never asks the engine for anything.
  *
- * Rows: every named part (probe/register/RAM/ROM) to start with, plus whatever
- * was selected on the canvas ("Add selection"), plus per-bit expansion for a
- * bus.  The axis is **cycles** — the model the course reasons in — and the
- * colours are the canvas's own (`theme.wire[state]`), so a signal is the same
- * colour in the trace as it is on the schematic (§35).
+ * The axis is **cycles** (fractional, so both edges of a clock show), with a
+ * ruler pinned at the top. The view is a window `[origin, origin + visible)`
+ * over the recorded run `[first, liveEnd]`, where `liveEnd` is half a tick past
+ * the newest event — the newest value is in effect *now*, so it gets width
+ * instead of being a zero-width sliver at the right edge.
  *
- * Breakpoints are the trace's other half (§90): a watched signal carries a ring
- * and the condition it stops on in the name column, and a run that stopped draws
- * a dashed rule at the cycle it stopped in.  Both come from the *document*
- * (`sim/waveform.ts`'s `breakpointWatches`), not from the engine, so the trace
- * marks what the schematic says — the same source as every other row here.
+ * Moving through time: drag the lanes, scroll sideways (trackpad, Shift+wheel,
+ * or a plain wheel when the rows all fit), the scrollbar, or ←/→ Home End.
+ * Ctrl/⌘+wheel zooms at the pointer; −/+ and Fit in the bar. **Follow** keeps
+ * the live edge in view while the sim runs; panning away turns it off, and
+ * panning back to the end turns it on again.
+ *
+ * Each row's name column always shows a value: the one under the pointer, or
+ * else the value at the right edge of the view (the live value while
+ * following). Hover a row for its remove ×; a bus has a ▸ to expand its bits.
  */
 
-/** Minimum row height; rows grow into the panel (see `laneH`). */
-const LANE_H = 22;
-/** Ceiling for that growth: generous enough to read, not a stretched ruler. */
-const LANE_H_MAX = 64;
-const GUTTER = 196;
-const PAD_TOP = 8;
-const AXIS_H = 18;
+const LANE_H = 30;
+const LANE_H_MAX = 52;
+const GUTTER = 220;
+const RULER_H = 24;
+/** Room under the last row for the "how to add / move" hint. */
+const HINT_H = 44;
+/** A fresh view shows about this many cycles across the lane area. */
+const DEFAULT_VISIBLE_CYCLES = 12;
+const MIN_PX = 0.25;
+const MAX_PX = 400;
+const ZOOM_STEP = 1.5;
+const ZERO: WireValue = { v: "0", x: "0", z: "0" };
+const MONO = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const SANS = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 
 interface Row {
   signal: WaveSignal;
@@ -53,10 +65,21 @@ interface Row {
   parent?: string;
 }
 
+/** The current window, mirrored into a ref so event handlers never go stale. */
+interface View {
+  origin: number;
+  px: number;
+  laneW: number;
+  domainStart: number;
+  domainEnd: number;
+  follow: boolean;
+}
+
 export default function WaveformView({
   sim,
   defaults,
   picked,
+  add = null,
   watches,
   circuitLabel,
   onClose,
@@ -67,6 +90,8 @@ export default function WaveformView({
   defaults: WaveSignal[];
   /** Signals the canvas selection resolves to right now (App resolves them). */
   picked: WaveSignal[];
+  /** "Show in waveform" (§96): signals to add; a new `seq` is a new request. */
+  add?: { signals: WaveSignal[]; seq: number } | null;
   /** Breakpoints on this sheet: net → the conditions that stop on it (§90). */
   watches: ReadonlyMap<number, readonly string[]>;
   circuitLabel: string;
@@ -76,41 +101,128 @@ export default function WaveformView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState<Row[]>(() => defaults.map((signal) => ({ signal })));
-  const [pxPerCycle, setPxPerCycle] = useState(6);
-  const [origin, setOrigin] = useState(0);
+  /** Default rows the user removed: they must not come back on the next reload. */
+  const removedRef = useRef(new Set<string>());
+
+  /**
+   * Keep the default rows current (§96). The viewer can open before the first
+   * load (its defaults are then empty), and every reload hands out NEW net ids —
+   * so a row keyed `n:main/acc` must take the fresh signal, and a named part that
+   * appears later must be added. A row the user removed stays removed.
+   */
+  useEffect(() => {
+    setRows((cur) => {
+      const byKey = new Map(defaults.map((d) => [d.key, d]));
+      let changed = false;
+      const next = cur.map((r) => {
+        const d = byKey.get(r.signal.key);
+        if (
+          d !== undefined &&
+          (d.net !== r.signal.net || d.bits !== r.signal.bits || d.label !== r.signal.label)
+        ) {
+          changed = true;
+          return { ...r, signal: d };
+        }
+        return r;
+      });
+      const have = new Set(next.map((r) => r.signal.key));
+      for (const d of defaults) {
+        if (!have.has(d.key) && !removedRef.current.has(d.key)) {
+          next.push({ signal: d });
+          changed = true;
+        }
+      }
+      return changed ? next : cur;
+    });
+  }, [defaults]);
+
+  // "Show in waveform": add the requested signals (once per request).
+  const lastAddSeq = useRef(0);
+  useEffect(() => {
+    if (add === null || add.seq === lastAddSeq.current) return;
+    lastAddSeq.current = add.seq;
+    for (const sig of add.signals) removedRef.current.delete(sig.key);
+    setRows((cur) => {
+      const have = new Set(cur.map((r) => r.signal.key));
+      const fresh = add.signals.filter((sig) => !have.has(sig.key));
+      return fresh.length === 0 ? cur : [...cur, ...fresh.map((signal) => ({ signal }))];
+    });
+  }, [add]);
+  /** Pixels per cycle once the user zoomed; null = the default window. */
+  const [pxManual, setPxManual] = useState<number | null>(null);
+  /** Left edge (in cycles) while NOT following. */
+  const [originState, setOriginState] = useState(0);
   const [follow, setFollow] = useState(true);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
-  const [cursor, setCursor] = useState<{ cycle: number; y: number } | null>(null);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [hoverRow, setHoverRow] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [size, setSize] = useState({ w: 800, h: 400 });
-  /** True once the user has zoomed or panned by hand, so Fit stops re-applying. */
-  const [manual, setManual] = useState(false);
-  const themeRef = useRef<Theme | null>(null);
 
   // Redraw on every applied frame (the store bumps ≤ once per frame while
   // running) — reading the recorder directly, like the canvas reads netValues.
   const version = useSyncExternalStore(sim.store.subscribe, () => sim.store.getVersion());
-  /**
-   * The axis: `x` is a fractional cycle, so a signal that moves twice inside one
-   * cycle (the clock) is drawn as it really is.  Several events share a cycle
-   * number — the mock says so outright (`cycle = tick / 2`) — so the cycle count
-   * alone cannot place them.
-   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- version invalidates the mutable recorder
   const tb = useMemo(() => sim.waves.timebase(), [sim.waves, version]);
   const span = useMemo(() => {
     const ts = sim.waves.timeSpan;
     if (ts === null) return null;
-    return {
-      first: tb.x(ts.firstT, ts.firstCycle),
-      last: tb.x(ts.lastT, ts.lastCycle),
-    };
+    const first = tb.x(ts.firstT, ts.firstCycle);
+    const lastEvent = tb.x(ts.lastT, ts.lastCycle);
+    // The newest value holds until the next edge: half a cycle on a timed
+    // axis (one tick), a whole cycle when the core only knows cycles.
+    return { first, lastEvent, liveEnd: lastEvent + (tb.hasTime ? 0.5 : 1) };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version invalidates the mutable recorder
   }, [tb, sim.waves, version]);
-  /**
-   * Where the run stopped, if it did (§90).  Read straight off the store, like
-   * the recorder: a halt is one more fact about the run the trace is showing,
-   * and the trace is the only place that can put it at a *cycle*.
-   */
+  /** Where the run stopped, if it did (§90). */
   const halted = sim.store.halted;
 
+  // ---- the window ----
+  const laneW = Math.max(64, size.w - GUTTER);
+  const domainStart = span?.first ?? 0;
+  const domainEnd = span?.liveEnd ?? 1;
+  const domain = Math.max(1e-6, domainEnd - domainStart);
+  const px = pxManual ?? clampPx(laneW / DEFAULT_VISIBLE_CYCLES);
+  const visible = laneW / px;
+  const maxOrigin = Math.max(domainStart, domainEnd - visible);
+  const origin = follow ? maxOrigin : Math.min(maxOrigin, Math.max(domainStart, originState));
+
+  const viewRef = useRef<View>({ origin, px, laneW, domainStart, domainEnd, follow });
+  viewRef.current = { origin, px, laneW, domainStart, domainEnd, follow };
+
+  /** Move the window's left edge; landing on the live end re-engages Follow. */
+  const panTo = useCallback((next: number, atPx?: number) => {
+    const v = viewRef.current;
+    const p = atPx ?? v.px;
+    const maxO = Math.max(v.domainStart, v.domainEnd - v.laneW / p);
+    const o = Math.min(maxO, Math.max(v.domainStart, next));
+    setOriginState(o);
+    setFollow(o >= maxO - 1e-6);
+  }, []);
+
+  const panBy = useCallback((cycles: number) => panTo(viewRef.current.origin + cycles), [panTo]);
+
+  /** Zoom to `nextPx`, keeping the cycle under `anchor` (lane px) where it is. */
+  const zoomTo = useCallback(
+    (nextPx: number, anchor?: number) => {
+      const v = viewRef.current;
+      const p = clampPx(nextPx);
+      setPxManual(p);
+      if (v.follow && anchor === undefined) return; // the live edge stays pinned
+      const a = anchor ?? v.laneW / 2;
+      panTo(v.origin + a / v.px - a / p, p);
+    },
+    [panTo],
+  );
+
+  const fit = useCallback(() => {
+    const v = viewRef.current;
+    setPxManual(clampPx(v.laneW / Math.max(1e-6, v.domainEnd - v.domainStart)));
+    setOriginState(v.domainStart);
+    setFollow(true);
+  }, []);
+
+  // ---- size ----
   useEffect(() => {
     const el = wrapRef.current;
     if (el === null) return;
@@ -125,16 +237,36 @@ export default function WaveformView({
     return () => ro.disconnect();
   }, []);
 
+  // ---- keyboard: Escape closes; arrows / Home / End / ± / F move the view ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // Ctrl+J/K/R stay the transport's
+      const target = e.target as HTMLElement | null;
+      if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const v = viewRef.current;
+      const page = v.laneW / v.px;
+      let handled = true;
+      if (e.key === "ArrowLeft") panBy(-page * (e.shiftKey ? 0.5 : 0.15));
+      else if (e.key === "ArrowRight") panBy(page * (e.shiftKey ? 0.5 : 0.15));
+      else if (e.key === "Home") panTo(v.domainStart);
+      else if (e.key === "End") setFollow(true);
+      else if (e.key === "+" || e.key === "=") zoomTo(v.px * ZOOM_STEP);
+      else if (e.key === "-" || e.key === "_") zoomTo(v.px / ZOOM_STEP);
+      else if (e.key === "f" || e.key === "F") fit();
+      else handled = false;
+      if (handled) {
+        // Captured, so the (hidden) editor never rotates a selection on ←/→.
+        e.preventDefault();
+        e.stopPropagation();
       }
     };
-    // Leaving the app must drop the cursor: `mouseleave` on the canvas does not
-    // fire when the window itself goes away, and a frozen readout then claims to
-    // be about a cycle the mouse is nowhere near.
+    // Leaving the app must drop the cursor: `mouseleave` does not fire when the
+    // window itself goes away, and a frozen readout would then lie.
     const onBlur = () => setCursor(null);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("blur", onBlur);
@@ -142,7 +274,39 @@ export default function WaveformView({
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, [onClose]);
+  }, [onClose, panBy, panTo, zoomTo, fit]);
+
+  // ---- the wheel: sideways pans, Ctrl/⌘ zooms, plain wheel scrolls rows ----
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (el === null) return;
+    const onWheel = (e: WheelEvent) => {
+      const scale = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      const dx = e.deltaX * scale;
+      const dy = e.deltaY * scale;
+      const v = viewRef.current;
+      const rect = el.getBoundingClientRect();
+      const lanePx = e.clientX - rect.left - GUTTER;
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const anchor = lanePx >= 0 ? lanePx : undefined;
+        zoomTo(v.px * Math.exp(-dy * 0.002), anchor ?? v.laneW / 2);
+        return;
+      }
+      const sideways = e.shiftKey || Math.abs(dx) > Math.abs(dy);
+      if (sideways) {
+        e.preventDefault();
+        panBy((e.shiftKey && dx === 0 ? dy : dx) / v.px);
+        return;
+      }
+      // Vertical: scroll the rows when there are more than fit, else move in time.
+      if (el.scrollHeight > el.clientHeight + 1) return;
+      e.preventDefault();
+      panBy(dy / v.px);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [panBy, zoomTo]);
 
   /** Rows to draw: an expanded bus contributes one row per bit, MSB first. */
   const drawRows = useMemo(() => {
@@ -150,513 +314,513 @@ export default function WaveformView({
     for (const row of rows) {
       out.push(row);
       if (expanded.has(row.signal.key)) {
-        const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
-        const sample = valueAt(placed, placed[placed.length - 1]?.x ?? 0);
-        const bits = Math.min(
-          32,
-          row.signal.bits ?? valueBits(sample?.val ?? { v: "0", x: "0", z: "0" }),
-        );
+        const samples = sim.waves.samples(row.signal.net);
+        const latest = samples[samples.length - 1]?.val ?? ZERO;
+        const bits = Math.min(32, row.signal.bits ?? valueBits(latest));
         for (const bit of bitLaneIndices(bits)) {
           out.push({ signal: row.signal, bit, parent: row.signal.key });
         }
       }
     }
     return out;
-  }, [rows, expanded, sim.waves, tb, version]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version invalidates the mutable recorder
+  }, [rows, expanded, sim.waves, version]);
 
-  /**
-   * Fit the whole recorded run into the canvas — the *whole* width, so a short
-   * trace is not a sliver at the left with dead space beside it. The ceiling is
-   * generous (a shallow run is readable zoomed in, and Follow keeps the live
-   * edge pinned when it matters).
-   */
-  const fit = useCallback(() => {
-    if (span === null) return;
-    const width = Math.max(64, size.w - GUTTER);
-    const cycles = Math.max(1, span.last - span.first + 1);
-    const px = Math.max(0.25, Math.min(400, width / cycles));
-    setPxPerCycle(px);
-    setOrigin(follow ? span.last - width / px : 0);
-    setManual(false);
-  }, [span, size.w, follow]);
-
-  /**
-   * Fit **once** — when the trace first has something to show, or when the panel
-   * is resized — and never again for a growing run.  Re-fitting on every new
-   * sample is what made the trace condense cycle by cycle and the old cycles
-   * creep leftwards: the scope model is a fixed width with the window sliding
-   * (Follow), or an explicit Fit.
-   */
-  const fitted = useRef(false);
-  const fittedWidth = useRef(0);
-  useEffect(() => {
-    if (manual || span === null) return;
-    if (!fitted.current || fittedWidth.current !== size.w) {
-      fit();
-      fitted.current = true;
-      fittedWidth.current = size.w;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [span, size.w, manual]);
-
-  // Follow the live edge while the sim runs (a scope's right-anchored view).
-  useEffect(() => {
-    if (!follow || span === null) return;
-    const width = size.w - GUTTER;
-    setOrigin(span.last - width / pxPerCycle);
-  }, [follow, span, pxPerCycle, size.w]);
-
-  /**
-   * Lane height: a scope's constant row would leave two signals as a sliver at
-   * the top of a full-height panel, so the rows grow into the space (bounded —
-   * a 40px lane is already generous for one bit).
-   */
   const laneH = Math.max(
     LANE_H,
-    Math.min(LANE_H_MAX, Math.floor((size.h - AXIS_H - PAD_TOP) / Math.max(1, drawRows.length))),
+    Math.min(LANE_H_MAX, Math.floor((size.h - RULER_H - HINT_H) / Math.max(1, drawRows.length))),
   );
-
   /**
    * The canvas is the whole signal list, not just what fits: rows outgrow the
-   * panel and the wrapper scrolls to reach them.  A trace you cannot scroll is a
-   * trace whose lower half you cannot see.
+   * panel and the wrapper scrolls vertically to reach them.
    */
-  const contentH = Math.max(size.h, PAD_TOP + drawRows.length * laneH + AXIS_H);
+  const contentH = Math.max(size.h, RULER_H + drawRows.length * laneH + HINT_H);
 
-  /**
-   * The recorded domain is `[0, last]` — nothing outside it was ever probed, so
-   * nothing outside it is shown.  `origin` is clamped into it from one place, so
-   * panning, zooming, Follow and the scrollbar cannot leave the data.
-   */
-  const domainLast = span?.last ?? 0;
-  const laneWidth = Math.max(64, size.w - GUTTER);
-  const visibleCycles = laneWidth / pxPerCycle;
-  const maxOrigin = Math.max(0, domainLast - visibleCycles);
-  useEffect(() => {
-    // React bails out when the value is unchanged, so this is free per render.
-    setOrigin((o) => Math.min(Math.max(0, o), maxOrigin));
-  }, [maxOrigin]);
-
+  // ---- drawing ----
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null) return;
-    const theme = themeRef.current ?? (themeRef.current = resolveTheme(canvas));
+    const theme = resolveTheme(canvas);
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(size.w * dpr);
     canvas.height = Math.round(contentH * dpr);
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, size.w, contentH);
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, size.w, contentH);
 
-    const laneW = size.w - GUTTER;
-    const x = (cycle: number) => GUTTER + (cycle - origin) * pxPerCycle;
-    const visibleTo = origin + laneW / pxPerCycle;
-    const first = Math.max(0, Math.floor(origin));
-    const last = Math.ceil(visibleTo);
+    const x = (c: number) => GUTTER + (c - origin) * px;
+    const viewEnd = origin + visible;
+    const lanesBottom = RULER_H + drawRows.length * laneH;
+    const liveX = span === null ? GUTTER : x(domainEnd);
 
-    /** Where the recorded data ends on screen: nothing is drawn past it. */
-    const dataRight = span === null ? size.w : Math.min(size.w, x(span.last));
+    // Row backgrounds: a faint zebra, and the hovered row lifted.
+    drawRows.forEach((_, i) => {
+      const yTop = RULER_H + i * laneH;
+      if (i === hoverRow) {
+        ctx.fillStyle = mixAlpha(theme.accent, 0.07);
+        ctx.fillRect(0, yTop, size.w, laneH);
+      } else if (i % 2 === 1) {
+        ctx.fillStyle = mixAlpha(theme.text, 0.025);
+        ctx.fillRect(0, yTop, size.w, laneH);
+      }
+    });
 
-    // The name column is its own pane: an opaque backdrop, so it reads as the
-    // fixed layer above the waves rather than as a translucent part of them.
-    ctx.fillStyle = theme.panel;
-    ctx.fillRect(0, 0, GUTTER, contentH);
-    // …and the space past the last recorded cycle is marked as unrecorded rather
-    // than left looking like a stretch of time in which nothing happened.
-    if (dataRight < size.w) {
-      ctx.fillStyle = theme.panel;
-      ctx.globalAlpha = 0.55;
-      ctx.fillRect(dataRight, 0, size.w - dataRight, contentH);
-      ctx.globalAlpha = 1;
+    // ---- everything time-based is clipped to the lane area ----
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(GUTTER, RULER_H, size.w - GUTTER, contentH - RULER_H);
+    ctx.clip();
+
+    // Past the live edge nothing was recorded: say so, rather than drawing a
+    // stretch of time in which nothing happened.
+    if (span !== null && liveX < size.w) {
+      ctx.fillStyle = mixAlpha(theme.panel, 0.65);
+      ctx.fillRect(Math.max(GUTTER, liveX), RULER_H, size.w, lanesBottom - RULER_H);
     }
 
-    // Cycle gridlines: a step that keeps labels readable at any zoom.
-    const target = 90;
-    const stepCandidates = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
-    const gridStep =
-      stepCandidates.find((s) => s * pxPerCycle >= target) ??
-      stepCandidates[stepCandidates.length - 1];
-    ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
-    ctx.textBaseline = "middle";
-    const lastCycle = span === null ? last : Math.min(last, Math.floor(span.last));
-    for (let c = Math.ceil(first / gridStep) * gridStep; c <= lastCycle; c += gridStep) {
-      const gx = x(c);
+    // Grid: whole cycles (labelled in the ruler) and, zoomed in, the half-cycle
+    // ticks where the clock's falling edges land.
+    const gridStep = niceStep(px);
+    const firstGrid = Math.ceil(Math.max(domainStart, origin) / gridStep) * gridStep;
+    ctx.lineWidth = 1;
+    for (let c = firstGrid; c <= Math.min(viewEnd, domainEnd); c += gridStep) {
+      const gx = Math.round(x(c)) + 0.5;
       ctx.strokeStyle = theme.grid;
+      ctx.beginPath();
+      ctx.moveTo(gx, RULER_H);
+      ctx.lineTo(gx, lanesBottom);
+      ctx.stroke();
+    }
+    if (px >= 36) {
+      ctx.save();
+      ctx.setLineDash([2, 4]);
+      ctx.strokeStyle = mixAlpha(theme.grid, 0.8);
+      for (let c = Math.floor(origin) + 0.5; c <= Math.min(viewEnd, domainEnd); c += 1) {
+        if (c < domainStart) continue;
+        const gx = Math.round(x(c)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(gx, RULER_H);
+        ctx.lineTo(gx, lanesBottom);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Traces.
+    ctx.font = MONO;
+    ctx.textBaseline = "middle";
+    const segFrom = origin - 2 / px;
+    const segTo = Math.min(domainEnd, viewEnd + 2 / px);
+    drawRows.forEach((row, i) => {
+      const yTop = RULER_H + i * laneH;
+      const mid = yTop + laneH / 2;
+      const placed = rowSamples(row, projectSamples(sim.waves.samples(row.signal.net), tb));
+      if (placed.length === 0) {
+        ctx.fillStyle = theme.textDim;
+        ctx.font = SANS;
+        ctx.fillText("no data yet — step or run the sim", GUTTER + 10, mid);
+        ctx.font = MONO;
+        return;
+      }
+      const latest = placed[placed.length - 1].val;
+      const rowBits =
+        row.bit !== undefined ? 1 : (row.signal.bits ?? Math.max(1, valueBits(latest)));
+      const busRow = row.bit === undefined && isBus(row.signal, latest);
+      const top = yTop + 6;
+      const bottom = yTop + laneH - 6;
+      const busHue = theme.bus[Math.abs(row.signal.net) % theme.bus.length] ?? theme.wire.high;
+
+      let prevY: number | null = null;
+      // Start no earlier than the first sample: a window that opens before it
+      // has no value in effect yet, and `stepSegments` would draw nothing.
+      for (const seg of stepSegments(placed, Math.max(segFrom, placed[0].x), segTo)) {
+        const x0 = x(seg.from);
+        let x1 = x(seg.to);
+        // A state change is at least a pixel wide, so a sub-pixel toggle at a
+        // far zoom still reads as "something happened here".
+        if (x1 - x0 < 1) x1 = x0 + 1;
+        const state = wireValueState(seg.val);
+        if (busRow) {
+          const color = state === "x" ? theme.wire.x : state === "z" ? theme.wire.z : busHue;
+          if (state === "z") {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.moveTo(x0, mid);
+            ctx.lineTo(x1, mid);
+            ctx.stroke();
+          } else {
+            // The classic bus shape: a band with slanted crossings where the
+            // value changes, carrying the value as text.
+            const s = Math.min(4, (x1 - x0) / 2);
+            ctx.beginPath();
+            ctx.moveTo(x0, mid);
+            ctx.lineTo(x0 + s, top);
+            ctx.lineTo(x1 - s, top);
+            ctx.lineTo(x1, mid);
+            ctx.lineTo(x1 - s, bottom);
+            ctx.lineTo(x0 + s, bottom);
+            ctx.closePath();
+            ctx.fillStyle = mixAlpha(color, state === "x" ? 0.22 : 0.14);
+            ctx.fill();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.3;
+            ctx.stroke();
+          }
+          const text = waveText(seg.val, rowBits);
+          const room = Math.min(x1, size.w) - Math.max(x0, GUTTER) - 10;
+          const fitted = fitText(ctx, text, room);
+          if (fitted !== null) {
+            ctx.fillStyle = state === "x" ? theme.wire.x : theme.text;
+            const tx = (Math.max(x0, GUTTER) + Math.min(x1, size.w)) / 2;
+            ctx.fillText(fitted, tx - ctx.measureText(fitted).width / 2, mid + 0.5);
+          }
+        } else {
+          const y =
+            state === "high" ? top : state === "low" || state === "disconnected" ? bottom : mid;
+          const color = theme.wire[state];
+          if (state === "high") {
+            ctx.fillStyle = mixAlpha(color, 0.12);
+            ctx.fillRect(x0, top, x1 - x0, bottom - top);
+          } else if (state === "x") {
+            ctx.fillStyle = mixAlpha(color, 0.16);
+            ctx.fillRect(x0, top, x1 - x0, bottom - top);
+          }
+          ctx.strokeStyle = color;
+          ctx.lineWidth = state === "high" || state === "low" ? 1.8 : 1.3;
+          ctx.beginPath();
+          if (prevY !== null && prevY !== y) {
+            ctx.moveTo(Math.round(x0) + 0.5, prevY);
+            ctx.lineTo(Math.round(x0) + 0.5, y);
+          } else {
+            ctx.moveTo(x0, y);
+          }
+          ctx.lineTo(x1, y);
+          ctx.stroke();
+          prevY = y;
+        }
+        if (seg.contended === true) {
+          ctx.strokeStyle = theme.violation;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x0, bottom + 3);
+          ctx.lineTo(x1, bottom + 3);
+          ctx.stroke();
+        }
+      }
+    });
+
+    // The live edge: where the newest value is still in effect.
+    if (span !== null && liveX >= GUTTER && liveX <= size.w) {
+      ctx.strokeStyle = mixAlpha(theme.accent, 0.55);
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(Math.round(gx) + 0.5, 0);
-      ctx.lineTo(Math.round(gx) + 0.5, contentH - AXIS_H);
+      ctx.moveTo(Math.round(liveX) + 0.5, RULER_H);
+      ctx.lineTo(Math.round(liveX) + 0.5, lanesBottom);
       ctx.stroke();
-      if (gx < size.w - 14) {
-        ctx.fillStyle = theme.textDim;
-        ctx.textAlign = "center";
-        ctx.fillText(String(c), gx, contentH - AXIS_H / 2);
-      }
     }
 
-    // Lanes.
-    ctx.textAlign = "left";
+    // Where the run stopped (§90): a dashed rule at the halting cycle.
+    if (halted !== null && halted.cycle <= domainEnd) {
+      const hx = Math.round(x(halted.cycle)) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = theme.wire.x;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(hx, RULER_H);
+      ctx.lineTo(hx, lanesBottom);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // The pointer's cycle.
+    if (cursor !== null) {
+      const cx = Math.round(x(cursor)) + 0.5;
+      ctx.strokeStyle = theme.accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, RULER_H);
+      ctx.lineTo(cx, Math.max(lanesBottom, RULER_H + laneH));
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ---- name column ----
+    ctx.fillStyle = theme.panel;
+    ctx.globalAlpha = 0.96;
+    ctx.fillRect(0, RULER_H, GUTTER, contentH - RULER_H);
+    ctx.globalAlpha = 1;
+    // Value shown per row: under the pointer, else at the view's right edge
+    // (the live value while following).
+    const readX = cursor ?? Math.min(viewEnd, domainEnd) - 1e-6;
     drawRows.forEach((row, i) => {
-      const yTop = PAD_TOP + i * laneH;
-      if (yTop > contentH - AXIS_H) return;
+      const yTop = RULER_H + i * laneH;
       const mid = yTop + laneH / 2;
-      const high = yTop + 5;
-      const low = yTop + laneH - 5;
-      const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
-
+      if (i === hoverRow) {
+        ctx.fillStyle = mixAlpha(theme.accent, 0.1);
+        ctx.fillRect(0, yTop, GUTTER, laneH);
+      }
+      const placed = rowSamples(row, projectSamples(sim.waves.samples(row.signal.net), tb));
       const latest = placed[placed.length - 1]?.val;
-      // Width from the document where it is known, so a 1-bit clock whose core
-      // reports a wide mask is not mistaken for a bus, and a 16-bit register pads
-      // to four hex digits rather than to whatever mask arrived.
       const rowBits =
-        row.bit !== undefined
-          ? 1
-          : (row.signal.bits ?? Math.max(1, bitsOf(latest ?? { v: "0", x: "0", z: "0" })));
-      const busRow = row.bit === undefined && isBus(row.signal, latest);
+        row.bit !== undefined ? 1 : (row.signal.bits ?? Math.max(1, valueBits(latest ?? ZERO)));
+      const bus = row.bit === undefined && isBus(row.signal, latest);
 
-      // Gutter: label, a breakpoint marker when this signal is watched, and the
-      // value under the cursor.
-      const atCursor = cursor === null ? null : rowValueAt(row, placed, cursor.cycle);
-      const watch = watches.get(row.signal.net);
-      // Two breakpoints on one signal read as `= 0x0 · = 0x5`: the ring is one
-      // either way, because it is one fact — this signal can stop the run.
-      const watchText = watch === undefined ? undefined : watch.join(" · ");
+      // × (remove) on hover, ▸/▾ for a bus, then the name.
+      ctx.font = SANS;
+      ctx.textBaseline = "middle";
+      if (i === hoverRow && row.bit === undefined) {
+        ctx.fillStyle = theme.textDim;
+        ctx.fillText("×", 7, mid);
+      }
+      if (bus) {
+        // Expand chevron: a small triangle, pointing down when open.
+        ctx.fillStyle = theme.textDim;
+        ctx.beginPath();
+        if (expanded.has(row.signal.key)) {
+          ctx.moveTo(19, mid - 2.5);
+          ctx.lineTo(27, mid - 2.5);
+          ctx.lineTo(23, mid + 2.5);
+        } else {
+          ctx.moveTo(21, mid - 4);
+          ctx.lineTo(26, mid);
+          ctx.lineTo(21, mid + 4);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      const nameX = row.bit !== undefined ? 46 : 34;
+      const watch = row.bit === undefined ? watches.get(row.signal.net) : undefined;
+      const watchText = watch?.join(" · ");
 
+      const sample = placed.length === 0 ? null : valueAt(placed, readX);
+      const valueText = sample === null ? "" : waveText(sample.val, rowBits);
+      ctx.font = MONO;
+      const valueW = valueText === "" ? 0 : ctx.measureText(valueText).width + 6;
+      const nameRoom =
+        GUTTER -
+        nameX -
+        valueW -
+        14 -
+        (watchText !== undefined ? Math.min(90, 14 + watchText.length * 7) : 0);
+
+      ctx.font = row.bit !== undefined ? MONO : SANS;
       ctx.fillStyle = row.bit !== undefined ? theme.textDim : theme.text;
-      const indent = row.bit !== undefined ? 12 : 0;
-      const label = row.bit !== undefined ? `[${row.bit}]` : row.signal.label;
-      // A watched row spends its name-column room on the condition: which signal
-      // is the question the column already answers, and what it stops on is the
-      // one the trace is open to ask (§90).
-      const labelText = clip(label, watchText === undefined ? 17 : 11);
-      ctx.fillText(labelText, 6 + indent, mid);
+      const label = row.bit !== undefined ? `bit ${row.bit}` : row.signal.label;
+      const shown = fitText(ctx, label, nameRoom) ?? "";
+      ctx.fillText(shown, nameX, mid);
       if (watchText !== undefined) {
-        // A ring in the halt colour — the same one the canvas rings a stopped
-        // part with, so "this can stop the run" reads the same in both views.
-        const wx = 6 + indent + ctx.measureText(labelText).width + 8;
+        // A ring in the halt colour — "this signal can stop the run" (§90).
+        const wx = nameX + ctx.measureText(shown).width + 9;
         ctx.strokeStyle = theme.wire.x;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.arc(wx, mid, 3.2, 0, Math.PI * 2);
         ctx.stroke();
-        // The condition, in whatever room the cursor's value readout leaves
-        // (that value is right-aligned, so it claims its width first).
-        const valueW =
-          atCursor === null ? 0 : ctx.measureText(waveText(atCursor.val, rowBits)).width + 8;
-        const room = Math.max(2, Math.floor((GUTTER - 14 - valueW - wx - 7) / 6.3));
-        ctx.fillStyle = theme.wire.x;
-        ctx.fillText(clip(watchText, room), wx + 7, mid);
+        // …and what it stops on, in whatever room the value leaves.
+        ctx.font = MONO;
+        const cond = fitText(ctx, watchText!, GUTTER - 10 - valueW - (wx + 8));
+        if (cond !== null) {
+          ctx.fillStyle = theme.wire.x;
+          ctx.fillText(cond, wx + 8, mid);
+        }
       }
-      if (atCursor !== null) {
-        ctx.fillStyle = theme.textDim;
-        const text = waveText(atCursor.val, rowBits);
-        ctx.fillText(text, GUTTER - 12 - ctx.measureText(text).width, mid);
-      }
-
-      // The trace.  A one-bit signal is a LEVEL that holds and then edges to the
-      // next level.  A bus is a VALUE that holds, so it is drawn as a bar
-      // carrying that value: giving a multi-bit signal a high/low level is simply
-      // wrong — every bus would look like the same flat line whatever it held,
-      // which is what "condensed into one line" was.
-      // Buses are told apart by hue, like on the canvas — a stable one per net,
-      // and X/Z always read as X/Z whatever the hue would be.
-      const busHue = theme.bus[Math.abs(row.signal.net) % theme.bus.length] ?? theme.wire.high;
-      const boxUp = mid - 8;
-      const boxDown = mid + 8;
-
-      const segs = stepSegments(placed, first, last);
-      let prevY: number | null = null;
-      let prevText: string | null = null;
-      for (const seg of segs) {
-        const x0 = Math.max(GUTTER, x(seg.from));
-        if (x0 >= dataRight) continue;
-        let x1 = Math.min(dataRight, x(seg.to));
-        if (x1 < x0) continue;
-        // A state change is at least a pixel wide: at a zoom where a clock's half
-        // cycle is sub-pixel, dropping it would show a flat line instead of a
-        // toggle.  One pixel of "something happened here" is the honest picture.
-        if (x1 - x0 < 1) x1 = Math.min(dataRight, x0 + 1);
-        const state = wireValueState(seg.val);
-        const known = state === "high" || state === "low";
-        const y = busRow
-          ? mid
-          : state === "high"
-            ? high
-            : state === "low" || state === "disconnected"
-              ? low
-              : mid;
-        const text = waveText(seg.val, row.bit !== undefined ? 1 : rowBits);
-        ctx.strokeStyle = busRow
-          ? state === "x"
+      if (valueText !== "") {
+        ctx.font = MONO;
+        const state = wireValueState(sample!.val);
+        ctx.fillStyle =
+          state === "x"
             ? theme.wire.x
             : state === "z"
               ? theme.wire.z
-              : busHue
-          : theme.wire[state];
-        ctx.lineWidth = busRow || known ? 1.6 : 1.2;
-        ctx.beginPath();
-        if (busRow) {
-          // The bar (top and bottom), with a change marker where the value
-          // becomes a different one: the reader has to see a new value rather
-          // than a longer bar.
-          if (prevText !== null && prevText !== text) {
-            ctx.moveTo(Math.round(x0) + 0.5, boxUp);
-            ctx.lineTo(Math.round(x0) + 0.5, boxDown);
-          }
-          ctx.moveTo(x0, boxUp);
-          ctx.lineTo(x1, boxUp);
-          ctx.moveTo(x0, boxDown);
-          ctx.lineTo(x1, boxDown);
-        } else if (prevY !== null && prevY !== y) {
-          ctx.moveTo(Math.round(x0) + 0.5, prevY);
-          ctx.lineTo(Math.round(x0) + 0.5, y);
-          ctx.lineTo(x1, y);
-        } else {
-          ctx.moveTo(x0, y);
-          ctx.lineTo(x1, y);
-        }
-        ctx.stroke();
-        prevY = y;
-        prevText = text;
-        if (seg.contended === true) {
-          ctx.strokeStyle = theme.violation;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(x0, busRow ? boxDown + 3 : y - 3);
-          ctx.lineTo(x1, busRow ? boxDown + 3 : y - 3);
-          ctx.stroke();
-        }
-        // The value itself: centred when it fits, clipped at the left when the
-        // segment is merely narrow, and left to the gutter readout below that.
-        const need = ctx.measureText(text).width + 8;
-        if (busRow && x1 - x0 >= need) {
-          ctx.fillStyle = theme.text;
-          ctx.fillText(text, (x0 + x1) / 2 - ctx.measureText(text).width / 2, mid);
-        } else if (busRow && x1 - x0 >= 34) {
-          ctx.fillStyle = theme.textDim;
-          ctx.fillText(clip(text, 10), x0 + 4, mid);
-        }
+              : cursor !== null
+                ? theme.accent
+                : theme.text;
+        ctx.fillText(valueText, GUTTER - 10 - ctx.measureText(valueText).width, mid);
       }
-      if (placed.length === 0) {
-        ctx.fillStyle = theme.textDim;
-        ctx.fillText("no data", GUTTER + 8, mid);
-      } else if (sim.waves.truncated.has(row.signal.net)) {
-        ctx.fillStyle = theme.textDim;
-        ctx.fillText("…", GUTTER - 6, mid);
-      }
-
       // Row separator.
-      ctx.strokeStyle = theme.panelBorder;
+      ctx.strokeStyle = mixAlpha(theme.panelBorder, 0.45);
       ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.35;
       ctx.beginPath();
       ctx.moveTo(0, yTop + laneH - 0.5);
       ctx.lineTo(size.w, yTop + laneH - 0.5);
       ctx.stroke();
-      ctx.globalAlpha = 1;
     });
-
-    // End of the signal list: the space below is not missing data, it is the
-    // rest of the panel.  Turn it into the one instruction that matters.
-    const lastLaneBottom = PAD_TOP + drawRows.length * laneH;
-    if (size.h - lastLaneBottom - AXIS_H > 70) {
-      ctx.strokeStyle = theme.panelBorder;
-      ctx.globalAlpha = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(GUTTER, lastLaneBottom + 0.5);
-      ctx.lineTo(size.w, lastLaneBottom + 0.5);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = theme.textDim;
-      ctx.textAlign = "left";
-      ctx.fillText(
-        "no more signals — select a wire or part on the canvas, then Add selection",
-        GUTTER + 8,
-        lastLaneBottom + 24,
-      );
-      ctx.textAlign = "center";
-    }
-
-    // Where the run stopped (§90): a dashed rule at the halting cycle, so the
-    // one thing the banner cannot say — *where* in the run — is visible in the
-    // trace. Dashed, because the cursor rules solid and the two are different
-    // things: that one is where your pointer is, this one is where the sim is.
-    if (halted !== null && halted.cycle <= domainLast) {
-      const hx = Math.round(x(halted.cycle)) + 0.5;
-      if (hx >= GUTTER && hx <= dataRight) {
-        ctx.save();
-        ctx.strokeStyle = theme.wire.x;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([5, 3]);
-        ctx.beginPath();
-        ctx.moveTo(hx, 0);
-        ctx.lineTo(hx, contentH - AXIS_H);
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
-
-    // Cursor, over everything — but only inside the lane area: a cursor left
-    // behind outside it (the app lost focus with the mouse away) would draw a
-    // rule through the signal labels.
-    const cursorX = cursor === null ? null : Math.round(x(cursor.cycle)) + 0.5;
-    if (
-      cursor !== null &&
-      cursor.cycle <= domainLast &&
-      cursorX !== null &&
-      cursorX >= GUTTER &&
-      cursorX <= Math.min(size.w - 1, dataRight)
-    ) {
-      const cx = cursorX;
-      ctx.strokeStyle = theme.accent;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx, 0);
-      ctx.lineTo(cx, contentH - AXIS_H);
-      ctx.stroke();
-    }
-
-    // Gutter separator.
     ctx.strokeStyle = theme.panelBorder;
     ctx.beginPath();
-    ctx.moveTo(GUTTER - 0.5, 0);
+    ctx.moveTo(GUTTER - 0.5, RULER_H);
     ctx.lineTo(GUTTER - 0.5, contentH);
     ctx.stroke();
 
-    function bitsOf(val: WireValue): number {
-      return Math.max(4, valueBits(val));
+    // The hint under the rows: how to add signals and how to move.
+    if (contentH - lanesBottom >= HINT_H - 4 && drawRows.length > 0) {
+      ctx.font = SANS;
+      ctx.fillStyle = theme.textDim;
+      ctx.fillText(
+        "Drag or scroll sideways to move through time · Ctrl/⌘+scroll zooms · ← → Home End",
+        GUTTER + 12,
+        lanesBottom + 18,
+      );
     }
-    function rowValueAt(row: Row, samples: readonly PlacedSample[], x: number) {
-      const s = valueAt(samples, x);
-      if (s === null) return null;
-      return row.bit === undefined ? s : { val: extractBit(s.val, row.bit) };
+
+    // ---- ruler, pinned on top ----
+    ctx.fillStyle = theme.panel;
+    ctx.fillRect(0, 0, size.w, RULER_H);
+    ctx.strokeStyle = theme.panelBorder;
+    ctx.beginPath();
+    ctx.moveTo(0, RULER_H - 0.5);
+    ctx.lineTo(size.w, RULER_H - 0.5);
+    ctx.moveTo(GUTTER - 0.5, 0);
+    ctx.lineTo(GUTTER - 0.5, RULER_H);
+    ctx.stroke();
+    ctx.font = SANS;
+    ctx.fillStyle = theme.textDim;
+    ctx.fillText("cycle", 12, RULER_H / 2);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(GUTTER, 0, size.w - GUTTER, RULER_H);
+    ctx.clip();
+    ctx.font = MONO;
+    for (let c = firstGrid; c <= Math.min(viewEnd, domainEnd); c += gridStep) {
+      const gx = Math.round(x(c)) + 0.5;
+      ctx.strokeStyle = theme.panelBorder;
+      ctx.beginPath();
+      ctx.moveTo(gx, RULER_H - 6);
+      ctx.lineTo(gx, RULER_H);
+      ctx.stroke();
+      ctx.fillStyle = theme.textDim;
+      ctx.fillText(String(c), gx + 4, RULER_H / 2);
     }
+    if (cursor !== null) {
+      const label = `${Math.floor(cursor)}${cursor % 1 >= 0.5 ? "½" : ""}`;
+      const w = ctx.measureText(label).width + 12;
+      const cx = x(cursor);
+      const bx = Math.min(size.w - w - 2, Math.max(GUTTER + 2, cx - w / 2));
+      ctx.fillStyle = theme.accent;
+      roundRect(ctx, bx, 3, w, RULER_H - 6, 4);
+      ctx.fill();
+      ctx.fillStyle = theme.bg;
+      ctx.fillText(label, bx + 6, RULER_H / 2);
+    }
+    ctx.restore();
   }, [
     drawRows,
     size,
     contentH,
-    pxPerCycle,
+    px,
     origin,
+    visible,
     cursor,
+    hoverRow,
+    expanded,
     sim.waves,
     tb,
     version,
     span,
+    domainStart,
+    domainEnd,
     laneH,
     watches,
     halted,
   ]);
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent<HTMLCanvasElement>) => {
-      if (!e.ctrlKey && !e.metaKey) return; // plain wheel scrolls the rows
-      const rect = e.currentTarget.getBoundingClientRect();
-      const cx = e.clientX - rect.left;
-      if (cx < GUTTER) return;
-      const cycleAt = origin + (cx - GUTTER) / pxPerCycle;
-      const next = Math.max(0.25, Math.min(200, pxPerCycle * Math.pow(1.0015, -e.deltaY)));
-      setPxPerCycle(next);
-      setOrigin(cycleAt - (cx - GUTTER) / next);
-      setFollow(false);
-      setManual(true);
-    },
-    [origin, pxPerCycle],
-  );
-
-  /** Drag horizontally to pan; vertical movement stays the wrapper's scroll. */
+  // ---- pointer: drag to pan, click the name column to remove / expand ----
   const drag = useRef<{ x: number; origin: number } | null>(null);
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      if (e.clientX - rect.left < GUTTER) return;
-      drag.current = { x: e.clientX, origin };
-      e.currentTarget.setPointerCapture(e.pointerId);
-    },
-    [origin, pxPerCycle],
-  );
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      const d = drag.current;
-      if (d === null) return;
-      setOrigin(d.origin - (e.clientX - d.x) / pxPerCycle);
-      setFollow(false);
-      setManual(true);
-    },
-    [pxPerCycle],
-  );
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+  const rowAt = (y: number): number | null => {
+    const i = Math.floor((y - RULER_H) / laneH);
+    return y >= RULER_H && i >= 0 && i < drawRows.length ? i : null;
+  };
+
+  const toggleExpand = (key: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    if (cx < GUTTER) {
+      const i = rowAt(cy);
+      const row = i === null ? undefined : drawRows[i];
+      if (row === undefined || row.bit !== undefined) return;
+      if (cx < 16) {
+        removedRef.current.add(row.signal.key);
+        setRows((cur) => cur.filter((r) => r.signal.key !== row.signal.key));
+        setExpanded((cur) => {
+          const next = new Set(cur);
+          next.delete(row.signal.key);
+          return next;
+        });
+        setHoverRow(null);
+      } else if (cx < 30) {
+        const samples = sim.waves.samples(row.signal.net);
+        if (isBus(row.signal, samples[samples.length - 1]?.val)) toggleExpand(row.signal.key);
+      }
+      return;
+    }
+    drag.current = { x: e.clientX, origin };
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const d = drag.current;
+    if (d !== null) {
+      panTo(d.origin - (e.clientX - d.x) / px);
+    }
+    setHoverRow(rowAt(cy));
+    setCursor(cx >= GUTTER ? Math.min(domainEnd, origin + (cx - GUTTER) / px) : null);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     drag.current = null;
+    setDragging(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, []);
+  };
 
-  /**
-   * The horizontal scrollbar: the whole recorded domain at a glance, with the
-   * visible window as its thumb.  Without it a zoomed-in view gives no clue how
-   * much run there is to the left or right, or that there is any.
-   */
+  // ---- the scrollbar: the whole recorded run, with the window as its thumb ----
   const trackRef = useRef<HTMLDivElement | null>(null);
   const scrub = useRef<{ x: number; origin: number } | null>(null);
-  const domain = Math.max(1e-6, domainLast);
-  const thumbWidth = Math.min(1, visibleCycles / domain);
-  const thumbLeft = Math.min(1 - thumbWidth, Math.max(0, origin / domain));
+  const thumbWidth = Math.min(1, visible / domain);
+  const thumbLeft = Math.min(1 - thumbWidth, Math.max(0, (origin - domainStart) / domain));
 
-  const onThumbDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      e.stopPropagation();
-      scrub.current = { x: e.clientX, origin };
-      e.currentTarget.setPointerCapture(e.pointerId);
-      setFollow(false);
-      setManual(true);
-    },
-    [origin],
-  );
-  const onThumbMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const d = scrub.current;
-      const track = trackRef.current;
-      if (d === null || track === null) return;
-      const width = track.getBoundingClientRect().width;
-      if (width <= 0) return;
-      setOrigin(d.origin + ((e.clientX - d.x) / width) * domainLast);
-    },
-    [domainLast],
-  );
-  const onThumbUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+  const onThumbDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    scrub.current = { x: e.clientX, origin };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onThumbMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = scrub.current;
+    const track = trackRef.current;
+    if (d === null || track === null) return;
+    const width = track.getBoundingClientRect().width;
+    if (width <= 0) return;
+    panTo(d.origin + ((e.clientX - d.x) / width) * domain);
+  };
+  const onThumbUp = (e: React.PointerEvent<HTMLDivElement>) => {
     scrub.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
-  }, []);
+  };
   /** A click on the track centres the window there. */
-  const onTrackDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const frac = (e.clientX - rect.left) / rect.width;
-      setOrigin(frac * domainLast - visibleCycles / 2);
-      setFollow(false);
-      setManual(true);
-    },
-    [domainLast, visibleCycles],
-  );
-
-  const onMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      if (px < GUTTER) {
-        setCursor(null);
-        return;
-      }
-      setCursor({ cycle: origin + (px - GUTTER) / pxPerCycle, y: e.clientY - rect.top });
-    },
-    [origin, pxPerCycle],
-  );
+  const onTrackDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = (e.clientX - rect.left) / rect.width;
+    panTo(domainStart + frac * domain - visible / 2);
+  };
 
   const addPicked = useCallback(() => {
     setRows((cur) => {
@@ -668,14 +832,13 @@ export default function WaveformView({
     onNotify?.(`Added ${picked.length} selected signal${picked.length === 1 ? "" : "s"}`);
   }, [picked, onNotify]);
 
-  // The axis is fractional (a cycle is several events), but a *readout* is a
-  // cycle number: nobody wants 1.6041666666666665 in the bar.
+  // A readout is a cycle number: nobody wants 1.6041666 in the bar.
   const current =
-    cursor === null ? Math.floor(span?.last ?? 0) : Math.max(0, Math.floor(cursor.cycle));
+    cursor === null ? Math.floor(span?.lastEvent ?? 0) : Math.max(0, Math.floor(cursor));
   const spanText =
     span === null
       ? "no samples yet — run the sim"
-      : `cycles ${Math.floor(span.first)}–${Math.floor(span.last)}`;
+      : `cycles ${Math.floor(span.first)}–${Math.floor(span.lastEvent)}`;
 
   return (
     <div className="wave-view">
@@ -693,40 +856,46 @@ export default function WaveformView({
           </span>
         )}
         <span className="wave-bar-text">cycle {current}</span>
+        <span className="wave-bar-sep" aria-hidden="true" />
         <button
-          className="secondary"
-          title="Zoom out (Ctrl+wheel zooms at the cursor)"
-          onClick={() => {
-            setPxPerCycle((p) => Math.max(0.25, p / 1.5));
-            setManual(true);
-          }}
+          className="secondary wave-icon-btn"
+          aria-label="Zoom out"
+          title="Zoom out (−, or Ctrl/⌘+scroll)"
+          onClick={() => zoomTo(px / ZOOM_STEP)}
         >
-          −
+          <MinusIcon />
         </button>
         <button
-          className="secondary"
-          title="Zoom in (Ctrl+wheel zooms at the cursor)"
-          onClick={() => {
-            setPxPerCycle((p) => Math.min(400, p * 1.5));
-            setManual(true);
-          }}
+          className="secondary wave-icon-btn"
+          aria-label="Zoom in"
+          title="Zoom in (+, or Ctrl/⌘+scroll)"
+          onClick={() => zoomTo(px * ZOOM_STEP)}
         >
-          +
+          <PlusIcon />
         </button>
-        <button className="secondary" onClick={fit}>
+        <button className="secondary" onClick={fit} title="Fit the whole run (F)">
           Fit
         </button>
         <button
           className={follow ? "" : "secondary"}
+          aria-pressed={follow}
           onClick={() => setFollow((f) => !f)}
-          title="Keep the newest cycle at the right edge"
+          title="Keep the newest cycle in view while the sim runs (End)"
         >
           Follow
         </button>
+        <span className="wave-bar-sep" aria-hidden="true" />
         <button className="secondary" onClick={addPicked} disabled={picked.length === 0}>
           Add selection{picked.length > 0 ? ` (${picked.length})` : ""}
         </button>
-        <button className="secondary" onClick={() => setRows([])} disabled={rows.length === 0}>
+        <button
+          className="secondary"
+          onClick={() => {
+            for (const r of rows) removedRef.current.add(r.signal.key);
+            setRows([]);
+          }}
+          disabled={rows.length === 0}
+        >
           Remove all
         </button>
         <button className="secondary" onClick={onClose}>
@@ -735,41 +904,38 @@ export default function WaveformView({
       </div>
       <div className="wave-canvas-wrap" ref={wrapRef}>
         {rows.length === 0 ? (
-          <p className="wave-empty">
-            No signals. Select a wire or a part on the canvas, then <em>Add selection</em> — named
-            parts (probes, registers, RAM, ROM) appear here automatically once the circuit is
-            loaded.
-          </p>
+          <div className="wave-empty">
+            <p className="wave-empty-title">No signals yet</p>
+            <p>
+              Right-click a wire or part on the canvas and choose <strong>Show in waveform</strong>,
+              or select it and press <strong>Add selection</strong>.
+            </p>
+            <p>Named probes, registers and memories appear here on their own.</p>
+          </div>
         ) : null}
         <canvas
           ref={canvasRef}
-          className="wave-canvas"
+          className={`wave-canvas${dragging ? " dragging" : ""}`}
           style={{ width: size.w, height: contentH }}
-          onWheel={onWheel}
-          onMouseMove={onMove}
-          onMouseLeave={() => setCursor(null)}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onDoubleClick={(e) => {
-            // Double-click a label to expand/collapse a bus, or drop the row.
-            const rect = e.currentTarget.getBoundingClientRect();
-            const y = e.clientY - rect.top;
-            const i = Math.floor((y - PAD_TOP) / laneH);
-            const row = drawRows[i];
-            if (row === undefined || row.bit !== undefined) return;
-            const placed = projectSamples(sim.waves.samples(row.signal.net), tb);
-            const bits = valueBits(
-              valueAt(placed, placed[placed.length - 1]?.x ?? 0)?.val ?? { v: "0", x: "0", z: "0" },
-            );
-            if (e.clientX - rect.left < GUTTER && bits > 1) {
-              setExpanded((cur) => {
-                const next = new Set(cur);
-                if (!next.delete(row.signal.key)) next.add(row.signal.key);
-                return next;
-              });
+          onPointerLeave={() => {
+            if (drag.current === null) {
+              setCursor(null);
+              setHoverRow(null);
             }
+          }}
+          onDoubleClick={(e) => {
+            // Double-click a bus's name to expand/collapse its bits.
+            const rect = e.currentTarget.getBoundingClientRect();
+            if (e.clientX - rect.left >= GUTTER) return;
+            const i = rowAt(e.clientY - rect.top);
+            const row = i === null ? undefined : drawRows[i];
+            if (row === undefined || row.bit !== undefined) return;
+            const samples = sim.waves.samples(row.signal.net);
+            if (isBus(row.signal, samples[samples.length - 1]?.val)) toggleExpand(row.signal.key);
           }}
         />
       </div>
@@ -792,7 +958,59 @@ export default function WaveformView({
   );
 }
 
-/** One-line clip for the gutter (the canvas has no ellipsis). */
-function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+function clampPx(p: number): number {
+  return Math.min(MAX_PX, Math.max(MIN_PX, p));
+}
+
+/** A cycle step for the grid that keeps labels ~80px apart. */
+function niceStep(px: number): number {
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000];
+  return steps.find((s) => s * px >= 80) ?? steps[steps.length - 1];
+}
+
+/** A row's samples: the signal itself, or one bit of it for a bit lane. */
+function rowSamples(row: Row, placed: PlacedSample[]): PlacedSample[] {
+  if (row.bit === undefined) return placed;
+  const bit = row.bit;
+  return placed.map((s) => ({ ...s, val: extractBit(s.val, bit) }));
+}
+
+/** `text` if it fits `room` px, else a clipped `abc…`, else null. */
+function fitText(ctx: CanvasRenderingContext2D, text: string, room: number): string | null {
+  if (room <= 0) return null;
+  if (ctx.measureText(text).width <= room) return text;
+  for (let n = text.length - 1; n >= 2; n--) {
+    const t = `${text.slice(0, n)}…`;
+    if (ctx.measureText(t).width <= room) return t;
+  }
+  return null;
+}
+
+/** A CSS colour at `alpha` (hex, rgb() and named colours via color-mix). */
+function mixAlpha(color: string, alpha: number): string {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (hex !== null) {
+    let h = hex[1];
+    if (h.length === 3) h = h.replace(/./g, (c) => c + c);
+    const n = Number.parseInt(h, 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+  return `color-mix(in srgb, ${color} ${Math.round(alpha * 100)}%, transparent)`;
+}
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

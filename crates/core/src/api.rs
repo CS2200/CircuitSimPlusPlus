@@ -466,6 +466,15 @@ pub trait Sim {
     fn load_circuit_path(&mut self, path: &str) -> LoadResult {
         unimplemented!("csim-core engine — BACKEND.md task B2/B3")
     }
+    /// Load `bytes` as the document that lives at `path` (contract v1.5): the
+    /// editor's CURRENT text — which may not be on disk yet — with autoload
+    /// paths resolving next to `path`, exactly as `load_circuit_path` would. The
+    /// file itself is not read. Without this an editor could only re-sync a
+    /// file-backed document by reading its stale disk copy.
+    fn load_circuit_bytes_at(&mut self, bytes: &[u8], path: &str) -> LoadResult {
+        let _ = path;
+        self.load_circuit_bytes(bytes)
+    }
     /// Serialize the current document canonically (sorted keys, 2-space
     /// indent — saving twice is byte-identical, §5.1).
     fn save_circuit(&mut self, path: &str, document: &serde_json::Value) -> SaveResult {

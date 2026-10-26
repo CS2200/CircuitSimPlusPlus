@@ -14,14 +14,14 @@ import CompIcon, { PaletteGroupIcon } from "./components/CompIcon";
 import EditorCanvas, { type EditorHandle, type EditorStatus } from "./components/EditorCanvas";
 import CanvasMenu, { type CanvasMenuAction } from "./components/CanvasMenu";
 import type { CanvasMenuState } from "./editor/tools";
-import type { NamedComponent } from "./ipc/types";
+import type { LoadError, NamedComponent } from "./ipc/types";
 import {
   AppLogoIcon,
-  CircuitIcon,
   HistoryIcon,
   RedoIcon,
+  SearchIcon,
+  SettingsIcon,
   UndoIcon,
-  WaveIcon,
 } from "./components/icons";
 import InspectorPanel from "./components/InspectorPanel";
 import MenuBar, { type MenuDef } from "./components/MenuBar";
@@ -30,6 +30,8 @@ import HistoryDrawer from "./components/HistoryDrawer";
 import WaveformView from "./components/WaveformView";
 import HistoryPreview from "./components/HistoryPreview";
 import ClosePrompt, { type CloseChoice } from "./components/ClosePrompt";
+import ConfirmDialog from "./components/ConfirmDialog";
+import CircuitExplorer from "./components/CircuitExplorer";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -40,7 +42,7 @@ import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { AutosaveController } from "./model/autosave";
 import { CircuitDocument } from "./model/document";
-import type { CsxComponent } from "./model/csx";
+import type { CsxCircuit, CsxComponent } from "./model/csx";
 import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
 import { newDocKey, recoveryStore, type RecoveryMeta } from "./model/recovery";
@@ -49,6 +51,7 @@ import {
   breakpointWatches,
   clockSignals,
   defaultSignals,
+  namedValueBits,
   pickedSignals,
   type WaveSignal,
 } from "./sim/waveform";
@@ -60,6 +63,7 @@ import {
   defaultAttrs,
   editableAttrs,
   typeDisplayName,
+  type PaletteItem,
 } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
 import { buildDemoDoc } from "./editor/demoCircuit";
@@ -207,6 +211,7 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
       ["Ctrl+A", "select all"],
       ["Shift+click palette", "place many (Esc to stop)"],
       ["Esc / right-click", "cancel wiring / placement"],
+      ["/", "search the palette"],
       ["?", "this panel"],
     ],
   },
@@ -284,6 +289,8 @@ export default function App() {
   /** Rate-limit for the "pause the clock" hint when editing a running register. */
   const pokeHintRef = useRef(0);
   const railRef = useRef<HTMLDivElement>(null);
+  /** The palette search box, so `/` can jump to it (§94). */
+  const paletteSearchRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<EditorStatus | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   /** Field the Inspector should focus next (a constant's value on double-click). */
@@ -314,6 +321,8 @@ export default function App() {
   const [historyUsage, setHistoryUsage] = useState<HistoryUsage | null>(null);
   // Palette activity rail (UI_OVERHAUL §8): which component group the body shows.
   const [paletteGroup, setPaletteGroup] = useState<string>(PALETTE[0].group);
+  /** Palette search text (UI_OVERHAUL §94); non-empty replaces the group view with matches. */
+  const [paletteQuery, setPaletteQuery] = useState("");
   // Resizable side panels (UI_OVERHAUL §7): live widths, persisted on
   // release; defaults match the pre-resize layout.
   const [panelWidths, setPanelWidths] = useState<Record<PanelId, number>>(() => ({
@@ -382,6 +391,8 @@ export default function App() {
   // The state names sheet-local ids, so switching sheets closes the menu.
   useEffect(() => closeCanvasMenu(), [sheet, closeCanvasMenu]);
 
+  /** The newest `showInWaveform` (declared further down), for the context menu. */
+  const showInWaveformRef = useRef<() => Promise<void>>(async () => {});
   /** Run one context-menu item through the editor's public commands (§75). */
   const onCanvasMenuAction = useCallback((action: CanvasMenuAction) => {
     const ed = editorRef.current;
@@ -392,6 +403,7 @@ export default function App() {
     else if (action === "delete") ed.deleteSelection();
     else if (action === "rotate-cw") ed.rotate(false);
     else if (action === "rotate-ccw") ed.rotate(true);
+    else if (action === "waveform") void showInWaveformRef.current();
     else ed.selectAll();
   }, []);
 
@@ -464,6 +476,19 @@ export default function App() {
   );
   // Sim clock speed; lifted from SimBar so the Simulation menu shares it.
   const [hzExp, setHzExp] = useState(() => loadNumPref(PREF_DEFAULT_HZ, 10)); // hz = 10^(exp/10)
+  /**
+   * Circuits whose TAB is closed (§99), by name. Closing a tab never deletes the
+   * circuit: it stays in the file and in the Circuits explorer, which reopens it.
+   * View state for this session, like the active sheet — not saved in the file.
+   */
+  const [closedSheets, setClosedSheets] = useState<ReadonlySet<string>>(() => new Set());
+  /** A destructive action waiting on "are you sure?" (§99). */
+  const [confirmAsk, setConfirmAsk] = useState<{
+    title: string;
+    body: string;
+    confirmLabel: string;
+    onConfirm: () => void;
+  } | null>(null);
   /** Sheet index being renamed inline in its tab, or null (UI_OVERHAUL §60). */
   const [renamingSheet, setRenamingSheet] = useState<number | null>(null);
   /** The sheet that just appeared — drives its slide-in animation (§60). */
@@ -490,12 +515,16 @@ export default function App() {
   // The rail always carries a Subcircuits group (UI_OVERHAUL §80): a feature you
   // only find after making your first subcircuit is one most people never find, so
   // the group has an empty state and its own "New subcircuit" button.
-  const paletteGroups = [...PALETTE.map((g) => g.group), "Subcircuits"];
+  // "Circuits" (§99) is the explorer: every circuit in the file, open tab or not.
+  const paletteGroups = ["Circuits", ...PALETTE.map((g) => g.group), "Subcircuits"];
   const activePaletteGroup = paletteGroups.includes(paletteGroup) ? paletteGroup : PALETTE[0].group;
 
   // Preference persistence (best-effort; non-fatal without storage).
   useEffect(() => {
     saveThemePref(theme);
+    // Mirror onto <html> too (index.html sets it before first paint), so the
+    // page background and native widgets follow a theme picked in Settings.
+    document.documentElement.dataset.theme = theme;
   }, [theme]);
   useEffect(() => {
     saveAccentPref(accent);
@@ -571,8 +600,7 @@ export default function App() {
     (n: NamedComponent): number | undefined => {
       const circuit = doc.circuits.find((c) => c.name === n.circuit);
       const comp = circuit?.components[n.comp_id];
-      const bits = comp?.attrs?.["bitsize"];
-      return typeof bits === "number" && bits > 0 ? bits : undefined;
+      return comp === undefined ? undefined : namedValueBits(comp, n.kind, doc.circuits);
     },
     [doc],
   );
@@ -595,8 +623,7 @@ export default function App() {
    * Resolved here rather than in the viewer because picking that pin needs the
    * registry's per-type pin specs.
    */
-  const wavePicked = useMemo<WaveSignal[]>(() => {
-    if (!waveOpen) return [];
+  const pickSelection = useCallback((): WaveSignal[] => {
     const circuit = doc.circuits[sheet];
     const wireToNet = sim.store.wireToNet;
     if (circuit === undefined || wireToNet === null) return [];
@@ -604,18 +631,46 @@ export default function App() {
     for (const id of selectedComps) {
       const comp = circuit.components.find((c) => c.id === id);
       if (comp === undefined) continue;
-      const out = compPins(comp, doc.circuits).find((pin) => pin.kind === "out");
-      if (out !== undefined) selectedPins.push({ comp: id, pin: out.name });
+      // The value you would probe: the OUTPUT. A part with none (a probe, an
+      // LED) is traced by the value it reads, its first pin.
+      const pins = compPins(comp, doc.circuits);
+      const pin = pins.find((p) => p.kind === "out") ?? pins[0];
+      if (pin !== undefined) selectedPins.push({ comp: id, pin: pin.name });
     }
+    // Human labels (§96): the part's name — or its plain type — and the pin,
+    // instead of the internal id (`c3.out` → `Adder.out`); a named wire is its name.
     return pickedSignals({
       wires: circuit.wires,
       wireToNet,
       selectedWires,
       selectedPins,
       bitsOf: bitsOfPin,
+    }).map((sig) => {
+      const pinPick = /^p:(.+)\.([^.]+)$/.exec(sig.key);
+      if (pinPick !== null) {
+        const comp = circuit.components.find((c) => c.id === pinPick[1]);
+        if (comp === undefined) return sig;
+        const base =
+          comp.name !== undefined && comp.name !== "" ? comp.name : typeDisplayName(comp.type);
+        return { ...sig, label: `${base}.${pinPick[2]}` };
+      }
+      const wirePick = /^w:(\d+)$/.exec(sig.key);
+      const name = wirePick === null ? undefined : circuit.wires[Number(wirePick[1])]?.name;
+      return name !== undefined && name !== "" ? { ...sig, label: name } : sig;
     });
-    // simVersion keeps the net map fresh across a reload.
-  }, [waveOpen, doc, sheet, selectedComps, selectedWires, sim, simVersion, bitsOfPin]);
+  }, [doc, sheet, selectedComps, selectedWires, sim, bitsOfPin]);
+  // simVersion keeps the net map fresh across a reload.
+  const wavePicked = useMemo<WaveSignal[]>(
+    () => (waveOpen ? pickSelection() : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
+    [waveOpen, pickSelection, simVersion],
+  );
+  /**
+   * Signals to add to the trace on the next render (§96): "Show in waveform"
+   * opens the viewer WITH the selection in it. `seq` makes a repeat request for
+   * the same signals still count.
+   */
+  const [waveAdd, setWaveAdd] = useState<{ signals: WaveSignal[]; seq: number } | null>(null);
 
   const inspectorCompId = selectedComps.length === 1 ? selectedComps[0] : null;
   const inspectorWireIdx =
@@ -683,14 +738,39 @@ export default function App() {
     // simVersion keeps the net map fresh across a reload.
   }, [doc, sheet, sim.store.wireToNet, simVersion]);
 
-  const openWaveform = useCallback(() => {
-    if (!sim.store.loaded) {
-      toast("Load a circuit and run the sim first — a trace has nothing to show yet");
+  /**
+   * Open the waveform viewer (§96). It used to refuse until the sim had run
+   * ("load a circuit and run the sim first"), which hid the feature exactly
+   * when someone went looking for it: now it loads the circuit itself and opens
+   * on an empty trace that says to press Tick or Play.
+   */
+  const openWaveform = useCallback(async () => {
+    const ok = await sim.resync(doc);
+    if (!ok) {
+      toast("The circuit does not load yet — fix the problems in the banner first");
       return;
     }
     setHistoryOpen(false);
     setWaveOpen(true);
-  }, [sim, toast]);
+  }, [sim, doc, toast]);
+
+  /** Open the viewer with the current selection added to it (context menu / Inspector). */
+  const showInWaveform = useCallback(async () => {
+    const ok = await sim.resync(doc);
+    if (!ok) {
+      toast("The circuit does not load yet — fix the problems in the banner first");
+      return;
+    }
+    const signals = pickSelection();
+    if (signals.length === 0) {
+      toast("Nothing to trace there — select a wire, or a part with an output");
+      return;
+    }
+    setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
+    setHistoryOpen(false);
+    setWaveOpen(true);
+  }, [sim, doc, pickSelection, toast]);
+  showInWaveformRef.current = showInWaveform;
   /** Click a toast to dismiss: bulge briefly, then remove it. */
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
@@ -792,6 +872,7 @@ export default function App() {
     setDoc(d);
     setFilePath(path);
     setSheet(0);
+    setClosedSheets(new Set()); // a new file opens with every tab
   }, []);
 
   const confirmDiscard = useCallback(() => {
@@ -1430,7 +1511,9 @@ export default function App() {
   const docRevision = status?.revision;
   useEffect(() => {
     if (docRevision === undefined) return;
-    if (!sim.store.loaded || !sim.isStale(doc)) return;
+    // Stale while loaded, or a failed load whose problem may now be fixed (§99).
+    const due = sim.store.loaded ? sim.isStale(doc) : sim.needsRetry(doc);
+    if (!due) return;
     if (sim.store.status?.running ?? false) return;
     const timer = setTimeout(() => void sim.resync(doc), LIVE_RESYNC_MS);
     return () => clearTimeout(timer);
@@ -1451,13 +1534,18 @@ export default function App() {
         return;
       }
       setSheet(idx);
-      if (compId !== undefined) {
+      // The INSTANCE view (red chrome, "these are its values") only means
+      // something once there are values: a run has happened. Before that a
+      // double-click is someone going in to edit the definition, and painting
+      // that red read as an error at the wrong time (§98).
+      const ran = sim.store.status !== null || sim.store.cycle > 0;
+      if (compId !== undefined && ran) {
         setInstancePath((p) => (p === "" ? compId : `${p}/${compId}`));
       } else {
         setInstancePath("");
       }
     },
-    [doc, toast],
+    [doc, toast, sim],
   );
 
   /** Step back out of the current instance (to its parent sheet). */
@@ -1482,6 +1570,9 @@ export default function App() {
     try {
       const idx = doc.addCircuit(`sub${n}`);
       setSheet(idx);
+      // A brand-new definition is never an instance view: without this, making
+      // a subcircuit from inside an instance kept the red instance chrome (§98).
+      setInstancePath("");
       setEnteringSheet(idx);
       setRenamingSheet(idx);
       editorRef.current?.refresh();
@@ -1513,28 +1604,119 @@ export default function App() {
   const onCancelSheetName = useCallback(() => setRenamingSheet(null), []);
 
   /** Delete a circuit sheet (guarded in the document; undoable). */
-  const onDeleteSheet = useCallback(
+  const deleteSheetNow = useCallback(
     (idx: number) => {
       const c = doc.circuit(idx);
-      if (c.components.length > 0) {
-        const ok = window.confirm(
-          `Delete circuit "${c.name}" and its ${c.components.length} component${
-            c.components.length === 1 ? "" : "s"
-          }?`,
-        );
-        if (!ok) return;
-      }
       try {
         doc.removeCircuit(idx);
       } catch (err) {
         toast(String(err instanceof Error ? err.message : err));
         return;
       }
+      setClosedSheets((prev) => {
+        if (!prev.has(c.name)) return prev;
+        const next = new Set(prev);
+        next.delete(c.name);
+        return next;
+      });
       // Keep the active sheet pointed at a valid circuit.
       setSheet((s) => (idx < s ? s - 1 : s === idx ? Math.max(0, idx - 1) : s));
       editorRef.current?.refresh();
     },
     [doc, toast],
+  );
+
+  /** Delete a circuit — always asked first, in the app's own dialog (§99). */
+  const onDeleteSheet = useCallback(
+    (idx: number) => {
+      const c = doc.circuit(idx);
+      const n = c.components.length;
+      setConfirmAsk({
+        title: `Delete "${c.name}"?`,
+        body:
+          (n > 0
+            ? `The circuit and its ${n} part${n === 1 ? "" : "s"} are removed from the file. `
+            : "The empty circuit is removed from the file. ") +
+          "Undo (Ctrl+Z) brings it back. To just hide it, close its tab instead.",
+        confirmLabel: "Delete",
+        onConfirm: () => deleteSheetNow(idx),
+      });
+    },
+    [doc, deleteSheetNow],
+  );
+
+  /**
+   * Close a tab (§99): the circuit stays in the file. The last open tab cannot
+   * close — the canvas always shows a circuit.
+   */
+  const onCloseSheet = useCallback(
+    (idx: number) => {
+      const name = doc.circuit(idx).name;
+      const open = doc.circuits
+        .map((c, j) => ({ c, j }))
+        .filter(({ c, j }) => j !== idx && !closedSheets.has(c.name))
+        .map(({ j }) => j);
+      if (open.length === 0) return;
+      setClosedSheets((prev) => new Set(prev).add(name));
+      if (idx === sheet) {
+        // The neighbour to the left, as an editor does; else the first open one.
+        const left = open.filter((j) => j < idx);
+        switchSheet(left.length > 0 ? left[left.length - 1] : open[0]);
+      }
+    },
+    [doc, closedSheets, sheet, switchSheet],
+  );
+
+  /**
+   * The load-error banner's Fix (§100): open the sheet the error is on (even a
+   * closed tab), select the part it names, and — for a name problem — put the
+   * cursor in its Name field. The id comes from the error's `comp_id` when the
+   * engine sent one, else from the `component '<id>'` its message carries.
+   */
+  const locateLoadError = useCallback(
+    (err: LoadError) => {
+      const ci = err.circuit === "" ? 0 : doc.circuitIdxByName(err.circuit);
+      if (ci < 0) return;
+      const c = doc.circuit(ci);
+      const fromMsg = /component '([^']+)'/.exec(err.message)?.[1];
+      const id = fromMsg ?? (err.comp_id !== undefined ? c.components[err.comp_id]?.id : undefined);
+      setHistoryOpen(false);
+      setWaveOpen(false);
+      switchSheet(ci);
+      if (id === undefined || !c.components.some((x) => x.id === id)) return;
+      // After the sheet switch has rendered (it clears the selection).
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          editorRef.current?.select([id]);
+          if (/named|name/i.test(err.message)) setInspectorFocus("name");
+        }),
+      );
+    },
+    [doc, switchSheet],
+  );
+
+  /** Open a circuit from the explorer (reopening its tab if closed). */
+  const onOpenSheet = useCallback((idx: number) => switchSheet(idx), [switchSheet]);
+
+  // Whatever brings a closed circuit to the canvas — the explorer, a
+  // double-click into an instance, the scope bar's way back — reopens its tab.
+  useEffect(() => {
+    const name = doc.circuits[sheet]?.name;
+    if (name === undefined || !closedSheets.has(name)) return;
+    setClosedSheets((prev) => {
+      const next = new Set(prev);
+      next.delete(name);
+      return next;
+    });
+  }, [sheet, doc, closedSheets]);
+
+  const hiddenSheets = useMemo(
+    () =>
+      new Set(
+        doc.circuits.flatMap((c, i) => (closedSheets.has(c.name) ? [i] : [])),
+      ) as ReadonlySet<number>,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- docRevision tracks in-place renames
+    [doc, closedSheets, status?.revision],
   );
 
   /** Attrs seeded when a part is placed: REQUIRED attrs plus the Editing prefs
@@ -1627,6 +1809,18 @@ export default function App() {
         label: "View",
         items: [
           {
+            label: "Waveform viewer",
+            shortcut: "Ctrl+Alt+W",
+            checked: waveOpen,
+            onSelect: () => (waveOpen ? setWaveOpen(false) : void openWaveform()),
+          },
+          {
+            label: "Show selection in waveform",
+            disabled: (status?.selection ?? 0) === 0,
+            onSelect: () => void showInWaveform(),
+          },
+          { kind: "sep" },
+          {
             label: "Show grid",
             checked: gridOn,
             onSelect: () => setGridOn(!gridOn),
@@ -1686,6 +1880,9 @@ export default function App() {
     pathOn,
     sim,
     simVersion,
+    waveOpen,
+    openWaveform,
+    showInWaveform,
   ]);
   // DEV hook: e2e reads the document JSON through this.
   useEffect(() => {
@@ -1828,11 +2025,17 @@ export default function App() {
       if (mod && e.altKey && e.key.toLowerCase() === "w") {
         e.preventDefault();
         if (waveOpen) setWaveOpen(false);
-        else openWaveform();
+        else void openWaveform();
         return;
       }
       if (e.key === "?") setShowHelp((v) => !v);
       if (e.key === "Escape") setShowHelp(false);
+      // `/` jumps to the palette search (§94) — the GitHub/Slack convention.
+      if (e.key === "/" && !mod && !e.altKey && paletteSearchRef.current !== null) {
+        e.preventDefault();
+        paletteSearchRef.current.focus();
+        paletteSearchRef.current.select();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1854,6 +2057,109 @@ export default function App() {
   /** The bar shows the file name; the app name lives on the logo's tooltip. */
   const docTitle = filePath === null ? "(unsaved)" : baseName(filePath);
 
+  /**
+   * One palette tile (UI_OVERHAUL §94): the same button whether it sits in its
+   * own group or in a search result, where `note` names the group it came from.
+   */
+  const paletteTile = (item: PaletteItem, note?: string) => {
+    const spec = compSpec(item.type);
+    const label = item.label ?? spec.label ?? spec.caption({});
+    const seed = { ...(placementAttrs(item.type) ?? {}), ...item.attrs };
+    return (
+      <button
+        key={`${item.type}:${item.label ?? ""}`}
+        className={`palette-item${status?.placing === item.type ? " active" : ""}`}
+        draggable
+        onClick={(e) =>
+          editorRef.current?.startPlacing(
+            item.type,
+            e.shiftKey,
+            Object.keys(seed).length === 0 ? undefined : seed,
+            item.rot,
+            item.name,
+          )
+        }
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/x-csx-type", item.type);
+          if (item.attrs !== undefined) {
+            e.dataTransfer.setData("text/x-csx-attrs", JSON.stringify(item.attrs));
+          }
+          if (item.rot !== undefined) e.dataTransfer.setData("text/x-csx-rot", item.rot);
+          if (item.name !== undefined) e.dataTransfer.setData("text/x-csx-name", item.name);
+        }}
+        title={typeDisplayName(item.type)}
+      >
+        <CompIcon type={item.type} attrs={item.attrs} />
+        <span className="palette-item-label">{label}</span>
+        {note !== undefined && <span className="palette-item-note">{note}</span>}
+      </button>
+    );
+  };
+
+  /**
+   * A subcircuit's tile: place an instance of that definition (§80). The note
+   * says where the definition is already placed — the one thing the palette
+   * cannot otherwise tell you — unless a search result names the group instead.
+   */
+  const subcircuitTile = (c: CsxCircuit, note = usedByText(doc.circuits, c.name)) => (
+    <button
+      key={`sub:${c.name}`}
+      className={`palette-item${status?.placing === "subcircuit" ? " active" : ""}`}
+      draggable
+      onClick={(e) =>
+        editorRef.current?.startPlacing("subcircuit", e.shiftKey, { circuit: c.name })
+      }
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/x-csx-type", "subcircuit");
+        e.dataTransfer.setData("text/x-csx-attrs", JSON.stringify({ circuit: c.name }));
+      }}
+      title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
+    >
+      <CompIcon type="subcircuit" />
+      <span className="palette-item-label">{c.name}</span>
+      <span className="palette-item-note">{note}</span>
+    </button>
+  );
+
+  /**
+   * Palette search (§94): every tile whose label, full name, type string or
+   * group contains the query, plus the other sheets' subcircuits. Null when
+   * the box is empty, so the rail's group view shows instead.
+   */
+  const paletteNeedle = paletteQuery.trim().toLowerCase();
+  const paletteResults =
+    paletteNeedle === ""
+      ? null
+      : [
+          ...PALETTE.flatMap((g) =>
+            g.items
+              .filter((item) => {
+                const spec = compSpec(item.type);
+                const label = item.label ?? spec.label ?? spec.caption({});
+                return [label, typeDisplayName(item.type), item.type, g.group].some((s) =>
+                  s.toLowerCase().includes(paletteNeedle),
+                );
+              })
+              .map((item) => ({ kind: "part" as const, item, group: g.group })),
+          ),
+          ...doc.circuits
+            .filter(
+              (c, i) => i !== sheet && `subcircuit ${c.name}`.toLowerCase().includes(paletteNeedle),
+            )
+            .map((c) => ({ kind: "sub" as const, circuit: c })),
+        ];
+
+  /**
+   * An empty sheet shows a hint where the circuit will go (§94): what the
+   * palette is for and how to move around. It never takes pointer events, so
+   * placing the first part lands exactly where it would have anyway.
+   */
+  const activeCircuit = doc.circuits[sheet];
+  const sheetEmpty =
+    activeCircuit !== undefined &&
+    activeCircuit.components.length === 0 &&
+    activeCircuit.wires.length === 0;
+
   return (
     <div className="app" data-theme={theme} data-accent={accent}>
       <AppHeader
@@ -1874,6 +2180,9 @@ export default function App() {
               onTogglePath={() => setPathOn((v) => !v)}
               hzExp={hzExp}
               onHzExp={setHzExp}
+              waveOpen={waveOpen}
+              onToggleWave={() => (waveOpen ? setWaveOpen(false) : void openWaveform())}
+              onLocateError={locateLoadError}
             />
           ) : undefined
         }
@@ -1904,6 +2213,7 @@ export default function App() {
                 >
                   <RedoIcon />
                 </button>
+                <span className="topbar-sep" aria-hidden="true" />
                 <button
                   className="icon-btn"
                   aria-label="Version history"
@@ -1912,18 +2222,15 @@ export default function App() {
                 >
                   <HistoryIcon />
                 </button>
+                <span className="topbar-sep" aria-hidden="true" />
+                {/* Settings is also under File; the gear is the discoverable door. */}
                 <button
-                  className={`icon-btn${waveOpen ? " active" : ""}`}
-                  aria-label={waveOpen ? "Back to the circuit" : "Waveform viewer"}
-                  aria-pressed={waveOpen}
-                  title={
-                    waveOpen
-                      ? "Back to the circuit (Ctrl+Alt+W)"
-                      : "Waveform viewer (Ctrl+Alt+W) — trace the running sim"
-                  }
-                  onClick={() => (waveOpen ? setWaveOpen(false) : openWaveform())}
+                  className="icon-btn"
+                  aria-label="Settings"
+                  title="Settings — theme, canvas, editing, autosave"
+                  onClick={() => setSettingsOpen(true)}
                 >
-                  {waveOpen ? <CircuitIcon /> : <WaveIcon />}
+                  <SettingsIcon />
                 </button>
               </>
             )}
@@ -1978,93 +2285,89 @@ export default function App() {
                 ))}
               </div>
               <div className="palette-body">
-                <div className="palette-group-title">{activePaletteGroup}</div>
-                <div className="palette-group" role="tabpanel" aria-label={activePaletteGroup}>
-                  {activePaletteGroup === "Subcircuits" && doc.circuits.length === 1 && (
-                    <p className="palette-hint">
-                      No subcircuits yet. Make one, then place instances of it on any sheet.
-                    </p>
-                  )}
-                  {activePaletteGroup === "Subcircuits" && (
-                    <button className="palette-new" onClick={onNewSheet}>
-                      + New subcircuit
-                    </button>
-                  )}
-                  {activePaletteGroup === "Subcircuits"
-                    ? doc.circuits.map(
-                        (c, i) =>
-                          i !== sheet && (
-                            <button
-                              key={c.name}
-                              className={`palette-item${status?.placing === "subcircuit" ? " active" : ""}`}
-                              draggable
-                              onClick={(e) =>
-                                editorRef.current?.startPlacing("subcircuit", e.shiftKey, {
-                                  circuit: c.name,
-                                })
-                              }
-                              onDragStart={(e) => {
-                                e.dataTransfer.setData("text/x-csx-type", "subcircuit");
-                                e.dataTransfer.setData(
-                                  "text/x-csx-attrs",
-                                  JSON.stringify({ circuit: c.name }),
-                                );
-                              }}
-                              title={`Place an instance of "${c.name}" — its interface is the circuit's named pin components`}
-                            >
-                              <CompIcon type="subcircuit" />
-                              <span className="palette-item-label">{c.name}</span>
-                              {/* Where this definition is placed (§80) — the one
-                               *  thing the palette cannot otherwise tell you. */}
-                              <span className="palette-item-note">
-                                {usedByText(doc.circuits, c.name)}
-                              </span>
-                            </button>
-                          ),
-                      )
-                    : (PALETTE.find((g) => g.group === activePaletteGroup)?.items ?? []).map(
-                        (item) => {
-                          const spec = compSpec(item.type);
-                          const label = item.label ?? spec.label ?? spec.caption({});
-                          const seed = { ...(placementAttrs(item.type) ?? {}), ...item.attrs };
-                          return (
-                            <button
-                              key={`${item.type}:${item.label ?? ""}`}
-                              className={`palette-item${status?.placing === item.type ? " active" : ""}`}
-                              draggable
-                              onClick={(e) =>
-                                editorRef.current?.startPlacing(
-                                  item.type,
-                                  e.shiftKey,
-                                  Object.keys(seed).length === 0 ? undefined : seed,
-                                  item.rot,
-                                  item.name,
-                                )
-                              }
-                              onDragStart={(e) => {
-                                e.dataTransfer.setData("text/x-csx-type", item.type);
-                                if (item.attrs !== undefined) {
-                                  e.dataTransfer.setData(
-                                    "text/x-csx-attrs",
-                                    JSON.stringify(item.attrs),
-                                  );
-                                }
-                                if (item.rot !== undefined) {
-                                  e.dataTransfer.setData("text/x-csx-rot", item.rot);
-                                }
-                                if (item.name !== undefined) {
-                                  e.dataTransfer.setData("text/x-csx-name", item.name);
-                                }
-                              }}
-                              title={typeDisplayName(item.type)}
-                            >
-                              <CompIcon type={item.type} attrs={item.attrs} />
-                              <span className="palette-item-label">{label}</span>
-                            </button>
-                          );
-                        },
+                {/* Find a part by name across every group (UI_OVERHAUL §94). */}
+                <label className="palette-search">
+                  <SearchIcon />
+                  <input
+                    ref={paletteSearchRef}
+                    type="search"
+                    value={paletteQuery}
+                    placeholder="Search"
+                    title="Find a part in any group (press / to jump here)"
+                    aria-label="Search parts"
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => setPaletteQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Escape") return;
+                      e.stopPropagation(); // the canvas must not also cancel its tool
+                      setPaletteQuery("");
+                      e.currentTarget.blur();
+                    }}
+                  />
+                </label>
+                {paletteResults === null && activePaletteGroup === "Circuits" ? (
+                  <>
+                    <div className="palette-group-title">Circuits</div>
+                    <CircuitExplorer
+                      entries={doc.circuits.map((c, i) => ({
+                        name: c.name,
+                        parts: c.components.length,
+                        note: i === 0 ? "" : usedByText(doc.circuits, c.name),
+                      }))}
+                      active={sheet}
+                      hidden={hiddenSheets}
+                      onOpen={onOpenSheet}
+                      onClose={onCloseSheet}
+                      onRename={(i) => {
+                        switchSheet(i);
+                        onRenameSheet(i);
+                      }}
+                      onDelete={onDeleteSheet}
+                      onNew={onNewSheet}
+                    />
+                  </>
+                ) : paletteResults !== null ? (
+                  <>
+                    <div className="palette-group-title">
+                      {paletteResults.length === 0
+                        ? "No matching parts"
+                        : `${paletteResults.length} match${paletteResults.length === 1 ? "" : "es"}`}
+                    </div>
+                    <div
+                      className="palette-group palette-results"
+                      role="list"
+                      aria-label="Matching parts"
+                    >
+                      {paletteResults.map((r) =>
+                        r.kind === "part"
+                          ? paletteTile(r.item, r.group)
+                          : subcircuitTile(r.circuit, "Subcircuit"),
                       )}
-                </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="palette-group-title">{activePaletteGroup}</div>
+                    <div className="palette-group" role="tabpanel" aria-label={activePaletteGroup}>
+                      {activePaletteGroup === "Subcircuits" && doc.circuits.length === 1 && (
+                        <p className="palette-hint">
+                          No subcircuits yet. Make one, then place instances of it on any sheet.
+                        </p>
+                      )}
+                      {activePaletteGroup === "Subcircuits" && (
+                        <button className="palette-new" onClick={onNewSheet}>
+                          + New subcircuit
+                        </button>
+                      )}
+                      {activePaletteGroup === "Subcircuits"
+                        ? doc.circuits.map((c, i) => i !== sheet && subcircuitTile(c))
+                        : (PALETTE.find((g) => g.group === activePaletteGroup)?.items ?? []).map(
+                            (item) => paletteTile(item),
+                          )}
+                    </div>
+                  </>
+                )}
               </div>
             </aside>
             {/* Circuit tabs live above the CANVAS column (UI_OVERHAUL §15), so
@@ -2078,6 +2381,8 @@ export default function App() {
                 onNew={onNewSheet}
                 onRename={onRenameSheet}
                 onDelete={onDeleteSheet}
+                onClose={onCloseSheet}
+                hidden={hiddenSheets}
                 renaming={renamingSheet}
                 onCommitRename={onCommitSheetName}
                 onCancelRename={onCancelSheetName}
@@ -2105,6 +2410,35 @@ export default function App() {
                   showValues={showValues}
                   showPerf={showPerf}
                 />
+                {/* §94: an empty sheet says what goes here. Hidden the moment a
+                    part is being placed, so the ghost has the canvas to itself. */}
+                {sheetEmpty && !status?.placing && (
+                  <div className="canvas-empty">
+                    <div className="canvas-empty-card">
+                      <span className="canvas-empty-glyph" aria-hidden="true">
+                        <AppLogoIcon />
+                      </span>
+                      <p className="canvas-empty-title">
+                        {inInstance || scope !== null ? "This sheet is empty" : "Start a circuit"}
+                      </p>
+                      <p className="canvas-empty-text">
+                        Pick a part from the palette, then click the canvas to place it. Click a pin
+                        to start a wire.
+                      </p>
+                      <ul className="canvas-empty-hints">
+                        <li>
+                          <kbd>Wheel</kbd> zoom
+                        </li>
+                        <li>
+                          <kbd>Right-drag</kbd> pan
+                        </li>
+                        <li>
+                          <kbd>?</kbd> shortcuts
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
                 {/* §80: inside a definition, the way out — named after a sheet that
                     really instantiates it — and where it is used. */}
                 {(scope !== null || inInstance) && sheetName !== undefined && (
@@ -2179,6 +2513,7 @@ export default function App() {
                 onEdit={() => editorRef.current?.refresh()}
                 onOpenCircuit={onOpenSubcircuit}
                 onNotify={toast}
+                onShowInWaveform={() => void showInWaveform()}
                 focusField={inspectorFocus}
                 onFocusHandled={() => setInspectorFocus(null)}
               />
@@ -2190,6 +2525,7 @@ export default function App() {
             sim={sim}
             defaults={waveDefaults}
             picked={wavePicked}
+            add={waveAdd}
             watches={waveWatches}
             circuitLabel={doc.circuits[sheet]?.name ?? ""}
             onClose={() => setWaveOpen(false)}
@@ -2265,11 +2601,13 @@ export default function App() {
         )}
         {status !== null && status.selection > 0 && <span>{status.selection} selected</span>}
         {status?.cursor && (
-          <span>
-            ({status.cursor.x.toFixed(1)}, {status.cursor.y.toFixed(1)})
+          <span className="statusbar-coords" title="Pointer position, in grid units">
+            {status.cursor.x.toFixed(1)}, {status.cursor.y.toFixed(1)}
           </span>
         )}
-        <span className="statusbar-hint">press ? for shortcuts</span>
+        <span className="statusbar-hint">
+          press <kbd>?</kbd> for shortcuts
+        </span>
       </footer>
       <div className="toast-stack">
         {toasts.map((t) => (
@@ -2328,6 +2666,20 @@ export default function App() {
         />
       )}
       {closeAsk !== null && <ClosePrompt name={closeAsk.name} onChoose={closeAsk.resolve} />}
+      {confirmAsk !== null && (
+        <ConfirmDialog
+          title={confirmAsk.title}
+          body={confirmAsk.body}
+          confirmLabel={confirmAsk.confirmLabel}
+          danger
+          onConfirm={() => {
+            const run = confirmAsk.onConfirm;
+            setConfirmAsk(null);
+            run();
+          }}
+          onCancel={() => setConfirmAsk(null)}
+        />
+      )}
       {recoveryOpen && recoveries.length > 0 && (
         <RecoveryDialog
           entries={recoveries}

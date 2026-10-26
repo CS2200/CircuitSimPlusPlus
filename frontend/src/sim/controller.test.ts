@@ -3,6 +3,7 @@ import { SimController, formatValue } from "./controller";
 import { createMockCore } from "../ipc/mock";
 import { buildMockDemoDoc } from "../editor/mockDemoCircuit";
 import { MOCK_DEMO_COMPS } from "../ipc/mockDemoSpec";
+import { CircuitDocument } from "../model/document";
 
 /** Synchronous flush: diffs apply immediately (no rAF in tests). */
 function makeController() {
@@ -11,6 +12,72 @@ function makeController() {
 }
 
 describe("SimController", () => {
+  it("re-syncs a FILE-backed document from the editor's text, at its path (§100)", async () => {
+    // Re-reading the file picked up a stale copy autosave had not rewritten
+    // yet, so a fixed load error stayed on screen in the desktop app.
+    const core = createMockCore();
+    const realLoad = core.api.loadCircuit.bind(core.api);
+    const calls: { path?: string; text?: string }[] = [];
+    let current = "";
+    core.api.loadCircuit = async (src) => {
+      calls.push({
+        path: src.path,
+        text: src.bytes === undefined ? undefined : new TextDecoder().decode(src.bytes),
+      });
+      // A path-only load reads "the file" — which is whatever it was at open.
+      return realLoad({ bytes: src.bytes ?? new TextEncoder().encode(current) });
+    };
+    const ctl = new SimController(core, (cb) => cb());
+    const doc = buildMockDemoDoc();
+    current = doc.toJson();
+    expect(await ctl.loadFromPath(doc, "/work/cpu.csx")).toBe(true);
+    expect(calls[0]).toEqual({ path: "/work/cpu.csx", text: undefined }); // Open reads the file
+
+    // An edit the file does not have yet: the re-sync sends the EDITOR's text.
+    doc.updateComponent(0, doc.circuit(0).components[0].id, { name: "renamed" });
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].path).toBe("/work/cpu.csx"); // autoloads still resolve there
+    expect(calls[1].text).toBe(doc.toJson());
+  });
+
+  it("retries a FAILED load once the document changes, so a fixed error clears (§99)", async () => {
+    // The engine refuses an unnamed pin; this core refuses until the pin has a name.
+    const core = createMockCore();
+    const realLoad = core.api.loadCircuit.bind(core.api);
+    core.api.loadCircuit = async (src) => {
+      const parsed = JSON.parse(new TextDecoder().decode(src.bytes)) as {
+        circuits: { components: { type: string; name?: string }[] }[];
+      };
+      const unnamed = parsed.circuits.some((c) =>
+        c.components.some((x) => x.type === "wiring.pin" && (x.name ?? "") === ""),
+      );
+      if (unnamed) {
+        return {
+          ok: false,
+          errors: [{ kind: "other", message: "wiring.pin components must be named", circuit: "t" }],
+          net_map: [],
+          named: [],
+        };
+      }
+      return realLoad(src);
+    };
+    const ctl = new SimController(core, (cb) => cb());
+    const doc = CircuitDocument.create("t");
+    const id = doc.addComponent(0, { type: "wiring.pin", pos: [0, 0], name: "a" });
+    doc.updateComponent(0, id, { name: "" }); // the broken state the banner reported
+    expect(await ctl.load(doc)).toBe(false);
+    expect(ctl.store.loadErrors).toHaveLength(1);
+    // Nothing changed yet: retrying the same netlist would fail the same way.
+    expect(ctl.needsRetry(doc)).toBe(false);
+    // Naming the pin is a netlist change: a retry is due, and it clears the error.
+    doc.updateComponent(0, id, { name: "a" });
+    expect(ctl.needsRetry(doc)).toBe(true);
+    expect(await ctl.resync(doc)).toBe(true);
+    expect(ctl.store.loadErrors).toHaveLength(0);
+    expect(ctl.needsRetry(doc)).toBe(false);
+  });
+
   it("loads a document: net map inverted, named comps stored", async () => {
     const ctl = makeController();
     const ok = await ctl.load(buildMockDemoDoc());

@@ -26,7 +26,12 @@ function simState(page: Page): Promise<SimState> {
 }
 
 /** Click a point in world coordinates on the circuit canvas. */
-async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
+async function clickWorld(
+  page: Page,
+  wx: number,
+  wy: number,
+  button: "left" | "right" = "left",
+): Promise<void> {
   const box = await page.locator("canvas.circuit-canvas").boundingBox();
   if (box === null) throw new Error("canvas not visible");
   const cam = await page.evaluate(() =>
@@ -37,6 +42,7 @@ async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
   await page.mouse.click(
     box.x + (wx - cam.x) * cam.scale + box.width / 2,
     box.y + (wy - cam.y) * cam.scale + box.height / 2,
+    { button },
   );
 }
 
@@ -244,7 +250,7 @@ test("waveform viewer: traces the run and takes the canvas selection", async ({ 
   const thumb = page.locator(".wave-scrollbar-thumb");
   await expect(thumb).toBeVisible();
   for (let i = 0; i < 4; i++) {
-    await page.getByRole("button", { name: "+", exact: true }).click();
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
   }
   const thumbStyle = async (): Promise<{ left: number; width: number }> =>
     thumb.evaluate((el) => {
@@ -275,4 +281,39 @@ test("waveform viewer: traces the run and takes the canvas selection", async ({ 
   await expect(page.locator(".wave-view")).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.locator(".wave-view")).toHaveCount(0);
+});
+
+test("waveform: one click from the transport, the View menu or a right-click (§96)", async ({
+  page,
+}) => {
+  // An empty sheet that has never run: the viewer still opens (it loads the
+  // circuit itself) and says how to fill it, instead of refusing with a toast.
+  await page.goto("/");
+  await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
+  await page.getByRole("button", { name: "Waveform viewer" }).click();
+  await expect(page.locator(".wave-view")).toBeVisible();
+  await expect(page.locator(".wave-empty")).toContainText("Show in waveform");
+  await page.getByRole("button", { name: "Back to the circuit" }).click();
+  await expect(page.locator(".wave-view")).toHaveCount(0);
+
+  // The View menu carries it too.
+  await page.getByRole("button", { name: "View", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Waveform viewer" }).click();
+  await expect(page.locator(".wave-view")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".wave-view")).toHaveCount(0);
+
+  // Right-click a part → Show in waveform: the viewer opens WITH that signal.
+  await page.goto("/?simdemo=1");
+  await page.getByRole("button", { name: "tick", exact: true }).click();
+  await expect.poll(() => simState(page)).toMatchObject({ loaded: true });
+  await clickWorld(page, 24, 3, "right"); // the adder
+  await page.getByRole("menuitem", { name: "Show in waveform" }).click();
+  await expect(page.locator(".wave-view")).toBeVisible();
+  const rows = async (): Promise<number> =>
+    Number(
+      /(\d+) rows?/.exec(await page.locator(".wave-bar-text").first().innerText())?.[1] ?? "0",
+    );
+  // The named parts and the clock, plus the adder's output.
+  await expect.poll(rows, { message: "the adder joined the trace" }).toBeGreaterThanOrEqual(4);
 });

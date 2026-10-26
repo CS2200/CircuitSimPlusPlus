@@ -1,3 +1,23 @@
+/* CircuitSim++ stylesheet.
+ *
+ *  0. Theme palettes — DATA (DESIGN.md §7.1 / D8): one custom-property block
+ *     per theme; the canvas reads them back through `resolveTheme`.
+ *  1. Derived tokens — surfaces, borders, radii, shadows, type — computed from
+ *     the palette with color-mix, so every theme gets the same hierarchy.
+ *  2. Base + primitives (buttons, fields, switches, keycaps, motion).
+ *  3. Shell: header, menus, transport.
+ *  4. Palette rail + body.
+ *  5. Editor column: sheet tabs, canvas overlays, zoom, scope marks.
+ *  6. Right dock: Inspector.
+ *  7. Status bar, toasts.
+ *  8. Dialogs: help, settings, memory, recovery, close prompt, about.
+ *  9. Version history view; waveform viewer.
+ * 10. Watch panel + memory inspector.
+ *
+ * Class names are a contract with the components AND the e2e suite — restyle
+ * them, do not rename them (frontend/UI_OVERHAUL.md §94).
+ */
+
 /* CircuitSim++ theme system (DESIGN.md §7.1, decision D8).
  * Palettes are data: a future colorblind-accessibility pass ships as a new
  * theme block, not a refactor.
@@ -370,40 +390,142 @@
   --accent: #f43f5e;
 }
 
-* {
+/* =============================================================================
+ * 1. Derived design tokens (UI_OVERHAUL §94)
+ *
+ * Everything below the palettes is computed FROM them with color-mix, so all
+ * eleven themes share one surface hierarchy, one border weight and one accent
+ * family. Declared on `[data-theme]` (not only :root) because `.app` carries
+ * the live theme and the <html> element only the one from first paint.
+ * ========================================================================== */
+
+:root,
+[data-theme] {
+  /* Type */
+  --font-ui:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+
+  /* Shape */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --ctl-h: 28px;
+
+  /* Surfaces. Mixing a little TEXT colour into the panel lifts it in a dark
+   * theme and sinks it in a light one — the same rule reads right in both. */
+  --surface-1: var(--panel);
+  --surface-2: color-mix(in srgb, var(--panel) 95%, var(--text));
+  --surface-3: color-mix(in srgb, var(--panel) 90%, var(--text));
+  --hover: color-mix(in srgb, var(--text) 8%, transparent);
+  --pressed: color-mix(in srgb, var(--text) 13%, transparent);
+  --field-bg: color-mix(in srgb, var(--bg) 80%, var(--panel));
+  --border: var(--panel-border);
+  --border-soft: color-mix(in srgb, var(--panel-border) 55%, transparent);
+  --border-strong: color-mix(in srgb, var(--panel-border) 70%, var(--text));
+
+  /* Accent family */
+  --on-accent: #fff;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-softer: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-ring: color-mix(in srgb, var(--accent) 38%, transparent);
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, var(--text));
+  --accent-border: color-mix(in srgb, var(--accent) 55%, var(--panel-border));
+
+  /* Semantic */
+  --ok: var(--wire-high);
+  --warn: var(--violation);
+  --danger: var(--wire-x);
+
+  /* Elevation (dark default; the light themes override below). */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 6px 18px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 22px 60px rgb(0 0 0 / 0.55), 0 4px 14px rgb(0 0 0 / 0.35);
+  --backdrop: rgb(0 0 0 / 0.5);
+}
+
+[data-theme="light"],
+[data-theme="paper"],
+[data-theme="solarized-light"] {
+  --shadow-sm: 0 1px 2px rgb(20 24 40 / 0.1);
+  --shadow-md: 0 6px 18px rgb(20 24 40 / 0.14), 0 1px 3px rgb(20 24 40 / 0.1);
+  --shadow-lg: 0 22px 60px rgb(20 24 40 / 0.22), 0 4px 14px rgb(20 24 40 / 0.12);
+  --backdrop: rgb(30 34 50 / 0.35);
+  --hover: color-mix(in srgb, var(--text) 6%, transparent);
+  --pressed: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* Text ON the accent: white on a deep accent, near-black on a light one, so a
+ * filled button is legible for every theme accent and every override. */
+[data-theme="oled"],
+[data-theme="midnight"],
+[data-theme="nord"],
+[data-theme="dracula"],
+[data-theme="gruvbox"],
+[data-theme="contrast"] {
+  --on-accent: #0b0d14;
+}
+
+[data-accent="blue"],
+[data-accent="indigo"],
+[data-accent="violet"],
+[data-accent="fuchsia"],
+[data-accent="rose"],
+[data-accent="red"] {
+  --on-accent: #fff;
+}
+
+[data-accent="orange"],
+[data-accent="amber"],
+[data-accent="lime"],
+[data-accent="green"],
+[data-accent="teal"],
+[data-accent="cyan"],
+[data-accent="slate"] {
+  --on-accent: #0b0d14;
+}
+
+/* =============================================================================
+ * 2. Base + primitives
+ * ========================================================================== */
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+* {
   scrollbar-width: thin;
-  scrollbar-color: var(--panel-border) transparent;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
-button,
-input,
-select {
-  font: inherit;
-  /* Native checkbox / radio / range highlights follow the chosen accent, never
-   * the browser's default blue (UI_OVERHAUL §31). */
-  accent-color: var(--accent);
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
 
-/* Text selection too, so dragging over a field is the selected colour. */
-::selection {
-  background: var(--accent);
-  color: #fff;
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
 }
 
-button {
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease,
-    color 0.12s ease,
-    filter 0.12s ease;
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-strong);
 }
 
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -416,88 +538,74 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-.app {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg);
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  /* Native checkbox / radio / range highlights follow the chosen accent, never
+   * the browser's default blue (UI_OVERHAUL §31). */
+  accent-color: var(--accent);
 }
 
-/* ---- app header (UI_OVERHAUL §28): a Docs-style two-row bar ----
- *
- *   row 1  [logo] alu.csx  (Saved)                     undo redo | history | theme
- *   row 2  File Edit View Tools Help    play tick reset run-to speed T_obs
- *
- * The sim transport lives in row 2 rather than owning a row of its own, so the
- * chrome stays two rows tall. */
-
-.appheader {
-  position: relative; /* anchors the sim banner that drops below the bar */
-  background: var(--panel);
-  border-bottom: 1px solid var(--panel-border);
-  user-select: none;
+button {
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease,
+    transform 0.1s ease;
 }
 
-.appheader-top {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.28rem 0.6rem 0;
+button:disabled {
+  cursor: default;
 }
 
-.app-logo {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
+/* Text selection too, so dragging over a field is the selected colour. */
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
-.app-title {
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A keycap: the shortcut hints in the status bar, the empty states and help. */
+kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface-2);
   color: var(--text);
-  font-size: 0.95rem;
-  font-weight: 600;
-  max-width: 34vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-family: var(--font-ui);
+  font-size: 0.86em;
+  font-weight: 500;
+  line-height: 1.55;
+  text-align: center;
   white-space: nowrap;
 }
 
-/* Clickable title (§38): looks like the label, invites a click to rename. */
-.app-title-editable {
-  padding: 0.1rem 0.35rem;
-  margin-left: -0.35rem;
-  background: transparent;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.app-title-editable:hover {
-  background: var(--grid);
-}
-
-/* Inline editing (§39): the same box, but boxed and focused so it reads as a
- * field you can type in — the document-editor gesture. */
-.app-title-input {
-  padding: 0.1rem 0.35rem;
-  margin-left: -0.35rem;
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  outline: none;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-}
-
-/* The app title stays in the accessibility tree but is not drawn (the
- * top bar itself is the chrome, VSCode-style). */
+/* Kept in the accessibility tree, not drawn. */
 .sr-only {
   position: absolute;
   width: 1px;
@@ -510,6 +618,399 @@ body {
   border: 0;
 }
 
+/* ---- the one button vocabulary ----
+ * Unclassed buttons inside a dialog's action row are the PRIMARY action;
+ * `.secondary` (and every other button here) is the quiet, bordered kind. */
+.secondary,
+.settings-foot button,
+.mem-dialog-foot button,
+.recovery-actions button,
+.history-preview-bar button,
+.inspector-buttons button,
+.wave-bar button,
+.prop-actions button,
+.settings-action,
+.history-copy,
+.update-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--ctl-h);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.secondary:hover:not(:disabled),
+.settings-foot button:hover:not(:disabled),
+.mem-dialog-foot button:hover:not(:disabled),
+.recovery-actions button:hover:not(:disabled),
+.history-preview-bar button:hover:not(:disabled),
+.inspector-buttons button:hover:not(:disabled),
+.wave-bar button:hover:not(:disabled),
+.prop-actions button:hover:not(:disabled),
+.settings-action:hover:not(:disabled),
+.history-copy:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.secondary:active:not(:disabled),
+.settings-foot button:active:not(:disabled),
+.mem-dialog-foot button:active:not(:disabled),
+.recovery-actions button:active:not(:disabled),
+.history-preview-bar button:active:not(:disabled),
+.inspector-buttons button:active:not(:disabled),
+.wave-bar button:active:not(:disabled),
+.prop-actions button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.secondary:disabled,
+.settings-foot button:disabled,
+.mem-dialog-foot button:disabled,
+.recovery-actions button:disabled,
+.history-preview-bar button:disabled,
+.inspector-buttons button:disabled,
+.wave-bar button:disabled,
+.prop-actions button:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+/* Primary: the one filled action in a row. */
+.settings-foot button:not(.secondary),
+.mem-dialog-foot button:not(.secondary),
+.recovery-actions button:not(.secondary),
+.history-preview-bar button:not(.secondary),
+.wave-bar button:not(.secondary),
+.prop-actions button:not(.secondary),
+.update-link {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.settings-foot button:not(.secondary):hover:not(:disabled),
+.mem-dialog-foot button:not(.secondary):hover:not(:disabled),
+.recovery-actions button:not(.secondary):hover:not(:disabled),
+.history-preview-bar button:not(.secondary):hover:not(:disabled),
+.wave-bar button:not(.secondary):hover:not(:disabled),
+.prop-actions button:not(.secondary):hover:not(:disabled),
+.update-link:hover {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+
+/* ---- the one text-field vocabulary ---- */
+.inspector-row input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
+.inspector-row select,
+.settings-row select,
+.split-row input,
+.sim-runto input,
+.history-rename,
+.sheet-tab-input,
+.app-title-input,
+.inspector-textarea,
+.mem-paste textarea,
+.select-btn,
+.memory-inspector-head .mem-addr input {
+  background: var(--field-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.inspector-row input:not([type="checkbox"]):not([type="range"]):not([type="color"]):hover,
+.inspector-row select:hover,
+.settings-row select:hover,
+.split-row input:hover,
+.sim-runto input:hover,
+.inspector-textarea:hover,
+.select-btn:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.inspector-row input:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus,
+.inspector-row select:focus,
+.settings-row select:focus,
+.split-row input:focus,
+.sim-runto input:focus,
+.history-rename:focus,
+.sheet-tab-input:focus,
+.app-title-input:focus,
+.inspector-textarea:focus,
+.mem-paste textarea:focus,
+.select-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--text-dim) 75%, transparent);
+}
+
+/* Hide native number steppers everywhere a number is TYPED (the tester read
+ * them as clutter beside the run-to button). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* ---- a switch, shared by Settings toggles and Inspector booleans ---- */
+.settings-toggle input,
+.inspector-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.settings-toggle input::after,
+.inspector-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transform: translateY(-50%);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition:
+    left 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.settings-toggle input:checked,
+.inspector-row input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.settings-toggle input:checked::after,
+.inspector-row input[type="checkbox"]:checked::after {
+  left: calc(100% - 16px);
+  background: #fff;
+}
+
+.settings-toggle input:disabled,
+.inspector-row input[type="checkbox"]:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- motion ---- */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* A slide, not a scale: a dialog's measured size must be its real size from the
+ * first frame (the Settings panel's "never resizes" check reads it at once). */
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes live-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+@keyframes play-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+}
+
+/* =============================================================================
+ * 3. Shell: header, menus, transport
+ *
+ * The chrome's heights are FIXED in px (header 40 + 35 + 1 border, tab strip
+ * 32, status bar 25 = 133), so the canvas area has the same size in every
+ * font environment — the committed canvas baselines depend on it.
+ * ========================================================================== */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+}
+
+.appheader {
+  position: relative; /* anchors the sim banner that drops below the bar */
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.appheader-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 8px 0 12px;
+}
+
+/* The app mark sits in a small accent tile, like an app icon. */
+.app-logo {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.app-logo svg {
+  width: 18px;
+  height: 18px;
+}
+
+.app-title {
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  max-width: 34vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Clickable title (§38): looks like the label, invites a click to rename. */
+.app-title-editable {
+  height: 26px;
+  padding: 0 8px;
+  margin-left: -8px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.app-title-editable:hover {
+  background: var(--hover);
+}
+
+/* Inline editing (§39): the same box, but a field you can type in. */
+.app-title-input {
+  height: 26px;
+  padding: 0 8px;
+  margin-left: -8px;
+  font-weight: 600;
+}
+
 .appheader-actions {
   display: flex;
   align-items: center;
@@ -517,11 +1018,102 @@ body {
   margin-left: auto;
 }
 
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.icon-btn:active:not(:disabled) {
+  background: var(--pressed);
+}
+
+.icon-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+}
+
+.icon-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.topbar-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 5px;
+  background: var(--border);
+}
+
+/* The save chip reads like a document editor's status pill. */
+.appheader-top .save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.save-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.save-state[data-kind="pending"] .save-dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent);
+  animation: soft-pulse 1.3s ease-in-out infinite;
+}
+
+.save-state[data-kind="error"] .save-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+.save-state[data-kind="off"] .save-dot {
+  background: var(--text-dim);
+  box-shadow: none;
+}
+
+.save-state-error {
+  color: var(--danger) !important;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent) !important;
+}
+
 .appheader-bottom {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.05rem 0.6rem 0.3rem;
+  gap: 10px;
+  height: 35px;
+  padding: 0 10px 0 6px;
 }
 
 /* The transport is the flexible half of row 2: it gives way (telemetry first)
@@ -533,272 +1125,16 @@ body {
   min-width: 0;
 }
 
-/* The save chip reads like a document editor's status pill. */
-.appheader-top .save-state {
-  padding: 0.1rem 0.5rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 0.76rem;
-  white-space: nowrap;
-}
-
-.icon-btn {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 30px;
-  padding: 0;
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.icon-btn:hover:not(:disabled) {
-  background: var(--grid);
-}
-
-.icon-btn:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.icon-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.icon-btn svg {
-  display: block;
-  width: 19px;
-  height: 19px;
-}
-
-.topbar-sep {
-  width: 1px;
-  align-self: center;
-  height: 16px;
-  background: var(--panel-border);
-  margin: 0 4px;
-}
-
-.app-main {
-  position: relative; /* anchors the version drawer + preview overlay (§34) */
-  flex: 1;
-  min-height: 0; /* allow the flex child to shrink to its container */
-  display: flex;
-}
-
-.palette {
-  width: 190px; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
-  flex: none;
-  display: flex;
-  background: var(--panel);
-}
-
-/* Activity rail (UI_OVERHAUL §8): one icon per component group, with the
- * group's name underneath (§13); hovering, focusing, or clicking a group
- * switches the body beside it. */
-.palette-rail {
-  flex: none;
-  width: 74px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  /* Roomier spacing between the group icons (UI_OVERHAUL §15). */
-  gap: 10px;
-  padding: 10px 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--panel-border);
-}
-
-.palette-rail-btn {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  flex: none;
-  width: 66px;
-  min-height: 44px;
-  padding: 5px 2px;
-  background: transparent;
-  color: var(--text-dim);
-  border: none;
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-.palette-rail-label {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.6rem;
-  /* Tall enough that the descender of a "g"/"y" is not clipped by the
-   * horizontal-overflow ellipsis box (UI_OVERHAUL §36). */
-  line-height: 1.4;
-  padding-bottom: 1px;
-  text-align: center;
-}
-
-.palette-rail-btn:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-.palette-rail-btn.active {
-  color: var(--accent);
-}
-
-.palette-rail-btn.active::before {
-  content: "";
-  position: absolute;
-  left: -6px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-
-.palette-body {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.palette-group {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-  gap: 4px;
-  margin-bottom: 10px;
-}
-
-.palette-group-title {
-  grid-column: 1 / -1;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-dim);
-  margin: 6px 3px 6px;
-}
-
-.palette-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 6px 8px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  cursor: grab;
-  font-size: 0.85rem;
-  text-align: left;
-}
-
-.palette-item-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.comp-icon {
-  flex: none;
-}
-
-/* ---- resizable side panels (UI_OVERHAUL §7) ---- */
-
-/* Overlays on the work area's edges: no layout footprint, so the canvas
- * geometry (and the visual-regression baselines) do not depend on the
- * handles. */
-.resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 5px;
-  z-index: 5;
-  cursor: col-resize;
-  touch-action: none;
-  user-select: none; /* double-clicks must not start a text-selection drag */
-  background: transparent;
-}
-
-.resize-handle.left {
-  left: 0;
-}
-
-.resize-handle.right {
-  right: 0;
-}
-
-.resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 1px;
-  background: var(--panel-border);
-}
-
-.resize-handle:hover::after,
-.resize-handle.dragging::after {
-  background: var(--accent);
-  width: 2px;
-  left: 1.5px;
-}
-
-.resize-handle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-/* Sheet tabs sit FLUSH against the canvas strip, so their focus ring is drawn
- * INSIDE the tab (like the resize handles). The global ring's 1px offset
- * overhangs the strip's top/left edge and reads as a misaligned box around the
- * tab (tester report). */
-.sheet-tab-wrap:focus-within,
-.sheet-tab:focus-visible,
-.sheet-tab-close:focus-visible,
-.sheet-tab-input:focus-visible {
-  outline-offset: -2px;
-}
-
-.palette-item:hover {
-  border-color: var(--accent);
-}
-
-.palette-item.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
-}
-
-.editor-wrap {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-}
-
-/* ---- menu bar (inside the top bar) ---- */
+/* ---- menu bar ---- */
 
 .menubar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 2px;
   /* Never shrink: the menu buttons must not spill over the transport beside
-   * them (they did, which swallowed clicks on play — §28). The transport
-   * gives way instead. */
+   * them (§28). The transport gives way instead. */
   flex: 0 0 auto;
   min-width: 0;
-  padding: 0;
-  background: transparent;
-  border-bottom: none;
   user-select: none;
 }
 
@@ -808,65 +1144,85 @@ body {
 }
 
 .menu-btn {
+  height: 26px;
+  padding: 0 9px;
   background: transparent;
   color: var(--text);
   border: none;
-  padding: 0.35rem 0.7rem;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 500;
   cursor: pointer;
-  font-size: 0.85rem;
-  border-radius: 6px;
-  margin: 2px 0;
 }
 
 .menu-btn:hover,
 .menu-btn.active {
-  background: var(--grid);
+  background: var(--hover);
+}
+
+/* Popups share one look: translucent panel, hairline border, deep shadow. */
+.menu-pop,
+.select-pop,
+.sheet-tab-menu,
+.canvas-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+  background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: pop-in 0.12s ease-out;
 }
 
 .menu-pop {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 2px);
   left: 0;
   z-index: 90;
-  min-width: 220px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
+  min-width: 230px;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px 0 6px;
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: 5px;
-  padding: 0.35rem 0.6rem;
-  cursor: pointer;
-  font-size: 0.85rem;
+  border-radius: 6px;
+  font-size: var(--fs-md);
   text-align: left;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .menu-item:hover:not(:disabled) {
-  background: var(--grid);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.menu-item:hover:not(:disabled) .menu-sc,
+.menu-item:hover:not(:disabled) .menu-mark {
+  color: inherit;
+  opacity: 0.85;
 }
 
 .menu-item:disabled {
-  opacity: 0.45;
-  cursor: default;
+  opacity: 0.4;
 }
 
 .menu-mark {
   width: 1em;
   flex: none;
   color: var(--accent);
-  font-size: 0.75rem;
+  font-size: var(--fs-xs);
+  text-align: center;
 }
 
 .menu-label {
@@ -874,1733 +1230,32 @@ body {
 }
 
 .menu-sc {
+  margin-left: 2rem;
   color: var(--text-dim);
-  font-size: 0.75rem;
-  margin-left: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
 }
 
 .menu-sep {
   height: 1px;
-  background: var(--panel-border);
   margin: 4px 6px;
+  background: var(--border);
 }
 
-/* ---- circuit tabs (one per circuit in the file) ---- */
-
-.sheet-tabs {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-  /* A small left inset, not flush (UI_OVERHAUL §84): a flush first tab lands its
-   * border exactly on the palette/editor boundary, and because the ACTIVE tab paints
-   * itself in the canvas colour it joins, the boundary then reads as a line running
-   * down THROUGH the tab. The canvas is still flush with the palette — only the tabs
-   * are clear of the seam. */
-  padding: 2px 0 0 4px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--panel-border);
-  overflow-x: auto;
-  scrollbar-width: thin;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.sheet-tab {
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
-  padding: 0.3rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-  flex: none;
-}
-
-.sheet-tab:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-/* Middle-click menu on a sheet tab (UI_OVERHAUL §37). */
-.sheet-tab-menu,
-.canvas-menu {
-  position: fixed;
-  z-index: 200;
-  min-width: 9rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 4px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
-}
-
-.sheet-tab-menu button,
-.canvas-menu button {
-  text-align: left;
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: 7px;
-  padding: 5px 8px;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.sheet-tab-menu button:hover,
-.canvas-menu button:hover {
-  background: var(--grid);
-}
-
-/* Canvas context menu (UI_OVERHAUL §75): the tab menu's panel look, with a header
-   naming what the commands will hit and a shortcut column on the right. */
-.canvas-menu {
-  min-width: 11rem;
-}
-
-.canvas-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.canvas-menu-title {
-  padding: 2px 8px 6px;
-  color: var(--text-dim);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.canvas-menu-hint {
-  flex: none;
-  color: var(--text-dim);
-  font-size: 0.74rem;
-}
-
-.sheet-tab.active {
-  color: var(--text);
-  background: var(--bg);
-  border-color: var(--panel-border);
-}
-
-.sheet-tab-wrap {
-  display: inline-flex;
-  align-items: stretch;
-  flex: none;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
-}
-
-.sheet-tab-wrap:hover {
-  background: var(--grid);
-}
-
-.sheet-tab-wrap.active {
-  background: var(--bg);
-  border-color: var(--panel-border);
-}
-
-.sheet-tab-wrap .sheet-tab,
-.sheet-tab-wrap .sheet-tab.active {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  /* Symmetric padding + centered label: the block name sits in the middle of
-   * its tab and the ✕ keeps its own slot (UI_OVERHAUL §15). */
-  padding: 0.3rem 0.7rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.sheet-tab-close {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 0 0.6rem 0 0.1rem;
-  font-size: 0.95rem;
-  line-height: 1;
-  border-radius: 0 7px 0 0;
-}
-
-.sheet-tab-close:hover {
-  color: var(--wire-x);
-}
-
-.sheet-tab.sheet-new {
-  color: var(--text-dim);
-  padding: 0.3rem 0.7rem;
-  font-weight: bold;
-}
-
-/* A freshly created tab slides/grows in (UI_OVERHAUL §60). */
-.sheet-tab-wrap.enter {
-  animation: sheet-tab-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-@keyframes sheet-tab-in {
-  from {
-    opacity: 0;
-    transform: translateX(-10px) scaleX(0.55);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Inline tab rename (UI_OVERHAUL §60): the label becomes a small input. */
-.sheet-tab-input {
-  font: inherit;
-  font-size: 0.8rem;
-  width: 7rem;
-  min-width: 4rem;
-  max-width: 12rem;
-  margin: 0.15rem;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 0.1rem 0.45rem;
-  outline: none;
-}
-
-.app-statusbar {
-  display: flex;
-  gap: 1.2rem;
-  align-items: center;
-}
-
-.statusbar-hint {
-  margin-left: auto;
-}
-
-/* Autosave indicator (phase 1): quiet on success, red on failure. */
-.save-state {
-  color: var(--text-dim);
-  font-size: 0.8rem;
-}
-
-.save-state-error {
-  color: var(--wire-x);
-}
-
-.help-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.help-card {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 1.2rem 1.6rem;
-  max-width: 480px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-}
-
-.help-card h2 {
-  margin: 0 0 0.8rem;
-  font-size: 1rem;
-}
-
-.help-card table {
-  border-collapse: collapse;
-  font-size: 0.85rem;
-}
-
-.help-card td {
-  padding: 3px 12px 3px 0;
-  vertical-align: top;
-}
-
-.help-card td:first-child {
-  font-family: ui-monospace, monospace;
-  color: var(--accent);
-  white-space: nowrap;
-}
-
-.help-dismiss {
-  margin: 0.8rem 0 0;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-}
-
-/* `?` shortcuts panel (UI_OVERHAUL §45): a two-column, scrollable card that
- * always fits the viewport instead of growing off-screen. */
-.help-shortcuts {
-  display: flex;
-  flex-direction: column;
-  width: min(94vw, 820px);
-  max-width: none;
-  max-height: min(88vh, 780px);
-  padding: 0.9rem 1.1rem 0.7rem;
-}
-
-.help-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.help-head h2 {
-  margin: 0;
-}
-
-.help-close {
-  flex: none;
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  font-size: 1.2rem;
-  line-height: 1;
-  padding: 2px 7px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.help-close:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-.help-sections {
-  margin-top: 0.6rem;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  align-content: start;
-  gap: 0.1rem 1.6rem;
-  padding-right: 0.2rem;
-}
-
-.help-section h3 {
-  margin: 0.55rem 0 0.25rem;
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.help-row {
-  display: grid;
-  grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
-  gap: 0.7rem;
-  padding: 2px 0;
-  font-size: 0.82rem;
-}
-
-.help-key {
-  font-family: ui-monospace, monospace;
-  color: var(--accent);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.help-desc {
-  min-width: 0;
-}
-
-/* Canvas column: circuit tabs sit above the canvas ONLY, so the side panels
- * run the full height (UI_OVERHAUL §15). */
-.editor-col {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.editor-col .editor-wrap {
-  min-height: 0;
-}
-
-/* ---- right dock: Inspector (UI overhaul §3) ---- */
-
-.right-dock {
-  width: 16rem; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  /* Breathing room for the Inspector content (UI_OVERHAUL §15). */
-  padding: 0.7rem 0.8rem 0.9rem;
-  overflow-y: auto;
-  background: var(--panel);
-}
-
-.dock-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 5px 6px 0;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.dock-tab {
-  flex: 1;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 7px 7px 0 0;
-  padding: 0.32rem 0.5rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.dock-tab:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-.dock-tab.active {
-  color: var(--text);
-  background: var(--bg);
-  border-color: var(--panel-border);
-  margin-bottom: -1px; /* sit over the strip's border */
-}
-
-.dock-panel {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.6rem;
-}
-
-/* ---- inspector (component editor, right dock) ---- */
-
-.inspector-empty {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  padding: 1.4rem 0.5rem;
-  text-align: center;
-}
-
-.inspector-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0 0.15rem 0.5rem;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-/* The header's headline: the component's plain full name (UI_OVERHAUL §57). */
-.inspector-id {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.inspector-type {
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Rows are a two-column grid (UI_OVERHAUL §17): the label column flexes and
- * the control column is a fixed track, so every input/select/button group
- * lines up down the panel instead of drifting with the label length. */
-.inspector-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 9.5rem);
-  align-items: center;
-  gap: 0.7rem;
-  margin: 11px 0;
-  font-size: 0.85rem;
-}
-
-.inspector-row > span {
-  color: var(--text-dim);
-}
-
-.inspector-row input:not([type="checkbox"]),
-.inspector-row select {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  padding: 4px 8px;
-  font-size: 0.85rem;
-}
-
-.inspector-row input:not([type="checkbox"]):hover,
-.inspector-row select:hover {
-  border-color: var(--accent);
-}
-
-.inspector-row input[type="checkbox"] {
-  justify-self: end;
-  accent-color: var(--accent);
-  width: 1rem;
-  height: 1rem;
-}
-
-.inspector-row input[type="color"] {
-  justify-self: end;
-  width: 100%;
-  height: 1.6rem;
-  padding: 0;
-  background: var(--bg);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-/* A drag bar + its numeric readout (UI_OVERHAUL §50). */
-.inspector-slider {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* The fill is an explicit gradient sized to --fill, so at the maximum the bar
-   reaches the very end (a native accent track stops at the thumb, §55). */
-.inspector-slider input[type="range"] {
-  flex: 1;
-  min-width: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  height: 14px;
-  /* Reset the shared `.inspector-row input` padding/border, which inset the
-     track and left a visible gap at the maximum (§55). */
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-}
-
-.inspector-slider input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 2px;
-  background: linear-gradient(
-    to right,
-    var(--accent) var(--fill, 0%),
-    var(--panel-border) var(--fill, 0%)
-  );
-}
-
-.inspector-slider input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--panel);
-}
-
-.inspector-slider input[type="range"]::-moz-range-track {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--panel-border);
-}
-
-.inspector-slider input[type="range"]::-moz-range-progress {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-
-.inspector-slider input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--panel);
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-/* Segmented base chooser for a constant (UI_OVERHAUL §55). */
-.radix-buttons {
-  display: inline-flex;
-  gap: 0.15rem;
-  padding: 0.15rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  background: var(--panel);
-}
-
-.radix-button {
-  flex: 1;
-  min-width: 2.6rem;
-  padding: 0.22rem 0.5rem;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.radix-button:hover {
-  color: var(--text);
-}
-
-.radix-button.active {
-  background: var(--accent);
-  color: #fff;
-}
-
-.inspector-slider-value {
-  flex: none;
-  min-width: 1.8rem;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-dim);
-  font-size: 0.78rem;
-}
-
-.inspector-note {
-  margin: 0.7rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--violation);
-}
-
-/* A LOAD-BLOCKING note (an unnamed `wiring.pin` fails the whole load) reads
- * stronger than the autograder-addressability nudge. */
-.inspector-note[data-note="unnamed-pin"] {
-  margin-top: 0.35rem;
-  font-weight: 600;
-}
-
-/* ---- inspector + bit-width picker (UI_OVERHAUL §18/§19) ---- */
-
-.inspector-hint {
-  margin: -3px 0 0.45rem;
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-
-.inspector-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  margin: 12px 0;
-  font-size: 0.85rem;
-}
-
-.inspector-field-label {
-  color: var(--text-dim);
-}
-
-/* Splitter editor (UI_OVERHAUL §41): one row per split pin. */
-.split-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.split-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 4px;
-  align-items: center;
-}
-
-.split-row input {
-  min-width: 0;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 3px 6px;
-  font-size: 0.78rem;
-  font-family: ui-monospace, monospace;
-}
-
-.split-row input:hover {
-  border-color: var(--accent);
-}
-
-.split-remove {
-  padding: 0 0.4rem;
-  font-size: 0.8rem;
-  line-height: 1.2rem;
-}
-
-.bitsize-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 4px;
-}
-
-.bitsize-cell {
-  padding: 5px 0;
-  font-size: 0.74rem;
-  font-variant-numeric: tabular-nums;
-  background: var(--bg);
-  color: var(--text-dim);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.bitsize-cell:hover {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.bitsize-cell.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.inspector-textarea {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  padding: 4px 8px;
-  font-family: ui-monospace, monospace;
-  font-size: 0.78rem;
-  resize: vertical;
-}
-
-.inspector-textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-/* ---- app dropdown (UI_OVERHAUL §28) ---- */
-
-.select {
-  min-width: 0;
-}
-
-.select-btn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  padding: 5px 8px;
-  font-size: 0.85rem;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.select-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.select-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.select-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.select-caret {
-  flex: none;
-  color: var(--text-dim);
-  font-size: 0.7rem;
-}
-
-/* Fixed-position overlay (§29): portaled to the body so it floats over the
- * panel instead of reflowing it, and is never clipped by a scrolling parent. */
-.select-pop {
-  position: fixed;
-  z-index: 200;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 3px;
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 9px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
-  overflow-y: auto;
-}
-
-.select-item {
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: 6px;
-  padding: 4px 7px;
-  font-size: 0.82rem;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.select-item:hover {
-  background: var(--grid);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-}
-
-.select-item.active {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--accent);
-}
-
-/* ---- inspector: memory image + wire styling (UI_OVERHAUL §11/§12) ---- */
-
-.inspector-sep {
-  height: 1px;
-  background: var(--panel-border);
-  margin: 0.6rem 0;
-}
-
-.inspector-file {
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  max-width: 9.5rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.inspector-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-/* Full-width action row (memory image): buttons share the whole column so the
- * panel reads as tidy stacked rows instead of a lopsided label/control grid. */
-.inspector-buttons-full {
-  margin: 0.35rem 0 0;
-}
-
-.inspector-buttons-full button {
-  flex: 1;
-  text-align: center;
-}
-
-/* Small dim heading that separates the memory-image controls from the fields. */
-.inspector-subhead {
-  margin: 0.35rem 0 0.4rem;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.inspector-buttons button {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.inspector-buttons button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.inspector-buttons button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.wire-colors {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-width: 9.5rem;
-}
-
-.wire-swatch {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.wire-swatch.active {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.wire-swatch.default {
-  background: linear-gradient(135deg, var(--wire-low), var(--wire-high) 55%, var(--wire-z));
-}
-
-/* ---- memory contents dialog (UI_OVERHAUL §11) ---- */
-
-/* Wider than the generic help card (`.help-card` caps at 480px): the memory
- * grid wants a full 16-column row visible. */
-.help-card.mem-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(74rem, calc(100vw - 2rem));
-  max-width: none;
-  max-height: 84vh;
-}
-
-.mem-paste {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
-.mem-paste textarea {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.4rem 0.6rem;
-  font-family: ui-monospace, monospace;
-  font-size: 0.8rem;
-  min-height: 4.5rem;
-  resize: vertical;
-}
-
-.mem-table-wrap {
-  /* One scrolling page for the whole memory (UI_OVERHAUL §58): flex to fill the
-     dialog, then scroll inside it. */
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  margin-top: 0.5rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-}
-
-/* The table fills the dialog; the INPUT fills its cell (UI_OVERHAUL §16).
- * Previously the table stretched while the inputs stayed narrow, so each cell
- * had dead space to the right of its input and only part of it was editable. */
-.mem-table {
-  width: 100%;
-}
-
-/* Editable hex cell (UI_OVERHAUL §14): click to select, paste to fill from
- * here. The input's width comes from the word's hex width (inline style). */
-.mem-table .mem-cell {
-  min-width: 0;
-  padding: 0.1rem 0.25rem;
-  text-align: right;
-}
-
-.mem-cell-input {
-  width: 100%;
-  background: transparent;
-  color: var(--text);
-  border: none;
-  outline: none;
-  padding: 0.05rem 0;
-  font-family: inherit;
-  font-size: inherit;
-  text-align: right;
-}
-
-.mem-cell:focus-within {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
-.mem-dialog-foot {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.7rem;
-}
-
-.mem-dialog-spacer {
-  flex: 1;
-}
-
-.mem-dialog-foot button {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.mem-dialog-foot button:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.mem-dialog-foot button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.settings-card {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  padding: 1rem 1.2rem 1.2rem;
-  width: min(36rem, calc(100vw - 2rem));
-  max-height: min(85vh, 40rem);
-  overflow-y: auto;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-}
-
-.settings-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
-}
-
-/* Sectioned settings panel (UI_OVERHAUL §25/§26): nav column + section pane.
- * The height is FIXED so switching sections never resizes the dialog. */
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  width: min(56rem, calc(100vw - 2rem));
-  height: min(88vh, 44rem);
-  overflow: hidden;
-  padding: 1rem 1.25rem 1.05rem;
-}
-
-.settings-panel .settings-head {
-  padding: 0 0 0.7rem;
-}
-
-.settings-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.settings-nav {
-  flex: none;
-  width: 11rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0.15rem 0.9rem 0.15rem 0;
-  border-right: 1px solid var(--panel-border);
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-
-.settings-nav-btn {
-  text-align: left;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.settings-nav-btn:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-.settings-nav-btn.active {
-  color: var(--text);
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.settings-pane {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  /* Reserved scrollbar gutter: the pane's content width (and so the dialog's
-   * look) stays identical whichever section is open (§26). */
-  scrollbar-gutter: stable;
-  padding: 0.15rem 0 0.3rem 1.15rem;
-}
-
-.settings-panel .settings-foot {
-  padding: 0.75rem 0 0;
-  margin-top: 0.6rem;
-}
-
-/* Rows read like the Inspector: label+hint left, the control on the right. */
-.settings-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(7rem, 9rem);
-  align-items: center;
-  gap: 0.8rem;
-  margin: 0.55rem 0;
-  font-size: 0.85rem;
-}
-
-.settings-row-label,
-.settings-toggle-label {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.settings-row-label > .settings-hint,
-.settings-toggle-label > .settings-hint {
-  margin: 0;
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
-.settings-row select {
-  width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 7px;
-  padding: 4px 8px;
-  font-size: 0.85rem;
-}
-
-.settings-row select:hover {
-  border-color: var(--accent);
-}
-
-.settings-head h2 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.settings-close {
-  background: transparent;
-  color: var(--text-dim);
-  border: none;
-  border-radius: 6px;
-  padding: 0.15rem 0.45rem;
-  font-size: 0.95rem;
-  cursor: pointer;
-}
-
-.settings-close:hover {
-  color: var(--text);
-  background: var(--grid);
-}
-
-.settings-section h3 {
-  margin: 0.4rem 0 0.25rem;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-dim);
-}
-
-.settings-hint {
-  margin: 0 0 0.6rem;
-  font-size: 0.8rem;
-  color: var(--text-dim);
-}
-
-.theme-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.5rem;
-}
-
-.theme-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.35rem;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 10px;
-  padding: 0.6rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.theme-card:hover {
-  border-color: var(--accent);
-}
-
-.theme-card.active {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.theme-swatches {
-  display: flex;
-  gap: 3px;
-}
-
-.theme-swatches span {
-  width: 0.85rem;
-  height: 0.85rem;
-  border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
-}
-
-.theme-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-}
-
-.theme-blurb {
-  font-size: 0.72rem;
-  color: var(--text-dim);
-  line-height: 1.3;
-}
-
-.theme-check {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.5rem;
-  color: var(--accent);
-  font-size: 0.8rem;
-}
-
-/* Accent color swatches (Settings → Appearance). */
-.accent-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.accent-swatch {
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  background: var(--grid);
-  color: var(--text-dim);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-size: 0.68rem;
-  font-weight: 600;
-}
-
-.accent-swatch:hover {
-  border-color: var(--accent);
-}
-
-.accent-swatch.active {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-/* Toggle rows (Settings → Canvas / Startup). */
-.settings-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  margin: 0 0 0.45rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-/* A toggle that lands directly under the accent swatches needs its own
- * breathing room: the swatch row is the end of its block, so the toggle's
- * bottom-only margin left it touching the row above (tester report). */
-.accent-row + .settings-toggle {
-  margin-top: 0.9rem;
-}
-
-.settings-toggle:hover {
-  border-color: var(--accent);
-}
-
-.settings-toggle input {
-  appearance: none;
-  position: relative;
-  flex: none;
-  width: 2rem;
-  height: 1.1rem;
-  margin: 0;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  background: var(--grid);
-  cursor: pointer;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease;
-}
-
-.settings-toggle input::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 2px;
-  width: 0.78rem;
-  height: 0.78rem;
-  border-radius: 50%;
-  background: var(--text-dim);
-  transform: translateY(-50%);
-  transition:
-    left 0.15s ease,
-    background-color 0.15s ease;
-}
-
-.settings-toggle input:checked {
-  background: color-mix(in srgb, var(--accent) 35%, var(--bg));
-  border-color: var(--accent);
-}
-
-.settings-toggle input:checked::after {
-  left: calc(100% - 0.9rem);
-  background: var(--accent);
-}
-
-.settings-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-top: 0.9rem;
-  padding-top: 0.7rem;
-  border-top: 1px solid var(--panel-border);
-}
-
-.settings-foot button {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.32rem 0.7rem;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.settings-foot button:hover {
-  border-color: var(--accent);
-}
-
-/* Crash-recovery dialog (autosave, phase 1). */
-.recovery-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.recovery-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-}
-
-.recovery-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-}
-
-.recovery-meta strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recovery-actions {
-  display: inline-flex;
-  flex: none;
-  gap: 0.35rem;
-}
-
-.recovery-actions button {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.recovery-actions button:hover {
-  border-color: var(--accent);
-}
-
-/* Version history (UI_OVERHAUL §34): a Docs-style drawer over the right dock,
- * plus a read-only canvas preview of the selected version. */
-
-.history-drawer {
-  position: relative;
-  z-index: 1;
-  width: 22rem;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  background: var(--panel);
-  border-left: 1px solid var(--panel-border);
-  user-select: none;
-}
-
-.history-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.35rem 0.5rem 0.8rem;
-  border-bottom: 1px solid var(--panel-border);
-}
-
-.history-head h2 {
-  flex: 1;
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.history-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 0.25rem;
-}
-
-.history-empty {
-  padding: 0.6rem 0.5rem;
-  color: var(--text-dim);
-  font-size: 0.82rem;
-}
-
-/* A row is a plain container: the click target is an overlay button, so the
- * version's name (and its edit field) can sit above it (§38). */
-.history-row {
-  position: relative;
-  border-radius: 6px;
-}
-
-.history-row:hover {
-  background: var(--grid);
-}
-
-.history-row.active {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
-.history-select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.history-body {
-  position: relative; /* above .history-select */
-  display: flex;
-  flex-direction: column;
-  gap: 0.05rem;
-  padding: 0.4rem 0.5rem;
-  pointer-events: none; /* clicks fall through unless a child opts in */
-}
-
-.history-when {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.history-label {
-  align-self: flex-start;
-  max-width: 100%;
-  overflow: hidden;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: auto; /* the one clickable child */
-  cursor: text;
-}
-
-.history-label:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-.history-rename {
-  width: 100%;
-  padding: 0.1rem 0.3rem;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  font: inherit;
-  font-size: 0.82rem;
-  pointer-events: auto;
-}
-
-.history-meta {
-  color: var(--text-dim);
-  font-size: 0.72rem;
-}
-
-/* "This version vs the open document" (§38). */
-.history-diff {
-  padding: 0.5rem 0.7rem;
-  border-top: 1px solid var(--panel-border);
-}
-
-.history-diff h3 {
-  margin: 0 0 0.2rem;
-  color: var(--text-dim);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.history-diff-summary {
-  margin: 0 0 0.3rem;
-  font-size: 0.82rem;
-}
-
-.history-diff-list {
-  max-height: 11rem;
-  overflow-y: auto;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  color: var(--text-dim);
-  font-family: ui-monospace, monospace;
-  font-size: 0.74rem;
-}
-
-.history-diff-list li {
-  overflow: hidden;
-  padding: 0.05rem 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-action {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.settings-action:hover {
-  border-color: var(--accent);
-}
-
-.history-foot {
-  padding: 0.45rem 0.8rem;
-  border-top: 1px solid var(--panel-border);
-  color: var(--text-dim);
-  font-size: 0.72rem;
-}
-
-/* The selected version, drawn over the canvas column (left of the drawer). */
-.history-preview {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-}
-
-/* The preview canvas takes whatever the bar leaves (it is height:100% by
-   default, which would overflow a column that also holds the bar). */
-.history-preview > .canvas-host {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-}
-
-/* No version picked (or none yet): the view still fills the space. */
-.history-preview-empty {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  color: var(--text-dim);
-  font-size: 0.86rem;
-  text-align: center;
-}
-
-.history-preview-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.7rem;
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
-  border-bottom: 1px solid var(--panel-border);
-  font-size: 0.82rem;
-}
-
-.history-preview-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-preview-bar button {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.history-preview-bar button:first-of-type {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.history-preview-bar button:hover {
-  border-color: var(--accent);
-}
-
-.history-preview .canvas-host {
-  flex: 1;
-  height: auto;
-  min-height: 0;
-}
-
-.canvas-host {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.circuit-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none; /* pointer events own pan/zoom, not the browser */
-  cursor: grab;
-}
-
-.circuit-canvas:active {
-  cursor: grabbing;
-}
-
-/* Bottom zoom slider (P2): a quiet control floating at the canvas's bottom
- * edge. */
-.canvas-zoom {
-  position: absolute;
-  bottom: 0.45rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  border: 1px solid var(--panel-border);
-}
-
-.canvas-zoom input {
-  width: 8rem;
-}
-
-.canvas-overlay {
-  position: absolute;
-  /* Flush with the canvas edge so it lines up with the circuit tab above it
-   * (UI_OVERHAUL §19). */
-  top: 0;
-  left: 0;
-  padding: 3px 9px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  border: 1px solid var(--panel-border);
-  border-top: none;
-  border-left: none;
-  border-radius: 0 0 6px 0;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--text-dim);
-  pointer-events: none;
-  white-space: pre;
-}
-
-.app-statusbar {
-  padding: 0.3rem 1rem;
-  background: var(--panel);
-  border-top: 1px solid var(--panel-border);
-  font-size: 0.85rem;
-  color: var(--text-dim);
-}
-
-/* Sim transport (U5; restyled §34): one quiet row inside the header — a single
- * filled play button, flat text buttons, hairline dividers between the
- * clusters, and the telemetry trailing. */
+/* ---- sim transport (U5; restyled §34, §94) ---- */
 
 .simbar {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 8px;
   min-width: 0;
-  padding: 0;
-  background: transparent;
-  border-bottom: none;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 
 .sim-group {
   display: inline-flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: 2px;
 }
 
 /* A hairline between clusters, instead of a border around each one. */
@@ -2608,76 +1263,131 @@ body {
   content: "";
   width: 1px;
   height: 18px;
-  margin: 0 0.45rem;
-  background: var(--panel-border);
+  margin: 0 6px;
+  background: var(--border);
 }
 
-.simbar button {
+/* Play / tick / reset sit in one soft pill. */
+.sim-transport {
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.sim-btn {
   display: inline-flex;
   align-items: center;
-  height: 26px;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: var(--text);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0 0.5rem;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.simbar button:hover:not(:disabled) {
-  background: var(--grid);
+.sim-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
 }
 
-.simbar button:disabled {
+.sim-btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.sim-btn:hover:not(:disabled) svg {
+  color: var(--text);
+}
+
+.sim-btn:active:not(:disabled) {
+  background: var(--pressed);
+}
+
+.sim-btn:disabled {
   opacity: 0.45;
-  cursor: default;
 }
 
 /* Play/pause is the only filled control in the row. */
 .simbar .sim-play {
-  min-width: 2.2rem;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  font-size: 0.95rem;
-  line-height: 1;
+  width: 36px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
   background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
+  cursor: pointer;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.25),
+    inset 0 1px 0 rgb(255 255 255 / 0.14);
+}
+
+.simbar .sim-play svg {
+  width: 15px;
+  height: 15px;
 }
 
 .simbar .sim-play:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 85%, #fff);
+  background: var(--accent-hover);
 }
 
+.simbar .sim-play:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* While the clock runs the play button breathes a little. */
+.simbar.running .sim-play {
+  animation: play-glow 1.6s ease-in-out infinite;
+}
+
+/* Run-to is one joined pill: the typed cycle, then the verb. */
 .sim-runto input {
-  width: 4.5rem;
+  width: 76px;
   height: 26px;
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0 0.45rem;
-  font-size: 0.82rem;
+  padding: 0 10px;
+  border-radius: 999px 0 0 999px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
-/* The run-to cycle is TYPED: hide the native stepper arrows (the tester read
- * them as clutter sitting next to the "run to" button). */
-.sim-runto input[type="number"]::-webkit-outer-spin-button,
-.sim-runto input[type="number"]::-webkit-inner-spin-button {
-  appearance: none;
-  margin: 0;
+.sim-runto input:focus {
+  position: relative;
+  z-index: 1;
 }
-.sim-runto input[type="number"] {
-  appearance: textfield;
+
+.sim-runto .sim-btn {
+  height: 26px;
+  margin-left: -1px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 0 999px 999px 0;
+  background: var(--surface-2);
+}
+
+.sim-runto .sim-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
 }
 
 .sim-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text-dim);
-  font-size: 0.78rem;
 }
 
 /* Speed slider: fully custom so the notches line up with the thumb's travel.
- * The track spans the input; the fixed thumb centre runs from 6px to
+ * The track spans the input; the fixed 12px thumb's centre runs from 6px to
  * width−6px, and `.sim-notches` is inset by exactly that, so a notch at
  * fraction f sits where the thumb centre lands (UI_OVERHAUL §19). */
 .sim-speed-slider {
@@ -2689,8 +1399,9 @@ body {
 .sim-speed input[type="range"] {
   appearance: none;
   -webkit-appearance: none;
-  width: 6.5rem;
-  height: 14px;
+  width: 108px;
+  height: 16px;
+  margin: 0;
   background: transparent;
   cursor: pointer;
 }
@@ -2698,37 +1409,40 @@ body {
 .sim-speed input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   border-radius: 2px;
-  background: var(--panel-border);
+  background: var(--border-strong);
 }
 
 .sim-speed input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 11px;
-  height: 11px;
-  margin-top: -4px;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
   border-radius: 50%;
   background: var(--accent);
+  border: 2px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .sim-speed input[type="range"]::-moz-range-track {
   height: 3px;
   border-radius: 2px;
-  background: var(--panel-border);
+  background: var(--border-strong);
 }
 
 .sim-speed input[type="range"]::-moz-range-thumb {
-  width: 11px;
-  height: 11px;
-  border: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--surface-1);
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .sim-notches {
   position: absolute;
   left: 6px;
   right: 6px;
-  bottom: -2px;
+  bottom: -1px;
   height: 5px;
   pointer-events: none;
 }
@@ -2751,26 +1465,128 @@ body {
 }
 
 .sim-speed-value {
-  min-width: 3.6rem;
+  min-width: 52px;
   text-align: right;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
+  font-size: var(--fs-xs);
   color: var(--text);
 }
 
+/* Telemetry chip: the cycle, and a dot that lights while the clock runs. */
 .sim-status {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 7px;
+  height: 24px;
   min-width: 0;
+  padding: 0 10px 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-dim);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
+  font-size: var(--fs-xs);
+}
+
+.sim-status-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.55;
+}
+
+.sim-status.live {
+  color: var(--text);
+}
+
+.sim-status.live .sim-status-dot {
+  background: var(--ok);
+  opacity: 1;
+  animation: live-ring 1.2s ease-out infinite;
+}
+
+/* T_obs / critical-path chip (U7) */
+.sim-tobs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sim-tobs:hover,
+.sim-tobs.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+.sim-tobs.warn {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}
+
+/* The waveform viewer's door (§96): a labelled pill beside the run controls. */
+.sim-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sim-wave svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+}
+
+.sim-wave:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.sim-wave.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.inspector-buttons-full button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.sim-violations {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 /* Halt / load-error banner: drops out from under the header as an overlay, so
@@ -2783,12 +1599,79 @@ body {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.35rem 1rem;
-  background: color-mix(in srgb, var(--wire-x) 16%, var(--panel));
-  border-bottom: 1px solid var(--wire-x);
+  gap: 3px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-1));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  box-shadow: var(--shadow-md);
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  animation: drop-in 0.16s ease-out;
+}
+
+/* Load errors (§100): each problem, where it is, and a Fix that goes there. */
+.sim-load-errors ul {
+  margin: 4px 0 0;
+  padding-left: 22px;
+}
+
+.sim-load-errors li {
+  margin: 2px 0;
+}
+
+.sim-err-where {
+  color: var(--text-dim);
+}
+
+.sim-err-fix {
+  margin-left: 10px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sim-err-fix:hover {
+  background: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+
+/* Dismiss (§99): pinned to the banner's right edge, the text never runs under it. */
+.sim-banner {
+  padding-right: 48px;
+}
+
+.sim-banner-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sim-banner-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.sim-banner-close svg {
+  width: 15px;
+  height: 15px;
 }
 
 /* A short circuit is a circuit-level FAULT rather than a halt, so it rides in
@@ -2798,248 +1681,14 @@ body {
 }
 
 /* Paused at a breakpoint (UI_OVERHAUL §90): the run stopped, but nothing is
- * wrong — amber like the violation markers rather than the halt red, so a
- * deliberate stop does not read as a fault. */
+ * wrong — amber like the violation markers rather than the halt red. */
 .sim-banner.breakpoint {
-  background: color-mix(in srgb, var(--violation) 14%, var(--panel));
-  border-bottom-color: var(--violation);
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface-1));
+  border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent);
 }
 
-/* Watch panel (U5/U6) — lives inside the right dock's Watch tab. */
-.watch-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.watch-empty {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  line-height: 1.5;
-  padding: 1.4rem 0.25rem;
-  text-align: center;
-}
-
-.watch-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-}
-
-.watch-name {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.watch-value {
-  margin-left: auto;
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
-}
-
-.watch-unknown {
-  color: var(--text-dim);
-}
-
-.watch-mode {
-  background: var(--bg);
-  color: var(--text-dim);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  width: 1.5rem;
-  font-size: 0.75rem;
-  font-family: ui-monospace, monospace;
-  cursor: pointer;
-}
-
-.watch-mode:hover {
-  border-color: var(--accent);
-}
-
-/* Memory inspector (U6) */
-.memory-inspector {
-  margin-top: 0.5rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 8px;
-  padding: 0.5rem;
-  background: var(--bg);
-}
-
-.memory-inspector-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
-}
-
-.memory-inspector-head .mem-addr {
-  color: var(--text-dim);
-  font-size: 0.8rem;
-}
-
-.memory-inspector-head .mem-addr input {
-  width: 5rem;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  padding: 0.1rem 0.3rem;
-  font-size: 0.8rem;
-}
-
-.memory-inspector-head button {
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 4px;
-  padding: 0.1rem 0.45rem;
-  cursor: pointer;
-}
-
-.mem-running {
-  color: var(--wire-z);
-  font-size: 0.75rem;
-}
-
-.mem-close {
-  margin-left: auto;
-}
-
-.mem-error {
-  color: var(--wire-x);
-  font-size: 0.8rem;
-  margin-bottom: 0.3rem;
-}
-
-.mem-grid {
-  border-collapse: collapse;
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-}
-
-.mem-rowaddr {
-  color: var(--text-dim);
-  padding-right: 0.5rem;
-  text-align: right;
-}
-
-.mem-cell {
-  padding: 0.1rem 0.3rem;
-  border: 1px solid var(--panel-border);
-  min-width: 4.5rem;
-  text-align: right;
-}
-
-.mem-cell.editable:hover {
-  border-color: var(--accent);
-  cursor: text;
-}
-
-.mem-cell.mem-editing input {
-  width: 5rem;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--accent);
-  border-radius: 3px;
-  font-family: inherit;
-  font-size: inherit;
-  text-align: right;
-}
-
-.watch-mem {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
-  margin-left: auto;
-  cursor: pointer;
-  padding: 0;
-}
-
-/* Toasts (U6 reset confirmations) */
-.toast-stack {
-  position: fixed;
-  bottom: 2.2rem;
-  right: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  z-index: 30;
-}
-
-.toast {
-  appearance: none;
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 0.5rem 0.9rem;
-  font: inherit;
-  font-size: 0.85rem;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  transition:
-    transform 0.1s ease,
-    opacity 0.14s ease,
-    box-shadow 0.12s ease;
-}
-
-/* Clickable: highlight on hover, bulge on press, then it goes away. */
-.toast:hover {
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.45),
-    0 0 0 1px var(--accent);
-}
-.toast:active {
-  transform: scale(1.06);
-}
-.toast.closing {
-  transform: scale(1.1);
-  opacity: 0;
-}
-
-/* T_obs / critical-path button (U7) */
-.sim-tobs {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  height: 26px;
-  min-width: 0;
-  max-width: 15rem;
-  overflow: hidden;
-  padding: 0 0.5rem;
-  background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  font-family: ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.sim-tobs:hover,
-.sim-tobs.active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.sim-violations {
-  color: var(--wire-x);
-}
-
-/* Narrow windows: shed the telemetry first, then the run-to group, so the
- * transport never crowds the menu tabs (UI_OVERHAUL §28). */
+/* Narrow windows: shed the telemetry first, then the run-to group, then the
+ * button labels, so the transport never crowds the menu tabs (§28). */
 @media (max-width: 1150px) {
   .appheader-bottom .sim-status {
     display: none;
@@ -3052,27 +1701,2450 @@ body {
   }
 }
 
+@media (max-width: 900px) {
+  .appheader-bottom .sim-btn-label {
+    display: none;
+  }
+}
+
+/* =============================================================================
+ * 4. Palette: activity rail + body
+ * ========================================================================== */
+
+.app-main {
+  position: relative; /* anchors the version drawer + preview overlay (§34) */
+  flex: 1;
+  min-height: 0; /* allow the flex child to shrink to its container */
+  display: flex;
+}
+
+.palette {
+  width: 190px; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
+  flex: none;
+  display: flex;
+  min-height: 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+}
+
+/* Activity rail (UI_OVERHAUL §8): one icon per component group, with the
+ * group's name underneath (§13); hovering, focusing, or clicking a group
+ * switches the body beside it. */
+.palette-rail {
+  flex: none;
+  width: 74px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  border-right: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-1) 70%, var(--bg));
+}
+
+.palette-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.palette-rail-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: none;
+  width: 62px;
+  height: 52px;
+  padding: 4px 2px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.palette-rail-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  /* Tall enough that the descender of a "g"/"y" is not clipped by the
+   * horizontal-overflow ellipsis box (UI_OVERHAUL §36). */
+  line-height: 1.4;
+  padding-bottom: 1px;
+  text-align: center;
+}
+
+.palette-rail-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.palette-rail-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.palette-rail-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.palette-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 8px 8px 12px;
+}
+
+/* Find a part by name (§94). */
+.palette-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--field-bg);
+  color: var(--text-dim);
+}
+
+.palette-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.palette-search svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.palette-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.palette-group-title {
+  grid-column: 1 / -1;
+  margin: 4px 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.palette-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.palette-item:hover {
+  border-color: var(--accent-border);
+  background: var(--surface-3);
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.18),
+    var(--shadow-sm);
+}
+
+.palette-item:active {
+  cursor: grabbing;
+  transform: none;
+}
+
+.palette-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.palette-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comp-icon {
+  flex: none;
+}
+
+/* A tile with a note (a search hit's group, a subcircuit's placements) stacks
+ * the note under the label: the body is narrow, and a note beside the label
+ * would squeeze the name out. */
+.palette-item:has(.palette-item-note) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  row-gap: 0;
+  height: auto;
+  min-height: 34px;
+  padding: 5px 8px;
+}
+
+.palette-item:has(.palette-item-note) .comp-icon {
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+.palette-item-note {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+/* ---- Subcircuits in the palette, and the way into a definition (§80) ---- */
+.palette-hint {
+  grid-column: 1 / -1;
+  margin: 0 0 2px;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.palette-new {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  line-height: 1.3;
+  text-align: left;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.palette-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-softer);
+}
+
+/* ---- Circuits explorer (§99) ---- */
+.explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.explorer-hint {
+  margin: 0 2px 2px;
+}
+
+.explorer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.explorer-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.explorer-row:hover {
+  background: var(--hover);
+}
+
+.explorer-row.active {
+  background: var(--accent-soft);
+}
+
+.explorer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorer-row.open .explorer-main {
+  color: var(--text);
+}
+
+.explorer-row.active .explorer-main {
+  color: var(--accent);
+}
+
+.explorer-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.explorer-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.explorer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.explorer-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.explorer-open-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+/* Close / delete appear on hover (and stay reachable by keyboard). They float
+ * over the row's right end rather than taking width: the palette is narrow, and
+ * reserved space for invisible buttons squeezed the circuit's name to nothing. */
+.explorer-actions {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.explorer-row:hover .explorer-actions,
+.explorer-row:focus-within .explorer-actions {
+  opacity: 1;
+}
+
+.explorer-row:hover .explorer-open-dot {
+  display: none;
+}
+
+.explorer-act {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.explorer-act svg {
+  width: 14px;
+  height: 14px;
+}
+
+.explorer-act:hover {
+  background: var(--pressed);
+  color: var(--text);
+}
+
+.explorer-delete:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.explorer-new {
+  gap: 6px;
+}
+
+.explorer-new svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* =============================================================================
+ * 5. Editor column: sheet tabs, canvas, overlays
+ * ========================================================================== */
+
+/* Canvas column: circuit tabs sit above the canvas ONLY, so the side panels
+ * run the full height (UI_OVERHAUL §15). */
+.editor-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-wrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* ---- resizable side panels (UI_OVERHAUL §7) ----
+ * Overlays on the work area's edges: no layout footprint, so the canvas
+ * geometry (and the visual-regression baselines) do not depend on them. The
+ * panels draw their own hairline; the handle only lights up on hover/drag. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none; /* double-clicks must not start a text-selection drag */
+  background: transparent;
+}
+
+.resize-handle.left {
+  left: 0;
+}
+
+.resize-handle.right {
+  right: 0;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: transparent;
+  transition: background-color 0.12s ease;
+}
+
+.resize-handle.right::after {
+  left: auto;
+  right: 0;
+}
+
+.resize-handle:hover::after,
+.resize-handle.dragging::after {
+  background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---- circuit tabs (one per circuit in the file) ---- */
+
+.sheet-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 32px;
+  /* A small left inset, not flush (UI_OVERHAUL §84): a flush first tab lands its
+   * border exactly on the palette/editor boundary. */
+  padding: 0 6px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.sheet-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Sheet tabs sit FLUSH against the canvas strip, so their focus ring is drawn
+ * INSIDE the tab (like the resize handles). */
+.sheet-tab-wrap:focus-within,
+.sheet-tab:focus-visible,
+.sheet-tab-close:focus-visible,
+.sheet-tab-input:focus-visible {
+  outline-offset: -2px;
+}
+
+.sheet-tab-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 28px;
+  margin-bottom: -1px; /* the active tab covers the strip's border */
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--text-dim);
+}
+
+.sheet-tab-wrap:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* The active tab opens into the canvas: canvas colour, bordered, and an accent
+ * stripe along its top. */
+.sheet-tab-wrap.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+  z-index: 1;
+}
+
+.sheet-tab-wrap.active::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: -1px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+}
+
+.sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 11px;
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-radius: 8px 8px 0 0;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  flex: none;
+}
+
+.sheet-tab-wrap .sheet-tab,
+.sheet-tab-wrap .sheet-tab.active {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+/* The close mark only shows on the tab you are on, or hovering. */
+.sheet-tab-close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin: 0 5px 0 -4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sheet-tab-wrap:hover .sheet-tab-close,
+.sheet-tab-wrap.active .sheet-tab-close,
+.sheet-tab-close:focus-visible {
+  opacity: 1;
+}
+
+.sheet-tab-close:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.sheet-tab.sheet-new {
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  margin-left: 2px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.sheet-tab.sheet-new:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* A freshly created tab slides/grows in (UI_OVERHAUL §60). */
+.sheet-tab-wrap.enter {
+  animation: sheet-tab-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sheet-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scaleX(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Inline tab rename (UI_OVERHAUL §60): the label becomes a small input. */
+.sheet-tab-input {
+  width: 7rem;
+  min-width: 4rem;
+  max-width: 12rem;
+  height: 22px;
+  margin: 0 4px;
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+  border-radius: 6px;
+}
+
+/* A subcircuit sheet is a different scope (§77): its tab's stripe takes the
+ * scope's hue instead of the accent. */
+.sheet-tab-wrap[data-scope="subcircuit"].active::before {
+  background: hsl(var(--scope-hue) 65% 55%);
+}
+
+/* Middle-click / right-click menu on a sheet tab (UI_OVERHAUL §37). */
+.sheet-tab-menu,
+.canvas-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 9rem;
+}
+
+.sheet-tab-menu button,
+.canvas-menu button {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 6px;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-tab-menu button:hover:not(:disabled),
+.canvas-menu button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.sheet-tab-menu button:disabled,
+.canvas-menu button:disabled {
+  opacity: 0.4;
+}
+
+/* Canvas context menu (UI_OVERHAUL §75): a header naming what the commands
+ * will hit, and a shortcut column on the right. */
+.canvas-menu {
+  min-width: 12rem;
+}
+
+.canvas-menu button {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.canvas-menu-title {
+  padding: 4px 8px 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.canvas-menu-hint {
+  flex: none;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.canvas-menu button:hover:not(:disabled) .canvas-menu-hint {
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ---- the canvas itself ---- */
+
+.canvas-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.circuit-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none; /* pointer events own pan/zoom, not the browser */
+  cursor: grab;
+}
+
+.circuit-canvas:active {
+  cursor: grabbing;
+}
+
+/* Bottom zoom control (P2; §94): −, the log₂ slider, +, and the percentage,
+ * which is also the way back to 100%. */
+.canvas-zoom {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-md);
+}
+
+.zoom-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.zoom-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.zoom-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-zoom input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 104px;
+  height: 14px;
+  margin: 0 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.canvas-zoom input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.canvas-zoom input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.canvas-zoom input[type="range"]::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.canvas-zoom input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--surface-1);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.zoom-value {
+  min-width: 46px;
+  height: 22px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.zoom-value:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Frame-rate overlay (Settings → Canvas). Flush with the canvas edge so it
+ * lines up with the circuit tab above it (UI_OVERHAUL §19). */
+.canvas-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 3px 9px;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-left: none;
+  border-radius: 0 0 6px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  pointer-events: none;
+  white-space: pre;
+}
+
+/* An empty sheet says what goes here (§94). Pointer events pass straight
+ * through to the canvas, so the first click lands where it would have anyway. */
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.canvas-empty-card {
+  max-width: 380px;
+  text-align: center;
+  color: var(--text-dim);
+  animation: fade-up 0.3s ease-out;
+}
+
+.canvas-empty-glyph {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.canvas-empty-glyph svg {
+  width: 30px;
+  height: 30px;
+}
+
+.canvas-empty-title {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.canvas-empty-text {
+  margin: 0 0 14px;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+.canvas-empty-hints {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-xs);
+}
+
+.canvas-empty-hints kbd {
+  margin-right: 2px;
+}
+
+/* ---- Scope marks (UI_OVERHAUL §77) ----
+ * A subcircuit sheet is a different scope from the top level: the frame, the
+ * tab and the status chip all take that sheet's hue. The frame is an overlay,
+ * so the drawing (and every canvas baseline) is untouched. */
+.scope-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px hsl(var(--scope-hue) 65% 55% / 0.5);
+}
+
+.statusbar-scope {
+  color: hsl(var(--scope-hue) 65% 62%);
+  font-weight: 600;
+}
+
+/* Inside a specific INSTANCE (not the class). CE's own cue was red, so the
+ * frame and chips go red — and the frame is dashed as well, so "instance" can
+ * never be mistaken for just another scope hue. */
+.scope-frame--instance {
+  box-shadow: inset 0 0 0 2px hsl(0 78% 55% / 0.8);
+  border: 1px dashed hsl(0 78% 62% / 0.65);
+}
+
+.statusbar-scope--instance {
+  color: hsl(0 78% 62%);
+}
+
+/* The scope bar: inside a definition, the way back and where it is used. The
+ * hue is the sheet's own (§77), so the bar and the frame read as the same place. */
+.scope-bar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px 0 4px;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid hsl(var(--scope-hue) 65% 55% / 0.5);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  font-size: var(--fs-sm);
+}
+
+.scope-bar--instance {
+  border-color: hsl(0 78% 55% / 0.7);
+}
+
+.scope-back {
+  height: 22px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.scope-back:hover {
+  background: var(--hover);
+  color: hsl(var(--scope-hue) 65% 62%);
+}
+
+.scope-bar--instance .scope-name,
+.scope-bar--instance .scope-back:hover {
+  color: hsl(0 78% 62%);
+}
+
+.scope-name {
+  font-weight: 600;
+}
+
+.scope-note {
+  color: var(--text-dim);
+}
+
+/* =============================================================================
+ * 6. Right dock: the Inspector (UI overhaul §3)
+ * ========================================================================== */
+
+.right-dock {
+  width: 16rem; /* fallback; App sets the persisted width inline (UI_OVERHAUL §7) */
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 12px 14px;
+  overflow-y: auto;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+}
+
+.inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The selected part's own glyph, in an accent tile. */
+.inspector-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* The header's headline: the component's plain full name (UI_OVERHAUL §57). */
+.inspector-id {
+  min-width: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-type {
+  margin-left: auto;
+  flex: none;
+  max-width: 7rem;
+  padding: 1px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rows are a two-column grid (UI_OVERHAUL §17): the label column flexes and
+ * the control column is a fixed track, so every input/select/button group
+ * lines up down the panel instead of drifting with the label length. */
+.inspector-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, 9.5rem);
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: var(--fs-md);
+}
+
+.inspector-row > span {
+  color: var(--text-dim);
+}
+
+.inspector-row input:not([type="checkbox"]):not([type="range"]):not([type="color"]),
+.inspector-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: var(--ctl-h);
+  padding: 0 9px;
+  font-size: var(--fs-md);
+}
+
+.inspector-row input[type="checkbox"] {
+  justify-self: end;
+}
+
+.inspector-row input[type="color"] {
+  justify-self: end;
+  width: 100%;
+  height: var(--ctl-h);
+  padding: 2px;
+  background: var(--field-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+/* A drag bar + its numeric readout (UI_OVERHAUL §50). */
+.inspector-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The fill is an explicit gradient sized to --fill, so at the maximum the bar
+   reaches the very end (a native accent track stops at the thumb, §55). */
+.inspector-slider input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.inspector-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--fill, 0%),
+    var(--border-strong) var(--fill, 0%)
+  );
+}
+
+.inspector-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface-1);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.inspector-slider input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.inspector-slider input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.inspector-slider input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--surface-1);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.inspector-slider-value {
+  flex: none;
+  min-width: 1.8rem;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+/* A size field (§98): label + Auto on one line, the track and a number box below. */
+.inspector-size-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-auto {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.inspector-auto:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.inspector-auto.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  cursor: default;
+}
+
+.inspector-size {
+  gap: 10px;
+}
+
+.inspector-size .inspector-size-input {
+  flex: none;
+  width: 4.2rem;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--field-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  outline: none;
+}
+
+.inspector-size .inspector-size-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* Segmented base chooser for a constant (UI_OVERHAUL §55). */
+.radix-buttons {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--field-bg);
+}
+
+.radix-button {
+  flex: 1;
+  min-width: 2.6rem;
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.radix-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.radix-button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Notes read as callouts: amber for a nudge, red for a load blocker, accent
+ * for plain information. */
+.inspector-note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* A LOAD-BLOCKING note (an unnamed `wiring.pin` fails the whole load) reads
+ * stronger than the autograder-addressability nudge. */
+.inspector-note[data-note="unnamed-pin"] {
+  margin-top: 6px;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  font-weight: 600;
+}
+
+.inspector-note[data-note="clock-alias"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-softer);
+  font-weight: 400;
+}
+
+.inspector-link {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ---- inspector + bit-width picker (UI_OVERHAUL §18/§19) ---- */
+
+.inspector-hint {
+  margin: -3px 0 0.45rem;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 12px 0;
+  font-size: var(--fs-md);
+}
+
+.inspector-field-label {
+  color: var(--text-dim);
+}
+
+/* Splitter editor (UI_OVERHAUL §41): one row per split pin. */
+.split-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.split-row input {
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.split-remove {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: var(--fs-md);
+}
+
+.bitsize-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.bitsize-cell {
+  height: 24px;
+  padding: 0;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--field-bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bitsize-cell:hover {
+  border-color: var(--accent-border);
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.bitsize-cell.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.inspector-textarea {
+  padding: 6px 9px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  resize: vertical;
+}
+
+/* ---- app dropdown (UI_OVERHAUL §28) ---- */
+
+.select {
+  min-width: 0;
+}
+
+.select-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: var(--ctl-h);
+  padding: 0 8px 0 9px;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-caret {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+/* Fixed-position overlay (§29): portaled to the app root so it floats over the
+ * panel instead of reflowing it, and is never clipped by a scrolling parent. */
+.select-pop {
+  position: fixed;
+  z-index: 200;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.select-item {
+  width: 100%;
+  height: 28px;
+  padding: 0 9px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 6px;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-item:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.select-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.select-item.active:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ---- inspector: memory image + wire styling (UI_OVERHAUL §11/§12) ---- */
+
+.inspector-sep {
+  height: 1px;
+  margin: 12px 0 8px;
+  background: var(--border);
+}
+
+/* Read-only values (a delay, a file path) wrap rather than truncate: the
+ * tooltip is a fallback, not the only way to read them. */
+.inspector-file {
+  min-width: 0;
+  max-width: 9.5rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.inspector-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* Full-width action row (memory image): buttons share the whole column so the
+ * panel reads as tidy stacked rows instead of a lopsided label/control grid. */
+.inspector-buttons-full {
+  margin: 8px 0 0;
+}
+
+.inspector-buttons-full button {
+  flex: 1;
+  text-align: center;
+}
+
+/* Small dim heading that separates the memory-image controls from the fields. */
+.inspector-subhead {
+  margin: 4px 0 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.inspector-buttons button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-sm);
+}
+
+.wire-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-width: 9.5rem;
+}
+
+.wire-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.wire-swatch:hover {
+  transform: translateY(-1px);
+}
+
+.wire-swatch.active {
+  box-shadow:
+    0 0 0 2px var(--surface-1),
+    0 0 0 4px var(--accent);
+}
+
+.wire-swatch.default {
+  background: linear-gradient(135deg, var(--wire-low), var(--wire-high) 55%, var(--wire-z));
+}
+
+/* The empty dock teaches the gestures that fill it (§94). */
+.inspector-empty {
+  padding: 30px 8px 16px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.inspector-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 12px;
+  border-radius: 13px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.inspector-empty-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.inspector-empty-title {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.inspector-empty-text {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.inspector-tips {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+
+.inspector-tips kbd {
+  margin-right: 4px;
+}
+
+/* =============================================================================
+ * 7. Status bar, toasts
+ * ========================================================================== */
+
+.app-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 25px;
+  padding: 0 12px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  user-select: none;
+}
+
+.app-statusbar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.app-statusbar > span + span:not(.statusbar-hint)::before {
+  content: "";
+  width: 1px;
+  height: 12px;
+  margin-right: 8px;
+  background: var(--border);
+}
+
+.statusbar-coords {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar-hint {
+  margin-left: auto;
+}
+
+.app-statusbar kbd {
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+/* Toasts (U6 reset confirmations) */
+.toast-stack {
+  position: fixed;
+  bottom: 36px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  appearance: none;
+  max-width: 380px;
+  padding: 9px 14px 9px 12px;
+  background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    transform 0.1s ease,
+    opacity 0.14s ease,
+    box-shadow 0.12s ease;
+}
+
+/* Clickable: highlight on hover, bulge on press, then it goes away. */
+.toast:hover {
+  border-color: var(--accent-border);
+}
+
+.toast:active {
+  transform: scale(1.04);
+}
+
+.toast.closing {
+  transform: scale(1.06);
+  opacity: 0;
+}
+
+/* =============================================================================
+ * 8. Dialogs: help, settings, memory, recovery, close prompt, about
+ * ========================================================================== */
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--backdrop);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fade-in 0.14s ease-out;
+}
+
+.help-card,
+.settings-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  animation: dialog-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.help-card {
+  max-width: 480px;
+  padding: 20px 24px;
+}
+
+.help-card h2 {
+  margin: 0 0 10px;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.help-card p {
+  margin: 8px 0;
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+.help-card table {
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+
+.help-card td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+}
+
+.help-card td:first-child {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.help-dismiss {
+  margin: 14px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+}
+
+/* `?` shortcuts panel (UI_OVERHAUL §45): a two-column, scrollable card that
+ * always fits the viewport instead of growing off-screen. */
+.help-shortcuts {
+  display: flex;
+  flex-direction: column;
+  width: min(94vw, 820px);
+  max-width: none;
+  max-height: min(88vh, 780px);
+  padding: 16px 20px 12px;
+}
+
+.help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.help-head h2 {
+  margin: 0;
+}
+
+.help-close,
+.settings-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-close:hover,
+.settings-close:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.help-sections {
+  margin-top: 8px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  align-content: start;
+  gap: 2px 28px;
+  padding-right: 4px;
+}
+
+.help-section h3 {
+  margin: 12px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.help-row {
+  display: grid;
+  grid-template-columns: minmax(0, 11.5rem) minmax(0, 1fr);
+  gap: 10px;
+  padding: 3px 0;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+
+/* Keys wrap rather than truncate: a shortcut you cannot read is no help. */
+.help-key {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.help-desc {
+  min-width: 0;
+  color: var(--text);
+}
+
+/* ---- settings (UI_OVERHAUL §25/§26) ---- */
+
+.settings-card {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: min(85vh, 40rem);
+  padding: 18px 22px 20px;
+  overflow-y: auto;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.settings-head h2 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Sectioned settings panel: nav column + section pane. The height is FIXED so
+ * switching sections never resizes the dialog. */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(56rem, calc(100vw - 2rem));
+  height: min(88vh, 44rem);
+  overflow: hidden;
+  padding: 18px 22px 16px;
+}
+
+/* Fade only: a slide leaves the box at a sub-pixel offset mid-animation, and
+ * the panel's "never resizes" contract is measured straight after opening. */
+.settings-card.settings-panel {
+  animation-name: fade-in;
+}
+
+.settings-panel .settings-head {
+  padding: 0 0 12px;
+  margin: 0;
+}
+
+.settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-nav {
+  flex: none;
+  width: 11rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 14px 2px 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.settings-nav-btn {
+  height: 30px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 8px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.settings-nav-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.settings-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  /* Reserved scrollbar gutter: the pane's content width (and so the dialog's
+   * look) stays identical whichever section is open (§26). */
+  scrollbar-gutter: stable;
+  padding: 2px 4px 6px 20px;
+}
+
+.settings-panel .settings-foot {
+  padding: 12px 0 0;
+  margin-top: 10px;
+}
+
+/* Rows read like the Inspector: label+hint left, the control on the right. */
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(7rem, 9rem);
+  align-items: center;
+  gap: 14px;
+  padding: 9px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: var(--fs-md);
+}
+
+.settings-row-label,
+.settings-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-row-label > .settings-hint,
+.settings-toggle-label > .settings-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.settings-row select {
+  width: 100%;
+  height: var(--ctl-h);
+  padding: 0 8px;
+  font-size: var(--fs-md);
+}
+
+.settings-section h3 {
+  margin: 6px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.settings-section + .settings-section {
+  margin-top: 18px;
+}
+
+.settings-hint {
+  margin: 0 0 10px;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.theme-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 8px 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.12s ease,
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.theme-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* A miniature of the workspace in that theme. */
+.theme-preview {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 46px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 8px;
+}
+
+.theme-preview-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 10px;
+}
+
+.theme-preview-side {
+  position: absolute;
+  top: 10px;
+  bottom: 0;
+  left: 0;
+  width: 22%;
+  opacity: 0.85;
+}
+
+.theme-preview-dot {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.theme-preview-wire {
+  position: absolute;
+  top: 60%;
+  left: 36%;
+  right: 14%;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.theme-name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.theme-blurb {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.theme-check {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Accent color swatches (Settings → Appearance). */
+.accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.accent-swatch {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.accent-swatch:hover {
+  transform: translateY(-1px);
+}
+
+.accent-swatch.active {
+  box-shadow:
+    0 0 0 2px var(--surface-1),
+    0 0 0 4px var(--accent);
+}
+
+/* Toggle rows (Settings → Canvas / Startup). */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+/* A toggle that lands directly under the accent swatches needs its own
+ * breathing room: the swatch row is the end of its block. */
+.accent-row + .settings-toggle {
+  margin-top: 16px;
+}
+
+.settings-toggle:hover {
+  border-color: var(--border-strong);
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-foot .settings-hint {
+  margin: 0;
+}
+
+/* The Settings footer button is small and quiet. */
+.settings-action,
+.settings-foot button {
+  font-size: var(--fs-sm);
+}
+
+/* Confirmation (§99): narrow, and a destructive confirm reads as one. */
+.confirm-card {
+  width: min(26rem, calc(100vw - 2rem));
+}
+
+.confirm-body {
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
+.confirm-foot {
+  justify-content: flex-end;
+}
+
+.settings-foot button.danger,
+.settings-foot button.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+
+.settings-foot button.danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.sheet-tab-menu button.menu-danger:hover,
+.canvas-menu button.menu-danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Crash-recovery dialog (autosave, phase 1). */
+.recovery-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recovery-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.recovery-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recovery-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recovery-meta .settings-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+}
+
+.recovery-actions {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+}
+
+/* ---- memory contents dialog (UI_OVERHAUL §11) ---- */
+
+/* Wider than the generic help card (`.help-card` caps at 480px): the memory
+ * grid wants a full 16-column row visible. */
+.help-card.mem-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(74rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: 84vh;
+}
+
+.help-card.mem-dialog h2 {
+  margin-bottom: 4px;
+}
+
+.help-card.mem-dialog .settings-hint {
+  margin: 0;
+}
+
+.prop-type {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.mem-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+}
+
+.mem-paste textarea {
+  min-height: 4.5rem;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  resize: vertical;
+}
+
+.mem-table-wrap {
+  /* One scrolling page for the whole memory (UI_OVERHAUL §58): flex to fill the
+     dialog, then scroll inside it. */
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--field-bg);
+}
+
+/* The table fills the dialog; the INPUT fills its cell (UI_OVERHAUL §16). */
+.mem-table {
+  width: 100%;
+}
+
+/* Editable hex cell (UI_OVERHAUL §14): click to select, paste to fill from
+ * here. The input's width comes from the word's hex width (inline style). */
+.mem-table .mem-cell {
+  min-width: 0;
+  padding: 2px 6px;
+  text-align: right;
+}
+
+.mem-cell-input {
+  width: 100%;
+  padding: 1px 0;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
+}
+
+.mem-cell:focus-within {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.mem-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.mem-dialog-spacer {
+  flex: 1;
+}
+
+.mem-error {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
 /* Update nudge + About (U8) */
 .update-nudge p {
-  margin: 0.4rem 0;
+  margin: 8px 0;
 }
 
-.update-link {
-  background: var(--accent);
-  color: #fff;
-  border-radius: 6px;
-  padding: 0.35rem 0.9rem;
-  text-decoration: none;
-  font-size: 0.9rem;
+.prop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
 }
 
-.update-link:hover {
-  filter: brightness(1.15);
-}
+/* =============================================================================
+ * 9. Version history (UI_OVERHAUL §34, §76) and the waveform viewer (§89)
+ * ========================================================================== */
 
-/* ---- Version history as a view (UI_OVERHAUL §76) ---- */
-/* Open, it owns the viewport: the editor row is not displayed, so there is
-   nothing behind the preview and nothing to overlay. */
+/* Open, the history view owns the viewport: the editor row is not displayed,
+ * so there is nothing behind the preview and nothing to overlay. */
 .app-main.history > .palette,
 .app-main.history > .editor-col,
 .app-main.history > .right-dock,
@@ -3087,30 +4159,182 @@ body {
   align-items: stretch;
 }
 
+.history-drawer {
+  position: relative;
+  z-index: 1;
+  width: 22rem;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border);
+  user-select: none;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.history-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+}
+
+.history-empty {
+  padding: 12px 10px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* A row is a plain container: the click target is an overlay button, so the
+ * version's name (and its edit field) can sit above it (§38). */
+.history-row {
+  position: relative;
+  border-radius: 8px;
+}
+
+.history-row:hover {
+  background: var(--hover);
+}
+
+.history-row.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.history-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.history-body {
+  position: relative; /* above .history-select */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  pointer-events: none; /* clicks fall through unless a child opts in */
+}
+
+.history-when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.history-label {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: auto; /* the one clickable child */
+  cursor: text;
+}
+
+.history-label:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.history-rename {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+}
+
+.history-meta {
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
+
+/* "This version vs the open document" (§38). */
+.history-diff {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
 .history-diff-head {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 8px;
+}
+
+.history-diff h3 {
+  margin: 0 0 4px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .history-copy {
   margin-left: auto;
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  padding: 0.1rem 0.45rem;
-  font-size: 0.72rem;
-  cursor: pointer;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+  box-shadow: none;
 }
 
-.history-copy:hover {
-  border-color: var(--accent);
+.history-diff-summary {
+  margin: 0 0 6px;
+  font-size: var(--fs-sm);
+}
+
+.history-diff-list {
+  max-height: 11rem;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.history-diff-list li {
+  overflow: hidden;
+  padding: 1px 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Kinds (§76), in the palette's own wire colours so they read in every theme. */
 .history-diff-list li.diff-added {
-  color: var(--wire-high);
+  color: var(--ok);
 }
 
 .history-diff-list li.diff-changed {
@@ -3118,117 +4342,69 @@ body {
 }
 
 .history-diff-list li.diff-removed {
-  color: var(--wire-x);
+  color: var(--danger);
 }
 
-/* ---- Scope marks (UI_OVERHAUL §77) ---- */
-/* A subcircuit sheet is a different scope from the top level: the frame, the tab
-   and the status chip all take that sheet's hue. The frame is an overlay, so the
-   drawing (and every canvas baseline) is untouched. */
-.scope-frame {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 2px hsl(var(--scope-hue) 65% 55% / 0.5);
-}
-
-.statusbar-scope {
-  color: hsl(var(--scope-hue) 65% 62%);
-  font-weight: 600;
-}
-
-/* Inside a specific INSTANCE (not the class). CE's own cue was red, so the
-   frame and chips go red — and the frame is dashed as well, so "instance" can
-   never be mistaken for just another scope hue. */
-.scope-frame--instance {
-  box-shadow: inset 0 0 0 2px hsl(0 78% 55% / 0.8);
-  border: 1px dashed hsl(0 78% 62% / 0.65);
-}
-.statusbar-scope--instance {
-  color: hsl(0 78% 62%);
-}
-.scope-bar--instance {
-  border-color: hsl(0 78% 55% / 0.7);
-}
-.scope-bar--instance .scope-name,
-.scope-bar--instance .scope-back:hover {
-  color: hsl(0 78% 62%);
-}
-
-.sheet-tab-wrap[data-scope="subcircuit"] .sheet-tab.active {
-  border-bottom: 2px solid hsl(var(--scope-hue) 65% 55%);
-}
-
-/* ---- Subcircuits in the palette, and the way into a definition (§80) ---- */
-.palette-hint {
-  margin: 0 0 0.3rem;
+.history-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: 0.74rem;
-  line-height: 1.35;
+  font-size: var(--fs-xs);
 }
 
-.palette-item-note {
-  margin-left: auto;
+/* The selected version, drawn over the canvas column (left of the drawer). */
+.history-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* The preview canvas takes whatever the bar leaves. */
+.history-preview > .canvas-host,
+.history-preview .canvas-host {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* No version picked (or none yet): the view still fills the space. */
+.history-preview-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 16px;
   color: var(--text-dim);
-  font-size: 0.66rem;
-  white-space: nowrap;
+  font-size: var(--fs-md);
+  text-align: center;
 }
 
-.palette-new {
-  background: transparent;
-  color: var(--text);
-  border: 1px dashed var(--panel-border);
-  border-radius: 8px;
-  padding: 5px 8px;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.palette-new:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* The scope bar: inside a definition, the way back and where it is used. The hue
-   is the sheet's own (§77), so the bar and the frame read as the same place. */
-.scope-bar {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 3;
+.history-preview-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 8px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  border: 1px solid hsl(var(--scope-hue) 65% 55% / 0.5);
-  border-radius: 999px;
-  font-size: 0.76rem;
+  padding: 7px 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-1));
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-md);
 }
 
-.scope-back {
-  background: transparent;
-  color: var(--text);
-  border: none;
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 0.76rem;
-  cursor: pointer;
+.history-preview-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.scope-back:hover {
-  color: hsl(var(--scope-hue) 65% 62%);
+.history-preview-bar button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-sm);
 }
 
-.scope-name {
-  font-weight: 600;
-}
-
-.scope-note {
-  color: var(--text-dim);
-}
-
-/* ---- Waveform viewer (UI_OVERHAUL §89) ---------------------------------- */
+/* ---- Waveform viewer (UI_OVERHAUL §89) ---- */
 
 .app-main.wave > .palette,
 .app-main.wave > .editor-col,
@@ -3247,16 +4423,49 @@ body {
 .wave-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--panel-border);
-  background: var(--panel);
+  gap: 8px;
   flex: none;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.wave-bar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}
+
+.wave-bar .wave-icon-btn {
+  width: 28px;
+  padding: 0;
+}
+
+.wave-bar .wave-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wave-canvas.dragging {
+  cursor: grabbing;
+}
+
+.wave-bar strong {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.wave-bar button {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-sm);
 }
 
 .wave-bar-text {
   color: var(--text-dim);
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .wave-bar-spacer {
@@ -3264,10 +4473,9 @@ body {
 }
 
 /* Where the run stopped (UI_OVERHAUL §90): the banner says why, the trace says
- * where — this says both, in the trace's own bar. Amber for a breakpoint (a
- * stop, not a fault), halt red for a real halt. */
+ * where — this says both, in the trace's own bar. */
 .wave-bar-halted {
-  color: var(--wire-x);
+  color: var(--danger);
   font-weight: 600;
 }
 
@@ -3288,12 +4496,33 @@ body {
   inset: 0;
   margin: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   padding: 0 2rem;
+  z-index: 1;
   color: var(--text-dim);
+  line-height: 1.55;
   text-align: center;
   pointer-events: none;
+}
+
+.wave-empty p {
+  margin: 0;
+  max-width: 34rem;
+}
+
+.wave-empty .wave-empty-title {
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+.wave-empty strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* The waveform's horizontal scrollbar (UI_OVERHAUL §89): the recorded domain,
@@ -3301,19 +4530,18 @@ body {
 .wave-scrollbar {
   position: relative;
   flex: none;
-  height: 12px;
-  margin: 0 0 0 0;
-  background: var(--panel);
-  border-top: 1px solid var(--panel-border);
+  height: 16px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
   cursor: pointer;
 }
 
 .wave-scrollbar-thumb {
   position: absolute;
-  top: 1px;
-  height: 9px;
-  min-width: 12px;
-  border-radius: 4px;
+  top: 3px;
+  height: 10px;
+  min-width: 18px;
+  border-radius: 5px;
   background: var(--text-dim);
   opacity: 0.55;
   cursor: grab;
@@ -3323,4 +4551,209 @@ body {
 .wave-scrollbar-thumb:active {
   opacity: 0.9;
   cursor: grabbing;
+}
+
+/* =============================================================================
+ * 10. Watch panel + memory inspector (U5/U6; kept for the dock's Watch tab)
+ * ========================================================================== */
+
+.dock-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 5px 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dock-tab {
+  flex: 1;
+  height: 28px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 7px 7px 0 0;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.dock-tab:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.dock-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dock-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.watch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.watch-empty {
+  padding: 24px 4px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.watch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.watch-name {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-value {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.watch-unknown {
+  color: var(--text-dim);
+}
+
+.watch-mode {
+  width: 1.6rem;
+  height: 20px;
+  background: var(--field-bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.watch-mode:hover {
+  border-color: var(--accent);
+}
+
+.memory-inspector {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--field-bg);
+}
+
+.memory-inspector-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.memory-inspector-head .mem-addr {
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+
+.memory-inspector-head .mem-addr input {
+  width: 5rem;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+}
+
+.memory-inspector-head button {
+  height: 24px;
+  padding: 0 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.mem-running {
+  color: var(--wire-z);
+  font-size: var(--fs-xs);
+}
+
+.mem-close {
+  margin-left: auto;
+}
+
+.mem-grid {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.mem-rowaddr {
+  padding: 0 10px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.mem-cell {
+  min-width: 4.5rem;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  text-align: right;
+}
+
+.mem-cell.editable:hover {
+  border-color: var(--accent);
+  cursor: text;
+}
+
+.mem-cell.mem-editing input {
+  width: 5rem;
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
+}
+
+.watch-mem {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+/* =============================================================================
+ * 11. Motion preferences
+ * ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

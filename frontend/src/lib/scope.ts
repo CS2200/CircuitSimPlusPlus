@@ -12,5 +12,14 @@ export function scopeHue(name: string): number {
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   // Spread the residues around the wheel: names that differ by one character
   // (the "sub2", "sub3" the "+" tab makes) must not land on neighbouring hues.
-  return Math.round((h * 137.508) % 360);
+  const spread = (h * 137.508) % 360;
+  // …but never on RED (UI_OVERHAUL §98): red is the one colour that means "you
+  // are inside a specific INSTANCE" (§77), and `sub2` (336°) and `sub5` (29°)
+  // used to land there — a freshly made subcircuit looked like an instance view.
+  // The wheel is squeezed into the band that excludes it.
+  return Math.round(SAFE_FROM + (spread * (SAFE_TO - SAFE_FROM)) / 360);
 }
+
+/** The hue band a scope may use: orange round to purple, skipping red/magenta. */
+export const SAFE_FROM = 42;
+export const SAFE_TO = 292;

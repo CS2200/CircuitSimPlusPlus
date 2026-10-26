@@ -1023,3 +1023,20 @@ describe("naming a wire (UI_OVERHAUL §86)", () => {
     expect(doc.circuit(0).wires[w].name).toBe("T");
   });
 });
+
+describe("new pins arrive named (UI_OVERHAUL §99)", () => {
+  it("names inputs in0, in1… and outputs out0… — the first free one", () => {
+    const d = CircuitDocument.create("t");
+    const a = d.addComponent(0, { type: "wiring.pin", pos: [0, 0] });
+    const b = d.addComponent(0, { type: "wiring.pin", pos: [0, 4] });
+    const o = d.addComponent(0, { type: "wiring.pin", pos: [9, 0], attrs: { isOutput: true } });
+    const names = (id: string) => d.circuit(0).components.find((c) => c.id === id)?.name;
+    expect([names(a), names(b), names(o)]).toEqual(["in0", "in1", "out0"]);
+    // A gap is reused, and a name the caller gives wins.
+    d.updateComponent(0, a, { name: "A" });
+    expect(names(d.addComponent(0, { type: "wiring.pin", pos: [0, 8] }))).toBe("in0");
+    expect(names(d.addComponent(0, { type: "wiring.pin", pos: [0, 12], name: "CLK" }))).toBe("CLK");
+    // Other parts are untouched.
+    expect(names(d.addComponent(0, { type: "gate.and", pos: [4, 4] }))).toBeUndefined();
+  });
+});

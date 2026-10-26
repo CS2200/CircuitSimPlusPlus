@@ -15,7 +15,7 @@ import type { CanvasMenuState } from "../editor/tools";
 
 /** The commands the menu can dispatch (the editor's public command set). */
 export type CanvasMenuAction =
-  "cut" | "copy" | "paste" | "delete" | "rotate-cw" | "rotate-ccw" | "select-all";
+  "cut" | "copy" | "paste" | "delete" | "rotate-cw" | "rotate-ccw" | "select-all" | "waveform";
 
 const MENU_NAME = { component: "Component", wire: "Wire", canvas: "Canvas" } as const;
 
@@ -40,9 +40,11 @@ export default function CanvasMenu({
       { id: "copy", label: "Copy", hint: "Ctrl+C" },
       { id: "rotate-cw", label: "Rotate right", hint: "R" },
       { id: "rotate-ccw", label: "Rotate left", hint: "Shift+R" },
+      { id: "waveform", label: "Show in waveform" },
       { id: "delete", label: "Delete", hint: "Del" },
     );
   } else if (menu.on === "wire") {
+    items.push({ id: "waveform", label: "Show in waveform" });
     items.push({
       id: "delete",
       label: menu.segment ? "Delete segment" : menu.wires > 1 ? "Delete wires" : "Delete wire",

@@ -225,6 +225,11 @@ export function readoutWidth(bits: number, radix: unknown): number {
   return Math.max(3, Math.round(w * 20) / 20); // to a tidy 0.05
 }
 
+/** A pin's body width: its value's readout, whole units, never under 3 (§99). */
+function pinBodyWidth(attrs: Readonly<Record<string, unknown>>): number {
+  return Math.max(3, Math.ceil(readoutWidth(bitsOf(attrs), attrs["radix"])));
+}
+
 /** Attach the optional palette label / body-mark scale to a spec. */
 function withExtras(
   spec: CompSpec,
@@ -485,12 +490,31 @@ export function subcircuitSize(
   attrs: Readonly<Record<string, unknown>>,
   circuits: readonly CsxCircuit[],
 ): { w: number; h: number } {
+  const lim = subcircuitSizeLimits(attrs, circuits);
+  return {
+    w: boxSize(attrs["width"], lim.minW, lim.autoW),
+    h: boxSize(attrs["height"], lim.minH, lim.autoH),
+  };
+}
+
+/**
+ * What an instance's box may be (UI_OVERHAUL §98): the smallest legal width and
+ * height (pins one grid unit apart), the size it derives when nothing is set, and
+ * the engine's ceiling. The Inspector's size sliders are built from it.
+ */
+export function subcircuitSizeLimits(
+  attrs: Readonly<Record<string, unknown>>,
+  circuits: readonly CsxCircuit[],
+): { minW: number; minH: number; autoW: number; autoH: number; max: number } {
   const target = subcircuitTarget(attrs, circuits);
   const iface = target === undefined ? null : circuitInterface(target);
   const pins = iface === null ? 0 : Math.max(iface.inputs.length, iface.outputs.length);
   return {
-    w: boxSize(attrs["width"], SUB_W, SUB_W),
-    h: boxSize(attrs["height"], Math.max(SUB_MIN_H, pins + 1), Math.max(SUB_MIN_H, 2 * pins)),
+    minW: SUB_W,
+    minH: Math.max(SUB_MIN_H, pins + 1),
+    autoW: SUB_W,
+    autoH: Math.max(SUB_MIN_H, 2 * pins),
+    max: SUB_MAX,
   };
 }
 
@@ -578,14 +602,18 @@ const REGISTRY: Record<string, CompSpec> = {
   // → kind "out"; an output pin is driven → kind "in". Canonical geometry
   // faces EAST (terminal at dx=w); placement defaults put input pins at
   // rot E (body faces left) and output pins at rot W (body faces right).
+  // A pin is a labelled port (UI_OVERHAUL §99): 2 tall, with IN / OUT across the
+  // top and the value it carries beneath, as wide as that value needs — rounded
+  // to whole units so the terminal stays on the grid. It used to be a 2×1 chip
+  // with room for nothing but "PIN".
   "wiring.pin": {
-    width: () => 2,
-    height: () => 1,
+    width: (attrs) => pinBodyWidth(attrs ?? {}),
+    height: () => 2,
     pins: (attrs) => [
       {
         name: "pin",
-        dx: 2,
-        dy: 0.5,
+        dx: pinBodyWidth(attrs ?? {}),
+        dy: 1,
         kind: attrs?.isOutput === true ? "in" : "out",
         bitsize: bitsOf(attrs ?? {}),
       },
@@ -1046,6 +1074,16 @@ export type AttrField =
       dflt: number;
       group?: string;
       hint?: string;
+      /**
+       * The track's upper end when it is shorter than `max` (UI_OVERHAUL §98): a
+       * 8..400 range on a 150 px track is ~2.6 units a pixel, so the track covers
+       * the useful sizes and the typed box reaches the rest.
+       */
+      trackMax?: number;
+      /** A number box beside the track for exact values (any value in min..max). */
+      typed?: boolean;
+      /** The attr may be absent ("derive it"): an Auto button clears it. */
+      auto?: boolean;
     }
   | {
       key: string;
@@ -1394,19 +1432,36 @@ function baseFields(type: string): AttrField[] {
       // so it carries the width fields only (UI_OVERHAUL §93).
       return [...MEMORY_WIDTH_FIELDS];
     case "subcircuit":
-      // Its box (UI_OVERHAUL §79): the same one-click width pickers everything
-      // else uses. Leaving them alone means "derive from the pins", which is what
-      // every pre-§79 file does; choosing one makes the size explicit.
+      // Its box (UI_OVERHAUL §79, §98): a slider each, plus a number box for an
+      // exact size. The one-click pickers everything else uses were a grid of
+      // ~400 cells here. Absent means "derive from the pins" (every pre-§79
+      // file), and Auto puts it back. The minimum and default depend on the
+      // target's interface; the Inspector fills them in (`subcircuitSizeLimits`).
       return [
         { key: "circuit", label: "Circuit", kind: "select", group: "Options", options: [] },
-        { key: "width", label: "Width", kind: "picker", min: SUB_W, max: SUB_MAX, group: "Width" },
+        {
+          key: "width",
+          label: "Width",
+          kind: "slider",
+          min: SUB_W,
+          max: SUB_MAX,
+          dflt: SUB_W,
+          trackMax: 48,
+          typed: true,
+          auto: true,
+          group: "Size",
+        },
         {
           key: "height",
           label: "Height",
-          kind: "picker",
+          kind: "slider",
           min: SUB_MIN_H,
           max: SUB_MAX,
-          group: "Width",
+          dflt: SUB_MIN_H,
+          trackMax: 64,
+          typed: true,
+          auto: true,
+          group: "Size",
         },
       ];
     case "io.hexdisplay":
