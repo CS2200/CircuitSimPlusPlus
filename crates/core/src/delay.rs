@@ -2070,7 +2070,28 @@ impl DelayEngine {
                 .in_pins
                 .iter()
                 .map(|(_, net)| {
-                    ec::resolve_except(&self.netlist, &self.net_drivers, &self.drives, *net, comp)
+                    if self.compat {
+                        // A splitter's view of its own pins is the *others'* merge, and a
+                        // flattened boundary can hide some of those others (docs/bugs.md,
+                        // Round 16: the splitter inside `373713172`'s `Selector` must not
+                        // see — or drive — the outer instruction bus).
+                        ec::resolve_except_visible(
+                            &self.netlist,
+                            &self.net_drivers,
+                            &self.drives,
+                            *net,
+                            comp,
+                            &self.netlist.comps[c].inst_path,
+                        )
+                    } else {
+                        ec::resolve_except(
+                            &self.netlist,
+                            &self.net_drivers,
+                            &self.drives,
+                            *net,
+                            comp,
+                        )
+                    }
                 })
                 .collect();
             // `CSIM_DEBUG_SPLITTER_SHAPE=1`: print every splitter's authored flags once.
@@ -2589,16 +2610,27 @@ impl DelayEngine {
                             // an oscillation rather than becoming a self-ignore.
                             // Production keeps the all-drivers merge until this is measured
                             // on the corpus; `compat` is where CE's reading belongs.
-                            let value = if self.compat
-                                && self.net_drivers[nidx]
-                                    .iter()
-                                    .any(|&(d, sl)| d == sp.comp && sl as u32 == sp.slot)
-                            {
-                                let others: Vec<Value> = self.net_drivers[nidx]
-                                    .iter()
-                                    .filter(|&&(d, sl)| !(d == sp.comp && sl as u32 == sp.slot))
-                                    .map(|&(d, sl)| self.drives[d as usize][sl].clone())
-                                    .collect();
+                            let value = if self.compat {
+                                let reader_path = &self.netlist.comps[sp.comp as usize].inst_path;
+                                let mut others: Vec<Value> = Vec::new();
+                                for &(d, sl) in &self.net_drivers[nidx] {
+                                    if d == sp.comp && sl as u32 == sp.slot {
+                                        continue; // CE excludes the receiving *port*
+                                    }
+                                    // …and a flattened subcircuit boundary hides the far
+                                    // side (`Netlist::driver_visible`, docs/bugs.md Round
+                                    // 16): the inner splitter's drive must not reach a
+                                    // reader outside the instance, nor an outer drive a
+                                    // reader inside it.
+                                    if !self.netlist.driver_visible(
+                                        NetId(net),
+                                        &self.netlist.comps[d as usize].inst_path,
+                                        reader_path,
+                                    ) {
+                                        continue;
+                                    }
+                                    others.push(self.drives[d as usize][sl].clone());
+                                }
                                 let (merged, shorted) = Value::contention_merge_detail(
                                     self.netlist.nets[nidx].width,
                                     &others,

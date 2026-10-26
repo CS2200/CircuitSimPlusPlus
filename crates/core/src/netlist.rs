@@ -208,9 +208,32 @@ pub struct Netlist {
     /// lets the engine answer the same question per cycle (`PROBE_NETS`,
     /// `csim nets --label`).
     pub labelled: Vec<(String, NetId)>,
+    /// Subcircuit interface pins that landed on a net, as *(net, instance path,
+    /// crossing)* — the flattened **boundary**. See
+    /// [`Netlist::driver_visible`] for why this is not merely bookkeeping.
+    pub boundaries: Vec<(NetId, String, Boundary)>,
+    /// Net-indexed `true` where [`Netlist::boundaries`] has an entry, so
+    /// [`Netlist::driver_visible`] — which sits on the resolution hot path — costs one
+    /// load for the nets that have no boundary, which is almost all of them.
+    pub has_boundary: Vec<bool>,
+    /// [`Netlist::boundaries`] grouped by net and instance as
+    /// *(instance path, has an input pin, has an output pin)* — the shape
+    /// [`Netlist::driver_visible`] needs, precomputed because it is read per delivery.
+    pub boundary_groups: Vec<Vec<(String, bool, bool)>>,
     /// Index of the root circuit in the document's `circuits` array (see
     /// [`root_circuit`]).
     pub root: usize,
+}
+
+/// Which way a subcircuit interface pin crosses: an **input** pin carries
+/// outside → inside, an **output** pin inside → outside (the format has no
+/// inout; `wiring.pin`'s `isOutput` attr, absent = input).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Boundary {
+    /// Outside → inside.
+    Input,
+    /// Inside → outside.
+    Output,
 }
 
 impl Netlist {
@@ -245,6 +268,51 @@ impl Netlist {
             .filter(|(_, n)| *n == net)
             .map(|(name, _)| name.as_str())
             .collect()
+    }
+
+    /// Whether `driver_path`'s drive reaches a reader on `reader_path` for `net`.
+    ///
+    /// The old tool keeps a subcircuit's inner nets in a **separate `CircuitState`** and
+    /// joins them to the outside by value copies across the interface pins — and
+    /// **`Subcircuit` is explicit about the two directions** (`simulator/components/Subcircuit.java`):
+    ///
+    /// ```java
+    /// // init: an OUTPUT pin (not input) pushes the inner value to the outer port
+    /// if (!pin.isInput()) { pin.addChangeListener(subcircuitState, (p, st, v) -> circuitState.pushValue(port, v)); }
+    /// // valueChanged: an INPUT pin pushes the outer value into the inner net
+    /// if (pin.isInput()) subcircuitState.pushValue(pin.getPort(0), value);
+    /// ```
+    ///
+    /// So an input pin injects the **outside value in** and an output pin the **inside
+    /// value out**, and a net carrying *both* is bridged **both ways**. A crossing is
+    /// one-way only when the net has a pin on one side and not the other — which is the
+    /// whole rule, and applying the two directions independently is what flipped 27
+    /// designs to fail on the first attempt (docs/bugs.md, Round 17).
+    ///
+    /// Flattening unions the two sides into one net, so this is where the direction has
+    /// to be restored. A net with no boundary on it, which is almost all of them, is
+    /// never filtered.
+    pub fn driver_visible(&self, net: NetId, driver_path: &str, reader_path: &str) -> bool {
+        let Some(groups) = self.boundary_groups.get(net.idx()) else {
+            return true;
+        };
+        for (inst, has_in, has_out) in groups {
+            let d_in = inside_instance(driver_path, inst);
+            let r_in = inside_instance(reader_path, inst);
+            if d_in == r_in {
+                continue; // both sides the same — the boundary is not between them
+            }
+            let across_outward = d_in; // driver inside, reader outside
+            if across_outward && *has_in && !*has_out {
+                // An input pin with no output pin on this net: outside -> inside only.
+                return false;
+            }
+            if !across_outward && *has_out && !*has_in {
+                // An output pin with no input pin: inside -> outside only.
+                return false;
+            }
+        }
+        true
     }
 
     /// Engine (post-flatten) id of a named component — the internal
@@ -312,6 +380,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         insts,
         inst_wire_nodes,
         inst_wire_names,
+        boundary_nodes,
         wire_len_nodes,
         wire_recs,
         ..
@@ -477,6 +546,30 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
     // entry per (instance, circuit, net); `wires` are circuit-relative.
     let mut net_map: Vec<NetMapEntry> = Vec::new();
     let mut labelled: Vec<(String, NetId)> = Vec::new();
+    let mut boundaries: Vec<(NetId, String, Boundary)> = Vec::new();
+    for (node, inst_path, cross) in &boundary_nodes {
+        let class = uf.find(*node);
+        if let Some(&net) = net_of_root.get(&class) {
+            boundaries.push((net, inst_path.clone(), *cross));
+        }
+    }
+    let mut has_boundary = vec![false; nets.len()];
+    let mut boundary_groups: Vec<Vec<(String, bool, bool)>> = vec![Vec::new(); nets.len()];
+    for (net, inst, cross) in &boundaries {
+        has_boundary[net.idx()] = true;
+        let groups = &mut boundary_groups[net.idx()];
+        match groups.iter_mut().find(|(i, _, _)| i == inst) {
+            Some(g) => match cross {
+                Boundary::Input => g.1 = true,
+                Boundary::Output => g.2 = true,
+            },
+            None => groups.push((
+                inst.clone(),
+                *cross == Boundary::Input,
+                *cross == Boundary::Output,
+            )),
+        }
+    }
     for (exp_idx, (instance, circuit, nodes)) in inst_wire_nodes.iter().enumerate() {
         let names = &inst_wire_names[exp_idx];
         let mut by_net: BTreeMap<NetId, Vec<WireIdx>> = BTreeMap::new();
@@ -517,6 +610,9 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         named_flat,
         net_map,
         labelled,
+        boundaries,
+        has_boundary,
+        boundary_groups,
         root,
     })
 }
@@ -585,6 +681,14 @@ pub fn autoload_memories(doc: &Document) -> Vec<(String, String)> {
     out
 }
 
+/// Is `path` the instance `inst` itself or something inside it?
+fn inside_instance(path: &str, inst: &str) -> bool {
+    path == inst
+        || (path.len() > inst.len()
+            && path.as_bytes()[inst.len()] == b'/'
+            && path.starts_with(inst))
+}
+
 /// A primitive instance under construction (pins already have UF nodes).
 struct InstBuild {
     type_: String,
@@ -613,6 +717,9 @@ struct Expander<'a> {
     /// Per expansion, parallel to [`Expander::inst_wire_nodes`]: each wire's
     /// `name` (`None` when unlabelled), so [`Netlist::labelled`] can be built.
     inst_wire_names: Vec<Vec<Option<String>>>,
+    /// Subcircuit interface pins as *(unified node, instance path, crossing)*,
+    /// resolved to nets after union-find completes (`Netlist::boundaries`).
+    boundary_nodes: Vec<(u32, String, Boundary)>,
     /// (UF node, drawn length) per processed wire, for per-net transport
     /// delays (§4.3) — attributed to nets after union-find completes.
     wire_len_nodes: Vec<(u32, u32)>,
@@ -670,6 +777,7 @@ impl<'a> Expander<'a> {
             errors: Vec::new(),
             inst_wire_nodes: Vec::new(),
             inst_wire_names: Vec::new(),
+            boundary_nodes: Vec::new(),
             wire_len_nodes: Vec::new(),
             wire_recs: Vec::new(),
         }
@@ -706,19 +814,39 @@ impl<'a> Expander<'a> {
                     continue;
                 };
                 // Bridge node per interface pin (document order of the
-                // target's pin components).
+                // target's pin components), with each pin's **crossing**.
                 let target = &self.doc.circuits[tidx];
-                let pin_names: Vec<&str> = target
+                let pins: Vec<(&str, Boundary)> = target
                     .components
                     .iter()
                     .filter(|c| c.type_ == "wiring.pin" && !c.name.is_empty())
-                    .map(|c| c.name.as_str())
+                    .map(|c| {
+                        let out = c
+                            .attrs
+                            .get("isOutput")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        (
+                            c.name.as_str(),
+                            if out {
+                                Boundary::Output
+                            } else {
+                                Boundary::Input
+                            },
+                        )
+                    })
                     .collect();
+                let inst_path = if path.is_empty() {
+                    comp.id.clone()
+                } else {
+                    format!("{}/{comp_id}", path.join("/"), comp_id = comp.id)
+                };
                 let mut bridge: BTreeMap<String, u32> = BTreeMap::new();
-                for pn in &pin_names {
+                for (pn, cross) in &pins {
                     let node = self.uf.node();
                     local.insert((idx, pn.to_string()), node);
                     bridge.insert(pn.to_string(), node);
+                    self.boundary_nodes.push((node, inst_path.clone(), *cross));
                 }
                 path.push(comp.id.clone());
                 let child = self.expand(tidx, path, false);
@@ -1101,6 +1229,84 @@ fn resolve_join(
 
 #[cfg(test)]
 mod tests {
+    /// A subcircuit interface pin crosses **one way** (`Boundary`): an inner part
+    /// cannot drive the outer net it is bridged to, and an outer part cannot drive the
+    /// inner one. Flattening unions the two sides, so the direction has to be carried
+    /// explicitly or the inner part silently becomes a second driver of the outer net —
+    /// which is what put `X` on a real design's instruction bus (docs/bugs.md Round 16).
+    #[test]
+    fn a_subcircuit_boundary_crosses_one_way() {
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [
+              { "name": "main", "components": [
+                {"id":"r","type":"mem.register","pos":[0,0],"name":"R"},
+                {"id":"sub","type":"subcircuit","pos":[0,0],"attrs":{"circuit":"inner"}}
+            ], "wires": [
+                {"a":{"comp":"r","pin":"q"},"b":{"comp":"sub","pin":"In"}}
+            ]},
+              { "name": "inner", "components": [
+                {"id":"i","type":"wiring.pin","pos":[0,0],"name":"In","attrs":{"bitsize":1}},
+                {"id":"g","type":"gate.not","pos":[0,0]}
+            ], "wires": [
+                {"a":{"comp":"i","pin":"pin"},"b":{"comp":"g","pin":"in"}}
+            ]}
+            ]
+        }"##;
+        let nl = build_json(json).unwrap();
+        assert_eq!(nl.boundaries.len(), 1, "one interface pin crossed");
+        let (net, inst, cross) = &nl.boundaries[0];
+        assert_eq!(
+            *cross,
+            Boundary::Input,
+            "no isOutput attr means an input pin"
+        );
+        assert_eq!(inst, "sub");
+        // The inner gate is hidden from a reader outside the instance …
+        assert!(!nl.driver_visible(*net, "sub", ""));
+        // … and visible from a reader inside it, which also sees the outer register.
+        assert!(nl.driver_visible(*net, "sub", "sub"));
+        assert!(nl.driver_visible(*net, "", "sub"));
+        // Nothing else is hidden, and a net with no boundary is never filtered.
+        assert!(nl.driver_visible(*net, "", ""));
+
+        // A net carrying **both** an input and an output pin of one instance is bridged
+        // both ways (`Subcircuit.init` pushes the inner value out, `valueChanged` pushes
+        // the outer value in), so nothing is hidden across it. Treating the two
+        // directions independently is what flipped 27 designs to fail (Round 17).
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [
+              { "name": "main", "components": [
+                {"id":"r","type":"mem.register","pos":[0,0],"name":"R"},
+                {"id":"sub","type":"subcircuit","pos":[0,0],"attrs":{"circuit":"inner"}}
+            ], "wires": [
+                {"a":{"comp":"r","pin":"q"},"b":{"comp":"sub","pin":"In"}},
+                {"a":{"comp":"sub","pin":"Out"},"b":{"comp":"sub","pin":"In"}}
+            ]},
+              { "name": "inner", "components": [
+                {"id":"i","type":"wiring.pin","pos":[0,0],"name":"In","attrs":{"bitsize":1}},
+                {"id":"o","type":"wiring.pin","pos":[0,0],"name":"Out",
+                 "attrs":{"bitsize":1,"isOutput":true}},
+                {"id":"g","type":"gate.not","pos":[0,0]}
+            ], "wires": [
+                {"a":{"comp":"i","pin":"pin"},"b":{"comp":"g","pin":"in"}},
+                {"a":{"comp":"o","pin":"pin"},"b":{"comp":"g","pin":"in"}}
+            ]}
+            ]
+        }"##;
+        let nl = build_json(json).unwrap();
+        let (net, _, _) = nl.boundaries[0];
+        for (d, r) in [("", ""), ("", "sub"), ("sub", ""), ("sub", "sub")] {
+            assert!(
+                nl.driver_visible(net, d, r),
+                "a net bridged both ways hides nothing: driver {d:?} reader {r:?}"
+            );
+        }
+    }
+
     /// A labelled wire (`Wire::name`, the old tool's tunnel) must be resolvable by
     /// name to the net it landed on — that is the *only* handle on a bus, and the
     /// old tool's tracer reads one by label. A name is a label, not a merging rule

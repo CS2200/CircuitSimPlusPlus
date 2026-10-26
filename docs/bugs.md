@@ -1626,3 +1626,63 @@ delay has to be zero (or the boundary's own) or every timing shifts.
 
 The evidence is now unambiguous and the lever is identified; the change itself is the next
 piece of work, not a guess.
+
+### Round 17: the boundary, made directional — `373713172` fixed, no regressions
+
+Round 16 identified the lever: the old tool keeps a subcircuit's inner nets in a **separate
+`CircuitState`** and joins them to the outside by value copies across the interface pins,
+while the expander **unions** the two sides (`uf.union(b, child_node)`), so an inner part
+becomes a second driver of an outer net. The old tool's own
+`simulator/components/Subcircuit.java` states the two directions exactly:
+
+```java
+// init: an OUTPUT pin (not input) pushes the inner value to the outer port
+if (!pin.isInput()) { pin.addChangeListener(subcircuitState, (p, st, v) -> circuitState.pushValue(port, v)); }
+
+// valueChanged: an INPUT pin pushes the outer value into the inner net
+if (pin.isInput()) subcircuitState.pushValue(pin.getPort(0), value);
+```
+
+So an input pin injects the **outside value in**, an output pin the **inside value out**.
+
+**The first attempt, and why it was wrong.** `Netlist::boundaries` now records every
+interface pin as *(net, instance path, crossing)* and `driver_visible` hides the far side's
+drivers from a reader. Applying the two directions *independently* — an inner driver hidden
+from outside readers at an input, and an outer driver hidden from inside readers at an
+output, as two separate rules — took compat from 208 agree to **182**, 27 designs flipped to
+fail. The old tool's `Subcircuit` is the reason: a net carrying **both** an input and an
+output pin of one instance is bridged **both ways**, so *nothing* is hidden across it, and
+the two rules each hid half of a mutual bridge. Register files, RAMs and ALU modules — any
+module wired with an in and an out pin on one net — are exactly that shape.
+
+**The rule, once**, per *(net, instance)*, grouped:
+
+```
+has_in  has_out   across (driver inside ↔ reader outside)   across (driver outside ↔ reader inside)
+  1       0       hidden                                   visible
+  0       1       visible                                  hidden
+  1       1       visible                                  visible
+```
+
+Which is just: *a crossing is one-way only when the net has a pin on one side and not the
+other.* A net with no boundary on it — almost all of them — is never filtered, and the
+resolution path keeps its borrow (`resolve_except_visible` short-circuits to
+`resolve_except`).
+
+**Where it applies.** Both compat resolution sites: a splitter's view of its own pins, and
+the per-sink delivery (`resolve_except_visible`). Production is gated off — the netlist change
+is recording only — and prod measured byte-identical.
+
+**Measured.** `report-compat-boundary2.json`, against `report-compat-skip.json`:
+
+| | before | after |
+|---|---|---|
+| agree | 208 | **209** |
+| disagreements | 4 | **3** |
+| false passes | 0 | 0 |
+| flips | — | **1: `373713172` (pass → pass)** |
+
+`373713172`'s instruction bus now matches the old tool cycle for cycle in compat
+(`3DD00000 93000010 33300000 …` where it was `X` from cycle 1), it runs instead of stopping,
+and `event_storm_halts_with_oscillation` and the rest of the suite are untouched. The
+remaining three are `374299303`, `374625393` and `410460509`.

@@ -313,6 +313,51 @@ pub(crate) fn resolve(
     }
 }
 
+/// As [`resolve_except`], but also hiding drivers the reader cannot see across a
+/// flattened subcircuit **boundary** ([`Netlist::driver_visible`]).
+///
+/// The old tool keeps an inner net and the outer net it is bridged to in *different*
+/// `CircuitState`s and copies values across the boundary pin one way, so an inner part
+/// cannot drive an outer net. Flattening unions them; this restores the direction at
+/// the point of *reading*, which is where it belongs — the net's drivers are correct as
+/// a set, only the visibility across the boundary is directional.
+///
+/// Nets with no boundary short-circuit to [`resolve_except`], so the common path is
+/// unchanged and keeps its borrow.
+pub(crate) fn resolve_except_visible<'a>(
+    netlist: &Netlist,
+    net_drivers: &[Vec<(u32, usize)>],
+    drives: &'a [Vec<Value>],
+    net: crate::api::NetId,
+    except: u32,
+    reader_path: &str,
+) -> Cow<'a, Value> {
+    if !netlist
+        .has_boundary
+        .get(net.idx())
+        .copied()
+        .unwrap_or(false)
+    {
+        return resolve_except(netlist, net_drivers, drives, net, except);
+    }
+    let n = &netlist.nets[net.idx()];
+    let mut acc: Vec<Value> = Vec::new();
+    for &(c, slot) in &net_drivers[net.idx()] {
+        if c == except {
+            continue;
+        }
+        if !netlist.driver_visible(net, &netlist.comps[c as usize].inst_path, reader_path) {
+            continue;
+        }
+        acc.push(drives[c as usize][slot].clone());
+    }
+    match acc.len() {
+        0 => Cow::Owned(Value::z(n.width)),
+        1 => Cow::Owned(acc.pop().expect("len 1")),
+        _ => Cow::Owned(Value::contention_merge(n.width, &acc)),
+    }
+}
+
 /// As [`resolve`], but skipping one component's contribution (splitters
 /// read *other* drivers' contributions on their pins' nets).
 pub(crate) fn resolve_except<'a>(
