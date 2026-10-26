@@ -1405,3 +1405,57 @@ now the *measured* conclusion rather than a reasoned one.
 Lesson, reused: instrument, count, *then* change. Three hypotheses died from reading a
 function and reasoning about the common case; this one line of counting settled in a minute
 what three rounds of reasoning got backwards.
+
+### Round 13: CE **defers** a short — and deferring it unfreezes two of the four
+
+Round 12's count pointed at propagation order, so I read the order instead of guessing at it.
+CircuitSim's `Simulator.step` is explicit:
+
+```java
+for (Pair<CircuitState, Link> pair : temp) {
+    try { state.propagateSignal(link); }
+    catch (ShortCircuitException exc) { lastShortCircuitedLinks.add(pair); }
+}
+...
+// Only throw the ShortCircuitException if there's no more links to update, which means that
+// links have reached a steady state
+if (!lastShortCircuitedLinks.isEmpty() && linksToUpdate.isEmpty()) { ... throw ... }
+```
+
+**A disagreement does not update the link at all.** CE records it and only *raises* it once the
+update set is empty — so at every intermediate moment the link keeps its previous value and its
+consumers keep seeing that; the next push re-merges. A **transient** disagreement is invisible.
+
+Our engine did the opposite: `resolve` turned a disagreement into `X` on the spot, every
+consumer propagated that, and nothing could undo it — CE has no `X` to undo it with. That is
+the whole `x-cascade` family in one sentence.
+
+Implemented under `compat` only (`resolve_detail` reports the short; the commit skips the net,
+leaving it at its previous value):
+
+| submission | prod | compat before | compat after |
+|---|---:|---:|---:|
+| `373713172` | 103 | 103, frozen | **10000 — runs** |
+| `410460509` | 160 | 160, frozen | **40625 — runs** |
+| `374299303` | 48331 | 48331 | 48331 |
+| `374625393` | 102 | 102 | 102 |
+
+and `CSIM_DEBUG_SHORTS` now reports **no short at all** on `373713172`. Production is unchanged
+by construction (the branch requires `self.compat`), and verified unchanged on the four.
+
+The two unfrozen rows do not yet *halt*, and the change is **net-negative**, so it was
+reverted rather than kept:
+
+| | agree | disagreements | flips |
+|---|---:|---:|---:|
+| compat before | 208 | 4 | — |
+| compat with the deferral | **205** | **7** | **3** (pass → fail: `374337181`, `374593140`, `374625075`) |
+| production with it | 198 | 14 | **0** (the branch requires `self.compat`, as designed) |
+
+It moved the two rows and broke three, which is the shape of a blunt approximation rather than
+the rule. `Simulator.step` records the *pushers'* values and re-merges on the next push, so the
+link converges; leaving the net at its previous value until a driver commits again is the same
+thing **only if a driver does commit again** — where none does, the net stays stale forever,
+which is a new failure mode rather than CE's. So the finding stands (`X` on a transient
+disagreement is wrong) but this implementation of it is not the fix; a faithful one has to
+re-attempt the merge at quiescence, not merely skip it.
