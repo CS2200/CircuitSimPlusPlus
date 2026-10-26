@@ -747,6 +747,15 @@ pub struct NetDump {
     pub view: Option<String>,
 }
 
+fn debug_boot() -> Option<u32> {
+    static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("CSIM_DEBUG_BOOT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+    })
+}
+
 fn debug_splitter() -> Option<u32> {
     static ON: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
     *ON.get_or_init(|| {
@@ -1084,6 +1093,30 @@ impl DelayEngine {
             .for_each(|t| *t = ClockTrack::default());
         if eng.halted.is_none() {
             eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
+        }
+        // `CSIM_DEBUG_BOOT=<net idx>`: what every driver of that net had committed when the
+        // boot settle finished. Env-gated; inert otherwise. (This is how the register's
+        // power-on value was settled — CE's `Register.init` pushes `WireValue.of(0, ...)`,
+        // so the engine's `0` is right and an experiment that drove `Z` instead regressed
+        // 106 submissions. docs/bugs.md.)
+        if let Some(net) = debug_boot() {
+            let ds = &eng.net_drivers[net as usize];
+            eprintln!(
+                "BOOT net {net} = {} | drivers [{}]",
+                eng.net_values[net as usize],
+                ds.iter()
+                    .map(|&(c, slot)| {
+                        let k = &eng.netlist.comps[c as usize];
+                        format!(
+                            "#{c}:{}({})= {}",
+                            k.name.clone().unwrap_or_else(|| k.type_.clone()),
+                            k.type_,
+                            eng.drives[c as usize][slot]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
         }
         Ok(eng)
     }

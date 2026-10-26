@@ -1301,3 +1301,40 @@ boot settle reaches the first. It really is the **settle order / initial state**
 same conclusion Rounds 7 and 3 reached from three different directions. The remaining work is
 to make `compat` settle a loop the way CE does — from `Z`, asserting only what arrives — which
 is a within-tick fixpoint pass in CE's component order, not a per-pin rule.
+
+### Round 10: the register fix was wrong — the corpus caught it — and `Register.init` is the proof
+
+I claimed `Register` does not override CE's no-op `Component.init`, and drove a register's
+power-on output `Z` under `compat` on that basis. **Wrong, and the corpus said so loudly:
+106 verdict flips, 104 disagreements → 110.** Reverted (`3d1b1d4`), and the four went
+straight back to `103 / 48331 / 102 / 160`.
+
+The source, read properly this time, says the opposite — `Register` *does* override `init`,
+one line above `valueChanged`, which is why I missed it:
+
+```java
+public void init(CircuitState circuitState, Object lastProperty) {
+    WireValue value = lastProperty == null ? WireValue.of(0, bitSize)
+                                           : new WireValue((WireValue)lastProperty, bitSize);
+    circuitState.pushValue(getPort(PORT_OUT), value);   // CE drives 0 at power-on
+}
+```
+
+So **CE's registers drive `0` at power-on, exactly as our engine already did**, and the boot
+dump confirmed both states (`Instr = 0x0`). A register that drove `Z` would leave the whole
+combinational cloud reading `Z` at the first edge, where `compat`'s per-pin rules only turn
+`Z` into a definite value on *some* pins (arithmetic drives all-`Z`) — which is exactly the
+104-submission regression.
+
+Two lessons worth keeping. **The corpus is the oracle for anything that touches both modes**,
+and it caught this inside one measurement round; and **"read the override" is a real hazard
+in this codebase** — `Component.init` is a no-op and every stateful peer overrides it, so the
+base class is never the answer.
+
+`CSIM_DEBUG_BOOT` (re-added, inert) prints what every driver of a net had committed at the end
+of the boot settle — it is how the two states above were compared, and it stays available for
+the next question, which is unchanged: `Instr` drives `0` on the instruction bus at boot (CE
+too), so a splitter *does* gather the opcode field and re-assert it on the bus, and the
+`0`-versus-`0x9` disagreement arises in the window where `Instr` has moved and the splitter has
+not. `resolve` judges drivers regardless of `driver_in_flight`; that is still where the next
+look is.
