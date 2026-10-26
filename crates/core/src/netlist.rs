@@ -197,12 +197,56 @@ pub struct Netlist {
     pub named_flat: Vec<CompId>,
     /// Root-circuit wire segments per net, for UI net highlighting.
     pub net_map: Vec<NetMapEntry>,
+    /// Labelled wires (`Wire::name`, the new tool's **tunnel**), instance-qualified
+    /// like [`Netlist::named`] — `"Opcode"` at the root, `"c61/Opcode"` inside an
+    /// instance — paired with the net they landed on.
+    ///
+    /// A name is a *label*, not a merging rule (docs/format-v2.md §9), so the same
+    /// name can appear on several nets (one per subcircuit instance) and one net can
+    /// carry several names; this keeps every pairing rather than collapsing them.
+    /// The old tool's tracer reads these as **tunnels** by label, so this is what
+    /// lets the engine answer the same question per cycle (`PROBE_NETS`,
+    /// `csim nets --label`).
+    pub labelled: Vec<(String, NetId)>,
     /// Index of the root circuit in the document's `circuits` array (see
     /// [`root_circuit`]).
     pub root: usize,
 }
 
 impl Netlist {
+    /// Nets carrying a labelled wire called `label` — an exact match, or a
+    /// `/`-suffix within an instance (`"Opcode"` finds `"c61/Opcode"`), the same
+    /// rule the named-component lookup uses. A name is a label, not a merging
+    /// rule, so there can be more than one (one per subcircuit instance); the
+    /// caller decides how strict to be.
+    pub fn net_ids_of_label(&self, label: &str) -> Vec<NetId> {
+        let suffix = format!("/{label}");
+        let mut out: Vec<NetId> = Vec::new();
+        for (n, net) in &self.labelled {
+            if (n == label || n.ends_with(&suffix)) && !out.contains(net) {
+                out.push(*net);
+            }
+        }
+        out
+    }
+
+    /// The first label on `net`, if any (instance-qualified). One net can carry
+    /// several names — two wires joined by geometry, or a name reused for the same
+    /// bus inside a subcircuit — so this is a representative, not the only one; use
+    /// [`Netlist::labels_of_net`] when all of them matter.
+    pub fn label_of_net(&self, net: NetId) -> Option<&str> {
+        self.labels_of_net(net).into_iter().next()
+    }
+
+    /// Every label on `net`, in wire order (instance-qualified).
+    pub fn labels_of_net(&self, net: NetId) -> Vec<&str> {
+        self.labelled
+            .iter()
+            .filter(|(_, n)| *n == net)
+            .map(|(name, _)| name.as_str())
+            .collect()
+    }
+
     /// Engine (post-flatten) id of a named component — the internal
     /// companion of the contract-facing [`Netlist::named`] registry.
     pub fn named_engine_id(&self, name: &str) -> Option<CompId> {
@@ -267,6 +311,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         mut uf,
         insts,
         inst_wire_nodes,
+        inst_wire_names,
         wire_len_nodes,
         wire_recs,
         ..
@@ -431,7 +476,9 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
     // for a subcircuit sheet opened as a specific instance, its values). One
     // entry per (instance, circuit, net); `wires` are circuit-relative.
     let mut net_map: Vec<NetMapEntry> = Vec::new();
-    for (instance, circuit, nodes) in &inst_wire_nodes {
+    let mut labelled: Vec<(String, NetId)> = Vec::new();
+    for (exp_idx, (instance, circuit, nodes)) in inst_wire_nodes.iter().enumerate() {
+        let names = &inst_wire_names[exp_idx];
         let mut by_net: BTreeMap<NetId, Vec<WireIdx>> = BTreeMap::new();
         for (widx, node) in nodes.iter().enumerate() {
             if let Some(node) = node {
@@ -442,6 +489,18 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
             }
         }
         for (net, wires) in by_net {
+            // Every label on the net, instance-qualified the same way the named
+            // registry is, so a tunnel resolves identically to a register.
+            for w in &wires {
+                if let Some(Some(name)) = names.get(w.idx()) {
+                    let qualified = if instance.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{instance}/{name}")
+                    };
+                    labelled.push((qualified, net));
+                }
+            }
             net_map.push(NetMapEntry {
                 net,
                 instance: instance.clone(),
@@ -457,6 +516,7 @@ pub fn build_with_cap(doc: &Document, cap: usize) -> Result<Netlist, Vec<LoadErr
         named,
         named_flat,
         net_map,
+        labelled,
         root,
     })
 }
@@ -550,6 +610,9 @@ struct Expander<'a> {
     /// One record per circuit expansion (root included), so every wire in every
     /// instance can be mapped to its net for the UI (`NetMapEntry`, v1.4).
     inst_wire_nodes: Vec<(String, String, Vec<Option<u32>>)>,
+    /// Per expansion, parallel to [`Expander::inst_wire_nodes`]: each wire's
+    /// `name` (`None` when unlabelled), so [`Netlist::labelled`] can be built.
+    inst_wire_names: Vec<Vec<Option<String>>>,
     /// (UF node, drawn length) per processed wire, for per-net transport
     /// delays (§4.3) — attributed to nets after union-find completes.
     wire_len_nodes: Vec<(u32, u32)>,
@@ -606,6 +669,7 @@ impl<'a> Expander<'a> {
             cap_hit: false,
             errors: Vec::new(),
             inst_wire_nodes: Vec::new(),
+            inst_wire_names: Vec::new(),
             wire_len_nodes: Vec::new(),
             wire_recs: Vec::new(),
         }
@@ -724,6 +788,7 @@ impl<'a> Expander<'a> {
         // recorded for `net_map` so the UI can resolve values even when the
         // sheet is a subcircuit opened as a specific instance (contract v1.4).
         let mut local_wire_nodes: Vec<Option<u32>> = Vec::with_capacity(circuit.wires.len());
+        let mut local_wire_names: Vec<Option<String>> = Vec::with_capacity(circuit.wires.len());
         for wire in &circuit.wires {
             let rec_base = self.wire_recs.len();
             let na = endpoint_node(circuit, &comp_idx_by_id, &local, &wire.a);
@@ -745,9 +810,14 @@ impl<'a> Expander<'a> {
                 }
             }
             local_wire_nodes.push(na.or(nb));
+            local_wire_names.push(match &wire.name {
+                Some(n) if !n.is_empty() => Some(n.clone()),
+                _ => None,
+            });
         }
         self.inst_wire_nodes
             .push((path.join("/"), circuit.name.clone(), local_wire_nodes));
+        self.inst_wire_names.push(local_wire_names);
 
         pin_terminals
     }
@@ -1031,6 +1101,52 @@ fn resolve_join(
 
 #[cfg(test)]
 mod tests {
+    /// A labelled wire (`Wire::name`, the old tool's tunnel) must be resolvable by
+    /// name to the net it landed on — that is the *only* handle on a bus, and the
+    /// old tool's tracer reads one by label. A name is a label, not a merging rule
+    /// (docs/format-v2.md §9), so one net can carry two names and two nets can share
+    /// one: the lookup must dedupe the first and keep both of the second.
+    #[test]
+    fn labelled_wires_resolve_to_their_net() {
+        let json = r##"{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t",
+            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "circuits": [{ "name": "main", "components": [
+                {"id":"r1","type":"mem.register","pos":[0,0],"name":"Instr"},
+                {"id":"n1","type":"gate.not","pos":[0,0]},
+                {"id":"r2","type":"mem.register","pos":[0,0],"name":"Other"},
+                {"id":"n2","type":"gate.not","pos":[0,0]}
+            ], "wires": [
+                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"n1","pin":"in"},"name":"Instr-FBUF"},
+                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"n1","pin":"in"},"name":"Opcode"},
+                {"a":{"comp":"r2","pin":"q"},"b":{"comp":"n2","pin":"in"},"name":"Instr-FBUF"}
+            ]}]
+        }"##;
+        let nl = build_json(json).unwrap();
+        let by = |name: &str| {
+            nl.net_ids_of_label(name)
+                .into_iter()
+                .map(|n| n.idx())
+                .collect::<Vec<_>>()
+        };
+        // Two wires on one net carry two names; both resolve, once each.
+        let bus = by("Opcode");
+        assert_eq!(bus.len(), 1, "one net carries Opcode: {:?}", bus);
+        assert_eq!(
+            by("Instr-FBUF").len(),
+            2,
+            "two nets carry Instr-FBUF (not merged)"
+        );
+        assert!(
+            by("Instr-FBUF").contains(&bus[0]),
+            "r1.q's net carries both names"
+        );
+        let mut names = nl.labels_of_net(crate::api::NetId(bus[0] as u32));
+        names.sort_unstable();
+        assert_eq!(names, vec!["Instr-FBUF", "Opcode"]);
+        assert!(by("no-such-wire").is_empty());
+    }
+
     #[test]
     fn wire_length_accumulates_per_net() {
         // One 200-unit wire (polyline) + one 30-unit wire (endpoint

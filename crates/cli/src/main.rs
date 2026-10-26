@@ -66,6 +66,12 @@ enum Cmd {
         /// Dump this root-circuit component instead: its class, pins, and views.
         #[arg(long)]
         comp: Option<String>,
+        /// Restrict to the nets carrying this labelled wire (`Wire::name`, the new
+        /// tool's tunnel) — an exact name, or a suffix within an instance. This is how
+        /// a *bus* is identified: `--label Opcode` finds the net a register named
+        /// `Opcode` would sit on, without knowing its id.
+        #[arg(long)]
+        label: Option<String>,
         /// Run this many cycles before dumping (default 1).
         #[arg(long, default_value_t = 1)]
         cycles: u64,
@@ -708,6 +714,7 @@ fn main() -> ExitCode {
             file,
             pin,
             comp,
+            label,
             cycles,
             compat,
             json,
@@ -715,6 +722,7 @@ fn main() -> ExitCode {
             file,
             pin.as_deref(),
             comp.as_deref(),
+            label.as_deref(),
             *cycles,
             *compat,
             json.as_deref(),
@@ -740,6 +748,7 @@ fn nets(
     file: &Path,
     pin: Option<&str>,
     comp: Option<&str>,
+    label: Option<&str>,
     cycles: u64,
     compat: bool,
     json_out: Option<&Path>,
@@ -805,21 +814,31 @@ fn nets(
         }
         return ExitCode::SUCCESS;
     }
-    let dumps = match pin {
-        None => eng.nets(),
-        Some(spec) => {
-            let Some((id, pin_name)) = spec.split_once('.') else {
-                eprintln!("csim: --pin must be <component>.<pin>, e.g. c54.in");
+    let dumps = match label {
+        Some(name) => {
+            let d = eng.nets_by_label(name);
+            if d.is_empty() {
+                eprintln!("csim: no net carries the label '{name}'");
                 return ExitCode::from(exit::USAGE);
-            };
-            match eng.net_of_pin(id, pin_name) {
-                Some(d) => vec![d],
-                None => {
-                    eprintln!("csim: no root-circuit pin '{spec}'");
+            }
+            d
+        }
+        None => match pin {
+            None => eng.nets(),
+            Some(spec) => {
+                let Some((id, pin_name)) = spec.split_once('.') else {
+                    eprintln!("csim: --pin must be <component>.<pin>, e.g. c54.in");
                     return ExitCode::from(exit::USAGE);
+                };
+                match eng.net_of_pin(id, pin_name) {
+                    Some(d) => vec![d],
+                    None => {
+                        eprintln!("csim: no root-circuit pin '{spec}'");
+                        return ExitCode::from(exit::USAGE);
+                    }
                 }
             }
-        }
+        },
     };
     let text = serde_json::to_string_pretty(&dumps).expect("nets serialize");
     match json_out {

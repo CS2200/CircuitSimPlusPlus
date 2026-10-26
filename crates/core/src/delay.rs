@@ -731,6 +731,12 @@ pub struct CompPin {
 pub struct NetDump {
     /// Index into the engine's net list.
     pub net: usize,
+    /// The wire **name** (`Wire::name`, the old tool's tunnel) when this net carries
+    /// one — instance-qualified like the named registry (`"Opcode"`, `"c61/Opcode"`).
+    /// A name is a label, not a merging rule, so this is the first of possibly
+    /// several; the net can be found by any of them with `--label`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub width: u32,
     /// No driving pin at all (the net is `Z`).
     pub floating: bool,
@@ -738,6 +744,10 @@ pub struct NetDump {
     pub value: String,
     /// Pins that can drive it, `id.pin` (or `instance/id.pin` when inlined).
     pub drivers: Vec<String>,
+    /// What each of those pins currently **drives** (its last push), parallel to
+    /// [`NetDump::drivers`]. This is what a disagreement is made of: the net's own value
+    /// says `X`, but only this says *which two pins* are fighting.
+    pub driver_values: Vec<String>,
     /// Pins that consume it, same naming.
     pub sinks: Vec<String>,
     /// The queried pin, when the dump was asked for one.
@@ -1674,6 +1684,63 @@ impl DelayEngine {
         })
     }
 
+    /// The raw four-state reading of every net carrying the labelled wire `label`, each
+    /// as `merged|ok` or `merged|SHORT`: the net's resolved value (every driver merged)
+    /// in the old tool's own alphabet — bare bits, lowercase `z` — and whether the
+    /// drivers genuinely **disagree** (`Value::contention_merge_detail`'s short flag).
+    ///
+    /// This is the engine-side twin of the old tracer's `TRACE_RAW` column, so the two
+    /// can be read side by side for the same wire name. The old tool has no `X`
+    /// (`WireValue.State` is `ONE`/`ZERO`/`Z`), so **any `x` here is a divergence** —
+    /// and `SHORT` is the transient the old engine defers (`Simulator.step` records it
+    /// and only re-raises at quiescence).
+    pub fn net_raw_by_label(&self, label: &str) -> Vec<String> {
+        self.netlist
+            .net_ids_of_label(label)
+            .into_iter()
+            .map(|n| {
+                let nidx = n.idx();
+                let drivers: Vec<Value> = self.net_drivers[nidx]
+                    .iter()
+                    .map(|&(d, sl)| self.drives[d as usize][sl].clone())
+                    .collect();
+                let (_, shorted) =
+                    Value::contention_merge_detail(self.netlist.nets[nidx].width, &drivers);
+                let merged = self
+                    .net_values
+                    .get(nidx)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                let merged = merged.strip_prefix("0b").unwrap_or(&merged).to_string();
+                format!("{merged}|{}", if shorted { "SHORT" } else { "ok" })
+            })
+            .collect()
+    }
+
+    /// The resolved values of every net carrying the labelled wire `label`, in net
+    /// order (see [`DelayEngine::nets_by_label`]). Empty when nothing carries it.
+    pub fn net_values_by_label(&self, label: &str) -> Vec<Value> {
+        self.netlist
+            .net_ids_of_label(label)
+            .into_iter()
+            .filter_map(|n| self.net_values.get(n.idx()).cloned())
+            .collect()
+    }
+
+    /// Every net carrying the labelled wire `label` — an exact name or a
+    /// `/`-suffix within an instance — as dumps. This is the *net* companion of
+    /// [`DelayEngine::named_value`]: a labelled wire is the old tool's **tunnel**, and
+    /// its tracer reads one by name (`Subcircuit.snitchTunnel`), so this is what lets
+    /// the engine answer the same question per cycle (`PROBE_NETS`) or on demand
+    /// (`csim nets --label`).
+    pub fn nets_by_label(&self, label: &str) -> Vec<NetDump> {
+        self.netlist
+            .net_ids_of_label(label)
+            .into_iter()
+            .map(|n| self.net_dump(n.idx()))
+            .collect()
+    }
+
     /// Every net that carries at least one pin, in id order (debugging aid).
     pub fn nets(&self) -> Vec<NetDump> {
         (0..self.netlist.nets.len())
@@ -1695,8 +1762,15 @@ impl DelayEngine {
                 format!("{}/{}.{pin}", c.inst_path, c.def_id)
             }
         };
+        let name = self
+            .netlist
+            .labelled
+            .iter()
+            .find(|(_, ln)| ln.idx() == net)
+            .map(|(name, _)| name.clone());
         NetDump {
             net,
+            name,
             width: n.width,
             floating: n.floating,
             value: self
@@ -1705,6 +1779,16 @@ impl DelayEngine {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "?".to_string()),
             drivers: n.drivers.iter().map(label).collect(),
+            driver_values: self.net_drivers[net]
+                .iter()
+                .map(|&(d, sl)| {
+                    self.drives
+                        .get(d as usize)
+                        .and_then(|pins| pins.get(sl))
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "?".to_string())
+                })
+                .collect(),
             sinks: n.sinks.iter().map(label).collect(),
             pin: None,
             view: None,
@@ -3019,6 +3103,43 @@ mod tests {
         let pc_wanted = std::env::var("PROBE_PC").unwrap_or_else(|_| "PC-IF".to_string());
         let pc = pick(&pc_wanted)
             .unwrap_or_else(|| panic!("no named register '{pc_wanted}' — set PROBE_PC"));
+        // `PROBE_NETS` (comma-separated **wire names**, i.e. the new tool's tunnels)
+        // appends each named net's resolved value to every row. A name is a label, not a
+        // merging rule, so more than one net can carry it (one per subcircuit instance):
+        // all of them are shown, joined by `|`, and an unmatched name prints `?` rather
+        // than silently shifting columns. This is the *net* companion of `PROBE_NAMES`
+        // and the engine-side half of the old tool's `TRACE_TUNNELS` diff.
+        let net_labels: Vec<String> = std::env::var("PROBE_NETS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect();
+        // `PROBE_RAW` (same spelling) appends `merged|ok|SHORT` per labelled net — the
+        // engine-side twin of the old tracer's `TRACE_RAW`, so the two read side by side.
+        let raw_labels: Vec<String> = std::env::var("PROBE_RAW")
+            .unwrap_or_default()
+            .split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect();
+        if !net_labels.is_empty() || !raw_labels.is_empty() {
+            let mut head = format!("TRACEHEAD cycle,{pc_wanted}");
+            for n in &names {
+                head.push(',');
+                head.push_str(n);
+            }
+            for l in &net_labels {
+                head.push(',');
+                head.push_str(l);
+            }
+            for l in &raw_labels {
+                head.push(',');
+                head.push_str(l);
+                head.push_str("(merged|short)");
+            }
+            println!("{head}");
+        }
         for i in 0..=cycles {
             if i > 0 {
                 let _ = eng.run(1);
@@ -3030,6 +3151,25 @@ mod tests {
             };
             let row: Vec<String> = std::iter::once(render(eng.named_value(&pc)))
                 .chain(names.iter().map(|n| render(eng.named_value(n))))
+                .chain(net_labels.iter().map(|l| {
+                    let vs = eng.net_values_by_label(l);
+                    if vs.is_empty() {
+                        "?".to_string()
+                    } else {
+                        vs.into_iter()
+                            .map(|v| render(Some(v)))
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    }
+                }))
+                .chain(raw_labels.iter().map(|l| {
+                    let rs = eng.net_raw_by_label(l);
+                    if rs.is_empty() {
+                        "?".to_string()
+                    } else {
+                        rs.join("|")
+                    }
+                }))
                 .collect();
             println!("TRACE {i} {}", row.join(","));
         }
