@@ -2069,3 +2069,43 @@ does fix it — refusing the tie on a net that crosses a subcircuit boundary —
 costs a production verdict, so it is reverted and recorded here with its reasoning rather than
 landed. The way forward is net surgery: tie the pins that are not the plexer's select and leave
 the select's own net undriven, which satisfies both.
+
+### Round 26: `374625393` — the sequencer visits a microstate with no control word
+
+The trajectory diff put the divergence at the `bne`-like branch at `PC=D`: CE goes `D → F` (the
+delay slot included) and ours goes `D → E`. Working the branch out from the design's own logic
+gave a clean chain, and then the microsequencer itself.
+
+`A − B`, the shared bus, is the comparison sheet's operand — and at that microstep it held the
+**adder's** result:
+
+```
+c27 (the ALU mux) sel = 0  ->  in0, the adder: 0x109FFF
+                              in1, A − B:      0xFFF0A001
+```
+
+with `A = 0xA000`, `B = 0x000FFFFF`. The sheet's input is *named* `A - B`, so the comparison
+reads whichever the ALU function select points at — and ours points at the adder.
+
+Watching the three microcode ROMs per cycle shows where that comes from:
+
+```
+cycle   MAIN addr -> control word    SEQ addr -> next    CC addr -> patch    PC
+ 25      0x14 -> 0x802400            0x5 -> 0x14         0x1 -> 0x17         D
+ 26      0x17 -> 0x16300             0x5 -> 0x14         0x0 -> 0x0          D
+ 27      0x1f -> 0x0000000   <- zero 0x6 -> 0x1a         0x0 -> 0x0          E
+ 28      0x00 -> 0x19f5240           0x6 -> 0x1a         0x0 -> 0x0          E
+```
+
+The branch *is* patched (`CC[1] = 0x17`, MAIN addressed at `0x17` next) — but then the sequencer
+visits **`0x1f`, where `MAIN` holds `0`**: a microstate with *no control word at all*. Nothing is
+driven, the state still advances, and the PC advances with it — so ours fetches at `E` where CE
+jumps to `F`. It is a two-microstep shift that persists, which is why the design then wanders.
+
+So the fault is upstream of the branch: our **state sequence** enters a state the design's
+microcode does not define, while CE never does. Reading the `SEQ`/`MAIN` contents (`N-value`
+run-length, e.g. MAIN = `19f5240 2-0000000 8202000 …`) is what tells which states are defined;
+the next step is to compare ours against that list at each transition rather than one cycle at a
+time. The last two bugs were both converter misreadings of an old-tool property, so the ROM
+addressing (`Address Shift`, the address width versus the contents length) is the first place to
+look, not the last.
