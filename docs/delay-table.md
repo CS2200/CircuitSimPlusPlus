@@ -206,7 +206,7 @@ check any number against a datasheet instead of guessing what the grader thinks.
 | | v1 | v2 | the part |
 |---|---:|---:|---|
 | `mem.ram.access` | 50 | **70** | 62256‑70, `tAA` 70 ns (write `tSD` 30, so `setup` 15→30) |
-| `mem.rom.access` | 50 | **120** | 27C256‑120, `tACC` 120 ns |
+| `mem.rom.access` | 50 | **15 + 7/addr‑bit** | small TTL PROM: 16 words → 43 ns, 32×8 → 50 (74S288/82S123 max), 64 → 57, 32K×8 → 120 (27C256‑120) |
 | `arith.adder` | `15 + 4/bit` = 139 @32 | **`22 + 6/bit` = 208 @32** | 74LS181 ripple chain (22 ns slice + 25 ns/slice carry) |
 | `arith.subtractor` | 139 @32 | **208 @32** | same, subtract mode |
 | `arith.comparator` | 15 | **26** | 74LS688 8-bit identity comparator |
@@ -227,23 +227,55 @@ deliberate step, and v2 does not smuggle it in).
 exists, and neither appears in the corpus. They are marked as estimates in their
 `source` strings rather than dressed up as datasheets.
 
+### Memory is priced by depth, not by type
+
+`mem.rom` (and `mem.ram`) carry an optional `perAddrBit` term:
+
+```
+effective_access(T, words) = access(T) + perAddrBit(T) × ceil(log2(words))
+```
+
+because a memory's read time is the **address decoder** plus the array, and the
+decoder grows with the word count. `mem.rom` ships `access 15, perAddrBit 7`,
+which passes through three real parts:
+
+| words | address bits | model | real part |
+|---:|---:|---:|---|
+| 16 | 4 | 43 ns | a small control table |
+| 32 | 5 | **50 ns** | 74S288 / 82S123 (32×8 bipolar PROM), address access 50 ns max |
+| 64 | 6 | 57 ns | 74S188A-class |
+| 32768 | 15 | **120 ns** | 27C256‑120, `tACC` 120 ns |
+
+This matters because **every ROM in this corpus is a control table, not program
+storage** (the harness bakes the program into `mem.ram`): sampling the converted
+designs, 34 of 35 have at least one ROM and they are 16–64 words of 1–28 bits —
+`SEQ` 6×16, `Main` 28×64, `CC` 6×16, `EX-ROM` 5×16, `ID/RR-ROM` 3×16. Charging
+those the flat `tACC` of a 256-Kbit EPROM over-charged them ~3×, and since a
+pipeline stage's bottleneck *was* that ROM, it decided who won. Known compromise:
+the line over-charges the middle of the range (a 512×8 74S472 is 55 ns; the model
+says 78 ns), because small bipolar PROMs are nearly size-flat while bulk CMOS
+EPROMs are not. It is exact at both ends, which is where this corpus lives.
+
+`mem.ram` keeps a flat 70 ns and no `perAddrBit`: in every design here it is one
+part (the 62256 that holds the program), so a depth term would only add noise.
+The field exists for both kinds so a future table can price a small RAM cheaply.
+
 ### The two things this fixes
 
 1. **Memory and the adder are both charged honestly.** The 32Kx8 SRAM is a
    62256‑70 (70 ns) and the EPROM a 27C256‑120 (120 ns); a 32-bit add is a
    real 74LS181 ripple chain at 208 ns. v1 paired a *best-case* memory (50 ns)   with a *worst-case* ALU (ripple, 139 ns), which is the one combination that
    maximizes the ALU's share of the critical path.
-2. **The adder asymmetry is what makes pipelining pay.** A one-cycle machine
+2. **The adder asymmetry is what makes pipelining pay *most*.** A one-cycle machine
    serializes **two** adds (PC+4 and the ALU op) into a single clock period; a
    pipeline does one per stage. With a 208 ns ripple adder that serialization is
-   expensive (467 vs 250 ns on the measured pair below) — which is the
-   historical argument for pipelining, now visible in `t_obs` rather than
-   asserted in a rubric. The 74LS181 datasheet offers ripple ("when speed
-   requirements are not stringent") and, with the 9342/74LS182, lookahead ("for
-   high speed operation … over extremely long word lengths"); the MIPS team's
-   own boards used ripple, so v2 charges ripple. A **lookahead variant**
-   (`22 + 1/bit` = 53 ns @ 32) is the documented alternative — see the
-   measurement below for why it changes who wins.
+   expensive — which is the historical argument for pipelining, now visible in
+   `t_obs` rather than asserted in a rubric. The 74LS181 datasheet offers ripple
+   ("when speed requirements are not stringent") and, with the 9342/74LS182,
+   lookahead ("for high speed operation … over extremely long word lengths"); the
+   MIPS team's own boards used ripple, so v2 charges ripple. The lookahead variant
+   (`22 + 1/bit` = 53 ns @ 32) narrows the margin but does not change the winner —
+   see the measurement below.
 
 ### Calibration targets
 
@@ -255,28 +287,39 @@ Published machines to sanity-check a design against, rather than a made-up scale
 | MIPS R2000/16 | **16.7 MHz** (60 ns) | external SRAM 25 ns |
 | Harvey Mudd / MOSIS student MIPS (AMI 0.5 µm) | **7.25 MHz** (138 ns) | 34 undergrads, 160k transistors |
 
-### Measured: the adder choice decides whether pipelining pays
+### Measured: pricing the control ROM by depth is what fixed the ranking
 
-`T_obs` (ns, pow), measured on the corpus's design families. **v2 ships the ripple
-adder**; the last column is the lookahead variant (`22 + 1/bit` = 53 ns @ 32 bits):
+`T_obs` (ns, pow), measured on the corpus's design families. The middle column is v2
+with the ROM still flat-priced (superseded), the last two are the shipped table
+(ripple adder) and its lookahead variant:
 
-| design | v1 | **v2 (ripple, shipped)** | v2 (lookahead variant) |
-|---|---:|---:|---:|
-| `none.sim` — multicycle baseline | 282 | 415 | 327 |
-| `pipeline-df.sim` — reference 5-stage | 290 | 379 | 224 |
-| `pipeline-pred.sim` — reference 5-stage + prediction | 322 | 449 | 272 |
-| fastest-clock 5-stage (corpus) | 195 | **250** | 227 |
-| one-cycle datapath (corpus) | 346 | **467** | 216 |
-| a real field design | 494 | 690 | 460 |
+| design | v1 | v2 flat‑ROM (ripple) | **v2 shipped (ripple + addr‑ROM)** | v2 lookahead + addr‑ROM |
+|---|---:|---:|---:|---:|
+| `none.sim` — multicycle baseline | 282 | 415 | 338 | 187 |
+| `pipeline-df.sim` — reference 5-stage | 290 | 379 | 369 | — |
+| `pipeline-pred.sim` — reference 5-stage + prediction | 322 | 449 | 449 | 195 |
+| fastest-clock 5-stage (corpus) | 195 | 250 | **250** | **150** |
+| one-cycle datapath (corpus) | 346 | 467 | **467** | 216 |
+| a real field design | 494 | 690 | 697 | 467 |
 
-With ripple the pipeline wins by ~1.9×; with the lookahead the one-cycle machine
-wins and would be the fastest submission in the corpus. So the adder is the lever,
-not the memory.
+Two conclusions, in order of importance:
 
-Why the memory fix alone does *not* separate them: the one-cycle design's critical
-path is `PC → mux → RAM → mux → PC` — **one** memory access, not two (its fetch and
-execute share the same RAM and overlap), so raising RAM 50→70 lengthens both sides
-about equally.
+1. **The one-cycle machine never wins once a control ROM is priced by depth.** The
+   flat 120 ns ROM made the corpus's best pipeline's stage 227 ns — *longer* than a
+   one-cycle machine's entire instruction path — so the one-cycle design looked
+   unbeatable under a cheap adder. Priced as a 16-word table (~43 ns), that
+   pipeline's stage drops to **150 ns**, and it beats the one-cycle machine under
+   **both** adder choices: 1.44× with lookahead, 1.87× with ripple. The apparent
+   "one-cycle beats everything" result was a ROM mispricing, not an architectural
+   truth.
+2. **The adder sets the margin, not the winner.** Ripple widens the pipeline's
+   advantage (208 ns of serialized adds is expensive); lookahead narrows it. Either
+   is self-consistent, and the winner is a pipeline in both.
+
+Why the *memory* fix alone changes nothing: the one-cycle design's critical path is
+`PC → mux → RAM → mux → PC` — **one** memory access, not two (its fetch and execute
+share the same RAM and overlap), so raising RAM 50→70 lengthens both sides about
+equally.
 
 ### Measured: cycles per instruction (why a "one-cycle" design is competitive at all)
 

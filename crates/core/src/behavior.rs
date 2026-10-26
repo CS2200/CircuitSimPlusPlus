@@ -1063,9 +1063,20 @@ impl Behavior {
             BehaviorKind::HexDisplay => ("io.hexdisplay", 1),
             BehaviorKind::Text => ("misc.text", 1),
         };
-        table.timing(type_, bitsize)
+        let mut t = table.timing(type_, bitsize);
+        // Memories are read through an address decoder, so their access time grows
+        // with the word count: a 16-word control table and a 64K-word store are not
+        // the same part (docs/delay-table.md). Charge the instance's real depth.
+        if matches!(
+            &self.kind,
+            BehaviorKind::Ram { .. } | BehaviorKind::Rom { .. }
+        ) {
+            if let Some(words) = self.memory_len() {
+                t.access = table.mem_access(type_, words);
+            }
+        }
+        t
     }
-
     // -- Engine/poke/autograder accessors ---------------------------------
 
     /// Drive an input pin (interactive poking / test setup, `Sim::poke`).

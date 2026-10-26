@@ -26,6 +26,6 @@
     "arith.divider": { "prop": 200, "source": "estimate; no single TTL part (iterative 74LS181 array)" },
     "mem.register": { "prop": 15, "setup": 20, "hold": 5, "source": "74LS374 clk->Q 15 typ, tsu 20, th 5" },
     "mem.ram": { "access": 70, "setup": 30, "hold": 5, "source": "62256-70 tAA 70 ns, tSD 30 ns" },
-    "mem.rom": { "access": 120, "source": "27C256-120 tACC 120 ns" }
+    "mem.rom": { "access": 15, "perAddrBit": 7, "source": "small TTL PROM, address access = 15 ns + 7 ns per address bit: 32x8 = 50 ns (74S288/82S123 max), 512x8 = 55 ns (74S472), 32Kx8 = 120 ns (27C256-120)" }
   }
 }

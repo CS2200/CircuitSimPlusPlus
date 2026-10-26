@@ -103,17 +103,17 @@ enum Role {
     Splitter,
 }
 
-fn role_of(type_: &str, in_width: u32, table: &TimingTable) -> Role {
+fn role_of(type_: &str, in_width: u32, words: usize, table: &TimingTable) -> Role {
     match type_ {
         "wiring.splitter" => Role::Splitter,
         // Registers are timing breaks: q restarts paths at 0, data inputs
         // are endpoints (collected by the caller).
         "mem.register" => Role::Source,
         "mem.ram" => Role::Ram {
-            access: table.timing(type_, in_width).access,
+            access: table.mem_access(type_, words),
         },
         "mem.rom" => Role::Rom {
-            access: table.timing(type_, in_width).access,
+            access: table.mem_access(type_, words),
         },
         "wiring.probe" | "io.led" | "io.hexdisplay" => Role::EndpointOnly,
         _ => {
@@ -191,7 +191,10 @@ pub fn analyze(
             .map(|p| p.width)
             .max()
             .unwrap_or(1);
-        let role = role_of(&fc.type_, in_width, table);
+        // Memories read through an address decoder: their access grows with depth
+        // (docs/delay-table.md). `depth` is the instance's word count.
+        let words = fc.attrs.get("depth").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let role = role_of(&fc.type_, in_width, words, table);
         roles.push(role);
         match fc.type_.as_str() {
             "mem.register" => {

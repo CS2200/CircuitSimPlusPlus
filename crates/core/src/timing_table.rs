@@ -106,6 +106,10 @@ const REQUIRED_KINDS: &[&str] = &[
 /// "adder scales per-bit (ripple)").
 const PER_BIT_KINDS: &[&str] = &["arith.adder", "arith.subtractor"];
 
+/// The only kinds whose read access scales with **address** width — memories,
+/// where the decoder grows with the word count (docs/delay-table.md).
+const PER_ADDR_BIT_KINDS: &[&str] = &["mem.rom", "mem.ram"];
+
 /// Why a table name or table body was rejected.
 #[derive(Debug, Error)]
 pub enum TableError {
@@ -138,6 +142,11 @@ struct Entry {
     setup: u64,
     hold: u64,
     access: u64,
+    /// Extra read-access time per **address** bit, for memories: a ROM/RAM is
+    /// slower the more words it holds, because the address decoder grows. A
+    /// 32-word control table and a 32K-word store are not the same part
+    /// (docs/delay-table.md).
+    per_addr_bit: u64,
     /// Provenance: the part and parameter this row's numbers come from
     /// (`"74LS374 clk->Q 15 typ, tsu 20, th 5"`). Documentation, not timing —
     /// but stored, so `csim` can name its sources without reading a doc file.
@@ -186,6 +195,9 @@ struct RawEntry {
     setup: u64,
     hold: u64,
     access: u64,
+    /// Extra read access per address bit (memories only).
+    #[serde(rename = "perAddrBit")]
+    per_addr_bit: u64,
     /// Provenance string (docs/delay-table.md): the part + parameter the row's
     /// numbers were taken from. Optional; carries no timing.
     source: String,
@@ -245,6 +257,11 @@ impl TimingTable {
                     "components.'{key}': 'perBit' is only meaningful for {PER_BIT_KINDS:?}"
                 ));
             }
+            if entry.per_addr_bit != 0 && !PER_ADDR_BIT_KINDS.contains(&key.as_str()) {
+                issues.push(format!(
+                    "components.'{key}': 'perAddrBit' is only meaningful for {PER_ADDR_BIT_KINDS:?}"
+                ));
+            }
         }
         if !issues.is_empty() {
             return Err(TableError::Invalid {
@@ -264,6 +281,7 @@ impl TimingTable {
                         setup: e.setup,
                         hold: e.hold,
                         access: e.access,
+                        per_addr_bit: e.per_addr_bit,
                         source: e.source,
                     },
                 )
@@ -313,6 +331,22 @@ impl TimingTable {
     /// row's numbers were taken from. `None` when the kind has no row.
     pub fn source(&self, type_: &str) -> Option<&str> {
         self.entries.get(type_).map(|e| e.source.as_str())
+    }
+
+    /// Address bits needed to hold `words` words (`ceil(log2(words))`, at least
+    /// 1). 16 words → 4, 64 → 6, 65536 → 16.
+    pub fn addr_bits(words: usize) -> u32 {
+        let w = words.max(1);
+        (usize::BITS - (w - 1).leading_zeros()).max(1)
+    }
+
+    /// Read access for a memory of `words` words: the flat `access` (the part's
+    /// published time) plus `perAddrBit` per address line — the decoder term.
+    /// A 16-word control table and a 64K-word program store are different parts
+    /// (docs/delay-table.md); callers pass the memory's real depth.
+    pub fn mem_access(&self, type_: &str, words: usize) -> u64 {
+        let e = self.entries.get(type_).cloned().unwrap_or_default();
+        e.access + e.per_addr_bit * u64::from(Self::addr_bits(words))
     }
 }
 
@@ -408,7 +442,16 @@ mod tests {
         let t = TimingTable::builtin("cs2200-74ls-v2").unwrap();
         assert_eq!(t.timing("mem.ram", 32).access, 70);
         assert_eq!(t.timing("mem.ram", 32).setup, 30);
-        assert_eq!(t.timing("mem.rom", 32).access, 120);
+        // Read access scales with the address decoder, not just the part: a 16-word
+        // control table and a 32K-word program store are different memories.
+        assert_eq!(TimingTable::addr_bits(16), 4);
+        assert_eq!(TimingTable::addr_bits(32768), 15);
+        assert_eq!(t.mem_access("mem.rom", 16), 43);
+        assert_eq!(t.mem_access("mem.rom", 32), 50); // 74S288/82S123 max
+        assert_eq!(t.mem_access("mem.rom", 64), 57);
+        assert_eq!(t.mem_access("mem.rom", 32768), 120); // 27C256-120
+                                                         // RAM stays flat: it is one part in every design here, the 62256.
+        assert_eq!(t.mem_access("mem.ram", 65536), 70);
         assert_eq!(t.timing("arith.adder", 32).prop, 208);
         let reg = t.timing("mem.register", 32);
         assert_eq!((reg.prop, reg.setup, reg.hold), (15, 20, 5));
@@ -435,6 +478,21 @@ mod tests {
             Err(other) => panic!("unexpected: {other}"),
             Ok(_) => panic!("expected the missing-kind validation to fire"),
         }
+    }
+
+    #[test]
+    fn per_addr_bit_is_only_meaningful_for_memories() {
+        let mut v: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V2).unwrap();
+        v["components"]["gate.not"]["perAddrBit"] = serde_json::json!(3);
+        let TableError::Invalid { issues, .. } =
+            TimingTable::from_json(&v.to_string()).unwrap_err()
+        else {
+            panic!("expected Invalid");
+        };
+        assert!(
+            issues.iter().any(|i| i.contains("perAddrBit")),
+            "{issues:?}"
+        );
     }
 
     #[test]
