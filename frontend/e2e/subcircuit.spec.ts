@@ -33,6 +33,36 @@ test("an instance offers its own box size in the Inspector", async ({ page }) =>
   await expect(inspector).toContainText("Height");
   await expect(inspector).toContainText("Width");
 
+  // §98: each size is a slider plus a number box — not a grid of ~400 cells.
+  await expect(inspector.locator(".bitsize-grid")).toHaveCount(0);
+  const doc = async () =>
+    JSON.parse(
+      await page.evaluate(() =>
+        (window as unknown as { __circuitDoc: () => string }).__circuitDoc(),
+      ),
+    ) as {
+      circuits: { components: { type: string; attrs?: Record<string, unknown> }[] }[];
+    };
+  const inst = async () =>
+    (await doc()).circuits[0].components.find((c) => c.type === "subcircuit");
+  // Untouched, the box follows the pins: no size is written and Auto is on.
+  expect((await inst())?.attrs).not.toHaveProperty("width");
+  await expect(inspector.getByRole("button", { name: "Auto" }).first()).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // The slider sets a size…
+  await inspector.getByRole("slider", { name: "Width", exact: true }).fill("20");
+  expect((await inst())?.attrs).toMatchObject({ width: 20 });
+  // …the number box reaches past the track for an exact one…
+  const heightBox = inspector.getByLabel("Height (grid units)");
+  await heightBox.fill("120");
+  await heightBox.press("Enter");
+  expect((await inst())?.attrs).toMatchObject({ height: 120 });
+  // …and Auto drops it again, leaving no `width` key behind (not `null`).
+  await inspector.getByRole("button", { name: "Auto" }).first().click();
+  expect((await inst())?.attrs).not.toHaveProperty("width");
+
   // …and the panel is a door into the definition, not just the canvas (§80).
   await page.getByRole("button", { name: "Edit definition" }).click();
   await expect(page.locator(".scope-bar")).toContainText("sub1");

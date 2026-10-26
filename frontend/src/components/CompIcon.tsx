@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { showsBodyCaption, compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
 import { probePath, chipPath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
@@ -280,8 +281,12 @@ const GROUP_GLYPHS: Readonly<Record<string, string>> = {
   Subcircuits: "subcircuit",
 };
 
-/** A bent wire with a junction dot — the Wiring group's rail glyph. */
-function WireGroupGlyph({ height }: { height: number }) {
+/**
+ * A bespoke rail glyph (UI_OVERHAUL §94): the groups whose representative part
+ * is a bare box get a drawing that says what the group IS instead. Same
+ * stroke, opacity and 3.2 × 2.6 frame as the component miniatures.
+ */
+function RailGlyph({ height, children }: { height: number; children: ReactNode }) {
   return (
     <svg
       className="comp-icon"
@@ -299,15 +304,108 @@ function WireGroupGlyph({ height }: { height: number }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       >
-        <path d="M0.15 1.95 H1.05 Q1.35 1.95 1.35 1.65 V0.55 Q1.35 0.25 1.65 0.25 H2.6" />
-        <circle cx="1.35" cy="1.95" r="0.2" fill="currentColor" stroke="none" />
+        {children}
       </g>
     </svg>
   );
 }
 
+/** A bent wire with a junction dot — the Wiring group. */
+function WireGroupGlyph({ height }: { height: number }) {
+  return (
+    <RailGlyph height={height}>
+      <path d="M0.15 1.95 H1.05 Q1.35 1.95 1.35 1.65 V0.55 Q1.35 0.25 1.65 0.25 H2.6" />
+      <circle cx="1.35" cy="1.95" r="0.2" fill="currentColor" stroke="none" />
+    </RailGlyph>
+  );
+}
+
+/** A chip with legs — the Memory group. */
+function MemoryGroupGlyph({ height }: { height: number }) {
+  return (
+    <RailGlyph height={height}>
+      <rect
+        x="0.75"
+        y="0.35"
+        width="1.7"
+        height="1.9"
+        rx="0.14"
+        fill="currentColor"
+        fillOpacity={0.08}
+      />
+      <path d="M1.42 0.35 a0.18 0.18 0 0 0 0.36 0" />
+      <path d="M0.3 0.8 H0.75 M0.3 1.3 H0.75 M0.3 1.8 H0.75 M2.45 0.8 H2.9 M2.45 1.3 H2.9 M2.45 1.8 H2.9" />
+    </RailGlyph>
+  );
+}
+
+/** A text mark in a dotted frame — the Misc group (annotations). */
+function MiscGroupGlyph({ height }: { height: number }) {
+  return (
+    <RailGlyph height={height}>
+      <rect
+        x="0.4"
+        y="0.3"
+        width="2.4"
+        height="2"
+        rx="0.14"
+        strokeDasharray="0.22 0.16"
+        strokeOpacity={0.5}
+      />
+      <text
+        x="1.6"
+        y="1.34"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontSize={1.25}
+        fontFamily="Georgia, 'Times New Roman', serif"
+        fontWeight={600}
+        fill="currentColor"
+        stroke="none"
+        opacity={0.9}
+      >
+        T
+      </text>
+    </RailGlyph>
+  );
+}
+
+/** A module with an inner box and pins on both sides — the Subcircuits group. */
+function SubcircuitGroupGlyph({ height }: { height: number }) {
+  return (
+    <RailGlyph height={height}>
+      <rect
+        x="0.65"
+        y="0.3"
+        width="1.9"
+        height="2"
+        rx="0.16"
+        fill="currentColor"
+        fillOpacity={0.08}
+      />
+      <rect x="1.0" y="0.7" width="1.2" height="1.2" rx="0.1" strokeOpacity={0.45} />
+      <path d="M0.2 0.85 H0.65 M0.2 1.75 H0.65 M2.55 1.3 H3.0" />
+    </RailGlyph>
+  );
+}
+
+/** Two stacked sheets — the Circuits explorer (§99). */
+function CircuitsGroupGlyph({ height }: { height: number }) {
+  return (
+    <RailGlyph height={height}>
+      <path d="M0.95 0.75 V2.25 H2.55" strokeOpacity={0.5} />
+      <path d="M1.3 0.3 H2.4 L2.95 0.85 V1.85 H1.3 Z" fill="currentColor" fillOpacity={0.08} />
+      <path d="M2.4 0.3 V0.85 H2.95" />
+    </RailGlyph>
+  );
+}
+
 /** Rail glyph for a palette group (Gates, Wiring, …). */
 export function PaletteGroupIcon({ group, height = 26 }: { group: string; height?: number }) {
+  if (group === "Circuits") return <CircuitsGroupGlyph height={height} />;
   if (group === "Wiring") return <WireGroupGlyph height={height} />;
+  if (group === "Memory") return <MemoryGroupGlyph height={height} />;
+  if (group === "Misc") return <MiscGroupGlyph height={height} />;
+  if (group === "Subcircuits") return <SubcircuitGroupGlyph height={height} />;
   return <CompIcon type={GROUP_GLYPHS[group] ?? "subcircuit"} height={height} />;
 }

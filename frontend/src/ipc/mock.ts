@@ -37,6 +37,7 @@
 import { CoreEventEmitter } from "./events";
 import { IpcEvents } from "./types";
 import type {
+  LoadError,
   CompId,
   CoreApi,
   LoadResult,
@@ -228,6 +229,22 @@ export class MockCore implements CoreApi {
     this.autoloads.clear();
 
     const doc = tryParseCsx(src.bytes);
+    // Mirror the engine's one load-blocking rule the editor can produce
+    // (`format/validate.rs`): an unnamed `wiring.pin`. Without it the mock loaded
+    // what the real engine refuses, and the load-error UI could not be exercised.
+    const unnamed: LoadError[] = [];
+    for (const c of doc?.circuits ?? []) {
+      for (const comp of c.components) {
+        if (comp.type === "wiring.pin" && (comp.name ?? "") === "") {
+          unnamed.push({
+            kind: "other",
+            message: `component '${comp.id}': wiring.pin components must be named — they form the subcircuit interface`,
+            circuit: c.name,
+          });
+        }
+      }
+    }
+    if (unnamed.length > 0) return { ok: false, errors: unnamed, net_map: [], named: [] };
     const circuit = doc?.circuits[0];
     if (doc !== null && circuit !== undefined) {
       // Document-driven mode: nets come from the document's own derivation

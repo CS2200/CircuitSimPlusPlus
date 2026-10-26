@@ -16,6 +16,8 @@ export default function SheetTabs({
   onNew,
   onRename,
   onDelete,
+  onClose,
+  hidden,
   renaming = null,
   onCommitRename,
   onCancelRename,
@@ -27,8 +29,15 @@ export default function SheetTabs({
   onSwitch: (i: number) => void;
   onNew: () => void;
   onRename: (i: number) => void;
-  /** Delete a circuit sheet (guarded in the document). */
+  /** Delete a circuit sheet (the caller confirms first; guarded in the document). */
   onDelete?: (i: number) => void;
+  /**
+   * Close a sheet's tab (UI_OVERHAUL §99): the circuit is NOT deleted — it stays
+   * in the file and in the Circuits explorer, from which it reopens.
+   */
+  onClose?: (i: number) => void;
+  /** Sheets whose tabs are closed (not drawn). */
+  hidden?: ReadonlySet<number>;
   /** Sheet index whose label is being edited inline, or null. */
   renaming?: number | null;
   onCommitRename?: (i: number, name: string) => void;
@@ -60,10 +69,13 @@ export default function SheetTabs({
     };
   }, [menu]);
 
+  const openCount = sheets.length - (hidden?.size ?? 0);
+
   return (
     <>
       <div className="sheet-tabs" role="tablist" aria-label="Circuits">
         {sheets.map((name, i) => {
+          if (hidden?.has(i) === true) return null;
           const editing = renaming === i;
           return (
             <div
@@ -119,12 +131,12 @@ export default function SheetTabs({
                   {name}
                 </button>
               )}
-              {!editing && onDelete !== undefined && sheets.length > 1 && (
+              {!editing && onClose !== undefined && openCount > 1 && (
                 <button
                   className="sheet-tab-close"
-                  aria-label={`Delete ${name}`}
-                  title={`Delete "${name}"`}
-                  onClick={() => onDelete(i)}
+                  aria-label={`Close ${name}`}
+                  title={`Close "${name}" — it stays in the file; reopen it from Circuits`}
+                  onClick={() => onClose(i)}
                   onDoubleClick={(e) => e.stopPropagation()}
                 >
                   ×
@@ -160,16 +172,29 @@ export default function SheetTabs({
           >
             Rename…
           </button>
+          {onClose !== undefined && openCount > 1 && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                const i = menu.i;
+                setMenu(null);
+                onClose(i);
+              }}
+            >
+              Close
+            </button>
+          )}
           {onDelete !== undefined && sheets.length > 1 && (
             <button
               role="menuitem"
+              className="menu-danger"
               onClick={() => {
                 const i = menu.i;
                 setMenu(null);
                 onDelete(i);
               }}
             >
-              Delete
+              Delete…
             </button>
           )}
         </div>

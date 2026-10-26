@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Camera } from "./camera";
 import type { Vec2 } from "./geom";
-import type { PathCmd, Renderer, RenderStats, StrokeStyle, TextStyle } from "./renderer";
+import type { BodyStyle, PathCmd, Renderer, RenderStats, StrokeStyle, TextStyle } from "./renderer";
 import {
   StressScene,
   STRESS_COMPONENT_COUNT,
@@ -35,6 +35,12 @@ class RecordingRenderer implements Renderer {
   }
   drawDashedPath(cmds: readonly PathCmd[], style: StrokeStyle, dash: readonly number[]): void {
     void dash;
+    if (cmds.length > 0) {
+      this.paths++;
+      this.styleKeys.add(JSON.stringify(style));
+    }
+  }
+  drawBody(cmds: readonly PathCmd[], style: BodyStyle): void {
     if (cmds.length > 0) {
       this.paths++;
       this.styleKeys.add(JSON.stringify(style));

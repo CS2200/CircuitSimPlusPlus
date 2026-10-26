@@ -33,6 +33,34 @@
 import type { NetId, NetDiffs, NamedComponent, WireValue } from "../ipc/types";
 import { wireValueState } from "../lib/value";
 import { breakpointCondition } from "../lib/breakpoint";
+import { compPins } from "../editor/catalog";
+import type { CsxCircuit, CsxComponent } from "../model/csx";
+
+/** The pin carrying a named part's watchable value (mirrors the engine's `value_net`). */
+export const NAMED_VALUE_PIN: Record<NamedComponent["kind"], string> = {
+  register: "q",
+  ram: "dout",
+  rom: "out",
+  probe: "in",
+};
+
+/**
+ * A named part's trace width (UI_OVERHAUL §96): the declared width of the pin
+ * that carries its value, from the registry's pin specs — the width the canvas
+ * draws. `attrs.bitsize` alone misses every part left at its default (a fresh
+ * probe is 1 bit with no attr), and the trace then fell back to the value's
+ * nibble-wide hex mask, so a 1-bit probe was drawn as a 4-bit bus.
+ */
+export function namedValueBits(
+  comp: Pick<CsxComponent, "type" | "attrs">,
+  kind: NamedComponent["kind"],
+  circuits?: readonly CsxCircuit[],
+): number | undefined {
+  const spec = compPins(comp, circuits).find((p) => p.name === NAMED_VALUE_PIN[kind]);
+  if (spec !== undefined) return spec.bitsize ?? 1;
+  const bits = comp.attrs?.["bitsize"];
+  return typeof bits === "number" && bits > 0 ? bits : undefined;
+}
 
 /** One value, in effect from `t` until the next sample. */
 export interface WaveSample {
@@ -142,7 +170,7 @@ export class WaveformRecorder {
 
   /** The axis: `t` and a cycle → a fractional cycle.  Cheap enough to rebuild per draw. */
   timebase(): Timebase {
-    return new Timebase(this.starts, this._hasTime);
+    return new Timebase(this.starts, this._hasTime, this._span?.lastT);
   }
 
   /**
@@ -267,11 +295,18 @@ export class WaveformRecorder {
  */
 export class Timebase {
   private readonly medianDuration: number;
+  /** The newest cycle recorded — the one still open at its right end. */
+  private readonly openCycle: number;
 
   constructor(
     private readonly starts: ReadonlyMap<number, number>,
     readonly hasTime: boolean,
+    /** The newest event time seen, so the open cycle can be sized before it closes. */
+    private readonly lastT?: number,
   ) {
+    let open = -Infinity;
+    for (const c of starts.keys()) if (c > open) open = c;
+    this.openCycle = open;
     const gaps: number[] = [];
     const cycles = [...starts.keys()].sort((a, b) => a - b);
     for (let i = 1; i < cycles.length; i++) {
@@ -288,12 +323,24 @@ export class Timebase {
     this.medianDuration = gaps.length > 0 ? gaps[Math.floor((gaps.length - 1) / 2)] : 0;
   }
 
-  /** The observed length of `cycle`, or the running estimate for the open one. */
+  /**
+   * The observed length of `cycle`, or an estimate for the open one.
+   *
+   * The open cycle has no successor yet, so it borrows the median — and, when
+   * its newest event already lies past the median's half (or there is no
+   * median at all, as after the very first tick), it is sized so that event
+   * sits at the half-cycle.  Without this a single tick projected its changes
+   * onto a 1 ns cycle and clamped them all against the right edge.
+   */
   duration(cycle: number): number {
     const a = this.starts.get(cycle);
     const b = this.starts.get(cycle + 1);
     if (a !== undefined && b !== undefined && b > a) return b - a;
-    return this.medianDuration > 0 ? this.medianDuration : 1;
+    let est = this.medianDuration;
+    if (cycle === this.openCycle && a !== undefined && this.lastT !== undefined) {
+      est = Math.max(est, 2 * (this.lastT - a));
+    }
+    return est > 0 ? est : 1;
   }
 
   /** First event time seen in `cycle` — the cycle's own start, as observed. */

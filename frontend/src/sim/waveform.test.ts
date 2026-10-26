@@ -8,6 +8,7 @@ import {
   clockSignals,
   isBus,
   bitLaneIndices,
+  namedValueBits,
   defaultSignals,
   extractBit,
   pickedSignals,
@@ -135,6 +136,31 @@ describe("WaveformRecorder: every event, not every cycle", () => {
     // Cycle boundaries are whole numbers and stay there as more arrive.
     expect(tb.x(120, 1)).toBe(1);
     expect(tb.x(320, 3)).toBe(3);
+  });
+
+  it("sizes the open cycle from its newest edge, so a single tick is visible", () => {
+    // The real engine: the full batch at t=0 (cycle 0), then the first tick —
+    // the rising edge at t=1000, which is also where cycle 1 begins.  There is
+    // no second cycle to measure a period from yet; the old estimate was 1 ns,
+    // which put every later event at the far right of its cycle.
+    const r = new WaveformRecorder();
+    r.recordBatch(batch(0, [[1, hex(0, 1), 0]], true));
+    r.recordBatch(batch(1, [[1, hex(1, 1), 1000]]));
+    let tb = r.timebase();
+    // The edge sits at the start of cycle 1 and the cycle is as wide as the
+    // half-period that reached it, so the new level has room to be drawn.
+    expect(tb.x(1000, 1)).toBe(1);
+    expect(tb.duration(1)).toBeGreaterThan(1);
+    // The falling edge (still cycle 1 — the engine counts rising edges) lands
+    // half-way, not clamped against the end.
+    r.recordBatch(batch(1, [[1, hex(0, 1), 2000]]));
+    tb = r.timebase();
+    expect(tb.x(2000, 1)).toBeCloseTo(1.5, 5);
+    // Once the next rising edge closes the cycle, nothing moves.
+    r.recordBatch(batch(2, [[1, hex(1, 1), 3000]]));
+    tb = r.timebase();
+    expect(tb.x(2000, 1)).toBeCloseTo(1.5, 5);
+    expect(tb.x(3000, 2)).toBe(2);
   });
 
   it("does not move a cycle boundary when later cycles arrive", () => {
@@ -362,6 +388,31 @@ describe("bit expansion", () => {
 
   it("lists the lanes most significant first", () => {
     expect(bitLaneIndices(4)).toEqual([3, 2, 1, 0]);
+  });
+});
+
+describe("namedValueBits (§96)", () => {
+  it("reads a default probe as ONE bit, not its value's nibble-wide mask", () => {
+    // A fresh probe carries no `bitsize` attr — the bug read that as "unknown"
+    // and fell back to the hex mask, drawing a 1-bit probe as a 4-bit bus.
+    expect(namedValueBits({ type: "wiring.probe" }, "probe")).toBe(1);
+    const sig: WaveSignal = {
+      key: "n:main/p",
+      label: "p",
+      net: 1,
+      origin: "named",
+      kind: "probe",
+      bits: 1,
+    };
+    expect(isBus(sig, { v: "1", x: "0", z: "0" })).toBe(false);
+  });
+
+  it("follows the declared width of the value pin", () => {
+    expect(namedValueBits({ type: "wiring.probe", attrs: { bitsize: 8 } }, "probe")).toBe(8);
+    expect(namedValueBits({ type: "mem.register", attrs: { bitsize: 16 } }, "register")).toBe(16);
+    expect(namedValueBits({ type: "mem.ram", attrs: { bitsize: 32, addrBits: 4 } }, "ram")).toBe(
+      32,
+    );
   });
 });
 

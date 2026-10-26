@@ -1,5 +1,13 @@
 import type { Vec2 } from "./geom";
-import type { FrameView, PathCmd, Renderer, RenderStats, StrokeStyle, TextStyle } from "./renderer";
+import type {
+  BodyStyle,
+  FrameView,
+  PathCmd,
+  Renderer,
+  RenderStats,
+  StrokeStyle,
+  TextStyle,
+} from "./renderer";
 import { styleKey } from "./renderer";
 
 /** Subset of Path2D used by the renderer (DI seam for tests). */
@@ -100,6 +108,45 @@ export class Canvas2DRenderer implements Renderer {
     this.stats.paths++;
   }
 
+  drawBody(cmds: readonly PathCmd[], style: BodyStyle): void {
+    if (cmds.length === 0) return;
+    const path = this.createPath();
+    appendCmds(path, cmds);
+    const ctx = this.ctx;
+    ctx.save();
+    if (style.fillTop !== undefined && style.y0 !== undefined && style.y1 !== undefined) {
+      // In world space: the context already carries the camera transform.
+      const g = ctx.createLinearGradient(0, style.y0, 0, style.y1);
+      g.addColorStop(0, style.fillTop);
+      g.addColorStop(1, style.fill);
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = style.fill;
+    }
+    if (style.shadow !== undefined) {
+      // Shadow blur and offsets ignore the transform (canvas spec), so they are
+      // scaled to device pixels here to stay proportional to the part at any zoom.
+      const t = ctx.getTransform();
+      const k = Math.hypot(t.a, t.b);
+      ctx.shadowColor = style.shadow.color;
+      ctx.shadowBlur = style.shadow.blur * k;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = style.shadow.dy * k;
+    }
+    ctx.fill(path as unknown as Path2D);
+    this.stats.fillBatches++;
+    ctx.restore();
+    if (style.stroke !== undefined) {
+      ctx.strokeStyle = style.stroke;
+      ctx.lineWidth = style.lineWidth ?? 1;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.stroke(path as unknown as Path2D);
+      this.stats.strokeBatches++;
+    }
+    this.stats.paths++;
+  }
+
   drawDots(centers: readonly Vec2[], halfSize: number, color: string): void {
     if (centers.length === 0) return;
     this.ctx.fillStyle = color;
@@ -162,7 +209,8 @@ export class Canvas2DRenderer implements Renderer {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     for (const op of this.texts) {
       this.ctx.fillStyle = op.style.color;
-      this.ctx.font = `${op.style.size * textScale}px ${op.style.font ?? "system-ui, sans-serif"}`;
+      const weight = op.style.weight === undefined ? "" : `${op.style.weight} `;
+      this.ctx.font = `${weight}${op.style.size * textScale}px ${op.style.font ?? "system-ui, sans-serif"}`;
       this.ctx.textAlign = op.style.align ?? "left";
       this.ctx.textBaseline = "middle";
       this.ctx.fillText(op.text, t.a * op.x + t.c * op.y + t.e, t.b * op.x + t.d * op.y + t.f);

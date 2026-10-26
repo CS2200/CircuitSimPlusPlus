@@ -74,6 +74,19 @@ export default function MemContentsDialog({
     setFocusAddr(null);
   }, [focusAddr]);
 
+  // Escape closes without applying, like every other dialog (UI_OVERHAUL §94) —
+  // captured, so the editor's own Escape (cancel placement) does not also fire.
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
   const cellText = (addr: number): string => {
     const v = cells.get(addr);
     return v === undefined ? "" : (v >>> 0).toString(16).padStart(width, "0");

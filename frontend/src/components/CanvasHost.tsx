@@ -5,6 +5,7 @@ import type { Rect, Vec2 } from "../render/geom";
 import type { Viewport } from "../render/renderer";
 import { FALLBACK_THEME, resolveTheme, type Theme } from "../render/theme";
 import { gridStepFor } from "../editor/docScene";
+import { MinusIcon, PlusIcon } from "./icons";
 
 /**
  * CanvasHost — the shared plumbing for every full-canvas view (editor,
@@ -185,6 +186,22 @@ export default function CanvasHost({
     }
     dirtyRef.current = true;
   }, []);
+
+  /**
+   * Set the camera scale from the zoom control (slider, ± buttons, the
+   * percentage reset): clamped to the camera's limits, grid-aligned, mirrored
+   * into React so the control reads back what it set.
+   */
+  const setScale = useCallback(
+    (scale: number): void => {
+      const next = Math.min(Camera.MAX_SCALE, Math.max(Camera.MIN_SCALE, scale));
+      cameraRef.current.scale = next;
+      alignToGrid();
+      setZoom(next);
+      dirtyRef.current = true;
+    },
+    [alignToGrid],
+  );
 
   /** Align once the wheel settles (zooming changes the edge's grid phase). */
   const scheduleAlign = useCallback((): void => {
@@ -531,7 +548,17 @@ export default function CanvasHost({
         }}
       />
       {!bench && (
-        <label className="canvas-zoom" title="Zoom">
+        <div className="canvas-zoom">
+          {/* The ± buttons and the percentage are named by `title` only (not
+           *  aria-label), so "Zoom" stays the slider's name alone. */}
+          <button
+            type="button"
+            className="zoom-btn"
+            title="Zoom out"
+            onClick={() => setScale(zoom / 2 ** 0.5)}
+          >
+            <MinusIcon />
+          </button>
           {/* Log₂ of the camera scale, so the range covers exactly the camera's
            *  limits (2..128 px per grid unit) with the default 16 in the
            *  middle — a linear slider would squash every useful zoom into its
@@ -543,15 +570,25 @@ export default function CanvasHost({
             step={0.05}
             value={Math.log2(zoom)}
             aria-label="Zoom"
-            onChange={(e) => {
-              const scale = 2 ** Number(e.target.value);
-              cameraRef.current.scale = scale;
-              alignToGrid();
-              setZoom(scale);
-              dirtyRef.current = true;
-            }}
+            onChange={(e) => setScale(2 ** Number(e.target.value))}
           />
-        </label>
+          <button
+            type="button"
+            className="zoom-btn"
+            title="Zoom in"
+            onClick={() => setScale(zoom * 2 ** 0.5)}
+          >
+            <PlusIcon />
+          </button>
+          <button
+            type="button"
+            className="zoom-value"
+            title="Back to 100%"
+            onClick={() => setScale(BASE_SCALE)}
+          >
+            {Math.round((zoom / BASE_SCALE) * 100)}%
+          </button>
+        </div>
       )}
       {showPerf && (
         <div className="canvas-overlay">

@@ -219,10 +219,29 @@ export default function SettingsDialog({
                         title={t.blurb}
                         onClick={() => onTheme(t.id)}
                       >
-                        <span className="theme-swatches" aria-hidden="true">
-                          {t.swatches.map((c) => (
-                            <span key={c} style={{ background: c }} />
-                          ))}
+                        {/* A miniature of the workspace in that theme: canvas,
+                         *  a panel strip, an accent mark and a lit wire. */}
+                        <span
+                          className="theme-preview"
+                          aria-hidden="true"
+                          style={{ background: t.swatches[0] }}
+                        >
+                          <span
+                            className="theme-preview-bar"
+                            style={{ background: t.swatches[1] }}
+                          />
+                          <span
+                            className="theme-preview-side"
+                            style={{ background: t.swatches[1] }}
+                          />
+                          <span
+                            className="theme-preview-dot"
+                            style={{ background: t.swatches[2] }}
+                          />
+                          <span
+                            className="theme-preview-wire"
+                            style={{ background: t.swatches[3] }}
+                          />
                         </span>
                         <span className="theme-name">{t.name}</span>
                         <span className="theme-blurb">{t.blurb}</span>
@@ -396,7 +415,9 @@ export default function SettingsDialog({
         </div>
 
         <div className="settings-foot">
-          <button onClick={onReset}>Reset to defaults</button>
+          <button className="secondary" onClick={onReset}>
+            Reset to defaults
+          </button>
           <span className="settings-hint">Preferences are stored on this machine</span>
         </div>
       </div>

@@ -1,8 +1,8 @@
 import type { ReactNode, SVGProps } from "react";
 
 /**
- * Minimal inline SVG icons for the top bar (VSCode-style chrome).
- * All icons stroke with `currentColor`, sit on a 20×20 grid, and are
+ * Minimal inline SVG icons for the chrome (header, transport, palette, status
+ * bar). All icons stroke with `currentColor`, sit on a 20×20 grid, and are
  * decorative (aria-hidden) — the buttons carry the accessible names.
  */
 
@@ -103,6 +103,7 @@ export function CircuitIcon() {
   );
 }
 
+/** Two slider rows — the Settings gear's quieter cousin. */
 export function SettingsIcon() {
   return (
     <Svg>
@@ -118,6 +119,135 @@ export function RotateIcon() {
     <Svg>
       <path d="M15.6 10a5.6 5.6 0 1 1-1.7-4" />
       <path d="M15.9 2.9v3.4h-3.4" />
+    </Svg>
+  );
+}
+
+// ---- transport (UI_OVERHAUL §94) ----
+
+/** Run: a filled triangle, the one solid mark in the transport. */
+export function PlayIcon() {
+  return (
+    <Svg fill="currentColor" stroke="none">
+      <path d="M6.6 4.6v10.8c0 .9 1 1.5 1.8 1l8.6-5.4c.7-.5.7-1.5 0-2L8.4 3.6c-.8-.5-1.8.1-1.8 1z" />
+    </Svg>
+  );
+}
+
+export function PauseIcon() {
+  return (
+    <Svg fill="currentColor" stroke="none">
+      <rect x="5" y="4" width="3.8" height="12" rx="1.3" />
+      <rect x="11.2" y="4" width="3.8" height="12" rx="1.3" />
+    </Svg>
+  );
+}
+
+/** Step one tick: a triangle up against a stop. */
+export function StepIcon() {
+  return (
+    <Svg fill="currentColor" stroke="none">
+      <path d="M4.5 5.1v9.8c0 .8.9 1.3 1.6.9l7-4.9c.6-.4.6-1.3 0-1.7l-7-4.9c-.7-.5-1.6 0-1.6.8z" />
+      <rect x="14.2" y="4.5" width="2.2" height="11" rx="1" />
+    </Svg>
+  );
+}
+
+/** Reset: back to the start, counter-clockwise. */
+export function ResetIcon() {
+  return (
+    <Svg>
+      <path d="M4.4 10.2a5.8 5.8 0 1 0 1.8-4.2" />
+      <path d="M4.2 3.2v3.6h3.6" />
+    </Svg>
+  );
+}
+
+/** Run to a cycle: an arrow to a mark. */
+export function RunToIcon() {
+  return (
+    <Svg>
+      <path d="M3.5 10h9" />
+      <path d="M9.5 6.5 13 10l-3.5 3.5" />
+      <path d="M16 5v10" />
+    </Svg>
+  );
+}
+
+// ---- general chrome ----
+
+export function SearchIcon() {
+  return (
+    <Svg>
+      <circle cx="9" cy="9" r="5.2" />
+      <path d="m13 13 4 4" />
+    </Svg>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <Svg>
+      <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />
+    </Svg>
+  );
+}
+
+export function PlusIcon() {
+  return (
+    <Svg>
+      <path d="M10 4.5v11M4.5 10h11" />
+    </Svg>
+  );
+}
+
+export function MinusIcon() {
+  return (
+    <Svg>
+      <path d="M4.5 10h11" />
+    </Svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <Svg strokeWidth={2}>
+      <path d="m4.5 10.5 3.6 3.5 7.4-8" />
+    </Svg>
+  );
+}
+
+export function WarnIcon() {
+  return (
+    <Svg>
+      <path d="M10 3.2 2.8 15.8h14.4z" />
+      <path d="M10 8v3.6M10 13.6v.1" />
+    </Svg>
+  );
+}
+
+export function InfoIcon() {
+  return (
+    <Svg>
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 9v4.5M10 6.4v.1" />
+    </Svg>
+  );
+}
+
+/** A pointer: "select something" (the Inspector's empty state). */
+export function CursorIcon() {
+  return (
+    <Svg>
+      <path d="M5 3.5 15.5 9.6l-4.6 1.2-2.4 4.2z" />
+    </Svg>
+  );
+}
+
+export function ChevronDownIcon() {
+  return (
+    <Svg>
+      <path d="m5.5 8 4.5 4.5L14.5 8" />
     </Svg>
   );
 }

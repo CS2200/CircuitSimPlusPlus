@@ -90,7 +90,10 @@ fn load_circuit(
     }
     let mut sim = new_session(TauriSink(app))?;
     let result = match (path, bytes) {
-        (Some(p), _) => sim.load_circuit_path(&p),
+        // Both (contract v1.5): the bytes ARE the document, the path is where it
+        // lives — the editor's current text, autoloads resolved next to the file.
+        (Some(p), Some(b)) => sim.load_circuit_bytes_at(&b, &p),
+        (Some(p), None) => sim.load_circuit_path(&p),
         (None, Some(b)) => sim.load_circuit_bytes(&b),
         (None, None) => unreachable!("checked above"),
     };
