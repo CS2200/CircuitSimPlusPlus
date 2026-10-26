@@ -53,6 +53,22 @@ use crate::components::KNOWN_TYPES;
 /// returns with it.
 const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
 
+/// The recalibrated table (`cs2200-74ls-v2`). Same 74LS board-level regime as v1, with two
+/// corrections that decide whether pipelining pays:
+///
+/// - **Memory was ~40% too fast.** v1 charged SRAM/ROM 50 ns; the real parts are a
+///   62256-70 (`tAA` 70 ns) and a 27C256-120 (`tACC` 120 ns). This is the term that
+///   makes the memory-dominated MIPS regime reproducible — see `docs/delay-table.md`.
+/// - **The adder was charged as a ripple chain.** v1's `prop 15 + perBit 4` is 139 ns for
+///   32 bits; a real 74LS181 slice is 22 ns typ and a board uses the 74LS182 lookahead,
+///   so 32 bits is ~53 ns. v1 therefore paired its worst-case ALU with its best-case
+///   memory, maximizing the ALU's share of the critical path — the opposite of the
+///   R2000, whose clock was set by its external SRAM (`R2000/12` 12.5 MHz @ 35 ns).
+///
+/// Every entry carries a `source` naming the part and parameter it came from, so the
+/// numbers are auditable rather than asserted.
+const BUILTIN_74LS_V2: &str = include_str!("../data/cs2200-74ls-v2.json");
+
 /// Component kinds a table must define — everything with a nonzero delay
 /// in the reference table. Kinds not listed here are ideal (no delay).
 const REQUIRED_KINDS: &[&str] = &[
@@ -110,13 +126,17 @@ pub enum TableError {
 }
 
 /// One component kind's timing parameters (absent fields default to 0).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Entry {
     prop: u64,
     per_bit: u64,
     setup: u64,
     hold: u64,
     access: u64,
+    /// Provenance: the part and parameter this row's numbers come from
+    /// (`"74LS374 clk->Q 15 typ, tsu 20, th 5"`). Documentation, not timing —
+    /// but stored, so `csim` can name its sources without reading a doc file.
+    source: String,
 }
 
 /// A loaded, validated delay table. Lookups are total: kinds absent from
@@ -161,6 +181,9 @@ struct RawEntry {
     setup: u64,
     hold: u64,
     access: u64,
+    /// Provenance string (docs/delay-table.md): the part + parameter the row's
+    /// numbers were taken from. Optional; carries no timing.
+    source: String,
 }
 
 impl TimingTable {
@@ -168,6 +191,7 @@ impl TimingTable {
     pub fn builtin(name: &str) -> Result<TimingTable, TableError> {
         match name {
             "cs2200-74ls-v1" => TimingTable::from_json(BUILTIN_74LS_V1),
+            "cs2200-74ls-v2" => TimingTable::from_json(BUILTIN_74LS_V2),
             _ => Err(TableError::Unknown {
                 name: name.to_string(),
                 available: Self::builtin_names().to_vec(),
@@ -175,9 +199,15 @@ impl TimingTable {
         }
     }
 
-    /// The table names this build ships.
+    /// The table names this build ships. **v2 is the current default**; v1 is kept
+    /// unchanged so designs written against it keep grading exactly as before.
     pub fn builtin_names() -> &'static [&'static str] {
-        &["cs2200-74ls-v1"]
+        &["cs2200-74ls-v2", "cs2200-74ls-v1"]
+    }
+
+    /// The table new designs should be created with.
+    pub fn default_name() -> &'static str {
+        "cs2200-74ls-v2"
     }
 
     /// Parse and validate a table from JSON (tests; future custom tables).
@@ -229,6 +259,7 @@ impl TimingTable {
                         setup: e.setup,
                         hold: e.hold,
                         access: e.access,
+                        source: e.source,
                     },
                 )
             })
@@ -262,7 +293,7 @@ impl TimingTable {
     /// scaling applied. Timing is unit-wide — there is no per-instance
     /// override (§4.3).
     pub fn timing(&self, type_: &str, bitsize: u32) -> Timing {
-        let e = self.entries.get(type_).copied().unwrap_or_default();
+        let e = self.entries.get(type_).cloned().unwrap_or_default();
         let effective = e.prop + e.per_bit * u64::from(bitsize.saturating_sub(1));
         Timing {
             prop: effective,
@@ -270,6 +301,13 @@ impl TimingTable {
             hold: e.hold,
             access: e.access,
         }
+    }
+
+    /// The provenance string for a kind's row, e.g.
+    /// `"74LS374 clk->Q 15 typ, tsu 20, th 5"` — the part and parameter the
+    /// row's numbers were taken from. `None` when the kind has no row.
+    pub fn source(&self, type_: &str) -> Option<&str> {
+        self.entries.get(type_).map(|e| e.source.as_str())
     }
 }
 
@@ -339,10 +377,58 @@ mod tests {
 
     #[test]
     fn unknown_table_name_is_a_clean_error() {
-        let e = TimingTable::builtin("cs2200-74ls-v99").unwrap_err();
+        let e = TimingTable::builtin("cs2200-74ls-v9").unwrap_err();
         let msg = e.to_string();
-        assert!(msg.contains("cs2200-74ls-v99"), "{msg}");
+        assert!(msg.contains("cs2200-74ls-v9"), "{msg}");
         assert!(msg.contains("cs2200-74ls-v1"), "{msg}");
+        assert!(msg.contains("cs2200-74ls-v2"), "{msg}");
+    }
+
+    #[test]
+    fn v2_loads_and_is_the_default() {
+        let t = TimingTable::builtin("cs2200-74ls-v2").expect("embedded v2 is valid");
+        assert_eq!(t.name(), "cs2200-74ls-v2");
+        assert_eq!(TimingTable::default_name(), "cs2200-74ls-v2");
+        assert_eq!(
+            TimingTable::builtin_names(),
+            ["cs2200-74ls-v2", "cs2200-74ls-v1"]
+        );
+    }
+
+    /// The two corrections that make the memory-dominated regime reproducible:
+    /// 32Kx8 SRAM is a 62256-70, EPROM is a 27C256-120, and a 32-bit add is a
+    /// 74LS181 slice chain with a 74LS182 lookahead, not a ripple chain.
+    #[test]
+    fn v2_anchors_are_datasheet_backed() {
+        let t = TimingTable::builtin("cs2200-74ls-v2").unwrap();
+        assert_eq!(t.timing("mem.ram", 32).access, 70);
+        assert_eq!(t.timing("mem.ram", 32).setup, 30);
+        assert_eq!(t.timing("mem.rom", 32).access, 120);
+        assert_eq!(t.timing("arith.adder", 32).prop, 53);
+        let reg = t.timing("mem.register", 32);
+        assert_eq!((reg.prop, reg.setup, reg.hold), (15, 20, 5));
+        // A 32-bit add no longer costs more than a memory access.
+        assert!(t.timing("arith.adder", 32).prop < t.timing("mem.ram", 32).access);
+        // Every row names where its numbers came from.
+        for kind in REQUIRED_KINDS {
+            let src = t.source(kind).unwrap_or("");
+            assert!(!src.is_empty(), "v2 row '{kind}' has no source");
+        }
+        assert!(t.source("mem.ram").unwrap().contains("62256"));
+        assert!(t.source("mem.register").unwrap().contains("74LS374"));
+        // Provenance is documentation: an unknown field is still rejected, but
+        // `source` is a known field (this table is rejected for *missing
+        // required kinds*, which is a semantic error, not a parse error).
+        let with_source = r#"{
+            "name": "t", "units": "ns", "wire": { "num": 1, "den": 10 },
+            "components": { "mem.rom": { "access": 5, "source": "27C256-120" } }
+        }"#;
+        match TimingTable::from_json(with_source) {
+            Err(TableError::Json(e)) => panic!("'source' must be a known field: {e}"),
+            Err(TableError::Invalid { .. }) => {}
+            Err(other) => panic!("unexpected: {other}"),
+            Ok(_) => panic!("expected the missing-kind validation to fire"),
+        }
     }
 
     #[test]

@@ -1,0 +1,31 @@
+{
+  "name": "cs2200-74ls-v2",
+  "status": "DRAFT",
+  "units": "ns",
+  "wire": { "num": 0, "den": 10 },
+  "components": {
+    "gate.not": { "prop": 9, "source": "74LS04" },
+    "gate.buffer": { "prop": 9, "source": "74LS07 / 74LS34" },
+    "gate.and": { "prop": 10, "source": "74LS08" },
+    "gate.or": { "prop": 10, "source": "74LS32" },
+    "gate.nand": { "prop": 10, "source": "74LS00" },
+    "gate.nor": { "prop": 10, "source": "74LS02" },
+    "gate.xor": { "prop": 12, "source": "74LS86" },
+    "gate.xnor": { "prop": 12, "source": "74LS266" },
+    "wiring.controlled-buffer": { "prop": 10, "source": "74LS125 / 74LS244" },
+    "plexers.mux": { "prop": 9, "source": "74LS157 data->Y 9 ns typ (select->Y 15-23)" },
+    "plexers.demux": { "prop": 22, "source": "74LS139 dual 2-to-4 decoder" },
+    "plexers.decoder": { "prop": 22, "source": "74LS138 3-to-8 decoder" },
+    "plexers.priority-decoder": { "prop": 19, "source": "74LS148 8-to-3 priority encoder" },
+    "arith.adder": { "prop": 22, "perBit": 1, "source": "74LS181 slice (22 ns typ) + 74LS182 lookahead = 53 ns for 32 bits" },
+    "arith.subtractor": { "prop": 22, "perBit": 1, "source": "74LS181 subtract mode + 74LS182 lookahead" },
+    "arith.comparator": { "prop": 26, "source": "74LS688 8-bit identity comparator" },
+    "arith.negator": { "prop": 22, "source": "74LS181 in 0 - B mode" },
+    "arith.shifter": { "prop": 9, "source": "74LS157, one mux level (a full 32-bit barrel is ~5 levels)" },
+    "arith.multiplier": { "prop": 200, "source": "estimate; no single TTL part (74LS181 carry-save array)" },
+    "arith.divider": { "prop": 200, "source": "estimate; no single TTL part (iterative 74LS181 array)" },
+    "mem.register": { "prop": 15, "setup": 20, "hold": 5, "source": "74LS374 clk->Q 15 typ, tsu 20, th 5" },
+    "mem.ram": { "access": 70, "setup": 30, "hold": 5, "source": "62256-70 tAA 70 ns, tSD 30 ns" },
+    "mem.rom": { "access": 120, "source": "27C256-120 tACC 120 ns" }
+  }
+}
