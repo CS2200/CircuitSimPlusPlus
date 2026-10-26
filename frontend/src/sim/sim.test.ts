@@ -106,12 +106,18 @@ describe("SimStore", () => {
     expect(seen).toBe(2);
   });
 
-  it("keeps a per-instance wire map, rooting the flat map at \"\" (v1.4)", () => {
+  it('keeps a per-instance wire map, rooting the flat map at "" (v1.4)', () => {
     const store = new SimStore();
     store.onLoaded(
       new Map([
         ["", new Map([[0, 7]])],
-        ["c0", new Map([[0, 9], [1, 10]])],
+        [
+          "c0",
+          new Map([
+            [0, 9],
+            [1, 10],
+          ]),
+        ],
       ]),
       [],
     );
