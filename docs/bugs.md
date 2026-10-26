@@ -1999,6 +1999,11 @@ transpiler's suite.
 | flips | — | **1: `374299303` pass → pass (fixed)** |
 
 `374299303` now halts with the expected state. The two left are `374625393` and `410460509`.
-Both halves of a design's `ONE` path are now expressible and converted, so this is not a fix
-for one submission: it was inverting the extension of every negative immediate in every
-converted design that used the mode.
+
+Unlike the compat-only rounds, this one reaches **production** too — the converter emits `one`
+and every engine understands the mode — so prod was measured as well
+(`report-prod-extend.json`, against `report-prod-boundary.json`): 199 agree (was 198), 13
+disagreements (was 14), 0 false passes, and the single flip is again `374299303` passing. So the
+design was wrong in *both* modes, and the same one-line misreading of CE's enum explains it: it
+was inverting the extension of every negative immediate in every converted design that used the
+`ONE` mode.
