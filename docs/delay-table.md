@@ -17,7 +17,11 @@ the available tables — the engine never guesses or silently defaults.
 technology, 2.0 µm CMOS, replacing the 74LS board-level idea (see below — the
 74LS model was ALU-bound and silently made a one-cycle datapath competitive).
 `cs2200-74ls-v1`/`-v2` remain published and unchanged, so designs and reports
-written against them keep grading identically. Both are **DRAFT** — 74LS-family TTL datasheet *typical*
+written against them keep grading identically. **The transpiler declares this
+table** (`csxtrans/csx.py`'s `DEFAULT_DELAY_TABLE`) for every converted
+document; it pinned the retired `cs2200-74ls-v1` until 2026-10-26, which
+overrode the engine's own default in every `.csx` and made one compat verdict
+depend on the table (see `circuitsim-transpiler:docs/04-verification.md`). Both are **DRAFT** — 74LS-family TTL datasheet *typical*
 propagation delays, period-authentic for the course (DESIGN.md §4.4), pending
 staff finalization (D13). Only ratios matter for scoring, but the units are ns
 so TAs can say "your clock would run at X MHz".
