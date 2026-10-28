@@ -2029,6 +2029,10 @@ impl DelayEngine {
                 if self.queue.len() > 1 {
                     let kind = ev.kind.clone();
                     self.queue.pop();
+                    // Drain the cascade. **No truncation here on purpose**: the engine's own
+                    // per-cycle event cap fires from `apply`, so a design that never quiesces
+                    // halts as an oscillation. A local `break` (which a debug build once had)
+                    // silently breaks the "never hang" contract by continuing instead.
                     while let Some(e) = self.queue.pop() {
                         self.apply(e)?;
                     }
@@ -4496,6 +4500,131 @@ mod tests {
             Some(k(1, 1)),
             "a gated-open clock must latch"
         );
+    }
+
+    /// **A3 (docs/derived-clock.md, test plan).** Edge times advance **monotonically**: the
+    /// derived clock must never move backwards, which is the invariant that lets the settle
+    /// be measured from the edge at all.
+    #[test]
+    fn edge_times_only_advance() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"1"}}}},
+                {{"id":"one1","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero1","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"reg","type":"mem.register","pos":[0,0],"name":"r","attrs":{{"bitsize":8}}}},
+                {{"id":"add","type":"arith.adder","pos":[0,0],"attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"reg","pin":"clk"}}}},
+                {{"a":{{"comp":"one1","pin":"out"}},"b":{{"comp":"reg","pin":"en"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"reg","pin":"rst"}}}},
+                {{"a":{{"comp":"add","pin":"out"}},"b":{{"comp":"reg","pin":"d"}}}},
+                {{"a":{{"comp":"reg","pin":"q"}},"b":{{"comp":"add","pin":"a"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"add","pin":"b"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"add","pin":"cin"}}}}
+            ]}}]
+        }}"##
+        );
+
+        let now = |e: &DelayEngine| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
+            v["now"].as_u64().expect("now")
+        };
+        let mut eng = engine(&json, 50);
+        let mut last = 0;
+        for i in 0..6 {
+            eng.run(1).expect("a cycle");
+            let n = now(&eng);
+            assert!(
+                n > last,
+                "cycle {i}: edge time must advance ({last} -> {n})"
+            );
+            last = n;
+        }
+    }
+
+    /// **F2 (docs/derived-clock.md, test plan).** A **divided** clock: the register's `clk`
+    /// is driven by another register's output, so it rises on every *other* global edge.
+    /// The discriminating assertion is that it does **not** latch on the falling half -- a
+    /// latch on both halves would leave it 1 instead of 0.
+    #[test]
+    fn a_divided_clock_latches_on_the_rise_only() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"not1","type":"gate.not","pos":[0,0]}},
+                {{"id":"r1","type":"mem.register","pos":[0,0],"name":"r1"}},
+                {{"id":"r2","type":"mem.register","pos":[0,0],"name":"r2"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r1","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r1","pin":"en"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r1","pin":"rst"}}}},
+                {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"not1","pin":"in"}}}},
+                {{"a":{{"comp":"not1","pin":"out"}},"b":{{"comp":"r1","pin":"d"}}}},
+                {{"a":{{"comp":"r1","pin":"q"}},"b":{{"comp":"r2","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r2","pin":"en"}}}},
+                {{"a":{{"comp":"not1","pin":"out"}},"b":{{"comp":"r2","pin":"d"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r2","pin":"rst"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 50);
+        eng.run(1).expect("cycle 1");
+        assert_eq!(eng.named_value("r1"), Some(k(1, 1)), "r1 toggles each edge");
+        assert_eq!(
+            eng.named_value("r2"),
+            Some(k(1, 1)),
+            "r2 latched on r1's rise -- reading not1's PRE-settled output, because not1's \
+             input changed at the same instant its clk rose. That is the hardware's own \
+             race, not a modelling choice."
+        );
+        eng.run(1).expect("cycle 2");
+        assert_eq!(eng.named_value("r1"), Some(k(1, 0)), "r1 toggled back");
+        assert_eq!(
+            eng.named_value("r2"),
+            Some(k(1, 1)),
+            "r1's clk FELL, so r2 must not latch -- and d became 0 in between, so a latch \
+             on the falling half would have left r2 at 0"
+        );
+    }
+
+    /// **F3 (docs/derived-clock.md, test plan).** A **self-oscillating** clock source -- a
+    /// ring driving a register's `clk` -- never quiesces, so the drain never ends and the
+    /// run must halt as an **oscillation**, not hang. The "never hang" contract, under the
+    /// barrier.
+    #[test]
+    fn a_self_oscillating_clock_halts_as_an_oscillation() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"n1","type":"gate.not","pos":[0,0]}},
+                {{"id":"n2","type":"gate.not","pos":[0,0]}},
+                {{"id":"n3","type":"gate.not","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"n1","pin":"out"}},"b":{{"comp":"n2","pin":"in"}}}},
+                {{"a":{{"comp":"n2","pin":"out"}},"b":{{"comp":"n3","pin":"in"}}}},
+                {{"a":{{"comp":"n3","pin":"out"}},"b":{{"comp":"n1","pin":"in"}}}},
+                {{"a":{{"comp":"n2","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 50);
+        let halt = eng.run(2).expect_err("a ring on clk must not settle");
+        assert_eq!(halt.reason, HaltReason::Oscillation);
     }
 
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
