@@ -2052,6 +2052,8 @@ impl DelayEngine {
                     continue;
                 }
                 let ev = self.queue.pop().expect("peeked");
+                #[cfg(test)]
+                self.assert_edge_does_not_overtake(&ev);
                 self.apply(ev).inspect_err(|h| self.record_halt(h))?;
                 return Ok(());
             }
@@ -2120,6 +2122,8 @@ impl DelayEngine {
             }
             let ev = self.queue.pop().expect("peeked");
             let was_rising = matches!(ev.kind, EvKind::Clock { phase: true });
+            #[cfg(test)]
+            self.assert_edge_does_not_overtake(&ev);
             self.apply(ev)?;
             if was_rising {
                 run_cycles += 1;
@@ -2642,27 +2646,54 @@ impl DelayEngine {
         self.halted = Some(h.clone());
     }
 
-    /// **A2 (`docs/derived-clock.md` section 10) instrument.** Fires if a *data* event at
-    /// or before `edge_time` is still unapplied when an edge is applied -- i.e. if the edge
-    /// overtook the cascade it is supposed to wait for.
+    /// **A2 (`docs/derived-clock.md` section 10) instrument.** Fires if any *data* event is
+    /// still queued when an edge is applied. The barrier's whole content is that an edge is
+    /// only ever applied once the cascade it closes has been drained, so at that moment the
+    /// queue holds nothing but clocks that are due later.
     ///
-    /// Strictly *before* the edge, not at it: events at exactly the edge's time are a
-    /// same-timestamp tie, which the queue's own ordering resolves, not an overtake. The
-    /// property under test is that nothing the edge should have out-waited is left behind.
+    /// Note what this is *not*. It is not "nothing earlier than the edge is still pending":
+    /// that holds for free, because the queue is time-ordered, so popping the minimum can
+    /// never leave an earlier event behind -- with or without a barrier. A2 was written that
+    /// way first, and the barrier-disabled control run *passed*, which is how the mistake
+    /// was caught; a test whose assertion is a property of the data structure rather than
+    /// of the thing under test is worse than no test, because it reads like coverage.
     ///
-    /// Test-only, and deliberately so: it is an *invariant*, not a knob, so it gets no
-    /// public accessor and no snapshot state -- it is compiled out of the released engine.
-    /// A test that could only look at a counter afterwards could not see this violation,
-    /// because the violation is a moment, not a state.
+    /// Two things are legitimately still queued, and both are *stimulus* rather than logic
+    /// awaiting settlement:
+    ///
+    /// - a **poke** the testbench scheduled for a future time -- it is the caller injecting
+    ///   a value at time `t`, not part of any cascade, and waiting for it would be wrong;
+    /// - **clocks due later** -- the next half-edge, which is not a violation of anything.
+    ///
+    /// It is called by the *cycle-advancing* paths -- where the loop is about to apply an
+    /// edge -- and checked there rather than inside `apply`, because `apply` cannot tell who
+    /// called it. `run_until_time` strides to a *time* on the testbench's behalf rather than
+    /// to a settled state and legitimately crosses an edge mid-cascade; it has no caller
+    /// outside this file's tests, and if one ever appears, that assertion site is what should
+    /// decide whether it is allowed to. (Being path-aware is not a convenience: put inside
+    /// `apply`, this check fails `breakpoint_fires_on_arrival_not_on_level`, which strides
+    /// across edges by design.)
+    ///
+    /// What it therefore pins is the *routing*: an edge with a cascade waiting must have gone
+    /// through `fire_edge_without_overtaking`, so reaching a plain apply with logic still
+    /// queued means the barrier did not do its job. That is a smaller claim than it looks,
+    /// and it is the honest one -- the *behavioural* half of A2 (a latch samples a settled
+    /// cloud) is A1's, B5's and B1/B3's, which all fail when the barrier is removed. This is
+    /// the mechanism those tests have in common, asserted where it is decided.
     #[cfg(test)]
-    fn assert_no_data_pending_at(&self, edge_time: u64) {
+    fn assert_edge_does_not_overtake(&self, ev: &Ev) {
+        // Only edges owe the barrier anything: a data event is applied by definition.
+        if !matches!(ev.kind, EvKind::Clock { .. }) {
+            return;
+        }
         if let Some(e) = self
             .queue
             .iter()
-            .find(|e| e.time < edge_time && !matches!(e.kind, EvKind::Clock { .. }))
+            .find(|e| !matches!(e.kind, EvKind::Clock { .. } | EvKind::Poke { .. }))
         {
             panic!(
-                "A2: an edge at {edge_time} fired while an event at {} ({:?}) was still pending",
+                "A2: an edge fired while an event at {} ({:?}) was still pending -- the \
+                 barrier drains the cascade, never the testbench's future stimulus",
                 e.time, e.kind
             );
         }
@@ -2694,11 +2725,6 @@ impl DelayEngine {
         self.hash_event(&ev);
         match ev.kind {
             EvKind::Clock { phase } => {
-                // **A2 (`docs/derived-clock.md` section 10).** An edge is only ever applied
-                // once the cascade it closes has been drained; this is that claim, checked
-                // in the one place that can see it.
-                #[cfg(test)]
-                self.assert_no_data_pending_at(ev.time);
                 // The cycle that just ended is closed **at the edge** — the barrier below
                 // guarantees the cascade has settled, so this is the state a grader reads.
                 if !self.in_boot {
@@ -4393,13 +4419,13 @@ mod tests {
     /// **A2 (`docs/derived-clock.md` section 10).** No edge fires while data events are
     /// pending -- the barrier's contract, asserted from the inside.
     ///
-    /// The plan's phrasing is "the queue holds only the next clock". That is not literally
-    /// true on every path, and the test would be wrong to demand it: `run_until_time` may
-    /// cross an edge with events *later* than it still queued, which is correct -- they
-    /// belong after the edge. The invariant that is true, and that the derived clock
-    /// exists to provide, is that nothing falling **before** the edge is left unapplied;
-    /// that is what the instrument checks, and it checks it at the moment of application,
-    /// which is the only vantage point from which the property is visible at all.
+    /// The plan's phrasing is "the queue holds only the next clock", and that is what is
+    /// asserted, give or take scheduled pokes: the instrument checks the whole queue at the
+    /// moment of application, which is the only vantage point from which the property is
+    /// visible.
+    /// (The weaker reading, "nothing *earlier* than the edge is still pending", is true for
+    /// free and was the first version of this test; the control run below is what exposed
+    /// it. See the instrument's comment.)
     ///
     /// The fixture is A1's over-period chain, because that is the design that *needs* the
     /// barrier: 250 inversions take ~2250 ns, well past the 1000 ns period, so an edge that
