@@ -239,6 +239,102 @@ violations that are structurally meaningless.
 Which means retiring the violation machinery is not optional decoration — it is the
 resolution of three of the four failures.
 
+## 10. Test plan
+
+Grouped by **property**, because that is what a test here is for — a test that asserts a
+number without naming the property is how the four retired fixtures rotted.
+
+Fixture vocabulary: *unit* = a hand-built document in `delay.rs` tests; *integration* = a
+`.csx` under `tests/fixtures/`; *corpus* = the 358 designs; *hand-computed* = delay numbers
+chosen so the expected period can be derived on paper (`gate.not` 2 ns, `mem.register` 4 ns
+clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
+
+### A. The barrier — an edge never overtakes the logic
+
+| # | property | how |
+|---|---|---|
+| A1 | a chain **longer than the nominal period** still latches the **settled** value | unit: the old 250-inverter fixture, asserting the register's *value* rather than a warning. This is the fixture `overclocked_chain_…` must become |
+| A2 | no edge fires while data events are pending | unit: after each edge, assert the queue holds only the next clock (the barrier's contract, from the inside) |
+| A3 | edge times are **strictly increasing** | unit: run a long cascade, assert the edge-time sequence is monotone (this is the inversion guard) |
+| A4 | a cascade spilling past the nominal period is **completed** before the edge | unit: assert the value *and* that the edge lands after the spill |
+
+### B. The period
+
+| # | property | how |
+|---|---|---|
+| B1 | `t_obs` = **settle + setup**, exactly | hand-computed unit: `clk→Q + not + not + setup` |
+| B2 | `t_obs` = the **max** over cycles, not the sum | hand-computed unit: a long path taken every third cycle; assert `t_obs` = the long settle and `est_time = cycles × t_obs` |
+| B3 | **setup is included** | two fixtures identical but for the register's setup; their periods differ by exactly that delta |
+| B4 | a design that never changes after the first edge → `t_obs` = 0 | hand-computed unit; documents the fixture artefact now asserted in `overclocked_chain_…` |
+| B5 | the period is a **floor**, not a schedule | unit: the clock parameter set to wildly different values gives the same verdict and the same `t_obs` |
+
+### C. Retired contract (slice 2 — write these when the fields go)
+
+| # | property | how |
+|---|---|---|
+| C1 | **no** design reports a violation, for any poke pattern | integration: near-edge pokes, a RAM `we`, both — assert `violations` empty |
+| C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | integration |
+| C3 | `timing_violations` is **absent or always zero** in the report | integration |
+| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration |
+| C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration |
+
+### D. Loops and non-quiescence — the "never hang" contract
+
+| # | property | how |
+|---|---|---|
+| D1 | a **ring oscillator** halts with an oscillation | unit — and note this is the test that would have caught the `next_boundary` hang: the cap must fire *inside a drain* |
+| D2 | a **settling** loop (an SR latch) settles and latches | unit |
+| D3 | a **conservative** loop — a graph cycle with no real one (a shared bus, mutually exclusive drivers) — runs, does not storm, and gives CE's values | integration: this is where the levelized engine failed, so it is the design the delay engine must keep passing |
+| D4 | the drain is **bounded**: a non-quiescing cascade trips the cap rather than growing | unit: assert the queue length stays bounded and the halt is an oscillation |
+
+### E. Determinism and state
+
+| # | property | how |
+|---|---|---|
+| E1 | same design twice → identical trace hash | unit |
+| E2 | snapshot mid-run → resume → bit-identical to an uninterrupted run | unit (**must include `cycle_start`**, which the snapshot now carries) |
+| E3 | `step_tick` (one edge) equals `run(1)` | unit |
+| E4 | the derived edge times reproduce on a second engine built from the same document | unit |
+
+### F. Clocks
+
+| # | property | how |
+|---|---|---|
+| F1 | a **gated** clock works — the gate settles as part of the cascade | integration |
+| F2 | a **divided** clock (a counter bit on `clk`) works, and is count-based | integration |
+| F3 | a **self-oscillating** source (a ring driving `clk`) is an oscillation halt, not a hang | unit |
+| F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | unit — the clock's own propagation is cascade, not schedule |
+
+### G. Corpus — the regression gate
+
+| # | property | how |
+|---|---|---|
+| G1 | **verdict-neutral**: the A/B over all 358 has zero differing rows | corpus: `pow-check.py`, both binaries frozen (it currently reports master 224/133/0 and derived 224/133/0) |
+| G2 | no timeouts in that A/B | corpus |
+| G3 | the prod and compat harness runs do not gain disagreements | corpus: `tools/check_submissions.py` |
+
+### H. Fidelity to CE — the goal, currently expected to fail
+
+| # | property | how | status |
+|---|---|---|---|
+| H1 | the **same verdict under any delay table** for a chosen design | corpus: `374625393` under `mips-r2000-2um-v1` and `cs2200-74ls-v1` | **fails today** (stop @2834 vs never stabilises). Encode it as a known-failure so the day it passes is visible |
+| H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | unit: pin the divergence explicitly rather than discovering it | known divergence |
+
+### I. Fixtures to replace, not repair
+
+- `overclocked_chain_completes_with_setup_violation` → **A1** (assert the value, not a warning). Its current `t_obs = 0` assertion is a property of the fixture, not the engine.
+- `neg-setup-violation.csx` → repurpose as "a near-edge poke is **not** reported" (**C1**).
+- `setup_and_hold_violations_are_warnings` → delete; superseded by **C1**.
+- `autograde::violations_assertion_and_report_entries` → already deleted.
+
+### J. What none of these cover, and should be said out loud
+
+Every test above pins **our** behaviour. Only **H1** and the corpus A/B speak to the actual
+goal — a verdict that does not move when the table does — and **H1 fails**. So the honest
+statement of where the test suite would be after all of this: thoroughly pinned, internally
+consistent, and still unable to claim CE fidelity. That claim needs H1 green, and H1 needs a
+value model with no time in it.
+
 ## 9. What does not change
 
 The event queue, per-sink views, transport/inertial delays, the tie-break, the `on_cycle`
