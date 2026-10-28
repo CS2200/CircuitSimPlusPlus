@@ -204,6 +204,41 @@ not be an input — but it is not sufficient: table-independent *values* need a 
 no time in it at all, which is the levelized engine. The two efforts are complementary, not
 alternatives: this one removes the race, that one removes the filtering and the tie-break.
 
+## 8d. The origin bug (found and fixed 2026-10-28)
+
+`t_obs` read 2990 where the overclocked-chain fixture expects 990. Instrumenting the
+measurement showed why:
+
+```
+SETTLE t=2990 cycle_start=0 dt=2990 rising_seen=0 in_boot=false
+```
+
+`rising_seen = 0` — **no edge had occurred yet** — while `in_boot` was already false. So
+there was an unguarded window between "boot ends" and "the first edge", and the derived
+clock makes that window *long*, because the first edge is deferred until the initial
+cascade settles: the origin stayed at 0 for the whole stretch.
+
+Fixed by requiring `rising_seen > 0` before measuring — nothing is measured before the
+first edge.
+
+## 8e. What the four failing tests are (2026-10-28)
+
+`cargo test`: 224 pass, 4 fail, and all four are the **legacy machinery**, not the derived
+clock:
+
+- `setup_and_hold_violations_are_warnings`, `violations_assertion_and_report_entries`,
+  `overclocked_chain_completes_with_setup_violation` — they assert that violations exist.
+- `watch_changes_counts_moves` — counts a latch at a specific edge time.
+
+And a finding that *forces* the decision: **violations now fire spuriously.** The edge is
+placed at the moment the drain ends, and the last data change is by definition *at* that
+moment — so the last-changing register input is always "within `t_setup` of the edge" by
+the tracking rule. So the tracking cannot be kept as-is: with a derived clock it reports
+violations that are structurally meaningless.
+
+Which means retiring the violation machinery is not optional decoration — it is the
+resolution of three of the four failures.
+
 ## 9. What does not change
 
 The event queue, per-sink views, transport/inertial delays, the tie-break, the `on_cycle`

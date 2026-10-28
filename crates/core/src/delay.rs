@@ -2828,9 +2828,20 @@ impl DelayEngine {
                 // notify the sink (F14). DTA settle and setup/hold
                 // tracking happen at the pin's own arrival time.
                 self.views[comp as usize][slot as usize] = Arc::clone(&value);
-                if !self.in_boot && self.state_input_net[net as usize] {
+                // `rising_seen > 0`: nothing is measured before the first edge. Under the
+                // derived clock the first edge is deferred until the initial cascade has
+                // settled, so without this the whole boot stretch is measured from
+                // `cycle_start == 0` — t_obs 2990 instead of 990 on the overclocked-chain
+                // fixture.
+                if !self.in_boot && self.rising_seen > 0 && self.state_input_net[net as usize] {
                     let cycle_start = self.cycle_start;
                     let dt = ev.time - cycle_start;
+                    if std::env::var("CSIM_DEBUG_SETTLE").is_ok() {
+                        eprintln!(
+                            "SETTLE t={} cycle_start={} dt={} rising_seen={} in_boot={}",
+                            ev.time, cycle_start, dt, self.rising_seen, self.in_boot
+                        );
+                    }
                     if dt > self.cycle_settle {
                         self.cycle_settle = dt;
                         self.cycle_settle_net = Some(net);
