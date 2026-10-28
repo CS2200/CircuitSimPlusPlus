@@ -11,6 +11,33 @@ selects a table by name via `settings.delayTable` (see
 `docs/format-v2.md`); an **unknown name is a load-time error** that lists
 the available tables — the engine never guesses or silently defaults.
 
+> ## ⚠ LANDMINE: a table change can move a VERDICT
+>
+> Do not treat this table as pure reporting. **A delay table change has moved a pass/fail
+> verdict**, and it still does. Measured 2026-10-28: `submission_374625393` halts under
+> `mips-r2000-2um-v1` (stop, 2834 cycles) and **never stabilises** under `cs2200-74ls-v1`
+> (runs out of cycles). Same design, same engine, only `settings.delayTable` different.
+>
+> The mechanism is that delays decide **values**, not just times: the settle can exceed the
+> period and latch a stale value, an inertial gate swallows a pulse CE would have passed,
+> and a different duration moves where equal timestamps fall for the `(time, seq)`
+> tie-break. CircuitSim CE has no time at all, so every one of these is a divergence.
+>
+> **Consequences for whoever touches this:**
+>
+> - The converter pins `mips-r2000-2um-v1` (`csxtrans/csx.py`, `DEFAULT_DELAY_TABLE`) and
+>   the grader declares it. That is deliberate: it is the table the corpus is verified
+>   against. **Changing it, or introducing a second table for the same semester, requires
+>   re-running the whole corpus** (`tools/check_submissions.py`) and re-verifying every row.
+> - The derived-clock branch (`docs/derived-clock.md` on `derived-clock`) removes the
+>   *race* route but **not** the glitch-filtering and tie-break routes — it is neutral on the
+>   corpus and does not fix this. So this warning survives that work.
+> - The only design that removes the dependence at the root is a value model with no time in
+>   it (the levelized engine, branch `settle-engine`), and that has its own conformance bill.
+>
+> Recorded 2026-10-28 because the failure is silent: nothing crashes, a design just grades
+> differently.
+
 ## Status
 
 **`mips-r2000-2um-v1` is the current table** (2026-10-25): the MIPS R2000's own
