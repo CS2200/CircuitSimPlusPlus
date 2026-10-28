@@ -411,7 +411,9 @@ fn negative_fixtures_halt_as_advertised() {
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Oscillation);
 
-    // setup violation: warning recorded, run still completes.
+    // setup violations are RETIRED with a derived clock (docs/derived-clock.md): the edge
+    // is placed after the settle, so a poke that looks like a near-edge change must NOT be
+    // reported. The run still completes.
     let doc = load("neg-setup-violation.csx");
     let mut cfg = autograde::GradeConfig {
         clock_half_period: 1000,
@@ -423,7 +425,7 @@ fn negative_fixtures_halt_as_advertised() {
         value: 1,
         at: 3990,
     }];
-    cfg.assertions = vec![autograde::parse_assertion("violations == 1").unwrap()];
+    cfg.assertions = vec![autograde::parse_assertion("violations == 0").unwrap()];
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Passed);
 

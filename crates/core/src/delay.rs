@@ -2080,8 +2080,7 @@ impl DelayEngine {
                             let who = match &e.kind {
                                 EvKind::Fire { comp, .. } => format!(
                                     "Fire {} {}",
-                                    comp,
-                                    self.netlist.comps[*comp as usize].type_
+                                    comp, self.netlist.comps[*comp as usize].type_
                                 ),
                                 other => format!("{other:?}"),
                             };
@@ -2972,18 +2971,11 @@ impl DelayEngine {
     /// Record a data-input change; flag a hold violation if it lands
     /// within `t_hold` after the last edge.
     fn track_hold(&mut self, c: usize, field: TrackField, time: u64) {
-        let hold = self.cdata[c].timing.hold;
+        // **Retired** (docs/derived-clock.md): hold violations are meaningless with a derived
+        // clock. The edge is placed *after* the settle and nothing races it, so there is no
+        // "data changed too soon after the edge" condition to detect. The arrival tracking
+        // below is kept because it costs nothing and is useful for debugging.
         let tr = &mut self.clk_track[c];
-        if let Some(e) = tr.last_edge {
-            if time >= e && time < e + hold {
-                self.violations.push(TimingViolation {
-                    comp: CompId(c as u32),
-                    kind: ViolationKind::Hold,
-                    time,
-                    cycle: self.rising_seen,
-                });
-            }
-        }
         match field {
             TrackField::D => tr.last_d = Some(time),
             TrackField::Din => tr.last_din = Some(time),
@@ -3003,16 +2995,11 @@ impl DelayEngine {
             Class::Ram => tr.last_din.max(tr.last_addr).max(tr.last_we),
             _ => tr.last_d,
         };
-        if let Some(dc) = last_data {
-            if dc > time.saturating_sub(setup) && dc <= time {
-                self.violations.push(TimingViolation {
-                    comp: CompId(c as u32),
-                    kind: ViolationKind::Setup,
-                    time,
-                    cycle: self.rising_seen,
-                });
-            }
-        }
+        // **Retired** (docs/derived-clock.md): with a derived clock the edge is placed at the
+        // instant the drain ends, so the last data change is *by construction* at the edge —
+        // every register would report a setup violation. The tracker cannot be kept as-is;
+        // it is deleted rather than reported.
+        let _ = (setup, last_data);
         self.clk_track[c].last_edge = Some(time);
         // Sample inputs from the pins' *views* and latch (consume rules
         // fire here).
@@ -3647,14 +3634,16 @@ mod tests {
         eng.poke_at("d", k(1, 1), 190);
         eng.run(1).unwrap();
         assert_eq!(eng.named_value("r"), Some(k(1, 1))); // latch still happens
-        assert_eq!(eng.violations().len(), 1);
-        assert_eq!(eng.violations()[0].kind, ViolationKind::Setup);
-        // Hold: D changes at 302, within t_hold 5 after the edge at 300.
+                                                         // Violations are **retired** (docs/derived-clock.md): the edge is placed after the
+                                                         // settle, so "data too close to the edge" is not a condition any more. The latch
+                                                         // above must still have happened, and nothing may be reported.
+        assert!(
+            eng.violations().is_empty(),
+            "setpoint violations are retired with a derived clock"
+        );
         eng.poke_at("d", k(1, 0), 302);
         eng.run(1).unwrap();
-        assert_eq!(eng.violations().len(), 2);
-        assert_eq!(eng.violations()[1].kind, ViolationKind::Hold);
-        assert_eq!(eng.violations()[1].comp.0, eng.violations()[0].comp.0);
+        assert!(eng.violations().is_empty());
     }
 
     /// A register whose `d` is a pokeable named pin: the fixture the stop-condition
@@ -3723,8 +3712,11 @@ mod tests {
             if stops {
                 let info = eng.stop_info().cloned().expect("stop recorded");
                 assert_eq!((info.name.as_str(), info.when.as_str()), ("r", "changes"));
-                assert_eq!(info.at_cycle, 2, "the latch at the edge @200 is the move");
-                assert_eq!(info.last_change_cycle, Some(2));
+                assert_eq!(
+                    info.at_cycle, 1,
+                    "the derived clock closes the cycle AT the edge, so the latch is boundary 1"
+                );
+                assert_eq!(info.last_change_cycle, Some(1));
             }
         }
         // A value that never moves is not a change: `is`-like, the first boundary only
@@ -4269,8 +4261,8 @@ mod tests {
         // Edge at 1000 (clk wire 0). we rises at 990 — inside setup 15.
         assert!(eng.poke_at("we", k(1, 1), 990));
         let rep = eng.run(1).unwrap();
-        assert_eq!(rep.violations.len(), 1, "we setup violation tracked");
-        assert_eq!(rep.violations[0].kind, ViolationKind::Setup);
+        // Retired with a derived clock (docs/derived-clock.md).
+        assert!(rep.violations.is_empty(), "violations are retired");
         assert_eq!(
             eng.memory_word("m", 0),
             Some(k(8, 0)),
@@ -4330,12 +4322,15 @@ mod tests {
         assert!(eng.poke_at("src", k(1, 1), 740));
         let rep = eng.run(3).expect("overclocked run must complete");
         assert_eq!(rep.cycles, 3);
-        assert_eq!(rep.violations.len(), 1, "exactly one setup violation");
-        assert_eq!(rep.violations[0].kind, ViolationKind::Setup);
-        // The final-cycle fold (F7) counts the last cycle's settle. With wire
-        // propagation off the data lands at 2990, and cycle 3 spans 2000..3000, so the
-        // settle measures 990 ns (a wire-delayed clock used to make this 25).
-        assert_eq!(rep.t_obs, 990, "final in-progress cycle is folded");
+        assert!(rep.violations.is_empty(), "violations are retired");
+        // **Rewritten for the derived clock.** The old expectation (990) was the settle
+        // measured from a *nominal* edge at 2000 — but the only activity here is the poke
+        // at 740, which starts the chain before the first edge. With a derived clock the
+        // first edge is deferred until that cascade settles (2990), and the design is then
+        // static, so there is no per-cycle settle to measure: t_obs is 0. A real program
+        // changes something every cycle, so this is a property of the fixture, not of the
+        // engine — see the test plan for the fixture that should replace it.
+        assert_eq!(rep.t_obs, 0, "nothing settles after the first edge");
     }
 
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
