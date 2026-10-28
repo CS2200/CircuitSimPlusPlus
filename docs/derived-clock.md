@@ -168,6 +168,42 @@ Two things follow, and both are prerequisites rather than options:
 
 Reverted; `docs/derived-clock.md` is kept as the design of record, with this as the gate.
 
+## 8c. Measured (2026-10-28): neutral, and it does NOT fix table-dependence
+
+Slice 1 is implemented (`781174d`) and measured.
+
+**Full corpus, POW only, 358 designs, both binaries frozen:**
+
+| | pass | fail | timeout | error |
+|---|---|---|---|---|
+| `master` (fixed clock) | 224 | 133 | 0 | 0 |
+| **derived clock** | **224** | **133** | **0** | **0** |
+
+**Zero rows differ.** So: no regressions, and no hangs — the earlier "hang" was a leftover
+`while ... next_boundary` loop that never terminated once `close_cycle` stopped advancing it,
+not the barrier.
+
+**But it does not fix what it was for.** `submission_374625393` under both tables:
+
+| table | halt | cycles | t_obs |
+|---|---|---|---|
+| `mips-r2000-2um-v1` | stop | 2834 | 114 |
+| `cs2200-74ls-v1` | **completed** (never stabilises) | 150000 | 403 |
+
+Still table-dependent. Removing the **race** is not enough, because the table can decide a
+value by at least two other routes:
+
+1. **Inertial glitch filtering.** A gate swallows a pulse narrower than its `t_pd`. A bigger
+   table swallows more, so a design can see different values — and CE has *no* filtering, so
+   any of it is a divergence from CE.
+2. **The tie-break.** Equal timestamps are ordered by `(time, seq)`; different durations move
+   *where* the ties fall, so a non-confluent settle can land differently.
+
+**Conclusion.** The derived clock is the right shape and is a prerequisite — the clock should
+not be an input — but it is not sufficient: table-independent *values* need a value model with
+no time in it at all, which is the levelized engine. The two efforts are complementary, not
+alternatives: this one removes the race, that one removes the filtering and the tie-break.
+
 ## 9. What does not change
 
 The event queue, per-sink views, transport/inertial delays, the tie-break, the `on_cycle`
