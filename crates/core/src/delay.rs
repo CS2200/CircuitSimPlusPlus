@@ -2071,8 +2071,31 @@ impl DelayEngine {
             if matches!(ev.kind, EvKind::Clock { .. }) && self.queue.len() > 1 {
                 let kind = ev.kind.clone();
                 self.queue.pop();
-                while let Some(e) = self.queue.pop() {
-                    self.apply(e)?;
+                {
+                    // `CSIM_DEBUG_DRAIN=1`: what one drain is made of, for a runaway cascade.
+                    let dbg = std::env::var("CSIM_DEBUG_DRAIN").is_ok();
+                    let mut n = 0usize;
+                    while let Some(e) = self.queue.pop() {
+                        if dbg && n < 60 {
+                            let who = match &e.kind {
+                                EvKind::Fire { comp, .. } => format!(
+                                    "Fire {} {}",
+                                    comp,
+                                    self.netlist.comps[*comp as usize].type_
+                                ),
+                                other => format!("{other:?}"),
+                            };
+                            eprintln!("DRAIN {n:4} t={} {who}", e.time);
+                        }
+                        n += 1;
+                        self.apply(e)?;
+                        if n > 400_000 {
+                            break;
+                        }
+                    }
+                    if dbg {
+                        eprintln!("DRAIN total {n} events in one drain");
+                    }
                 }
                 self.schedule(self.now, kind);
                 continue;
@@ -2618,9 +2641,10 @@ impl DelayEngine {
         // closing on peek would be premature when the run loop stops
         // *before* a boundary-edge it only looked at. No cycle accounting
         // during the boot settle.
-        while !self.in_boot && self.now >= self.next_boundary {
-            self.close_cycle()?;
-        }
+        // There is no time-based cycle boundary any more: the cycle is closed by the edge
+        // itself (`EvKind::Clock`), which the barrier only fires once the cascade has
+        // settled. This used to spin here waiting for `next_boundary` to be passed — and
+        // since `close_cycle` no longer advances it, that loop never terminated.
         self.events_this_cycle += 1;
         self.events_processed += 1;
         if self.events_this_cycle > self.events_per_cycle_cap {
