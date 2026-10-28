@@ -4342,6 +4342,50 @@ mod tests {
         assert_eq!(rep.t_obs, 0, "nothing settles after the first edge");
     }
 
+    /// **B5 (`docs/derived-clock.md` §10).** The nominal period is a *floor*, not a
+    /// schedule: it must not decide *values*, and it must not change the settle `t_obs`
+    /// reports. A counter is the clean probe — it changes every cycle, so there is always
+    /// something to settle.
+    #[test]
+    fn the_nominal_period_does_not_decide_values_or_t_obs() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"1"}}}},
+                {{"id":"one1","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero1","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"reg","type":"mem.register","pos":[0,0],"name":"r","attrs":{{"bitsize":8}}}},
+                {{"id":"add","type":"arith.adder","pos":[0,0],"attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"reg","pin":"clk"}}}},
+                {{"a":{{"comp":"one1","pin":"out"}},"b":{{"comp":"reg","pin":"en"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"reg","pin":"rst"}}}},
+                {{"a":{{"comp":"add","pin":"out"}},"b":{{"comp":"reg","pin":"d"}}}},
+                {{"a":{{"comp":"reg","pin":"q"}},"b":{{"comp":"add","pin":"a"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"add","pin":"b"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"add","pin":"cin"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut fast = engine(&json, 50); // nominal period 100
+        let mut slow = engine(&json, 5000); // nominal period 10 000
+        let a = fast.run(3).expect("fast run");
+        let b = slow.run(3).expect("slow run");
+        assert_eq!(
+            fast.named_value("r"),
+            Some(k(8, 3)),
+            "the program must advance identically"
+        );
+        assert_eq!(slow.named_value("r"), Some(k(8, 3)));
+        assert_eq!(
+            a.t_obs, b.t_obs,
+            "a nominal period 100x longer must not change the settle"
+        );
+        assert!(a.t_obs > 0, "a counter settles every cycle");
+    }
+
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
     /// consumed — no halt; the output is still computed (driverless-net
     /// views do not block evaluation).
