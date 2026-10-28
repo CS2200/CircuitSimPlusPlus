@@ -2014,6 +2014,25 @@ impl DelayEngine {
         }
     }
 
+    /// Fire a clock edge **without overtaking the logic** (`docs/derived-clock.md`):
+    /// drain everything queued, then place the edge `setup_wait` after the last event
+    /// applied, so the cycle it closes has settled and a latch samples a settled cloud.
+    ///
+    /// The drain is **untruncated on purpose**. A design that never quiesces is caught by
+    /// the engine's own per-cycle event cap in `apply` and halts as an oscillation; a local
+    /// cap here (a debug build once carried `if n > 400_000 { break; }`) instead *continues*
+    /// on a partially settled cascade, which silently breaks the one contract that is not
+    /// negotiable. Both callers come through here for the same reason: when this logic was
+    /// copy-pasted between `run_inner` and `step_tick`, the copies drifted, and the one in
+    /// `run_inner` -- the path a real run takes -- kept the truncation.
+    fn fire_edge_without_overtaking(&mut self, kind: EvKind) -> Result<(), Halt> {
+        while let Some(e) = self.queue.pop() {
+            self.apply(e)?;
+        }
+        self.schedule(self.now + self.setup_wait, kind);
+        Ok(())
+    }
+
     /// Advance one half-period (one clock edge — the contract v1.1
     /// `step_tick` in delay mode): apply events up to and including the
     /// next global clock event.
@@ -2029,14 +2048,7 @@ impl DelayEngine {
                 if self.queue.len() > 1 {
                     let kind = ev.kind.clone();
                     self.queue.pop();
-                    // Drain the cascade. **No truncation here on purpose**: the engine's own
-                    // per-cycle event cap fires from `apply`, so a design that never quiesces
-                    // halts as an oscillation. A local `break` (which a debug build once had)
-                    // silently breaks the "never hang" contract by continuing instead.
-                    while let Some(e) = self.queue.pop() {
-                        self.apply(e)?;
-                    }
-                    self.schedule(self.now + self.setup_wait, kind);
+                    self.fire_edge_without_overtaking(kind)?;
                     continue;
                 }
                 let ev = self.queue.pop().expect("peeked");
@@ -2093,32 +2105,7 @@ impl DelayEngine {
             if matches!(ev.kind, EvKind::Clock { .. }) && self.queue.len() > 1 {
                 let kind = ev.kind.clone();
                 self.queue.pop();
-                {
-                    // `CSIM_DEBUG_DRAIN=1`: what one drain is made of, for a runaway cascade.
-                    let dbg = std::env::var("CSIM_DEBUG_DRAIN").is_ok();
-                    let mut n = 0usize;
-                    while let Some(e) = self.queue.pop() {
-                        if dbg && n < 60 {
-                            let who = match &e.kind {
-                                EvKind::Fire { comp, .. } => format!(
-                                    "Fire {} {}",
-                                    comp, self.netlist.comps[*comp as usize].type_
-                                ),
-                                other => format!("{other:?}"),
-                            };
-                            eprintln!("DRAIN {n:4} t={} {who}", e.time);
-                        }
-                        n += 1;
-                        self.apply(e)?;
-                        if n > 400_000 {
-                            break;
-                        }
-                    }
-                    if dbg {
-                        eprintln!("DRAIN total {n} events in one drain");
-                    }
-                }
-                self.schedule(self.now + self.setup_wait, kind);
+                self.fire_edge_without_overtaking(kind)?;
                 continue;
             }
             let at_boundary = matches!(ev.kind, EvKind::Clock { phase: true });
@@ -2655,6 +2642,32 @@ impl DelayEngine {
         self.halted = Some(h.clone());
     }
 
+    /// **A2 (`docs/derived-clock.md` section 10) instrument.** Fires if a *data* event at
+    /// or before `edge_time` is still unapplied when an edge is applied -- i.e. if the edge
+    /// overtook the cascade it is supposed to wait for.
+    ///
+    /// Strictly *before* the edge, not at it: events at exactly the edge's time are a
+    /// same-timestamp tie, which the queue's own ordering resolves, not an overtake. The
+    /// property under test is that nothing the edge should have out-waited is left behind.
+    ///
+    /// Test-only, and deliberately so: it is an *invariant*, not a knob, so it gets no
+    /// public accessor and no snapshot state -- it is compiled out of the released engine.
+    /// A test that could only look at a counter afterwards could not see this violation,
+    /// because the violation is a moment, not a state.
+    #[cfg(test)]
+    fn assert_no_data_pending_at(&self, edge_time: u64) {
+        if let Some(e) = self
+            .queue
+            .iter()
+            .find(|e| e.time < edge_time && !matches!(e.kind, EvKind::Clock { .. }))
+        {
+            panic!(
+                "A2: an edge at {edge_time} fired while an event at {} ({:?}) was still pending",
+                e.time, e.kind
+            );
+        }
+    }
+
     /// Apply one event (the queue's minimum).
     fn apply(&mut self, ev: Ev) -> Result<(), Halt> {
         self.now = ev.time;
@@ -2681,6 +2694,11 @@ impl DelayEngine {
         self.hash_event(&ev);
         match ev.kind {
             EvKind::Clock { phase } => {
+                // **A2 (`docs/derived-clock.md` section 10).** An edge is only ever applied
+                // once the cascade it closes has been drained; this is that claim, checked
+                // in the one place that can see it.
+                #[cfg(test)]
+                self.assert_no_data_pending_at(ev.time);
                 // The cycle that just ended is closed **at the edge** — the barrier below
                 // guarantees the cascade has settled, so this is the state a grader reads.
                 if !self.in_boot {
@@ -4292,11 +4310,11 @@ mod tests {
         );
     }
 
-    /// F6 (S1): a propagation path longer than the clock period must NOT
-    /// halt as floating-read — the boot settle quiesces first; the run
-    /// completes with setup/hold warnings and deterministic latching.
-    #[test]
-    fn a_chain_longer_than_the_period_latches_the_settled_value() {
+    /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
+    /// that the settle outlasts the nominal period (n x t_pd). Shared by **A1**, which
+    /// reads the *value* it latches, and **A2**, which reads the barrier that makes that
+    /// value possible in the first place.
+    fn long_chain(n: usize) -> String {
         let mut comps = String::new();
         let mut wires = String::new();
         comps.push_str(
@@ -4311,7 +4329,7 @@ mod tests {
             {"a":{"comp":"one","pin":"out"},"b":{"comp":"r2","pin":"en"}},"#,
         );
         let mut prev = ("src".to_string(), "pin".to_string());
-        for i in 0..250 {
+        for i in 0..n {
             comps.push_str(&format!(
                 r#"{{"id":"g{i}","type":"gate.not","pos":[{},2]}},"#,
                 i
@@ -4326,12 +4344,20 @@ mod tests {
             r#"{{"a":{{"comp":"{}","pin":"{}"}},"b":{{"comp":"r2","pin":"d"}}}}"#,
             prev.0, prev.1
         ));
-        let json = format!(
+        format!(
             r##"{{"format":"circuitsim-plus-plus","version":2,"name":"t",{SETTINGS},
             "circuits":[{{"name":"main","components":[{}],"wires":[{}]}}]}}"##,
             comps.trim_end_matches(','),
             wires
-        );
+        )
+    }
+
+    /// F6 (S1): a propagation path longer than the clock period must NOT
+    /// halt as floating-read — the boot settle quiesces first; the run
+    /// completes with setup/hold warnings and deterministic latching.
+    #[test]
+    fn a_chain_longer_than_the_period_latches_the_settled_value() {
+        let json = long_chain(250);
         // 250 inverters ≈ 2250 ns; period 1000 ns < the path. Before F6
         // this died at cycle close with a spurious FloatingRead.
         let mut eng = engine(&json, 500);
@@ -4362,6 +4388,37 @@ mod tests {
         // changes something every cycle, so this is a property of the fixture, not of the
         // engine — see the test plan for the fixture that should replace it.
         assert_eq!(rep.t_obs, 0, "nothing settles after the first edge");
+    }
+
+    /// **A2 (`docs/derived-clock.md` section 10).** No edge fires while data events are
+    /// pending -- the barrier's contract, asserted from the inside.
+    ///
+    /// The plan's phrasing is "the queue holds only the next clock". That is not literally
+    /// true on every path, and the test would be wrong to demand it: `run_until_time` may
+    /// cross an edge with events *later* than it still queued, which is correct -- they
+    /// belong after the edge. The invariant that is true, and that the derived clock
+    /// exists to provide, is that nothing falling **before** the edge is left unapplied;
+    /// that is what the instrument checks, and it checks it at the moment of application,
+    /// which is the only vantage point from which the property is visible at all.
+    ///
+    /// The fixture is A1's over-period chain, because that is the design that *needs* the
+    /// barrier: 250 inversions take ~2250 ns, well past the 1000 ns period, so an edge that
+    /// did not wait would land in the middle of a cascade.
+    #[test]
+    fn no_edge_fires_while_data_events_are_pending() {
+        let json = long_chain(250);
+        let mut eng = engine(&json, 500);
+        assert!(eng.halted().is_none(), "boot halt: {:?}", eng.halted());
+        // Kick the chain before the first edge, so the very first edge has a cascade it
+        // could overtake -- otherwise the test would pass by having nothing to wait for.
+        assert!(eng.poke_at("src", k(1, 1), 740));
+        for cycle in 0..4 {
+            eng.run(1)
+                .unwrap_or_else(|h| panic!("cycle {cycle}: {:?}", h));
+        }
+        // The run is not vacuous: the register really did move (A1's value, re-asserted
+        // here only to keep this test from passing on a design that does nothing).
+        assert_eq!(eng.named_value("r2"), Some(k(1, 1)));
     }
 
     /// **B5 (`docs/derived-clock.md` §10).** The nominal period is a *floor*, not a
