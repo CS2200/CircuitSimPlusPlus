@@ -248,6 +248,10 @@ impl EventQueue {
         self.buckets.entry(ev.time).or_default()[usize::from(ev.prio.min(1))].push_back(ev);
     }
 
+    fn len(&self) -> usize {
+        self.buckets.values().map(|b| b[0].len() + b[1].len()).sum()
+    }
+
     fn peek(&self) -> Option<&Ev> {
         let (_, b) = self.buckets.iter().next()?;
         b[0].front().or_else(|| b[1].front())
@@ -304,6 +308,10 @@ struct DelaySnap {
     rising_seen: u64,
     next_boundary: u64,
     cycle_settle: u64,
+    /// Simulated time of the last clock edge: the start of the cycle in progress. The
+    /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
+    /// has settled, so there is no nominal boundary to measure the settle from.
+    cycle_start: u64,
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
@@ -650,6 +658,10 @@ pub struct DelayEngine {
     rising_seen: u64,
     next_boundary: u64,
     cycle_settle: u64,
+    /// Simulated time of the last clock edge: the start of the cycle in progress. The
+    /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
+    /// has settled, so there is no nominal boundary to measure the settle from.
+    cycle_start: u64,
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
@@ -989,6 +1001,7 @@ impl DelayEngine {
             rising_seen: 0,
             next_boundary: 2 * clock_half_period,
             cycle_settle: 0,
+            cycle_start: 0,
             cycle_settle_net: None,
             t_obs: 0,
             top_paths: Vec::new(),
@@ -1236,6 +1249,7 @@ impl DelayEngine {
             rising_seen: self.rising_seen,
             next_boundary: self.next_boundary,
             cycle_settle: self.cycle_settle,
+            cycle_start: self.cycle_start,
             cycle_settle_net: self.cycle_settle_net,
             t_obs: self.t_obs,
             top_paths: self.top_paths.clone(),
@@ -1403,6 +1417,7 @@ impl DelayEngine {
         self.rising_seen = snap.rising_seen;
         self.next_boundary = snap.next_boundary;
         self.cycle_settle = snap.cycle_settle;
+        self.cycle_start = snap.cycle_start;
         self.cycle_settle_net = snap.cycle_settle_net;
         self.t_obs = snap.t_obs;
         self.top_paths = snap.top_paths;
@@ -1988,14 +2003,27 @@ impl DelayEngine {
         if let Some(h) = &self.halted {
             return Err(h.clone());
         }
-        while let Some(ev) = self.queue.pop() {
-            let is_clock = matches!(ev.kind, EvKind::Clock { .. });
-            self.apply(ev).inspect_err(|h| self.record_halt(h))?;
-            if is_clock {
+        loop {
+            let Some(ev) = self.queue.peek() else {
+                return Ok(());
+            };
+            if matches!(ev.kind, EvKind::Clock { .. }) {
+                if self.queue.len() > 1 {
+                    let kind = ev.kind.clone();
+                    self.queue.pop();
+                    while let Some(e) = self.queue.pop() {
+                        self.apply(e)?;
+                    }
+                    self.schedule(self.now, kind);
+                    continue;
+                }
+                let ev = self.queue.pop().expect("peeked");
+                self.apply(ev).inspect_err(|h| self.record_halt(h))?;
                 return Ok(());
             }
+            let ev = self.queue.pop().expect("peeked");
+            self.apply(ev).inspect_err(|h| self.record_halt(h))?;
         }
-        Ok(())
     }
 
     /// Settle everything queued BEFORE the next clock edge — i.e. let an
@@ -2036,6 +2064,19 @@ impl DelayEngine {
         let target = self.rising_seen + cycles;
         let mut run_cycles = 0;
         while let Some(ev) = self.queue.peek() {
+            // **Derived clock** (`docs/derived-clock.md`): an edge never overtakes the
+            // logic. If the cascade from the previous edge is still pending, drain it and
+            // re-stamp the edge to the settled time, so a latch always samples a settled
+            // cloud — which is what makes values independent of the delay table.
+            if matches!(ev.kind, EvKind::Clock { .. }) && self.queue.len() > 1 {
+                let kind = ev.kind.clone();
+                self.queue.pop();
+                while let Some(e) = self.queue.pop() {
+                    self.apply(e)?;
+                }
+                self.schedule(self.now, kind);
+                continue;
+            }
             let at_boundary = matches!(ev.kind, EvKind::Clock { phase: true });
             if at_boundary {
                 if self.rising_seen == target {
@@ -2595,6 +2636,12 @@ impl DelayEngine {
         self.hash_event(&ev);
         match ev.kind {
             EvKind::Clock { phase } => {
+                // The cycle that just ended is closed **at the edge** — the barrier below
+                // guarantees the cascade has settled, so this is the state a grader reads.
+                if !self.in_boot {
+                    self.close_cycle()?;
+                }
+                self.cycle_start = ev.time;
                 self.next_rising = !phase;
                 for i in 0..self.clock_comps.len() {
                     let c = self.clock_comps[i];
@@ -2758,7 +2805,7 @@ impl DelayEngine {
                 // tracking happen at the pin's own arrival time.
                 self.views[comp as usize][slot as usize] = Arc::clone(&value);
                 if !self.in_boot && self.state_input_net[net as usize] {
-                    let cycle_start = self.next_boundary - 2 * self.half_period;
+                    let cycle_start = self.cycle_start;
                     let dt = ev.time - cycle_start;
                     if dt > self.cycle_settle {
                         self.cycle_settle = dt;
@@ -2989,7 +3036,8 @@ impl DelayEngine {
     fn close_cycle(&mut self) -> Result<(), Halt> {
         self.floating_sweep()?;
         self.record_cycle();
-        self.next_boundary += 2 * self.half_period;
+        // The boundary is the edge itself (the `EvKind::Clock` arm closes the cycle);
+        // a nominal period no longer advances anything.
         Ok(())
     }
 
