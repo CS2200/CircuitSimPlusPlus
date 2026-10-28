@@ -4416,6 +4416,115 @@ mod tests {
         assert_eq!(rep.t_obs, 0, "nothing settles after the first edge");
     }
 
+    /// **A4 (`docs/derived-clock.md` section 10).** The complement of A1: not only does the
+    /// register latch the *settled* value, the **edge itself is late** -- it lands after the
+    /// spill. A1 alone would still pass if the engine deferred the value but fired the edge
+    /// on time, and it is the lateness that makes A3's monotonicity a statement about
+    /// *derived* edges rather than about nominal ones.
+    #[test]
+    fn the_edge_lands_after_a_cascade_that_spills_past_it() {
+        let json = long_chain(250);
+        let mut eng = engine(&json, 500);
+        assert!(eng.poke_at("src", k(1, 1), 740));
+        eng.run(1).expect("a cycle");
+        let v: serde_json::Value = serde_json::from_str(&eng.snapshot()).expect("snapshot");
+        let now = v["now"].as_u64().expect("now");
+        // 250 inverters from the T=740 poke spill well past the nominal first edge; the
+        // edge can therefore only be at the far end of the spill or later.
+        assert!(
+            now >= 2990,
+            "the edge must land after the cascade, not at {now}"
+        );
+        assert_eq!(eng.named_value("r2"), Some(k(1, 1)));
+    }
+
+    /// **E3 (`docs/derived-clock.md` section 10).** The stepper and the runner are the same
+    /// simulation: two `step_tick`s and a settle reach the state `run(1)` reaches -- same
+    /// time, same cycle, same trace hash. If they diverged, what a student sees while
+    /// clicking and what they are graded on would come from two engines.
+    ///
+    /// Both halves of that sentence are measured, not assumed:
+    ///
+    /// - A cycle is **two half-edges**, so one `step_tick` is half a `run(1)`. Stepped from
+    ///   boot it lands on the rising edge (T=1000, cycle 1) while `run(1)` stops after that
+    ///   cycle's falling edge (T=1500, cycle 1).
+    /// - The settle is what the *stepper* defers. Measured on the pipeline, `run(1)` applies
+    ///   55 events and two `step_tick`s apply 51: the four missing ones carry the falling
+    ///   edge's own timestamp, so they are the cascade that edge *launches*, which the stepper
+    ///   leaves queued for its next call. Draining them makes the two identical -- which is
+    ///   also why the stepper can legitimately be *looked at* mid-settle.
+    #[test]
+    fn a_pair_of_step_ticks_equals_a_cycle_run() {
+        let json = pipeline_json();
+        let mut stepped = engine(&json, 500);
+        let mut ran = engine(&json, 500);
+        let state = |e: &DelayEngine| -> (u64, u64, u64) {
+            let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
+            (
+                v["now"].as_u64().expect("now"),
+                v["rising_seen"].as_u64().expect("rising_seen"),
+                e.trace_hash(),
+            )
+        };
+        for cycle in 0..3 {
+            stepped.step_tick().expect("a half-edge");
+            stepped.step_tick().expect("a half-edge");
+            stepped.settle_cycle().expect("the edge's own cascade");
+            ran.run(1).expect("a cycle");
+            assert_eq!(
+                state(&stepped),
+                state(&ran),
+                "cycle {cycle}: stepping and running must agree"
+            );
+        }
+    }
+
+    /// **D4 (`docs/derived-clock.md` section 10).** The drain is **bounded**. The cap counts
+    /// events *applied*, so a queue that merely grew would sail past it; what this asserts is
+    /// that the events are consumed as they are produced -- the queue stays small while the
+    /// storm runs -- and that the storm ends as an oscillation rather than as memory.
+    ///
+    /// The storm here is deliberately inside a *barrier drain*: a ring drives a register's
+    /// `clk`, so the cascade the edge is waiting for never ends. That is the shape that hung
+    /// on the `next_boundary` spin, and the reason the cap has to be checked in `apply`
+    /// rather than only at a cycle boundary.
+    #[test]
+    fn a_storm_inside_a_drain_stays_bounded_and_halts() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"n1","type":"gate.not","pos":[0,0]}},
+                {{"id":"n2","type":"gate.not","pos":[0,0]}},
+                {{"id":"n3","type":"gate.not","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"n1","pin":"out"}},"b":{{"comp":"n2","pin":"in"}}}},
+                {{"a":{{"comp":"n2","pin":"out"}},"b":{{"comp":"n3","pin":"in"}}}},
+                {{"a":{{"comp":"n3","pin":"out"}},"b":{{"comp":"n1","pin":"in"}}}},
+                {{"a":{{"comp":"n2","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        eng.events_per_cycle_cap = 500;
+        let halt = eng.run(2).expect_err("a ring on clk must not settle");
+        assert_eq!(halt.reason, HaltReason::Oscillation);
+        // Tight on purpose: a ring of three nots plus one register keeps a handful of
+        // events in flight. A bound of "the cap" would pass just as happily against a queue
+        // that grew to the cap without ever draining, which is the failure this names.
+        assert!(
+            eng.queue.len() <= 32,
+            "the queue must be drained as it fills, not left to grow: {} pending",
+            eng.queue.len()
+        );
+    }
+
     /// **A2 (`docs/derived-clock.md` section 10).** No edge fires while data events are
     /// pending -- the barrier's contract, asserted from the inside.
     ///
