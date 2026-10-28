@@ -4453,6 +4453,51 @@ mod tests {
         );
     }
 
+    #[test]
+    /// **F1 (`docs/derived-clock.md` §10).** A **gated clock**: the register's `clk` is
+    /// driven by logic (here an AND of the global clock and an enable) rather than the
+    /// global clock directly. Its own gate settling is *part of the cascade*, so the
+    /// barrier waits for it exactly as it waits for data — and with the enable held low the
+    /// register never sees a rising edge and must not latch.
+    fn a_gated_clock_latches_only_when_the_gate_passes_it() {
+        let build = |en: &str| {
+            format!(
+                r##"{{
+                "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+                "circuits": [{{ "name": "main", "components": [
+                    {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                    {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                    {{"id":"en","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"{en}"}}}},
+                    {{"id":"and","type":"gate.and","pos":[0,0]}},
+                    {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+                ], "wires": [
+                    {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"and","pin":"in0"}}}},
+                    {{"a":{{"comp":"en","pin":"out"}},"b":{{"comp":"and","pin":"in1"}}}},
+                    {{"a":{{"comp":"and","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                    {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                    {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+                ]}}]
+            }}"##
+            )
+        };
+        // Gate closed: the AND never rises, so no edge reaches the register.
+        let mut shut = engine(&build("0"), 50);
+        shut.run(3).expect("closed-gate run");
+        assert_eq!(
+            shut.named_value("r"),
+            Some(k(1, 0)),
+            "a gated-off clock must not latch"
+        );
+        // Gate open: the AND passes the global clock, so the register latches.
+        let mut open = engine(&build("1"), 50);
+        open.run(3).expect("open-gate run");
+        assert_eq!(
+            open.named_value("r"),
+            Some(k(1, 1)),
+            "a gated-open clock must latch"
+        );
+    }
+
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
     /// consumed — no halt; the output is still computed (driverless-net
     /// views do not block evaluation).
