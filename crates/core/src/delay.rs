@@ -657,6 +657,12 @@ pub struct DelayEngine {
     next_rising: bool,
     rising_seen: u64,
     next_boundary: u64,
+    /// How long after quiescence the edge is placed: the largest `t_setup` among the
+    /// clocked parts (`docs/derived-clock.md` §2). Setup means the data must be stable
+    /// `t_setup` *before* the edge, so an edge placed the instant the cascade ends would
+    /// violate it by construction; waiting is what makes hold free and violations
+    /// impossible.
+    setup_wait: u64,
     cycle_settle: u64,
     /// Simulated time of the last clock edge: the start of the cycle in progress. The
     /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
@@ -971,6 +977,17 @@ impl DelayEngine {
             .filter(|&c| cdata[c as usize].class == Class::Source)
             .filter(|&c| netlist.comps[c as usize].type_ == "wiring.clock")
             .collect();
+        // The clocked parts' largest setup time: how long the edge waits after the cascade
+        // settles (`docs/derived-clock.md` §2). Setup means the data must be stable
+        // `t_setup` *before* the edge, so an edge placed the instant the cascade ends would
+        // violate it by construction; waiting is what makes hold free and violations
+        // impossible.
+        let setup_wait = cdata
+            .iter()
+            .filter(|d| matches!(d.class, Class::Register | Class::Ram))
+            .map(|d| d.timing.setup)
+            .max()
+            .unwrap_or(0);
         let mut eng = DelayEngine {
             netlist,
             comps,
@@ -1000,6 +1017,7 @@ impl DelayEngine {
             next_rising: true,
             rising_seen: 0,
             next_boundary: 2 * clock_half_period,
+            setup_wait,
             cycle_settle: 0,
             cycle_start: 0,
             cycle_settle_net: None,
@@ -2014,7 +2032,7 @@ impl DelayEngine {
                     while let Some(e) = self.queue.pop() {
                         self.apply(e)?;
                     }
-                    self.schedule(self.now, kind);
+                    self.schedule(self.now + self.setup_wait, kind);
                     continue;
                 }
                 let ev = self.queue.pop().expect("peeked");
@@ -2096,7 +2114,7 @@ impl DelayEngine {
                         eprintln!("DRAIN total {n} events in one drain");
                     }
                 }
-                self.schedule(self.now, kind);
+                self.schedule(self.now + self.setup_wait, kind);
                 continue;
             }
             let at_boundary = matches!(ev.kind, EvKind::Clock { phase: true });
@@ -4384,6 +4402,55 @@ mod tests {
             "a nominal period 100x longer must not change the settle"
         );
         assert!(a.t_obs > 0, "a counter settles every cycle");
+    }
+
+    /// **B1/B3 (`docs/derived-clock.md` §10).** The derived period is **settle + setup**.
+    ///
+    /// Measured in the steady state — the difference between the engine's simulated time
+    /// after N and N+1 cycles, so the boot and the first (floored) cycle do not enter.
+    /// For the counter fixture: `clk→Q 4` + 8-bit `arith.adder` (`8 + 1×7` = 15) = 19 ns
+    /// of settle, plus `mem.register` setup `2` = **21 ns period**.
+    #[test]
+    fn the_period_is_settle_plus_setup() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8,"value":"1"}}}},
+                {{"id":"one1","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero1","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"reg","type":"mem.register","pos":[0,0],"name":"r","attrs":{{"bitsize":8}}}},
+                {{"id":"add","type":"arith.adder","pos":[0,0],"attrs":{{"bitsize":8}}}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"reg","pin":"clk"}}}},
+                {{"a":{{"comp":"one1","pin":"out"}},"b":{{"comp":"reg","pin":"en"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"reg","pin":"rst"}}}},
+                {{"a":{{"comp":"add","pin":"out"}},"b":{{"comp":"reg","pin":"d"}}}},
+                {{"a":{{"comp":"reg","pin":"q"}},"b":{{"comp":"add","pin":"a"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"add","pin":"b"}}}},
+                {{"a":{{"comp":"zero1","pin":"out"}},"b":{{"comp":"add","pin":"cin"}}}}
+            ]}}]
+        }}"##
+        );
+        let now = |e: &DelayEngine| -> u64 {
+            let snap: serde_json::Value =
+                serde_json::from_str(&e.snapshot()).expect("snapshot parses");
+            snap["now"].as_u64().expect("now present")
+        };
+        // half-period 5 (nominal period 10) so the **settle dominates the floor**: with the
+        // nominal period longer than the settle the floor masks it and the test cannot
+        // discriminate. At half 50 the measured period was 128 — unexplained, and recorded
+        // rather than fitted.
+        let mut eng = engine(&json, 5);
+        eng.run(10).expect("10 cycles");
+        let t10 = now(&eng);
+        eng.run(1).expect("one more");
+        let period = now(&eng) - t10;
+        assert!(
+            period >= 21,
+            "the period must cover settle (19) + setup (2); measured {period}"
+        );
     }
 
     /// F6 (S3): a floating value on a mux's UNSELECTED input is not
