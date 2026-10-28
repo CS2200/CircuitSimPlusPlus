@@ -4274,7 +4274,7 @@ mod tests {
     /// halt as floating-read — the boot settle quiesces first; the run
     /// completes with setup/hold warnings and deterministic latching.
     #[test]
-    fn overclocked_chain_completes_with_setup_violation() {
+    fn a_chain_longer_than_the_period_latches_the_settled_value() {
         let mut comps = String::new();
         let mut wires = String::new();
         comps.push_str(
@@ -4323,6 +4323,15 @@ mod tests {
         let rep = eng.run(3).expect("overclocked run must complete");
         assert_eq!(rep.cycles, 3);
         assert!(rep.violations.is_empty(), "violations are retired");
+        // **A1 (docs/derived-clock.md §10).** The barrier's whole point: the chain is far
+        // longer than the nominal period, and the register must still latch the *settled*
+        // value — 250 inversions of a 1 is a 1. Before the derived clock this fixture
+        // asserted a *warning*; the value is the property that matters.
+        assert_eq!(
+            eng.named_value("r2"),
+            Some(k(1, 1)),
+            "a chain longer than the period must latch the settled value"
+        );
         // **Rewritten for the derived clock.** The old expectation (990) was the settle
         // measured from a *nominal* edge at 2000 — but the only activity here is the poke
         // at 740, which starts the chain before the first edge. With a derived clock the
