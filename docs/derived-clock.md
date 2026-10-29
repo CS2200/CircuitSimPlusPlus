@@ -1,6 +1,7 @@
 # The derived clock: the period is an output, not an input
 
-**Status:** design + implementation plan, 2026-10-28. Supersedes the `--clock-half-period-ns`
+**Status:** implemented. §2/§3 are what the engine does: every edge is placed by the drain,
+the legacy run parameter is gone, and `t_obs` is the derived period. Supersedes the `--clock-half-period-ns`
 run parameter as the way a cycle is bounded. Written before implementing; §7 says what has
 to be true afterwards.
 
@@ -25,19 +26,24 @@ against it.
 
 ## 2. The model
 
-**The clock is not an event with a time. It is a phase transition that happens when the event
-queue drains.**
+**The clock is a phase transition whose *time the drain decides*.** A transition is queued —
+the engine needs an event to wake on — but its queued time is only "one step after the edge
+that scheduled it", and it is *placed* when it comes due:
 
 ```
 loop:
-    apply events until the queue is empty        ← the cascade, to quiescence
-    advance the clock phase (a transition, stamped `now`)
-    the transition schedules the registers' clk→Q and its cascade
+    a transition comes due at `edge + MIN_STEP`    ← a placeholder, not a period
+    drain the queue to quiescence                  ← the cascade, to quiescence
+    place it at max(its due time, quiescence + setup if it samples)
+    apply it: the transition schedules the registers' clk→Q and its cascade
     every second transition is a rising edge → latch, and count a cycle
 ```
 
-- The queue is never "empty except for the clock" — the clock is not queued at all, so
-  *empty* means *quiesced*.
+- The queue has just been drained when the placement is decided, which is what makes the
+  placement the design's own number rather than the placeholder's.
+- `MIN_STEP` (1 ns) exists because a transition may not land on its own scheduler's timestamp:
+  with no clocked parts there is nothing to drain and no setup to charge, so two transitions
+  would share one instant forever and trip the event-storm cap.
 - Causality makes the drain exact: events belonging to the next cycle are only scheduled *by*
   the transition, which hasn't happened yet. So everything drained belongs to this cycle.
 - **A design that never quiesces never transitions** → the existing event-storm cap declares
@@ -46,9 +52,11 @@ loop:
   — which also means the time-inversion problem cannot arise (there is no scheduled timestamp
   to contradict).
 
-**Setup is added when the transition is placed.** Setup means the data must be stable
-`t_setup` *before* the edge, so the transition waits: `edge = quiescence + max t_setup` over
-the clocked parts. **Hold then comes for free** — the data is stable across the edge because
+**Setup is added when the transition is placed** — and only to a transition that *samples*.
+Setup means the data must be stable `t_setup` *before* the edge, so a sampling transition
+waits: `edge = quiescence + max t_setup` over the clocked parts. A falling edge latches
+nothing, so it has no data to be stable and is placed at quiescence; charging it too would
+charge two setups per cycle (measured: 69 where this model says 54). **Hold then comes for free** — the data is stable across the edge because
 nothing moves again until the next transition, so there is no race to hold against.
 
 ## 3. What the period is
@@ -60,8 +68,9 @@ period = t(rise k+1) − t(rise k)
 ```
 
 `t_obs` **is** this: the maximum over the run of the derived period, i.e. the clock rate the
-design can actually be run at. It is now the same quantity as the period — today they are two
-unrelated numbers (2000 ns and ~80 ns), and that mismatch is what feels wrong.
+design can actually be run at. The field and the quantity are one thing now. They were not
+before: the field held the *settle* (39 on the pipeline, where the period is 54) and the 15 ns
+setup gap the barrier inserted was measured by nobody.
 
 **The metric must use the maximum, not the sum.** Each cycle takes its own time (its own
 depth), so the simulated elapsed time is the *sum*; real hardware clocks at the *worst* depth.
@@ -262,10 +271,10 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how |
 |---|---|---|
-| B1 | `t_obs` = **settle + setup**, exactly | the *period* (edge to edge) is settle + setup — `the_period_is_settle_plus_setup` measures it that way, from edge times. **Open question:** the engine's `t_obs` field holds the *settle* (39 on the pipeline, where the period is 54), so `est_time` is `cycles × settle`. Which one `est_time` should mean is a decision, not a bug — see the B3 row |
+| B1 | `t_obs` = **settle + setup**, exactly | **done**: `t_obs` *is* the derived period (rise-to-rise), so the pipeline reports 54 = 39 + 15 and `est_time = cycles × period`. The question this row used to carry — which number `est_time` should mean — was answered by implementing §3 |
 | B2 | `t_obs` = the **max** over cycles, not the sum | **done**: `settling_mux_json` — a short and a long path carrying the same value, selected by a mux. Each path is *pinned* first and the two periods asserted to differ (the control), then the select toggles and `t_obs` must equal the long one |
-| B3 | **setup is included** | **done**: two tables identical but for the register's `t_setup`; the period (edge to edge) moves by exactly the delta. Asserted against the *period*, because `t_obs` is the settle — the one line in this plan where the field and the wording disagree |
-| B4 | a design that never changes after the first edge → `t_obs` = 0 | covered by A1's fixture. Note this row is what says `t_obs` is the *settle*: a static design's period is still the nominal floor, but its `t_obs` is 0 |
+| B3 | **setup is included** | **done**: two tables identical but for the register's `t_setup`; the period moves by exactly the delta |
+| B4 | a design that never changes after the first edge → `t_obs` = 0 | **retired as written**, and the row was the tell: 0 was reachable only while the metric was the settle. Under §3 a static design's period is `0 + setup`, which is what A1's fixture asserts now. (A design with *one* cycle reports 0 — no rise-to-rise pair exists to measure, which is why `alu.csx` still reads 0 in the golden table.) |
 | B5 | the period is a **floor**, not a schedule | unit: the clock parameter set to wildly different values gives the same verdict and the same `t_obs` |
 
 ### C. Retired contract (slice 2 — write these when the fields go)

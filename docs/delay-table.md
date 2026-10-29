@@ -175,7 +175,7 @@ The two numbers in a report measure different things, deliberately:
 
 | | **DTA `t_obs`** (grading) | **STA `t_sta`** (informational) |
 |---|---|---|
-| What | max observed per-cycle settle over the run | structural longest path |
+| What | the derived period (max rise-to-rise) over the run | structural longest path |
 | Start of measurement | the clock **edge** (clk→Q of the launching register **included**) | the launching register's output (arrival 0; clk→Q **excluded**) |
 | End of measurement | last change at any register/RAM data-input view (setup **excluded**) | arrival at a register/RAM data input **plus the destination's setup time** (the textbook clock-period bound) |
 | Paths | only sensitized ones | all structural ones — may include paths the design never uses |

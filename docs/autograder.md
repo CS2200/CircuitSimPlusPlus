@@ -57,7 +57,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `cycles`                         | rising edges executed                                                                                                                               |
 | `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"` — `"breakpoint"` only with `pause_on_breakpoints`, since a graded run ignores them by default (§1) |
 | `halt_details`                   | `comp <id> pin "<pin>": <message>` when attributable (root-sheet document-order id; see `docs/ipc.md` §3's `sim_halted`), else a plain message      |
-| `t_obs`                          | max observed per-cycle settle time, ns                                                                                                              |
+| `t_obs`                          | the derived period, ns: the max rise-to-rise interval (`docs/derived-clock.md` §3)                                                                                                              |
 | `est_time`                       | `cycles × t_obs`, saturating                                                                                                                        |
 | `speedup_vs_baseline`            | `baseline_est_time / est_time`; `null` without a baseline or when `est_time == 0`                                                                   |
 | `assertions`                     | per-assertion `{ assertion, passed, actual, expected }`                                                                                             |

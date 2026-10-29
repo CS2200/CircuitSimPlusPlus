@@ -632,8 +632,8 @@ pub struct Report {
     /// completion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<api::StopInfo>,
-    /// Max observed per-cycle settle time, delay-table units (ns); 0 in
-    /// zero mode.
+    /// The derived period — the maximum rise-to-rise interval (`docs/derived-clock.md` §3) —
+    /// in delay-table units (ns). Delay mode only.
     pub t_obs: u64,
     /// `cycles × t_obs` (saturating); 0 in zero mode.
     pub est_time: u64,

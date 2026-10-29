@@ -165,7 +165,7 @@ const TOP_K: usize = 10;
 pub struct RunReport {
     /// Rising edges processed in this run.
     pub cycles: u64,
-    /// Max observed per-cycle settle time (§4.4).
+    /// The derived period (§4.4, `docs/derived-clock.md` §3).
     pub t_obs: u64,
     /// Top-k distinct observed critical paths, longest first, as
     /// `(settle_time, comp chain from latest-arriving register input back
@@ -1209,7 +1209,7 @@ impl DelayEngine {
         self.rising_seen
     }
 
-    /// Max observed per-cycle settle time so far (§4.4).
+    /// The derived period so far: max rise-to-rise interval (§4.4).
     pub fn t_obs(&self) -> u64 {
         self.t_obs
     }
@@ -1958,9 +1958,9 @@ impl DelayEngine {
 
     /// Run `cycles` full clock cycles (rising edges). Returns the run
     /// report; on a halt, the engine stays halted (the error is sticky).
-    /// The in-progress final cycle is *closed out* at run end (F7): its
-    /// settle time counts toward `t_obs` and the cycle-close
-    /// floating-read sweep runs.
+    /// The in-progress final cycle is *closed out* at run end (F7): the cycle-close
+    /// floating-read sweep runs and its critical path is recorded. `t_obs` is the
+    /// rise-to-rise period, so a cycle that never ended contributes nothing to it.
     pub fn run(&mut self, cycles: u64) -> Result<RunReport, Halt> {
         if let Some(h) = &self.halted {
             return Err(h.clone());
@@ -3160,7 +3160,7 @@ impl DelayEngine {
         Ok(())
     }
 
-    /// Fold the current cycle's settle measurements into `t_obs` /
+    /// Fold the current cycle's settle into the critical-path record (the period `t_obs`
     /// `top_paths` and reset the per-cycle counters (without advancing
     /// the boundary — also called at run end for the final in-progress
     /// cycle, F7).
@@ -5008,8 +5008,8 @@ mod tests {
         assert_eq!(eng.named_value("r2"), Some(k(1, 1)));
     }
 
-    /// **B5 (`docs/derived-clock.md` §10).** The nominal period is a *floor*, not a
-    /// schedule: it must not decide *values*, and it must not change the settle `t_obs`
+    /// **B5 (`docs/derived-clock.md` §10).** The nominal period is the timeline's *origin*,
+    /// not a schedule: it must not decide *values*, and it must not change the period `t_obs`
     /// reports. A counter is the clean probe — it changes every cycle, so there is always
     /// something to settle.
     #[test]
