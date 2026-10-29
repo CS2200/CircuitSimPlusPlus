@@ -146,28 +146,6 @@ pub const DEFAULT_EVENTS_PER_CYCLE_CAP: u64 = 1_000_000;
 
 const TOP_K: usize = 10;
 
-/// A setup/hold warning (DESIGN.md §4.3): recorded, never corrupts state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TimingViolation {
-    /// Component whose input changed too close to its clock edge.
-    pub comp: CompId,
-    /// Which discipline was violated (setup or hold).
-    pub kind: ViolationKind,
-    /// Simulation time of the offending edge.
-    pub time: u64,
-    /// Cycle (rising-edge count) containing the edge.
-    pub cycle: u64,
-}
-
-/// Which timing discipline a [`TimingViolation`] records (§4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum ViolationKind {
-    /// Data changed within `t_setup` before the edge.
-    Setup,
-    /// Data changed within `t_hold` after the edge.
-    Hold,
-}
-
 /// What a run produced (also the engine's observable state).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
@@ -175,8 +153,6 @@ pub struct RunReport {
     pub cycles: u64,
     /// Max observed per-cycle settle time (§4.4).
     pub t_obs: u64,
-    /// Cumulative setup/hold warnings.
-    pub violations: Vec<TimingViolation>,
     /// Top-k distinct observed critical paths, longest first, as
     /// `(settle_time, comp chain from latest-arriving register input back
     /// to the launching element)`.
@@ -315,7 +291,6 @@ struct DelaySnap {
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
-    violations: Vec<TimingViolation>,
     events_this_cycle: u64,
     events_processed: u64,
     trace_hash: u64,
@@ -331,7 +306,6 @@ struct DelaySnap {
     pending_val: Vec<Vec<crate::api::WireValue>>,
     pending_cause: Vec<Option<u32>>,
     pending_net_cause: Vec<(u32, (u32, Option<u32>))>,
-    clk_track: Vec<ClockTrack>,
     queue: Vec<SnapEv>,
 }
 
@@ -499,18 +473,6 @@ fn class_of(type_: &str, has_inputs: bool, has_outputs: bool) -> Class {
     }
 }
 
-/// Per-clocked-component setup/hold tracking. `we` is tracked like
-/// `din`/`addr` (contract v1.1, F11 — the write-enable must also be
-/// stable around the edge).
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-struct ClockTrack {
-    last_edge: Option<u64>,
-    last_d: Option<u64>,
-    last_din: Option<u64>,
-    last_addr: Option<u64>,
-    last_we: Option<u64>,
-}
-
 /// Precomputed sink-pin identity per net (Copy — the hot Deliver-apply
 /// loop iterates it without cloning the netlist's `String` sink table).
 #[derive(Debug, Clone, Copy)]
@@ -671,8 +633,6 @@ pub struct DelayEngine {
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
-    violations: Vec<TimingViolation>,
-    clk_track: Vec<ClockTrack>,
     /// Cap on applied events per cycle (storm detection, §4.5); also the
     /// boot settle's quiescence cap.
     pub events_per_cycle_cap: u64,
@@ -1023,8 +983,6 @@ impl DelayEngine {
             cycle_settle_net: None,
             t_obs: 0,
             top_paths: Vec::new(),
-            violations: Vec::new(),
-            clk_track: vec![ClockTrack::default(); n],
             events_per_cycle_cap: DEFAULT_EVENTS_PER_CYCLE_CAP,
             breakpoints_enabled: true,
             pause_on_unknown: false,
@@ -1170,9 +1128,6 @@ impl DelayEngine {
         eng.now = 0;
         eng.next_boundary = 2 * clock_half_period;
         eng.events_this_cycle = 0;
-        eng.clk_track
-            .iter_mut()
-            .for_each(|t| *t = ClockTrack::default());
         if eng.halted.is_none() {
             eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
         }
@@ -1233,11 +1188,6 @@ impl DelayEngine {
         self.t_obs
     }
 
-    /// Setup/hold warnings recorded so far.
-    pub fn violations(&self) -> &[TimingViolation] {
-        &self.violations
-    }
-
     /// The sticky halt, if the engine has halted — including a
     /// boot-settle halt at construction (the session surfaces it).
     pub fn halted(&self) -> Option<&Halt> {
@@ -1254,12 +1204,13 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 2 (F14): per-sink views.
+    /// (§4.6 — see the test). Snapshot version 3: per-sink views (F14), and the
+    /// setup/hold tracker and its violations list are gone (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 2,
+            version: 3,
             half_period: self.half_period,
             now: self.now,
             seq: self.seq,
@@ -1271,7 +1222,6 @@ impl DelayEngine {
             cycle_settle_net: self.cycle_settle_net,
             t_obs: self.t_obs,
             top_paths: self.top_paths.clone(),
-            violations: self.violations.clone(),
             events_this_cycle: self.events_this_cycle,
             events_processed: self.events_processed,
             trace_hash: self.trace_hash,
@@ -1303,7 +1253,6 @@ impl DelayEngine {
                 .collect(),
             pending_cause: self.pending_cause.clone(),
             pending_net_cause: self.pending_net_cause.clone(),
-            clk_track: self.clk_track.clone(),
             queue: queue.iter().map(|e| SnapEv::from_ev(e)).collect(),
         };
         serde_json::to_string(&snap).expect("snapshot serializes")
@@ -1314,7 +1263,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 2 {
+        if snap.version != 3 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.half_period != self.half_period {
@@ -1328,7 +1277,6 @@ impl DelayEngine {
             && snap.pending_gen.len() == n_comps
             && snap.pending_val.len() == n_comps
             && snap.pending_cause.len() == n_comps
-            && snap.clk_track.len() == n_comps
             && snap.net_values.len() == n_nets
             && snap.net_scheduled.len() == n_nets
             && snap.net_cause.len() == n_nets
@@ -1389,7 +1337,6 @@ impl DelayEngine {
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
         self.pending_net_cause = snap.pending_net_cause;
-        self.clk_track = snap.clk_track;
         self.queue = snap
             .queue
             .iter()
@@ -1439,7 +1386,6 @@ impl DelayEngine {
         self.cycle_settle_net = snap.cycle_settle_net;
         self.t_obs = snap.t_obs;
         self.top_paths = snap.top_paths;
-        self.violations = snap.violations;
         self.events_this_cycle = snap.events_this_cycle;
         self.events_processed = snap.events_processed;
         self.trace_hash = snap.trace_hash;
@@ -2001,7 +1947,6 @@ impl DelayEngine {
             // counts toward T_obs, F7).
             rep.t_obs = self.t_obs;
             rep.top_paths = self.top_paths.clone();
-            rep.violations = self.violations.clone();
             rep.trace_hash = self.trace_hash;
             rep.events_processed = self.events_processed;
             Ok(rep)
@@ -2132,7 +2077,6 @@ impl DelayEngine {
         Ok(RunReport {
             cycles: run_cycles,
             t_obs: self.t_obs,
-            violations: self.violations.clone(),
             top_paths: self.top_paths.clone(),
             trace_hash: self.trace_hash,
             events_processed: self.events_processed,
@@ -2940,11 +2884,10 @@ impl DelayEngine {
             }
             Class::Ram => match pin {
                 SinkKind::Addr => {
-                    self.track_hold(c, TrackField::Addr, time);
                     self.eval_and_schedule(comp, time, Some(net))?;
                 }
-                SinkKind::Din => self.track_hold(c, TrackField::Din, time),
-                SinkKind::We => self.track_hold(c, TrackField::We, time),
+                // `din`/`we` only matter at the edge; there is nothing to do on arrival.
+                SinkKind::Din | SinkKind::We => {}
                 // CE's `PORT_CLEAR` is level-sensitive too (`RAM.java`): while it is
                 // an exact `1` every word is cleared at once, not at the next edge.
                 SinkKind::Rst => {
@@ -2967,7 +2910,8 @@ impl DelayEngine {
                 _ => {}
             },
             Class::Register => match pin {
-                SinkKind::D => self.track_hold(c, TrackField::D, time),
+                // `d` only matters at the edge; nothing happens on arrival.
+                SinkKind::D => {}
                 SinkKind::Clk => {
                     let cur = self.cdata[c]
                         .clk_slot
@@ -3034,39 +2978,11 @@ impl DelayEngine {
         Ok(())
     }
 
-    /// Record a data-input change; flag a hold violation if it lands
-    /// within `t_hold` after the last edge.
-    fn track_hold(&mut self, c: usize, field: TrackField, time: u64) {
-        // **Retired** (docs/derived-clock.md): hold violations are meaningless with a derived
-        // clock. The edge is placed *after* the settle and nothing races it, so there is no
-        // "data changed too soon after the edge" condition to detect. The arrival tracking
-        // below is kept because it costs nothing and is useful for debugging.
-        let tr = &mut self.clk_track[c];
-        match field {
-            TrackField::D => tr.last_d = Some(time),
-            TrackField::Din => tr.last_din = Some(time),
-            TrackField::Addr => tr.last_addr = Some(time),
-            TrackField::We => tr.last_we = Some(time),
-        }
-    }
-
     /// Rising clock edge on a register/RAM: setup check (data inputs
     /// include `we` for RAM, F11), latch/write (consuming `Z` halts),
     /// schedule the output commit.
     fn clock_edge(&mut self, comp: u32, time: u64) -> Result<(), Halt> {
         let c = comp as usize;
-        let setup = self.cdata[c].timing.setup;
-        let tr = self.clk_track[c];
-        let last_data = match self.cdata[c].class {
-            Class::Ram => tr.last_din.max(tr.last_addr).max(tr.last_we),
-            _ => tr.last_d,
-        };
-        // **Retired** (docs/derived-clock.md): with a derived clock the edge is placed at the
-        // instant the drain ends, so the last data change is *by construction* at the edge —
-        // every register would report a setup violation. The tracker cannot be kept as-is;
-        // it is deleted rather than reported.
-        let _ = (setup, last_data);
-        self.clk_track[c].last_edge = Some(time);
         // Sample inputs from the pins' *views* and latch (consume rules
         // fire here).
         let mut ins: Vec<Arc<Value>> = self.cdata[c]
@@ -3280,14 +3196,6 @@ impl DelayEngine {
         }
         self.trace_hash = h;
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum TrackField {
-    D,
-    Din,
-    Addr,
-    We,
 }
 
 #[cfg(test)]
@@ -3523,7 +3431,6 @@ mod tests {
         let rep = eng.run(3).unwrap();
         assert_eq!(rep.cycles, 3);
         assert_eq!(rep.t_obs, 39, "clk→Q 20 + not 9 + and 10");
-        assert!(rep.violations.is_empty());
         // r1 toggled every cycle; r2 follows one cycle behind (d=1,0,1 at
         // the three edges → q=1).
         assert_eq!(eng.named_value("r1"), Some(k(1, 1))); // 3 toggles: 0→1→0→1
@@ -3673,43 +3580,6 @@ mod tests {
         assert_eq!(eng.named_value("d"), Some(k(1, 0)));
         eng.run_until_time(301).unwrap();
         assert_eq!(eng.named_value("d"), Some(k(1, 1))); // edge @100+200
-    }
-
-    #[test]
-    fn setup_and_hold_violations_are_warnings() {
-        let json = format!(
-            r##"{{
-            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
-            "circuits": [{{ "name": "main", "components": [
-                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
-                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
-                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
-                {{"id":"d","type":"wiring.pin","pos":[0,0],"name":"d"}},
-                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
-            ], "wires": [
-                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
-                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
-                {{"a":{{"comp":"d","pin":"pin"}},"b":{{"comp":"r","pin":"d"}}}}
-            ]}}]
-        }}"##
-        );
-        let mut eng = engine(&json, 50); // period 100, edges at 100/200/…
-        eng.run(1).unwrap(); // edge @100, clean
-        assert_eq!(eng.named_value("r"), Some(k(1, 0)));
-        // Setup: D changes at 190, within t_setup 15 of the edge at 200.
-        eng.poke_at("d", k(1, 1), 190);
-        eng.run(1).unwrap();
-        assert_eq!(eng.named_value("r"), Some(k(1, 1))); // latch still happens
-                                                         // Violations are **retired** (docs/derived-clock.md): the edge is placed after the
-                                                         // settle, so "data too close to the edge" is not a condition any more. The latch
-                                                         // above must still have happened, and nothing may be reported.
-        assert!(
-            eng.violations().is_empty(),
-            "setpoint violations are retired with a derived clock"
-        );
-        eng.poke_at("d", k(1, 0), 302);
-        eng.run(1).unwrap();
-        assert!(eng.violations().is_empty());
     }
 
     /// A register whose `d` is a pokeable named pin: the fixture the stop-condition
@@ -3906,7 +3776,6 @@ mod tests {
             assert_eq!(a.cycle(), eng.cycle(), "{name} cycle");
             assert_eq!(a.named_value("r1"), eng.named_value("r1"), "{name} r1");
             assert_eq!(a.named_value("r2"), eng.named_value("r2"), "{name} r2");
-            assert_eq!(a.violations(), eng.violations(), "{name} violations");
         }
     }
 
@@ -4301,42 +4170,47 @@ mod tests {
         );
     }
 
-    /// F11: the RAM write-enable is tracked like din/addr — a `we`
-    /// change inside the setup window is a warning (the write still
-    /// happens, deterministically).
+    /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
+    /// **C1 (`docs/derived-clock.md` §10).** A near-edge poke is **honoured**, and there is
+    /// nothing to report. `we` *and* `din` both change 10 ns before the edge -- inside any
+    /// setup window -- and the write still lands with the new data, because with a derived
+    /// clock the edge is placed *after* the settle: a near-edge change is not a race, it is
+    /// the normal case.
+    ///
+    /// The old version of this test asserted the warning and then asserted word 0 was 0 --
+    /// which is also the reset value, so it would have passed without the write landing at
+    /// all. The rewritten assertion is the *data*, which cannot be satisfied by accident.
     #[test]
-    fn ram_we_setup_violation_is_tracked() {
+    fn a_near_edge_ram_write_is_honoured_not_reported() {
         let json = format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"za","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":2}}}},
-                {{"id":"zd","type":"wiring.constant","pos":[0,0],"attrs":{{"bitsize":8}}}},
+                {{"id":"din","type":"wiring.pin","pos":[0,0],"name":"din","attrs":{{"bitsize":8}}}},
                 {{"id":"we","type":"wiring.pin","pos":[0,0],"name":"we"}},
                 {{"id":"m","type":"mem.ram","pos":[0,0],"name":"m","attrs":{{"bitsize":8,"depth":4}}}}
             ], "wires": [
                 {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"m","pin":"clk"}}}},
                 {{"a":{{"comp":"za","pin":"out"}},"b":{{"comp":"m","pin":"addr"}}}},
-                {{"a":{{"comp":"zd","pin":"out"}},"b":{{"comp":"m","pin":"din"}}}},
+                {{"a":{{"comp":"din","pin":"pin"}},"b":{{"comp":"m","pin":"din"}}}},
                 {{"a":{{"comp":"we","pin":"pin"}},"b":{{"comp":"m","pin":"we"}}}}
             ]}}]
         }}"##
         );
         let mut eng = engine(&json, 500);
-        // Edge at 1000 (clk wire 0). we rises at 990 — inside setup 15.
+        // The enable and the data both land 10 ns before the first edge (T=1000).
         assert!(eng.poke_at("we", k(1, 1), 990));
-        let rep = eng.run(1).unwrap();
-        // Retired with a derived clock (docs/derived-clock.md).
-        assert!(rep.violations.is_empty(), "violations are retired");
+        assert!(eng.poke_at("din", k(8, 0x2A), 990));
+        eng.run(1).expect("a cycle");
         assert_eq!(
             eng.memory_word("m", 0),
-            Some(k(8, 0)),
-            "write still happened"
+            Some(k(8, 0x2A)),
+            "the write must land with the poked data"
         );
     }
 
-    /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
     /// that the settle outlasts the nominal period (n x t_pd). Shared by **A1**, which
     /// reads the *value* it latches, and **A2**, which reads the barrier that makes that
     /// value possible in the first place.
@@ -4396,7 +4270,6 @@ mod tests {
         assert!(eng.poke_at("src", k(1, 1), 740));
         let rep = eng.run(3).expect("overclocked run must complete");
         assert_eq!(rep.cycles, 3);
-        assert!(rep.violations.is_empty(), "violations are retired");
         // **A1 (docs/derived-clock.md §10).** The barrier's whole point: the chain is far
         // longer than the nominal period, and the register must still latch the *settled*
         // value — 250 inversions of a 1 is a 1. Before the derived clock this fixture

@@ -947,8 +947,6 @@ mod tests {
                 "mem('imem')[0] == 0x2A",
                 "--assert",
                 "mem('imem')[1] == 0x55",
-                "--assert",
-                "violations == 0",
                 "--baseline-est-time",
                 "234",
                 "--sta",

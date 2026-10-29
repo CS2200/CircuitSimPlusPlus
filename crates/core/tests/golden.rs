@@ -110,7 +110,6 @@ fn cpu_fixtures_compute_the_program() {
             "probe('r4') == 10",
             "probe('r5') == 20",
             "mem('dmem')[0] == 10",
-            "violations == 0",
         ]
         .iter()
         .map(|a| autograde::parse_assertion(a).unwrap())
@@ -366,7 +365,6 @@ fn fixture_fsm_alternates() {
         cfg.assertions = vec![
             autograde::parse_assertion(&format!("probe('ns_green') == {ns}")).unwrap(),
             autograde::parse_assertion(&format!("probe('ew_green') == {ew}")).unwrap(),
-            autograde::parse_assertion("violations == 0").unwrap(),
         ];
         let out = autograde::grade(&doc, &cfg).unwrap();
         assert_eq!(
@@ -411,9 +409,11 @@ fn negative_fixtures_halt_as_advertised() {
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Oscillation);
 
-    // setup violations are RETIRED with a derived clock (docs/derived-clock.md): the edge
-    // is placed after the settle, so a poke that looks like a near-edge change must NOT be
-    // reported. The run still completes.
+    // A near-edge poke is honoured, and there is nothing to *report* (C1,
+    // docs/derived-clock.md): setup violations are retired with a derived clock, because the
+    // edge is placed after the settle and nothing races it. The assertion is the value --
+    // the property that survives; `violations == 0` was true by construction, which is why
+    // it is gone rather than kept as a passing test.
     let doc = load("neg-setup-violation.csx");
     let mut cfg = autograde::GradeConfig {
         clock_half_period: 1000,
@@ -425,7 +425,7 @@ fn negative_fixtures_halt_as_advertised() {
         value: 1,
         at: 3990,
     }];
-    cfg.assertions = vec![autograde::parse_assertion("violations == 0").unwrap()];
+    cfg.assertions = vec![autograde::parse_assertion("probe('r') == 1").unwrap()];
     let out = autograde::grade(&doc, &cfg).unwrap();
     assert_eq!(out.outcome, autograde::GradeOutcome::Passed);
 

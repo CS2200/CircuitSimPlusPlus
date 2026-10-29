@@ -31,7 +31,6 @@
 //! ```text
 //! probe('result') == 0x2A          — named probe/register value
 //! mem('dmem')[0x100] == 0x1234     — named RAM/ROM word
-//! violations == 0                  — setup/hold warning count
 //! ```
 //!
 //! Operators: `== != < <= > >=`. Literals: `0x…` hex, `0b…` binary,
@@ -183,18 +182,11 @@ pub enum Assertion {
         /// Literal to compare against.
         value: u64,
     },
-    /// `violations <op> <value>` — setup/hold warning count.
-    Violations {
-        /// Comparison operator.
-        op: CmpOp,
-        /// Literal to compare against.
-        value: u64,
-    },
 }
 
 /// Assertion parse failure (position-free — assertions are one-liners).
 #[derive(Debug, Error, PartialEq, Eq)]
-#[error("malformed assertion '{0}': expected probe('<name>') <op> <value>, mem('<name>')[<addr>] <op> <value>, or violations <op> <value>")]
+#[error("malformed assertion '{0}': expected probe('<name>') <op> <value>, mem('<name>')[<addr>] <op> <value>")]
 pub struct AssertError(String);
 
 struct Parser<'a> {
@@ -378,11 +370,6 @@ pub fn parse_assertion(text: &str) -> Result<Assertion, AssertError> {
         Assertion::Mem {
             name,
             addr,
-            op: p.op().map_err(|_| err())?,
-            value: p.number().map_err(|_| err())?,
-        }
-    } else if p.keyword("violations") {
-        Assertion::Violations {
             op: p.op().map_err(|_| err())?,
             value: p.number().map_err(|_| err())?,
         }
@@ -641,9 +628,7 @@ pub struct AssertionResult {
 /// The JSON report (§8.2). Simulation-derived fields are bit-identical
 /// across runs/machines; `wall_time_ms`/`peak_rss_bytes` are telemetry.
 ///
-/// Contract v1.1: `timing_violations` is the setup/hold warning **count**
-/// (DESIGN §8.2's name); the warnings themselves are in
-/// `violation_details`, and `top_paths` uses the document-identity
+/// `top_paths` uses the document-identity
 /// [`api::TimingPath`] shape. `errors` carries the load/validation error list
 /// when `halt_reason` is `"malformed-file"` (empty otherwise) — one
 /// malformed-file JSON shape everywhere (F10).
@@ -672,11 +657,6 @@ pub struct Report {
     /// `baseline_est_time / est_time`; `None` without a baseline or when
     /// `est_time == 0`.
     pub speedup_vs_baseline: Option<f64>,
-    /// Number of setup/hold warnings (§8.2; `violation_details.len()`).
-    pub timing_violations: u64,
-    /// The setup/hold warnings themselves, with document-identity
-    /// component references (contract v1.1).
-    pub violation_details: Vec<api::TimingViolation>,
     /// Per-assertion outcomes.
     pub assertions: Vec<AssertionResult>,
     /// Top-k observed critical paths (§4.4), grouped per circuit with
@@ -702,27 +682,6 @@ pub struct Report {
     pub peak_rss_bytes: Option<u64>,
     /// Wall-clock duration of the run (telemetry — varies by machine).
     pub wall_time_ms: u64,
-}
-
-/// Map an engine violation to the contract shape (document identity).
-pub(crate) fn api_violation(
-    nl: &Netlist,
-    v: &crate::delay::TimingViolation,
-) -> api::TimingViolation {
-    let (circuit, comp_id) = nl.doc_id(v.comp);
-    let origin = nl.comps[v.comp.idx()].origin();
-    api::TimingViolation {
-        circuit,
-        comp_id,
-        kind: match v.kind {
-            crate::delay::ViolationKind::Setup => api::ViolationKind::Setup,
-            crate::delay::ViolationKind::Hold => api::ViolationKind::Hold,
-        },
-        detail: format!(
-            "{:?} violation at {origin}: input changed at T={} ns (cycle {})",
-            v.kind, v.time, v.cycle
-        ),
-    }
 }
 
 /// Map a flat (engine) observed path to contract [`TimingPath`]s: split
@@ -832,8 +791,6 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 t_obs: 0,
                 est_time: 0,
                 speedup_vs_baseline: None,
-                timing_violations: 0,
-                violation_details: Vec::new(),
                 assertions: Vec::new(),
                 top_paths: Vec::new(),
                 t_sta: None,
@@ -875,7 +832,6 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
         let (name, want_mem) = match a {
             Assertion::Probe { name, .. } => (name, false),
             Assertion::Mem { name, .. } => (name, true),
-            Assertion::Violations { .. } => continue,
         };
         match named_kind(name) {
             Some((kind, _)) => {
@@ -1082,7 +1038,6 @@ fn grade_delay(
     let mut last_report = RunReport {
         cycles: 0,
         t_obs: 0,
-        violations: Vec::new(),
         top_paths: Vec::new(),
         trace_hash: 0,
         events_processed: 0,
@@ -1109,11 +1064,10 @@ fn grade_delay(
     let est_time = cycles.saturating_mul(t_obs);
 
     // -- Assertions ------------------------------------------------------
-    let violation_count = eng.violations().len() as u64;
     let results: Vec<AssertionResult> = cfg
         .assertions
         .iter()
-        .map(|a| eval_assertion(a, &DelayProbe(eng), violation_count))
+        .map(|a| eval_assertion(a, &DelayProbe(eng)))
         .collect();
 
     // -- Outcome (precedence in module docs) ------------------------------
@@ -1171,12 +1125,6 @@ fn grade_delay(
             .baseline_est_time
             .filter(|_| est_time > 0)
             .map(|b| b as f64 / est_time as f64),
-        timing_violations: eng.violations().len() as u64,
-        violation_details: eng
-            .violations()
-            .iter()
-            .map(|v| api_violation(&nl, v))
-            .collect(),
         assertions: results,
         top_paths: last_report
             .top_paths
@@ -1215,7 +1163,7 @@ impl ProbeView for DelayProbe<'_> {
     }
 }
 
-fn eval_assertion(a: &Assertion, view: &dyn ProbeView, violation_count: u64) -> AssertionResult {
+fn eval_assertion(a: &Assertion, view: &dyn ProbeView) -> AssertionResult {
     let text = render_assertion(a);
     let expected = format!("{} 0x{:X}", a.op().as_str(), a.value());
     let (observed, actual) = match a {
@@ -1227,7 +1175,6 @@ fn eval_assertion(a: &Assertion, view: &dyn ProbeView, violation_count: u64) -> 
             Some(v) => (numeric(&v), render_actual(&v)),
             None => (None, format!("<unknown memory '{name}'>")),
         },
-        Assertion::Violations { .. } => (Some(violation_count), violation_count.to_string()),
     };
     let passed = observed.is_some_and(|n| a.op().apply(n, a.value()));
     AssertionResult {
@@ -1241,17 +1188,13 @@ fn eval_assertion(a: &Assertion, view: &dyn ProbeView, violation_count: u64) -> 
 impl Assertion {
     fn op(&self) -> CmpOp {
         match self {
-            Assertion::Probe { op, .. }
-            | Assertion::Mem { op, .. }
-            | Assertion::Violations { op, .. } => *op,
+            Assertion::Probe { op, .. } | Assertion::Mem { op, .. } => *op,
         }
     }
 
     fn value(&self) -> u64 {
         match self {
-            Assertion::Probe { value, .. }
-            | Assertion::Mem { value, .. }
-            | Assertion::Violations { value, .. } => *value,
+            Assertion::Probe { value, .. } | Assertion::Mem { value, .. } => *value,
         }
     }
 }
@@ -1267,7 +1210,6 @@ fn render_assertion(a: &Assertion) -> String {
             op,
             value,
         } => format!("mem('{name}')[0x{addr:X}] {} 0x{value:X}", op.as_str()),
-        Assertion::Violations { op, value } => format!("violations {} 0x{value:X}", op.as_str()),
     }
 }
 
@@ -1400,13 +1342,6 @@ mod tests {
                 value: 0x1234
             }
         );
-        assert_eq!(
-            parse_assertion("violations!=3").unwrap(),
-            Assertion::Violations {
-                op: CmpOp::Ne,
-                value: 3
-            }
-        );
         for (text, op) in [
             ("==", CmpOp::Eq),
             ("!=", CmpOp::Ne),
@@ -1415,7 +1350,7 @@ mod tests {
             (">", CmpOp::Gt),
             (">=", CmpOp::Ge),
         ] {
-            let a = parse_assertion(&format!("violations {text} 7")).unwrap();
+            let a = parse_assertion(&format!("probe('x') {text} 7")).unwrap();
             assert_eq!(a.op(), op, "{text}");
         }
         assert_eq!(
@@ -1467,7 +1402,6 @@ mod tests {
             parse_assertion("probe('out') == 0x0").unwrap(),
             parse_assertion("mem('dmem')[2] == 0x2A").unwrap(),
             parse_assertion("mem('dmem')[0] == 0").unwrap(),
-            parse_assertion("violations == 0").unwrap(),
         ];
         cfg.loads = vec![("dmem".into(), LoadSource::Words(vec![0, 0, 0x2A]))];
         cfg.baseline_est_time = Some(234);
@@ -1482,13 +1416,12 @@ mod tests {
         assert_eq!(r.t_obs, 39);
         assert_eq!(r.est_time, 3 * 39);
         assert_eq!(r.speedup_vs_baseline, Some(2.0));
-        assert_eq!(r.timing_violations, 0);
         assert!(r.assertions.iter().all(|a| a.passed));
-        assert_eq!(r.assertions.len(), 6);
+        assert_eq!(r.assertions.len(), 5);
         assert!(!r.top_paths.is_empty());
         assert_eq!(r.top_paths[0].delay_ns, 39);
         assert_eq!(r.top_paths[0].circuit, "main");
-        // r1 is the 6th component in the fixture's document order.
+
         assert!(r.top_paths[0].comps.contains(&CompId(5)));
         assert_eq!(r.t_sta, Some(34));
         assert!(r.sta_note.as_deref().unwrap().contains("structural bound"));
@@ -1498,6 +1431,22 @@ mod tests {
         assert!(r.errors.is_empty());
         assert!(r.peak_rss_bytes.unwrap_or(1) > 0);
     }
+
+    /// **C3 (`docs/derived-clock.md` §10).** The violation surface is **absent** from the
+    /// report, not merely always zero. A field that is always zero invites exactly the
+    /// vacuous assertion C2 retires: a grading script could read it and learn nothing, and
+    /// so could a student. Absence is the only honest form of "there is nothing here".
+    #[test]
+    fn the_report_has_no_violation_surface() {
+        let cfg = cfg3();
+        let out = grade(&doc(&counter_json()), &cfg).unwrap();
+        let json = serde_json::to_string(&out.report).unwrap();
+        assert!(
+            !json.contains("violation"),
+            "the report must carry no violation surface: {json}"
+        );
+    }
+    // r1 is the 6th component in the fixture's document order.
 
     #[test]
     fn identical_runs_identical_sim_fields() {
@@ -1816,8 +1765,7 @@ mod tests {
                 "clock_half_period_ns": 500,
                 "loads": [{"memory": "dmem", "file": "data.hex"}],
                 "pokes": [{"target": "d", "value": "0x2A", "at": 100}],
-                "assertions": ["probe('r1') == 1", "violations == 0",
-                               "mem('dmem')[2] == 0x2A"]
+                "assertions": ["probe('r1') == 1", "mem('dmem')[2] == 0x2A"]
             }"#,
         )
         .unwrap();
@@ -1829,7 +1777,7 @@ mod tests {
         assert!(cfg.include_sta);
         assert_eq!(cfg.rubric_full_credit_below, Some(200));
         assert_eq!(cfg.clock_half_period, 500);
-        assert_eq!(cfg.assertions.len(), 3);
+        assert_eq!(cfg.assertions.len(), 2);
         assert_eq!(cfg.pokes.len(), 1);
         assert_eq!(cfg.pokes[0].value, 0x2A);
         match &cfg.loads[0].1 {
@@ -1838,7 +1786,7 @@ mod tests {
         }
         // ...and the config actually grades (file load included; the
         // poke is dropped — the counter fixture has no pin named "d";
-        // pokes are covered end-to-end by the violations test).
+        // pokes are covered end-to-end by the golden tests).
         let mut cfg = cfg;
         cfg.pokes.clear();
         let out = grade(&doc(&counter_json()), &cfg).unwrap();

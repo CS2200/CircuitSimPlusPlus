@@ -289,11 +289,6 @@ impl SimState {
         let update = TimingUpdate {
             t_obs,
             est_time: cycles.saturating_mul(t_obs),
-            violations: e
-                .violations()
-                .iter()
-                .map(|v| crate::autograde::api_violation(&self.netlist, v))
-                .collect(),
             top_paths: self
                 .last_report
                 .as_ref()
@@ -1152,7 +1147,6 @@ mod tests {
         let t = r.timings.last().expect("timing_update on run_until");
         assert!(t.t_obs > 0);
         assert_eq!(t.est_time, 4 * t.t_obs);
-        assert!(t.violations.is_empty());
         // r1 toggles every cycle: q = 0 after 4 cycles → register value 0.
     }
 

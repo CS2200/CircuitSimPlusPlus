@@ -359,33 +359,6 @@ pub struct SimHalted {
     pub details: String,
 }
 
-/// Which timing discipline a [`TimingViolation`] records (§4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ViolationKind {
-    /// Data changed within `t_setup` before the clock edge.
-    Setup,
-    /// Data changed within `t_hold` after the clock edge.
-    Hold,
-}
-
-/// A setup/hold warning (DESIGN.md §4.3), contract v1.1. `comp_id` obeys
-/// the CompId-on-the-wire rule: the document-order index within `circuit`'s
-/// `components` array. For a violating component inside a subcircuit, the
-/// pair (`circuit`, `comp_id`) names the component within its defining
-/// circuit; hierarchical designs attribute violations per circuit.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TimingViolation {
-    /// Circuit whose `components` array `comp_id` indexes into.
-    pub circuit: CircuitName,
-    /// Document-order index of the violating component within `circuit`.
-    pub comp_id: CompId,
-    /// Which discipline was violated.
-    pub kind: ViolationKind,
-    /// Human-readable detail (offending edge time, cycle, pin).
-    pub detail: String,
-}
-
 /// One observed critical path (DTA, §4.4), contract v1.1. `comps` are
 /// document-order indices within `circuit`'s `components` array (the
 /// CompId-on-the-wire rule). A path that crosses circuit boundaries is
@@ -406,16 +379,13 @@ pub struct TimingPath {
 /// Event: DTA timing results (DESIGN.md §4.4), emitted after `run_until` and
 /// on pause. `t_obs` is the max observed per-cycle settle time in delay-table
 /// units (ns); `est_time` is `cycles × t_obs` (saturating); `violations` is
-/// the setup/hold warning list (the count is its length); `top_paths` are
-/// the observed critical paths for UI highlighting.
+/// `top_paths` are the observed critical paths for UI highlighting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimingUpdate {
     /// Max observed per-cycle settle time in delay-table units (ns).
     pub t_obs: u64,
     /// `cycles × t_obs` (saturating).
     pub est_time: u64,
-    /// Setup/hold warnings (§4.3); the count is the list length.
-    pub violations: Vec<TimingViolation>,
     /// Observed critical paths, grouped per circuit, for UI highlighting.
     pub top_paths: Vec<TimingPath>,
 }
@@ -643,10 +613,6 @@ mod tests {
             r#""floating-read""#
         );
         assert_eq!(serde_json::to_string(&NamedKind::Ram).unwrap(), r#""ram""#);
-        assert_eq!(
-            serde_json::to_string(&ViolationKind::Setup).unwrap(),
-            r#""setup""#
-        );
     }
 
     #[test]
@@ -654,12 +620,6 @@ mod tests {
         let update = TimingUpdate {
             t_obs: 39,
             est_time: 117,
-            violations: vec![TimingViolation {
-                circuit: "main".into(),
-                comp_id: CompId(4),
-                kind: ViolationKind::Hold,
-                detail: "d changed 3 ns after the edge".into(),
-            }],
             top_paths: vec![TimingPath {
                 circuit: "main".into(),
                 comps: vec![CompId(4), CompId(2)],
@@ -669,7 +629,7 @@ mod tests {
         let json = serde_json::to_string(&update).unwrap();
         assert_eq!(
             json,
-            r#"{"t_obs":39,"est_time":117,"violations":[{"circuit":"main","comp_id":4,"kind":"hold","detail":"d changed 3 ns after the edge"}],"top_paths":[{"circuit":"main","comps":[4,2],"delay_ns":39}]}"#
+            r#"{"t_obs":39,"est_time":117,"top_paths":[{"circuit":"main","comps":[4,2],"delay_ns":39}]}"#
         );
         assert_eq!(update, serde_json::from_str(&json).unwrap());
     }
