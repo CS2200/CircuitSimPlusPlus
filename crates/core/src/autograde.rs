@@ -429,10 +429,6 @@ pub struct GradeConfig {
     pub loads: Vec<(String, LoadSource)>,
     /// Testbench pokes (§8.3 setup).
     pub pokes: Vec<Poke>,
-    /// Global clock half-period in ns (delay mode; §8.3 clock config).
-    /// Runtime is event-count-driven, so this only affects violation and
-    /// DTA semantics, never speed.
-    pub clock_half_period: u64,
     /// Course baseline processor's `est_time` for `speedup_vs_baseline`.
     pub baseline_est_time: Option<u64>,
     /// Exit 2 when the budget is consumed without a natural halt
@@ -474,7 +470,6 @@ impl Default for GradeConfig {
             assertions: Vec::new(),
             loads: Vec::new(),
             pokes: Vec::new(),
-            clock_half_period: 1000,
             baseline_est_time: None,
             expect_halt: false,
             pause_on_unknown: false,
@@ -522,8 +517,6 @@ pub struct TestSpec {
     pub loads: Vec<SpecLoad>,
     /// Testbench pokes.
     pub pokes: Vec<SpecPoke>,
-    /// Global clock half-period in ns (delay mode).
-    pub clock_half_period_ns: Option<u64>,
     /// Assertion strings (grammar in module docs).
     pub assertions: Vec<String>,
 }
@@ -589,9 +582,6 @@ impl TestSpec {
                 value,
                 at: p.at,
             });
-        }
-        if let Some(h) = self.clock_half_period_ns {
-            cfg.clock_half_period = h;
         }
         for a in &self.assertions {
             cfg.assertions
@@ -845,7 +835,7 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
     }
 
     // -- Engine (delay-aware only) ---------------------------------------
-    let half = cfg.clock_half_period.max(1);
+    let half = crate::delay::DEFAULT_HALF_PERIOD_NS;
     // `compat` is known at construction: the boot settle already reads floating inputs.
     let mut eng = match DelayEngine::build(nl, half, &table, cfg.compat) {
         Ok(e) => e,
@@ -1727,7 +1717,6 @@ mod tests {
                 "expect_halt": false,
                 "top_paths": 5,
                 "rubric_full_credit_below": 200,
-                "clock_half_period_ns": 500,
                 "loads": [{"memory": "dmem", "file": "data.hex"}],
                 "pokes": [{"target": "d", "value": "0x2A", "at": 100}],
                 "assertions": ["probe('r1') == 1", "mem('dmem')[2] == 0x2A"]
@@ -1740,7 +1729,6 @@ mod tests {
         assert_eq!(cfg.baseline_est_time, Some(234));
         assert_eq!(cfg.top_k, 5);
         assert_eq!(cfg.rubric_full_credit_below, Some(200));
-        assert_eq!(cfg.clock_half_period, 500);
         assert_eq!(cfg.assertions.len(), 2);
         assert_eq!(cfg.pokes.len(), 1);
         assert_eq!(cfg.pokes[0].value, 0x2A);

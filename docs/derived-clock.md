@@ -275,7 +275,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | C1 | **no** design reports a violation, for any poke pattern | integration: near-edge pokes, a RAM `we`, both — assert `violations` empty |
 | C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | integration |
 | C3 | `timing_violations` is **absent or always zero** in the report | integration |
-| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration |
+| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3) |
 | C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration — **done**: the flags are rejected by clap and the report carries none of the three |
 
 ### D. Loops and non-quiescence — the "never hang" contract

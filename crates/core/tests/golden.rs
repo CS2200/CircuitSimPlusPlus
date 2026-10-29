@@ -415,10 +415,7 @@ fn negative_fixtures_halt_as_advertised() {
     // the property that survives; `violations == 0` was true by construction, which is why
     // it is gone rather than kept as a passing test.
     let doc = load("neg-setup-violation.csx");
-    let mut cfg = autograde::GradeConfig {
-        clock_half_period: 1000,
-        ..autograde::GradeConfig::default()
-    };
+    let mut cfg = autograde::GradeConfig::default();
     cfg.limits.max_cycles = 2;
     cfg.pokes = vec![autograde::Poke {
         target: "d".into(),

@@ -51,10 +51,6 @@ use crate::netlist::{self, Netlist};
 use crate::timing_table::TimingTable;
 use crate::value::Value;
 
-/// Default clock half-period for the delay engine (ns); the same default
-/// the autograder uses (docs/delay-table.md).
-const DEFAULT_HALF_PERIOD: u64 = 1000;
-
 /// Play loop frame time (diff batching granularity, §7.2).
 const FRAME: Duration = Duration::from_millis(16);
 
@@ -417,7 +413,7 @@ impl Session {
                 return fail(errors);
             }
         };
-        match build_engine(&doc, DEFAULT_HALF_PERIOD) {
+        match build_engine(&doc, crate::delay::DEFAULT_HALF_PERIOD_NS) {
             Err(errors) => {
                 inner.doc = None;
                 inner.state = None;
@@ -430,7 +426,7 @@ impl Session {
                 let st = SimState {
                     engine,
                     netlist: nl,
-                    half: DEFAULT_HALF_PERIOD,
+                    half: crate::delay::DEFAULT_HALF_PERIOD_NS,
                     root_flat,
                     last_values: Vec::new(),
                     last_contended: Vec::new(),
@@ -485,7 +481,10 @@ impl Session {
                 wire_idx: None,
             }]);
         };
-        let half = inner.state.as_ref().map_or(DEFAULT_HALF_PERIOD, |s| s.half);
+        let half = inner
+            .state
+            .as_ref()
+            .map_or(crate::delay::DEFAULT_HALF_PERIOD_NS, |s| s.half);
         let (engine, nl, _table) = build_engine(&doc, half)?;
         let root_flat = root_flat_map(&doc, &nl);
         inner.state = Some(SimState {

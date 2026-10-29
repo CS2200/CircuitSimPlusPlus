@@ -158,7 +158,7 @@ turned back on, the clock must stay skew-free, because CE's atomic edge is what 
 designs (and their conversions) are built on.
 
 The delay engine's global clock half-period is a run parameter,
-`--clock-half-period-ns` / `clock_half_period_ns` (spec), default **1000
+`--clock-half-period-ns` / `clock_half_period_ns` (spec) — **retired**, the clock is derived; the floor is a constant of **1000
 ns** (2000 ns period). It does not affect correctness — it sets edge times
 for setup/hold detection — and it no longer bounds what can be graded: a
 design whose propagation exceeds the period produces setup/hold warnings and

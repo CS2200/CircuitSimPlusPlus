@@ -19,7 +19,7 @@ _Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/de
 - Power-on state: **RAM powers on `X`** — an uninitialized word is unknown, and a read of it propagates `X` like any other unknown value (docs/format-v2.md §9) — while **registers still power on 0** (legacy compatibility; under review, see docs/bugs.md). Deterministic either way: `X` is as reproducible as `0`. Combinational feedback nets seed 0, splitters seed Z (they carry, never originate).
 - Divide-by-zero → X; mux with X select passes when all inputs are equal, else X.
 - The per-pin floating-consume table (gates always; mux selected input only; controlled-buffer data only while enabled; register D only while enabled at an edge; probes/pins/splitters/breakpoints never).
-- `clock_half_period_ns` engine parameter (CLI default 1000 ns).
+- The clock is **derived** (`docs/derived-clock.md`): the period is an *output*, so `clock_half_period_ns` is no longer an engine parameter. The nominal 1000 ns floor survives as a constant, not a knob.
 - **Boot settle**: the delay engine settles to quiescence before cycle accounting begins — overclocked designs now correctly latch the settled value instead of spurious floating-read halts.
 - **Wire delay is per-path** (driver→sink path length × constant; stubs never inflate other sinks; Manhattan fallback for missing points) — layout cannot unfairly change a student's grade.
 - STA totals include destination setup time; DTA settle is edge-to-settle including clk→Q (convention table in delay-table.md).

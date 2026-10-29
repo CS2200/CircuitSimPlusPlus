@@ -68,10 +68,11 @@
 //!
 //! ## Clock, cycles, DTA
 //!
-//! The global clock is a free-running square wave with half period
-//! `clock_half_period` (engine parameter; the CLI pins it with
-//! `--clock-half-period-ns`, default 1000 ns). Cycle 0 is the first full
-//! period after the boot settle. Per cycle, the engine records the
+//! The global clock is **derived** (`docs/derived-clock.md`): an edge fires
+//! when the cascade from the previous one has settled, so the nominal half
+//! period ([`DEFAULT_HALF_PERIOD_NS`]) is a **floor** rather than a schedule —
+//! it decides neither the values latched nor `T_obs`. Cycle 0 is the first
+//! full period after the boot settle. Per cycle, the engine records the
 //! timestamp of the last input change at any register/memory input pin
 //! (its own view's arrival), measured from cycle start; `T_obs` is the
 //! maximum over the run — **including the final in-progress cycle, which
@@ -142,6 +143,13 @@ use crate::value::{Bit, Value};
 /// Default cap on applied events per cycle before declaring an event
 /// storm (§4.5).
 pub const DEFAULT_EVENTS_PER_CYCLE_CAP: u64 = 1_000_000;
+
+/// The clock's nominal half-period (ns): the derived clock's **floor**, and deliberately
+/// not a knob (`docs/derived-clock.md` §2). The period is an *output* — an edge fires when
+/// the cascade has settled — so the nominal value decides neither the values latched nor
+/// `t_obs` (B5 in the test plan). It survives at all because an edge still has to be
+/// scheduled somewhere, and the barrier is what re-stamps it from the last settle.
+pub const DEFAULT_HALF_PERIOD_NS: u64 = 1000;
 
 const TOP_K: usize = 10;
 

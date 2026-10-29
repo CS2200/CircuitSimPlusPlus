@@ -486,7 +486,7 @@ halt — F6).
 
 **Delay-model semantics** (details: docs/delay-table.md).
 
-- The grading clock is a run parameter (`--clock-half-period-ns`, default 1000 ns;
+- The grading clock was a run parameter (`--clock-half-period-ns`, default 1000 ns; **retired** — the clock is derived, `docs/derived-clock.md`;
   docs/delay-table.md). The delay engine runs a **boot settle** (power-on events to
   quiescence, no clock edges) before cycle accounting, and closes the in-progress final
   cycle at run end so its settle counts toward `T_obs` (F7).

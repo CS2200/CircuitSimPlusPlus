@@ -89,9 +89,6 @@ enum Cmd {
         /// Run this many cycles before snapshotting.
         #[arg(long, default_value_t = 0)]
         cycles: u64,
-        /// Clock half-period in ns.
-        #[arg(long)]
-        clock_half_period_ns: Option<u64>,
     },
     /// Resume from a snapshot and continue running; prints named values.
     Resume {
@@ -160,9 +157,6 @@ struct RunArgs {
     /// (§8.1).
     #[arg(long)]
     pause_on_breakpoints: bool,
-    /// Clock half-period in ns (delay mode).
-    #[arg(long)]
-    clock_half_period_ns: Option<u64>,
     /// Top-k observed critical paths in the report.
     #[arg(long, default_value_t = 10)]
     paths: usize,
@@ -336,9 +330,6 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
     cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
     cfg.pause_on_unknown |= args.pause_on_unknown;
     cfg.compat |= args.compat;
-    if let Some(h) = args.clock_half_period_ns {
-        cfg.clock_half_period = h;
-    }
     cfg.top_k = args.paths;
     if cfg.limits.max_cycles == 0 {
         return Err("cycle limit is 0 — pass --cycles or a spec".to_string());
@@ -453,7 +444,7 @@ fn timing(file: &Path, paths: usize, cycles: Option<u64>, json_out: Option<&Path
 }
 
 /// Self-contained snapshot file: circuit + engine state.
-fn snapshot(file: &Path, out: &Path, cycles: u64, half: Option<u64>) -> ExitCode {
+fn snapshot(file: &Path, out: &Path, cycles: u64) -> ExitCode {
     let bytes = match std::fs::read(file) {
         Ok(b) => b,
         Err(e) => {
@@ -483,7 +474,7 @@ fn snapshot(file: &Path, out: &Path, cycles: u64, half: Option<u64>) -> ExitCode
         }
     };
     let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
-    let half = half.unwrap_or(1000).max(1);
+    let half = csim_core::delay::DEFAULT_HALF_PERIOD_NS;
     let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
         Ok(e) => e,
         Err(errors) => {
@@ -504,8 +495,7 @@ fn snapshot(file: &Path, out: &Path, cycles: u64, half: Option<u64>) -> ExitCode
     let state_json = eng.snapshot();
     let file_json = serde_json::json!({
         "format": "csim-snapshot",
-        "version": 2,
-        "clock_half_period_ns": half,
+        "version": 3,
         "cycles_run": run_cycles,
         "circuit": doc_json,
         "state": serde_json::from_str::<serde_json::Value>(&state_json).expect("state parses"),
@@ -541,8 +531,8 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    if file["format"] != "csim-snapshot" || file["version"] != 2 {
-        eprintln!("csim: not a csim-snapshot v2 file");
+    if file["format"] != "csim-snapshot" || file["version"] != 3 {
+        eprintln!("csim: not a csim-snapshot v3 file");
         return ExitCode::from(exit::MALFORMED_FILE);
     }
     let doc: Document = match serde_json::from_value(file["circuit"].clone()) {
@@ -590,7 +580,18 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
             return ExitCode::from(exit::MALFORMED_FILE);
         }
     };
-    let half = file["clock_half_period_ns"].as_u64().unwrap_or(1000).max(1);
+    // **C4** (`docs/derived-clock.md` §10): a savestate that carries a half-period is from a
+    // build where the clock was a run parameter. It is rejected rather than silently restored
+    // at today's floor -- the file's value could have been anything, and the whole point of
+    // the derived clock is that the period is no longer something a caller sets.
+    if file.get("clock_half_period_ns").is_some() {
+        eprintln!(
+            "csim: snapshot carries clock_half_period_ns; the clock is derived and takes no \
+             half-period (snapshot format 3)"
+        );
+        return ExitCode::from(exit::MALFORMED_FILE);
+    }
+    let half = csim_core::delay::DEFAULT_HALF_PERIOD_NS;
     let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
         Ok(e) => e,
         Err(errors) => {
@@ -662,12 +663,7 @@ fn main() -> ExitCode {
             *compat,
             json.as_deref(),
         ),
-        Cmd::Snapshot {
-            file,
-            out,
-            cycles,
-            clock_half_period_ns,
-        } => snapshot(file, out, *cycles, *clock_half_period_ns),
+        Cmd::Snapshot { file, out, cycles } => snapshot(file, out, *cycles),
         Cmd::Resume {
             snapshot,
             cycles,
@@ -995,12 +991,51 @@ mod tests {
         for argv in [
             vec!["csim", "timing", "c.csx", "--sta"],
             vec!["csim", "run", "c.csx", "--sta"],
+            vec!["csim", "run", "c.csx", "--clock-half-period-ns", "500"],
+            vec![
+                "csim",
+                "snapshot",
+                "c.csx",
+                "--out",
+                "s.json",
+                "--clock-half-period-ns",
+                "5",
+            ],
         ] {
             assert!(
                 Cli::try_parse_from(&argv).is_err(),
                 "must be rejected: {argv:?}"
             );
         }
+    }
+
+    /// **C4 (`docs/derived-clock.md` §10), second half.** A savestate that still carries a
+    /// clock half-period is from a build where the clock was a run parameter; restoring it
+    /// silently at today's floor would hide the difference. It is refused instead.
+    #[test]
+    fn a_savestate_carrying_a_half_period_is_rejected() {
+        let dir = counter_dir("resumehalf");
+        let snap = dir.join("s.json");
+        let out = dir.join("resume.json");
+        assert_eq!(
+            snapshot(&dir.join("counter.csx"), &snap, 1),
+            ExitCode::SUCCESS
+        );
+        let text = std::fs::read_to_string(&snap).unwrap();
+        // The round trip does not write the retired field at all...
+        assert!(!text.contains("clock_half_period_ns"));
+        // ...and the same file restores, so a failure below can only be the field.
+        assert_eq!(resume(&snap, 1, Some(&out)), ExitCode::SUCCESS);
+        // Add the field a build with `--clock-half-period-ns` would have written.
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["clock_half_period_ns"] = serde_json::json!(500);
+        std::fs::write(&snap, serde_json::to_string(&v).unwrap()).unwrap();
+        assert_ne!(
+            resume(&snap, 1, Some(&out)),
+            ExitCode::SUCCESS,
+            "a half-period-bearing savestate must be refused"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// F8: `csim validate` catches netlist-level load errors (bitsize
@@ -1035,7 +1070,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("csim-cli-f10-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("bad.csx");
-        std::fs::write(&f, r#"{"version":2}"#).unwrap();
+        std::fs::write(&f, r#"{"version":3}"#).unwrap();
         let report_path = dir.join("report.json");
         let args = run_args(
             &f,
@@ -1058,7 +1093,7 @@ mod tests {
         let dir = counter_dir("resume-evil");
         let snap = dir.join("state.json");
         assert_eq!(
-            snapshot(&dir.join("counter.csx"), &snap, 1, None),
+            snapshot(&dir.join("counter.csx"), &snap, 1),
             ExitCode::SUCCESS
         );
         // Corrupt the embedded circuit's delayTable.
@@ -1075,7 +1110,7 @@ mod tests {
         let dir = counter_dir("snap");
         let snap = dir.join("state.json");
         assert_eq!(
-            snapshot(&dir.join("counter.csx"), &snap, 3, None),
+            snapshot(&dir.join("counter.csx"), &snap, 3),
             ExitCode::SUCCESS
         );
         let out = dir.join("resumed.json");

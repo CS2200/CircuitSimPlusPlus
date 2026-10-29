@@ -15,7 +15,7 @@ csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rs
     [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--json out.json]
-csim snapshot file.csx --out state.json [--cycles N] [--clock-half-period-ns N]
+csim snapshot file.csx --out state.json [--cycles N]
 csim resume state.json [--cycles N] [--json out.json]
 ```
 
@@ -106,7 +106,6 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   ],
   "top_paths": 10,
   "rubric_full_credit_below": 90000, // §8.3 rubric hook
-  "clock_half_period_ns": 1000, // delay-mode clock (default 1000)
   "loads": [{ "memory": "imem", "file": "program.hex" }],
   "pokes": [{ "target": "reset_pin", "value": "0x1", "at": 0 }], // value: §4 literal syntax; at: ns
   "assertions": ["probe('result') == 0x2A", "violations == 0"],
@@ -134,7 +133,6 @@ Self-contained JSON — the circuit travels with the state:
 {
   "format": "csim-snapshot",
   "version": 2,
-  "clock_half_period_ns": 1000,
   "cycles_run": 500,
   "circuit": {/* the full .csx document */},
   "state": {/* delay-engine snapshot format version 2 */},
