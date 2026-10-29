@@ -888,9 +888,9 @@ mod tests {
         let report: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
         assert_eq!(report["cycles"], 3);
-        assert_eq!(report["t_obs"], 39);
-        assert_eq!(report["est_time"], 117);
-        assert_eq!(report["speedup_vs_baseline"], 2.0);
+        assert_eq!(report["t_obs"], 54);
+        assert_eq!(report["est_time"], 162);
+        assert_eq!(report["speedup_vs_baseline"], 234.0 / 162.0);
         assert_eq!(report["halt_reason"], "completed");
         assert!(report["assertions"]
             .as_array()
@@ -969,7 +969,7 @@ mod tests {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(v["dta"]["cycles"], 3);
-        assert_eq!(v["dta"]["t_obs"], 39);
+        assert_eq!(v["dta"]["t_obs"], 54);
         for key in ["t_sta", "sta_note", "sta_paths"] {
             assert!(v.get(key).is_none(), "the report must not carry {key}");
         }

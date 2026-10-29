@@ -36,6 +36,14 @@
 //! has six unconnected inputs — and again `t_obs` held and the architectural checks pass:
 //! the drift is one fewer spurious hold, not a different result.
 
+//! Re-blessed again by the **derived period** (`docs/derived-clock.md` §3): every edge is
+//! placed by the drain now, so the timeline is the design's own and not the nominal's, and
+//! `t_obs` is the rise-to-rise period. Every hash moves (the event times in them move by
+//! construction) and every `t_obs` moves by exactly its fixture's setup — 39/40/205/205 ->
+//! 54/55/220/220. `alu` stays 0 because one cycle has no rise-to-rise pair to measure, which
+//! is also why the earlier note that `t_obs` "did not move" was telling us something: it was
+//! measuring the settle.
+
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
 use csim_core::format::load_document;
@@ -60,16 +68,16 @@ const SCENARIOS: &[Scenario] = &[
         half: 1000,
         cycles: 3,
         pokes: &[],
-        t_obs: 39,
-        trace_hash: 0x91a0_5a34_91a4_6c30,
+        t_obs: 54,
+        trace_hash: 0x5231_7847_6633_ea41,
     },
     Scenario {
         fixture: "fsm.csx",
         half: 1000,
         cycles: 4,
         pokes: &[("car", 1, 0)],
-        t_obs: 40,
-        trace_hash: 0x5d00_45c8_6818_a4b4,
+        t_obs: 55,
+        trace_hash: 0xe6ea_5e23_47ed_a6b6,
     },
     Scenario {
         fixture: "alu.csx",
@@ -77,26 +85,25 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x2a13_1225_e53a_a71e,
+        trace_hash: 0x0ca4_af9e_a6d4_7e8c,
     },
     Scenario {
         fixture: "multicycle.csx",
         half: 500,
         cycles: 100,
         pokes: &[],
-        t_obs: 205,
-        trace_hash: 0x8da8_ca27_5942_04cf,
+        t_obs: 220,
+        trace_hash: 0x28a1_eb38_6758_4996,
     },
     Scenario {
         fixture: "pipeline5.csx",
         half: 500,
         cycles: 100,
         pokes: &[],
-        t_obs: 205,
-        trace_hash: 0xe494_ee8b_25dc_d628,
+        t_obs: 220,
+        trace_hash: 0xeaa4_9cf7_9540_a28e,
     },
 ];
-
 /// The CPU fixtures run the same program to the same architectural state
 /// (the course's CPI lesson is in the timing numbers, not the values).
 #[test]

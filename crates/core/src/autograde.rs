@@ -1375,9 +1375,9 @@ mod tests {
         let r = &out.report;
         assert_eq!(r.cycles, 3);
         assert_eq!(r.halt_reason, "completed");
-        assert_eq!(r.t_obs, 39);
-        assert_eq!(r.est_time, 3 * 39);
-        assert_eq!(r.speedup_vs_baseline, Some(2.0));
+        assert_eq!(r.t_obs, 54);
+        assert_eq!(r.est_time, 3 * 54);
+        assert_eq!(r.speedup_vs_baseline, Some(234.0 / (3.0 * 54.0)));
         assert!(r.assertions.iter().all(|a| a.passed));
         assert_eq!(r.assertions.len(), 5);
         assert!(!r.top_paths.is_empty());

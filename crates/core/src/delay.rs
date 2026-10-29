@@ -151,6 +151,13 @@ pub const DEFAULT_EVENTS_PER_CYCLE_CAP: u64 = 1_000_000;
 /// scheduled somewhere, and the barrier is what re-stamps it from the last settle.
 pub const DEFAULT_HALF_PERIOD_NS: u64 = 1000;
 
+/// The smallest step a transition can take. A transition may not land on the timestamp of the
+/// edge that scheduled it: with no clocked parts there is nothing to drain and no setup to
+/// charge, so two transitions would share one instant forever and trip the event cap. One
+/// unit of simulator time is that guarantee, and it is the **only** floor left — the nominal
+/// period no longer decides where any edge after the first one goes.
+pub const MIN_STEP: u64 = 1;
+
 const TOP_K: usize = 10;
 
 /// What a run produced (also the engine's observable state).
@@ -231,8 +238,13 @@ impl EventQueue {
         self.buckets.entry(ev.time).or_default()[usize::from(ev.prio.min(1))].push_back(ev);
     }
 
+    #[cfg(test)]
     fn len(&self) -> usize {
         self.buckets.values().map(|b| b[0].len() + b[1].len()).sum()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buckets.is_empty()
     }
 
     fn peek(&self) -> Option<&Ev> {
@@ -295,6 +307,9 @@ struct DelaySnap {
     /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
     /// has settled, so there is no nominal boundary to measure the settle from.
     cycle_start: u64,
+    /// Time of the last **rising** edge: the period is rise-to-rise
+    /// (`docs/derived-clock.md` §3), so `t_obs` needs the previous one.
+    last_rise: Option<u64>,
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
@@ -637,6 +652,9 @@ pub struct DelayEngine {
     /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
     /// has settled, so there is no nominal boundary to measure the settle from.
     cycle_start: u64,
+    /// Time of the last **rising** edge: the period is rise-to-rise
+    /// (`docs/derived-clock.md` §3), so `t_obs` needs the previous one.
+    last_rise: Option<u64>,
     cycle_settle_net: Option<u32>,
     t_obs: u64,
     top_paths: Vec<(u64, Vec<CompId>)>,
@@ -987,6 +1005,7 @@ impl DelayEngine {
             setup_wait,
             cycle_settle: 0,
             cycle_start: 0,
+            last_rise: None,
             cycle_settle_net: None,
             t_obs: 0,
             top_paths: Vec::new(),
@@ -1226,6 +1245,7 @@ impl DelayEngine {
             next_boundary: self.next_boundary,
             cycle_settle: self.cycle_settle,
             cycle_start: self.cycle_start,
+            last_rise: self.last_rise,
             cycle_settle_net: self.cycle_settle_net,
             t_obs: self.t_obs,
             top_paths: self.top_paths.clone(),
@@ -1390,6 +1410,7 @@ impl DelayEngine {
         self.next_boundary = snap.next_boundary;
         self.cycle_settle = snap.cycle_settle;
         self.cycle_start = snap.cycle_start;
+        self.last_rise = snap.last_rise;
         self.cycle_settle_net = snap.cycle_settle_net;
         self.t_obs = snap.t_obs;
         self.top_paths = snap.top_paths;
@@ -1977,12 +1998,57 @@ impl DelayEngine {
     /// negotiable. Both callers come through here for the same reason: when this logic was
     /// copy-pasted between `run_inner` and `step_tick`, the copies drifted, and the one in
     /// `run_inner` -- the path a real run takes -- kept the truncation.
-    fn fire_edge_without_overtaking(&mut self, kind: EvKind) -> Result<(), Halt> {
+    fn place_transition(&mut self, due: u64, kind: EvKind) -> Result<(), Halt> {
+        // Drain to quiescence: everything queued belongs to the cycle this transition closes,
+        // because nothing can schedule the next cycle's events before the transition happens.
+        let mut pause = None;
         while let Some(e) = self.queue.pop() {
-            self.apply(e)?;
+            if let Err(h) = self.apply(e) {
+                pause = Some(h);
+                break;
+            }
         }
-        self.schedule(self.now + self.setup_wait, kind);
-        Ok(())
+        // The transition is re-queued **whatever happened**: a pause (a breakpoint, a `stop`)
+        // is not a fault, so the rest of the cycle is still queued and the run carries on from
+        // exactly here. Dropping the transition would stop the clock.
+        self.schedule(self.transition_time(due, &kind), kind);
+        match pause {
+            Some(h) => Err(h),
+            None => Ok(()),
+        }
+    }
+
+    /// Where a transition lands: **quiescence plus the setup it owes** — and it owes setup only
+    /// if it *samples*. A falling edge latches nothing, so it has no data to be stable and is
+    /// placed at quiescence; charging it setup there would charge two setups per cycle.
+    ///
+    /// `max` with the transition's own due time rather than `quiescence + setup` alone: a
+    /// transition is never pulled *earlier* than it was due, which is what leaves the boot's
+    /// first edge (an empty queue in front of it) where the boot put it.
+    fn transition_time(&self, due: u64, kind: &EvKind) -> u64 {
+        let samples = matches!(kind, EvKind::Clock { phase: true }) && self.setup_wait > 0;
+        let settled = if samples {
+            self.now + self.setup_wait
+        } else {
+            self.now
+        };
+        settled.max(due)
+    }
+
+    /// Apply a transition that the queue already holds alone: nothing left to drain, so it is
+    /// already as early as the drain would place it, and it is applied rather than re-queued.
+    /// (This is also what advances a design with no clocked parts at all.)
+    fn apply_transition_now(&mut self, due: u64, kind: EvKind) -> Result<(), Halt> {
+        self.seq += 1;
+        let ev = Ev {
+            time: self.transition_time(due, &kind),
+            prio: 0,
+            seq: self.seq,
+            kind,
+        };
+        #[cfg(test)]
+        self.assert_edge_does_not_overtake(&ev);
+        self.apply(ev)
     }
 
     /// Advance one half-period (one clock edge — the contract v1.1
@@ -1997,17 +2063,15 @@ impl DelayEngine {
                 return Ok(());
             };
             if matches!(ev.kind, EvKind::Clock { .. }) {
-                if self.queue.len() > 1 {
-                    let kind = ev.kind.clone();
-                    self.queue.pop();
-                    self.fire_edge_without_overtaking(kind)?;
-                    continue;
+                let (due, kind) = (ev.time, ev.kind.clone());
+                self.queue.pop();
+                if self.queue.is_empty() {
+                    self.apply_transition_now(due, kind)
+                        .inspect_err(|h| self.record_halt(h))?;
+                    return Ok(());
                 }
-                let ev = self.queue.pop().expect("peeked");
-                #[cfg(test)]
-                self.assert_edge_does_not_overtake(&ev);
-                self.apply(ev).inspect_err(|h| self.record_halt(h))?;
-                return Ok(());
+                self.place_transition(due, kind)?;
+                continue;
             }
             let ev = self.queue.pop().expect("peeked");
             self.apply(ev).inspect_err(|h| self.record_halt(h))?;
@@ -2022,12 +2086,20 @@ impl DelayEngine {
         if let Some(h) = &self.halted {
             return Err(h.clone());
         }
+        // A transition is *deferred*, not a stopping point. It sits at the head of the queue
+        // the moment it is due (a successor is due immediately after its edge), so stopping at
+        // it would leave an interactive poke unsettled — which is this function's whole job.
+        let mut deferred: Vec<Ev> = Vec::new();
         while let Some(ev) = self.queue.peek() {
             if matches!(ev.kind, EvKind::Clock { .. }) {
-                break;
+                deferred.push(self.queue.pop().expect("peeked"));
+                continue;
             }
             let ev = self.queue.pop().expect("peeked");
             self.apply(ev).inspect_err(|h| self.record_halt(h))?;
+        }
+        for ev in deferred {
+            self.queue.push(ev);
         }
         Ok(())
     }
@@ -2042,6 +2114,20 @@ impl DelayEngine {
             if ev.time >= t {
                 break;
             }
+            if matches!(ev.kind, EvKind::Clock { .. }) {
+                let (due, kind) = (ev.time, ev.kind.clone());
+                if self.transition_time(due, &kind) >= t {
+                    break; // it lands at or after `t`: leave it for the caller
+                }
+                self.queue.pop();
+                if self.queue.is_empty() {
+                    self.apply_transition_now(due, kind)
+                        .inspect_err(|h| self.record_halt(h))?;
+                } else {
+                    self.place_transition(due, kind)?;
+                }
+                continue;
+            }
             let ev = self.queue.pop().expect("peeked");
             self.apply(ev).inspect_err(|h| self.record_halt(h))?;
         }
@@ -2052,33 +2138,44 @@ impl DelayEngine {
         let target = self.rising_seen + cycles;
         let mut run_cycles = 0;
         while let Some(ev) = self.queue.peek() {
-            // **Derived clock** (`docs/derived-clock.md`): an edge never overtakes the
-            // logic. If the cascade from the previous edge is still pending, drain it and
-            // re-stamp the edge to the settled time, so a latch always samples a settled
-            // cloud — which is what makes values independent of the delay table.
-            if matches!(ev.kind, EvKind::Clock { .. }) && self.queue.len() > 1 {
-                let kind = ev.kind.clone();
-                self.queue.pop();
-                self.fire_edge_without_overtaking(kind)?;
-                continue;
-            }
-            let at_boundary = matches!(ev.kind, EvKind::Clock { phase: true });
-            if at_boundary {
+            // Copy what this iteration needs and let the queue borrow end here: every path
+            // below mutates the engine.
+            let due = ev.time;
+            let is_rising = matches!(ev.kind, EvKind::Clock { phase: true });
+            let kind = if matches!(ev.kind, EvKind::Clock { .. }) {
+                Some(ev.kind.clone())
+            } else {
+                None
+            };
+            if is_rising {
                 if self.rising_seen == target {
                     break; // stop at the boundary; the edge belongs to the next run
                 }
-                // Caller-defined stop conditions (§8.4) are evaluated at the boundary:
-                // every event earlier than the edge has been applied, so the cycle has
-                // settled — the state a course grader reads after a clock tick.
+                // Caller-defined stop conditions (§8.4) are evaluated at the boundary: every
+                // event earlier than the edge has been applied, so the cycle has settled —
+                // the state a course grader reads after a clock tick.
                 self.check_watch()?;
             }
-            let ev = self.queue.pop().expect("peeked");
-            let was_rising = matches!(ev.kind, EvKind::Clock { phase: true });
-            #[cfg(test)]
-            self.assert_edge_does_not_overtake(&ev);
-            self.apply(ev)?;
-            if was_rising {
-                run_cycles += 1;
+            let Some(kind) = kind else {
+                let ev = self.queue.pop().expect("peeked");
+                #[cfg(test)]
+                self.assert_edge_does_not_overtake(&ev);
+                self.apply(ev)?;
+                continue;
+            };
+            // **Derived clock** (`docs/derived-clock.md` §3): a transition is *placed* by the
+            // drain before it is applied. If the cascade from the previous one is still
+            // pending, drain it and stamp the transition at `quiescence + setup` — so a latch
+            // always samples a settled cloud, and the period is the design's own number rather
+            // than the nominal.
+            self.queue.pop();
+            if self.queue.is_empty() {
+                self.apply_transition_now(due, kind)?;
+                if is_rising {
+                    run_cycles += 1;
+                }
+            } else {
+                self.place_transition(due, kind)?;
             }
         }
         Ok(RunReport {
@@ -2688,8 +2785,19 @@ impl DelayEngine {
                     self.comps[c as usize].set_phase(phase);
                     self.eval_and_schedule(c, ev.time, None)?;
                 }
-                self.schedule(ev.time + self.half_period, EvKind::Clock { phase: !phase });
+                // The successor is **due immediately**, and *placed* by the drain
+                // (`place_transition`). The nominal period is the timeline's origin now, not
+                // a rate (docs/derived-clock.md §3).
+                self.schedule(ev.time + MIN_STEP, EvKind::Clock { phase: !phase });
                 if phase {
+                    // **The derived period** (`docs/derived-clock.md` §3): `t_obs` is the
+                    // maximum rise-to-rise interval -- the clock rate the design can actually
+                    // be run at. Both edges are placed by the drain now, so this *is*
+                    // `depth + setup`: the two numbers are one number.
+                    if let Some(prev) = self.last_rise {
+                        self.t_obs = self.t_obs.max(ev.time - prev);
+                    }
+                    self.last_rise = Some(ev.time);
                     self.rising_seen += 1;
                     // Implicit clocks: the same edge, for the parts that do not
                     // wire one (UI_OVERHAUL §93). `rising_seen` is bumped first,
@@ -3058,7 +3166,8 @@ impl DelayEngine {
     /// cycle, F7).
     fn record_cycle(&mut self) {
         if self.cycle_settle > 0 {
-            self.t_obs = self.t_obs.max(self.cycle_settle);
+            // The *settle* is what a critical path's `delay_ns` is; the period `t_obs` reports
+            // is the rise-to-rise interval, folded where the rising edge is applied.
             let path = self.extract_path(self.cycle_settle_net);
             let entry = (self.cycle_settle, path);
             if !self.top_paths.contains(&entry) {
@@ -3433,11 +3542,11 @@ mod tests {
 
     #[test]
     fn t_obs_matches_hand_computed_value() {
-        // half = 500 ns (cycle 1000 ns — far above the 39 ns path).
+        // The half-period is the timeline's origin now; the period is derived.
         let mut eng = engine(&pipeline_json(), 500);
         let rep = eng.run(3).unwrap();
         assert_eq!(rep.cycles, 3);
-        assert_eq!(rep.t_obs, 39, "clk→Q 20 + not 9 + and 10");
+        assert_eq!(rep.t_obs, 54, "clk→Q 20 + not 9 + and 10 + setup 15");
         // r1 toggled every cycle; r2 follows one cycle behind (d=1,0,1 at
         // the three edges → q=1).
         assert_eq!(eng.named_value("r1"), Some(k(1, 1))); // 3 toggles: 0→1→0→1
@@ -4434,9 +4543,9 @@ mod tests {
         );
         assert_eq!(
             t_far,
-            t_near + CLOCK_WIRE_NS,
-            "the clock's 200-unit wire must add its {CLOCK_WIRE_NS} ns to the settle \
-             ({t_near} -> {t_far})"
+            t_near + 2 * CLOCK_WIRE_NS,
+            "the clock's wire carries **both** transitions, so the period grows by twice its \
+             delay: {t_near} -> {t_far}"
         );
     }
 
@@ -4574,139 +4683,72 @@ mod tests {
         );
     }
 
-    /// **What `t_obs` is, exactly — and the open decision about what it should be.**
+    /// **`t_obs` is the derived period** (`docs/derived-clock.md` §3): the maximum rise-to-rise
+    /// interval, i.e. `depth + setup`.
     ///
-    /// Measured, on the two-stage pipeline (`clk→Q 20 + not 9 + and 10` = a 39 ns settle,
-    /// register `t_setup` 15):
-    ///
-    /// ```text
-    /// half=500  setup_wait=15  edges=[1500 2500 3500 4500]  periods=[1000 1000 1000]  t_obs=39
-    /// half=  5  setup_wait=15  edges=[  64  123  182  241]  periods=[  59   59   59]  t_obs=39
-    /// ```
-    ///
-    /// So `t_obs` is the **settle**: the time from the cycle's edge to the last input change
-    /// at a clocked part's pin. It is not the period (which is 1000 when the nominal floor
-    /// dominates and 59 when it does not), and it is not what the design *needs* either —
-    /// the edge cannot follow the data by less than `t_setup`, so the sustainable period is
-    /// `settle + setup_wait` = 54.
-    ///
-    /// **Why the gap goes missing:** the barrier *places* the edge `setup_wait` after the
-    /// drain, and the per-cycle measurement then runs *from that edge*. The gap is real in
-    /// the edge times (that is why the periods above are 59 rather than 44) and invisible in
-    /// every cycle's measurement, because it falls between the window that ends at the last
-    /// change and the window that starts at the next edge. Nobody measures it.
-    ///
-    /// The consequence is `est_time = cycles × t_obs` = `cycles × settle`: on a 1000-cycle
-    /// run of this fixture it reports 39 000 ns where the design needs 54 000, and `est_time`
-    /// is what `speedup_vs_baseline` divides by.
-    ///
-    /// This test pins the *current* semantics and both numbers, so that whichever way the
-    /// decision goes, exactly one assertion moves and the reason is written down. The plan's
-    /// B1/B3 rows say the period; B4's says `0` for a static design (which is why a *settle*
-    /// is the only thing that can be zero); §2's prose says the period; the retired STA note
-    /// in §2 said `t_sta` is "not comparable to `t_obs`" *because* STA included setup. The
-    /// field implements the last of those, and the decision is whether that is what was meant.
+    /// Measured on the pipeline: 54 = 39 (`clk→Q 20 + not 9 + and 10`) + 15 (`t_setup`), the
+    /// same in every cycle. This replaces a test that pinned the *old* semantics — `t_obs` as
+    /// the settle (39), with the period a separate number the field did not report, and the
+    /// 15 ns setup gap measured by nobody. Both numbers still exist: the settle is what a
+    /// critical path's `delay_ns` carries.
     #[test]
-    fn t_obs_is_the_settle_and_the_requirement_is_settle_plus_setup() {
-        const SETTLE: u64 = 39;
-        const SETUP: u64 = 15;
-        let json = pipeline_json();
-        let edge_times = |half: u64| -> Vec<u64> {
-            let mut eng = engine(&json, half);
-            (0..4)
-                .map(|_| {
-                    eng.run(1).expect("a cycle");
-                    let v: serde_json::Value =
-                        serde_json::from_str(&eng.snapshot()).expect("snapshot");
-                    v["now"].as_u64().expect("now")
-                })
-                .collect()
-        };
-        // The floor dominates: the period is the nominal one, whatever the design needs.
-        let floored = edge_times(500);
+    fn t_obs_is_the_derived_period() {
+        let mut eng = engine(&pipeline_json(), 500);
+        let rep = eng.run(4).expect("cycles");
+        assert_eq!(rep.t_obs, 54, "depth 39 + setup 15");
         assert_eq!(
-            floored.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>(),
-            [1000, 1000, 1000]
-        );
-        // Below the floor the periods are the design's own: the falling half-edge is placed
-        // `settle + setup` after the rising one (54), and the next rising only has to wait
-        // its nominal half (5) -- 59.
-        let derived = edge_times(5);
-        assert_eq!(
-            derived.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>(),
-            [59, 59, 59]
-        );
-        // And in both runs the reported number is the settle, floor-independent (B5).
-        let mut eng = engine(&json, 5);
-        eng.run(4).expect("cycles");
-        assert_eq!(eng.setup_wait, SETUP, "the table's register setup time");
-        assert_eq!(
-            eng.t_obs,
-            SETTLE,
-            "t_obs is the settle; the sustainable period would be {}",
-            SETTLE + SETUP
+            rep.top_paths.iter().map(|(settle, _)| *settle).max(),
+            Some(39),
+            "the critical path keeps the settle: a path's delay is propagation, not a cycle"
         );
     }
 
-    /// **Does the nominal bind, or is every edge placed by the drain?**
+    /// **The period is derived, whatever the nominal is.**
     ///
-    /// `docs/derived-clock.md` §2 gives the edge as `edge = quiescence + max t_setup` — every
-    /// edge *placed* by the drain. The code schedules each edge at `edge + half_period` and
-    /// has the barrier **push it out** when work is still queued. Measured on the pipeline
-    /// (39 ns settle, 15 ns setup), those are different answers:
+    /// The nominal is the timeline's *origin* now — it decides when the clock starts and
+    /// nothing else. Measured on the pipeline, the period is 54 whether the origin is at 500,
+    /// 50, 5 or 1, and `t_obs` (which *is* that period) is 54 in all of them.
     ///
-    /// ```text
-    /// half=500  periods=[1000, 1000, 1000]   the nominal binds (2 x 500)
-    /// half= 50  periods=[ 100,  100,  100]   the nominal binds
-    /// half=  5  periods=[  59,   59,   59]   derived: 54 + the 5 ns placeholder
-    /// half=  1  periods=[  55,   55,   55]   derived: 54 + 1
-    /// half=  0  periods=[  69,   69,   69]   derived, and 69 = 54 + 15
-    /// ```
-    ///
-    /// The mechanism is the barrier's trigger, `queue.len() > 1`: "the edge is due *and*
-    /// something is still queued, so push it out". That is a **safety** rule (never overtake
-    /// the logic), and a safety rule is satisfied by firing *late* — so whenever the logic
-    /// finishes before the nominal, the nominal wins and the period is the nominal. §2's
-    /// formula is the *derivation* rule (place the edge where the drain ends), which is not
-    /// what the code implements. The docs are ahead of the code here, not behind it.
-    ///
-    /// The last line is the trap on the way to fixing it: at a zero placeholder every edge is
-    /// derived, and the period is **69, not 54**, because `setup_wait` is added to *every*
-    /// edge — including the falling one, where no register latches. A cycle's requirement is
-    /// `settle + t_setup` for the edge that *acts*; a phase that samples nothing has no setup
-    /// requirement, or a rising-only design pays setup twice per cycle.
+    /// This test used to pin the **opposite**, and that is why it is written down: before every
+    /// edge was placed by the drain, the nominal bound the period the moment it exceeded the
+    /// design's requirement — 1000 ns at an origin of 500, for a design that needs 54. If the
+    /// nominal ever decides a period again, this fails.
     #[test]
-    fn the_nominal_binds_until_it_is_smaller_than_the_requirement() {
-        const SETTLE: u64 = 39;
+    fn the_period_is_derived_whatever_the_nominal_is() {
+        const DEPTH: u64 = 39;
         const SETUP: u64 = 15;
         let json = pipeline_json();
-        let periods = |half: u64| -> Vec<u64> {
-            let mut eng = engine(&json, half);
+        let now = |e: &DelayEngine| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
+            v["now"].as_u64().expect("now")
+        };
+        for origin in [500u64, 50, 5, 1] {
+            let mut eng = engine(&json, origin);
             let edges: Vec<u64> = (0..4)
                 .map(|_| {
                     eng.run(1).expect("a cycle");
-                    let v: serde_json::Value =
-                        serde_json::from_str(&eng.snapshot()).expect("snapshot");
-                    v["now"].as_u64().expect("now")
+                    now(&eng)
                 })
                 .collect();
-            let p: Vec<u64> = edges.windows(2).map(|w| w[1] - w[0]).collect();
-            assert_eq!(eng.t_obs, SETTLE, "the settle is the same at every nominal");
-            p
-        };
-        // The nominal binds when it exceeds what the design needs.
-        assert_eq!(periods(500), [1000, 1000, 1000]);
-        assert_eq!(periods(50), [100, 100, 100]);
-        // Below the requirement, the derived placement takes over and the period is the
-        // design's own number plus whatever placeholder is left.
-        assert_eq!(periods(5), [SETTLE + SETUP + 5; 3]);
-        assert_eq!(periods(1), [SETTLE + SETUP + 1; 3]);
-        // Zero placeholder: fully derived -- and one setup per *half-edge*, which is one too
-        // many. This is the line that says a "just derive it" fix is not a one-liner.
+            let periods: Vec<u64> = edges.windows(2).map(|w| w[1] - w[0]).collect();
+            assert_eq!(
+                periods,
+                [DEPTH + SETUP; 3],
+                "the period must be the design's own at origin {origin}, not the nominal"
+            );
+            assert_eq!(eng.t_obs, DEPTH + SETUP, "t_obs is that period");
+        }
+        // The origin is still an origin: the clock's first edge is at 2 x it, plus the setup
+        // its sampling owe.
+        let mut eng = engine(&json, 500);
+        eng.run(1).expect("a cycle");
+        // The origin still holds: the first edge is *due* at 2 x 500 = 1000, and `max` leaves
+        // it there (the queue in front of it is already empty, so `now + setup` is 15). `now`
+        // after one cycle is the end of that cycle's drain — 1000 + the 39 ns pipeline.
         assert_eq!(
-            periods(0),
-            [SETTLE + 2 * SETUP; 3],
-            "the second setup is charged to the falling edge, which latches nothing"
+            now(&eng),
+            2 * 500 + DEPTH,
+            "the origin, then one cycle's drain"
         );
     }
 
@@ -4819,14 +4861,11 @@ mod tests {
             Some(k(1, 1)),
             "a chain longer than the period must latch the settled value"
         );
-        // **Rewritten for the derived clock.** The old expectation (990) was the settle
-        // measured from a *nominal* edge at 2000 — but the only activity here is the poke
-        // at 740, which starts the chain before the first edge. With a derived clock the
-        // first edge is deferred until that cascade settles (2990), and the design is then
-        // static, so there is no per-cycle settle to measure: t_obs is 0. A real program
-        // changes something every cycle, so this is a property of the fixture, not of the
-        // engine — see the test plan for the fixture that should replace it.
-        assert_eq!(rep.t_obs, 0, "nothing settles after the first edge");
+        // **Rewritten again for the derived period.** The design goes static after the first
+        // edge, so every later cycle has *no depth* — but it still pays its sampling edge's
+        // setup, which is now part of the period (`docs/derived-clock.md` §3: `depth + setup`).
+        // The old `t_obs == 0` was reachable only while the metric was the settle.
+        assert_eq!(rep.t_obs, 35, "measured: clk→Q 20 + setup 15");
     }
 
     /// **A4 (`docs/derived-clock.md` section 10).** The complement of A1: not only does the
@@ -5702,7 +5741,9 @@ mod tests {
         assert!(eng.poke_at("p", k(1, 1), 1500));
         let h = eng.run_until_time(2000).expect_err("the value arrived");
         assert_eq!(h.reason, HaltReason::Breakpoint);
-        assert_eq!(h.cycle, 1);
+        // The cycle count is a timeline fact: this fixture has no clocked parts, so its period
+        // is the minimum step (2 ns) and the clock starts at 2 x 500 = 1000.
+        assert_eq!(h.cycle, 250);
         assert!(h.details.contains("0x1"), "{}", h.details);
 
         // Held at the watched value, cycles pass quietly: nothing arrives.
@@ -5715,7 +5756,7 @@ mod tests {
             .expect("leaving the value is not a hit");
         assert!(eng.poke_at("p", k(1, 1), 10500));
         let h2 = eng.run_until_time(11000).expect_err("it arrived again");
-        assert_eq!(h2.cycle, 10);
+        assert_eq!(h2.cycle, 4250);
     }
 
     /// Arriving at a value the net *already* carries at power-on is not a hit:
