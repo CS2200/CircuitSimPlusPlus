@@ -272,9 +272,9 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how |
 |---|---|---|
-| C1 | **no** design reports a violation, for any poke pattern | integration: near-edge pokes, a RAM `we`, both — assert `violations` empty |
-| C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | integration |
-| C3 | `timing_violations` is **absent or always zero** in the report | integration |
+| C1 | **no** design reports a violation, for any poke pattern | **done**: there is no violation surface left to report. A near-edge register poke (golden) and a RAM `we`+`din` poke (delay.rs) assert the *values* they produce |
+| C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | **done**: the keyword is out of the grammar, so both spellings are parse errors (autograde's bad-assertion list) |
+| C3 | `timing_violations` is **absent or always zero** in the report | **done**: absent — asserted on the serialized report, because "always zero" is what invites the vacuous assertion C2 retires |
 | C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3) |
 | C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration — **done**: the flags are rejected by clap and the report carries none of the three |
 

@@ -1343,6 +1343,10 @@ mod tests {
             "mem('dmem')[0x100] < ",
             "mem(dmem)[0] == 1",
             "violation == 0",
+            // C2: the retired keyword, in both spellings. `== 0` always passed and
+            // `== 1` never could, so the grammar must not accept it at all.
+            "violations == 0",
+            "violations == 1",
             "register('r1') == 1",
             "probe('x') == -1",
         ] {
