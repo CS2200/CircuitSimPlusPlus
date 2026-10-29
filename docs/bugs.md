@@ -42,7 +42,7 @@ regression and is the CE-faithful rule.
 | `--compat` | 349/357 (8) | **353/357 (4)** — +4, **0 regressions** |
 
 Production's gain is `submission_410843919`; `compat` gains `submission_374337181`,
-`374593140`, `374625075`, `409848157`. Remaining under `compat`: `374625393` (the others in this list are fixed — see the boundary exclusion and `ExtendMode::One` below).
+`374593140`, `374625075`, `409848157`. Remaining under `compat` at the time: `374625393`. All four are fixed now — the boundary exclusion and `ExtendMode::One`, below — and it completes in both tools.
 `374299303` (never halts), `374625393`, `410460509`. A `csim nets --compat` flag was added
 (the dump and the graded run then agree on mode).
 
@@ -927,7 +927,7 @@ a guess.
 
 ## `compat` and the last four corpus rows (2026-10-26)
 
-Under `CSIM_COMPAT=1` the corpus is clean: 212 both-pass, 0 disagreements, 0 false passes. The only design that still differs from the old tool is `374625393`.
+Under `CSIM_COMPAT=1` the corpus is clean: 212 both-pass, 0 disagreements, 0 false passes (the other 145 rows agree-fail). **Every** design agrees with the old tool, `374625393` included.
 `373713172` (4200 pipeline, X-cascade), `374299303` (4200 datapath, never halts),
 `374625393` (4200 datapath, wrong value) and `410460509` (5200 datapath, X-cascade).
 They are the same four that fail in production, which is why the earlier round concluded
