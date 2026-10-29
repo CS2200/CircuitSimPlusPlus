@@ -262,10 +262,10 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how |
 |---|---|---|
-| B1 | `t_obs` = **settle + setup**, exactly | hand-computed unit: `clk→Q + not + not + setup` |
-| B2 | `t_obs` = the **max** over cycles, not the sum | hand-computed unit: a long path taken every third cycle; assert `t_obs` = the long settle and `est_time = cycles × t_obs` |
-| B3 | **setup is included** | two fixtures identical but for the register's setup; their periods differ by exactly that delta |
-| B4 | a design that never changes after the first edge → `t_obs` = 0 | hand-computed unit; documents the fixture artefact now asserted in `overclocked_chain_…` |
+| B1 | `t_obs` = **settle + setup**, exactly | the *period* (edge to edge) is settle + setup — `the_period_is_settle_plus_setup` measures it that way, from edge times. **Open question:** the engine's `t_obs` field holds the *settle* (39 on the pipeline, where the period is 54), so `est_time` is `cycles × settle`. Which one `est_time` should mean is a decision, not a bug — see the B3 row |
+| B2 | `t_obs` = the **max** over cycles, not the sum | **done**: `settling_mux_json` — a short and a long path carrying the same value, selected by a mux. Each path is *pinned* first and the two periods asserted to differ (the control), then the select toggles and `t_obs` must equal the long one |
+| B3 | **setup is included** | **done**: two tables identical but for the register's `t_setup`; the period (edge to edge) moves by exactly the delta. Asserted against the *period*, because `t_obs` is the settle — the one line in this plan where the field and the wording disagree |
+| B4 | a design that never changes after the first edge → `t_obs` = 0 | covered by A1's fixture. Note this row is what says `t_obs` is the *settle*: a static design's period is still the nominal floor, but its `t_obs` is 0 |
 | B5 | the period is a **floor**, not a schedule | unit: the clock parameter set to wildly different values gives the same verdict and the same `t_obs` |
 
 ### C. Retired contract (slice 2 — write these when the fields go)
@@ -275,7 +275,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | C1 | **no** design reports a violation, for any poke pattern | **done**: there is no violation surface left to report. A near-edge register poke (golden) and a RAM `we`+`din` poke (delay.rs) assert the *values* they produce |
 | C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | **done**: the keyword is out of the grammar, so both spellings are parse errors (autograde's bad-assertion list) |
 | C3 | `timing_violations` is **absent or always zero** in the report | **done**: absent — asserted on the serialized report, because "always zero" is what invites the vacuous assertion C2 retires |
-| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3) |
+| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3). The floor is one shared constant |
 | C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration — **done**: the flags are rejected by clap and the report carries none of the three |
 
 ### D. Loops and non-quiescence — the "never hang" contract
@@ -284,7 +284,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 |---|---|---|
 | D1 | a **ring oscillator** halts with an oscillation | unit — and note this is the test that would have caught the `next_boundary` hang: the cap must fire *inside a drain* |
 | D2 | a **settling** loop (an SR latch) settles and latches | unit |
-| D3 | a **conservative** loop — a graph cycle with no real one (a shared bus, mutually exclusive drivers) — runs, does not storm, and gives CE's values | integration: this is where the levelized engine failed, so it is the design the delay engine must keep passing |
+| D3 | a **conservative** loop — a graph cycle with no real one (a shared bus, mutually exclusive drivers) — runs, does not storm, and gives CE's values | **done**: two buffers sharing a bus and gated *by* that bus, so `ba -> bus -> ba.en` closes a loop the delay engine must simply settle. The test asserts the loop is really there (via `on_cycle`) before asserting the value, so it cannot pass on a design that has no loop |
 | D4 | the drain is **bounded**: a non-quiescing cascade trips the cap rather than growing | unit: assert the queue length stays bounded and the halt is an oscillation |
 
 ### E. Determinism and state
@@ -294,7 +294,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | E1 | same design twice → identical trace hash | unit |
 | E2 | snapshot mid-run → resume → bit-identical to an uninterrupted run | unit (**must include `cycle_start`**, which the snapshot now carries) |
 | E3 | `step_tick` (one edge) equals `run(1)` | unit |
-| E4 | the derived edge times reproduce on a second engine built from the same document | unit |
+| E4 | the derived edge times reproduce on a second engine built from the same document | **done**: every edge time compared, not just the final hash (E1) — a difference that cancelled out by the end would still show |
 
 ### F. Clocks
 
@@ -303,7 +303,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | F1 | a **gated** clock works — the gate settles as part of the cascade | integration |
 | F2 | a **divided** clock (a counter bit on `clk`) works, and is count-based | integration |
 | F3 | a **self-oscillating** source (a ring driving `clk`) is an oscillation halt, not a hang | unit |
-| F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | unit — the clock's own propagation is cascade, not schedule |
+| F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | **done**: lengthening the *clock's* wire lengthens the period by exactly the wire's delay — which can only be true if the clock's arrival is a cascade event rather than a scheduled time |
 
 ### G. Corpus — the regression gate
 
@@ -317,8 +317,8 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** for a chosen design | corpus: `374625393` under `mips-r2000-2um-v1` and `cs2200-74ls-v1` | **fails today** (stop @2834 vs never stabilises). Encode it as a known-failure so the day it passes is visible |
-| H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | unit: pin the divergence explicitly rather than discovering it | known divergence |
+| H1 | the **same verdict under any delay table** for a chosen design | corpus: `374625393` under `mips-r2000-2um-v1` and `cs2200-74ls-v1` | **fails today** (stop @2834 vs never stabilises). Its *mechanism* is now pinned in-repo as `a_glitch_dependent_design_is_table_dependent` (the same pulse, two tables, two answers), so the class is visible in CI; the failing row itself still needs the private design, and the check for it belongs to the corpus harness |
+| H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: one test, `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
 ### I. Fixtures to replace, not repair
 

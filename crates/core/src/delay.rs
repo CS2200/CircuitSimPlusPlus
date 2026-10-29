@@ -4177,6 +4177,403 @@ mod tests {
         );
     }
 
+    /// Build an engine from `json` with a caller-supplied table (the shipped table is the
+    /// test helper's default, so any test that varies the *table* has to reach past it).
+    fn engine_with(json: &str, half: u64, table: &TimingTable) -> DelayEngine {
+        let doc = load_document(json.as_bytes()).expect("test doc parses");
+        let nl = netlist::build(&doc).expect("test doc netlists");
+        DelayEngine::new(nl, half, table).expect("test engine builds")
+    }
+
+    /// The shipped table with the register's setup time raised by `extra` — and nothing
+    /// else touched. B3's whole point is that the two runs differ by exactly that.
+    fn table_with_extra_setup(extra: u64) -> TimingTable {
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        let base = v["components"]["mem.register"]["setup"]
+            .as_u64()
+            .expect("the register has a setup time");
+        v["components"]["mem.register"]["setup"] = serde_json::json!(base + extra);
+        TimingTable::from_json(&v.to_string()).unwrap()
+    }
+
+    /// **B2's fixture.** Register `r` samples a value that arrives over a **short** path or a
+    /// **long** one, chosen by a mux. Both paths invert an even number of times, so they
+    /// carry the *same* value and only the *timing* differs — which is what lets the test
+    /// compare periods without the values moving underneath it. `sel_wire` is the JSON for
+    /// the mux's select, so the same circuit can pin the short path, pin the long one, or
+    /// let the select toggle.
+    fn settling_mux_json(sel_wire: &str) -> String {
+        format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"tog","type":"mem.register","pos":[0,0],"name":"tog"}},
+                {{"id":"t0","type":"gate.not","pos":[0,0]}},
+                {{"id":"s1","type":"gate.not","pos":[0,0]}},
+                {{"id":"s2","type":"gate.not","pos":[0,0]}},
+                {{"id":"l1","type":"gate.not","pos":[0,0]}},
+                {{"id":"l2","type":"gate.not","pos":[0,0]}},
+                {{"id":"l3","type":"gate.not","pos":[0,0]}},
+                {{"id":"l4","type":"gate.not","pos":[0,0]}},
+                {{"id":"mux","type":"plexers.mux","pos":[0,0],"attrs":{{"selectBits":1}}}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"tog","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"tog","pin":"en"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"tog","pin":"rst"}}}},
+                {{"a":{{"comp":"t0","pin":"out"}},"b":{{"comp":"tog","pin":"d"}}}},
+                {{"a":{{"comp":"tog","pin":"q"}},"b":{{"comp":"t0","pin":"in"}}}},
+                {{"a":{{"comp":"tog","pin":"q"}},"b":{{"comp":"s1","pin":"in"}}}},
+                {{"a":{{"comp":"s1","pin":"out"}},"b":{{"comp":"s2","pin":"in"}}}},
+                {{"a":{{"comp":"s2","pin":"out"}},"b":{{"comp":"mux","pin":"in0"}}}},
+                {{"a":{{"comp":"tog","pin":"q"}},"b":{{"comp":"l1","pin":"in"}}}},
+                {{"a":{{"comp":"l1","pin":"out"}},"b":{{"comp":"l2","pin":"in"}}}},
+                {{"a":{{"comp":"l2","pin":"out"}},"b":{{"comp":"l3","pin":"in"}}}},
+                {{"a":{{"comp":"l3","pin":"out"}},"b":{{"comp":"l4","pin":"in"}}}},
+                {{"a":{{"comp":"l4","pin":"out"}},"b":{{"comp":"mux","pin":"in1"}}}},
+                {sel_wire},
+                {{"a":{{"comp":"mux","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
+                {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        )
+    }
+
+    /// **B2 (`docs/derived-clock.md` §10).** `t_obs` is the **max** over cycles, not their
+    /// sum, and the fixture is built so the claim cannot pass vacuously: the same circuit is
+    /// first run with each path *pinned*, and the test asserts the two pinned periods
+    /// actually differ before it asserts anything about the toggling one. If the select ever
+    /// stopped moving the settle, the earlier assertion fails and says so.
+    ///
+    /// (`est_time = cycles × t_obs` is asserted where `est_time` lives, in autograde's report
+    /// test — the engine's `RunReport` deliberately does not carry it.)
+    #[test]
+    fn t_obs_is_the_max_over_cycles_not_their_sum() {
+        let pin = |comp: &str| {
+            format!(r#"{{"a":{{"comp":"{comp}","pin":"out"}},"b":{{"comp":"mux","pin":"sel"}}}}"#)
+        };
+        let t_short = engine(&settling_mux_json(&pin("zero")), 500)
+            .run(4)
+            .expect("a cycle")
+            .t_obs;
+        let t_long = engine(&settling_mux_json(&pin("one")), 500)
+            .run(4)
+            .expect("a cycle")
+            .t_obs;
+        // The control: the fixture must really have two different settles to take a max of.
+        assert!(
+            t_long > t_short,
+            "the long path must settle later than the short one ({t_long} vs {t_short})"
+        );
+        // The property: with the select toggling, the period is the *worst* cycle.
+        let varying = engine(
+            &settling_mux_json(r#"{"a":{"comp":"tog","pin":"q"},"b":{"comp":"mux","pin":"sel"}}"#),
+            500,
+        )
+        .run(4)
+        .expect("a cycle")
+        .t_obs;
+        assert_eq!(
+            varying, t_long,
+            "t_obs is the max over cycles ({t_long}), not a sum or an average (short {t_short})"
+        );
+    }
+
+    /// **B3 (`docs/derived-clock.md` §10).** Setup is included in the period, and by
+    /// *exactly* its delta: the same circuit run against two tables that differ only in the
+    /// register's `t_setup`. This is why a near-edge poke is not a race — the edge is placed
+    /// after the data by construction, and the width of that gap is `t_setup`.
+    ///
+    /// **The number is the period (edge to edge), not `t_obs`.** The plan's B1/B3 rows say
+    /// `t_obs = settle + setup`, but the engine's `t_obs` is the per-cycle *settle*: the
+    /// pipeline reports 39 (`clk→Q 20 + not 9 + and 10`) while its period is 54. B1's own
+    /// test already measures the period this way, and B4 says a static design's `t_obs` is 0
+    /// (which only the settle can be). So the plan's wording and the field disagree, and the
+    /// disagreement is a decision about what `est_time` should mean — `cycles × settle` or
+    /// `cycles × period`. Flagged rather than silently resolved; this test asserts the
+    /// property either reading agrees on: **setup moves the period by exactly its delta**.
+    #[test]
+    fn setup_is_in_the_period_by_exactly_its_delta() {
+        const EXTRA: u64 = 40;
+        // A half period *below* the settle, so the barrier's placement is what decides the
+        // period: with a large floor the nominal schedule masks the setup term entirely.
+        // (B1's existing test does the same thing for the same reason.)
+        let json = pipeline_json();
+        let base = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let slow = table_with_extra_setup(EXTRA);
+        let now = |e: &DelayEngine| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
+            v["now"].as_u64().expect("now")
+        };
+        let period = |table: &TimingTable| -> u64 {
+            let mut eng = engine_with(&json, 5, table);
+            eng.run(3).expect("3 cycles");
+            let a = now(&eng);
+            eng.run(1).expect("one more");
+            now(&eng) - a
+        };
+        let (p_base, p_slow) = (period(&base), period(&slow));
+        assert_eq!(
+            p_slow,
+            p_base + EXTRA,
+            "raising t_setup by {EXTRA} must lengthen the period by exactly {EXTRA} \
+             ({p_base} -> {p_slow})"
+        );
+    }
+
+    /// **D3 (`docs/derived-clock.md` §10).** A **conservative** loop: a graph cycle with no
+    /// behavioural one. Two controlled buffers share a bus and are gated *by that bus* — one
+    /// directly, one through its complement — so the dependency graph closes a loop
+    /// (`ba -> bus -> ba.en`) while the circuit has exactly one stable state. This is the
+    /// shape that took down the levelized engine (`docs/engine-redesign.md` §3: "almost every
+    /// design in this course has such a bus"), and the delay engine must run it, not storm on
+    /// it, and give CE's values.
+    #[test]
+    fn a_conservative_loop_settles_instead_of_storming() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                {{"id":"ba","type":"wiring.controlled-buffer","pos":[0,0]}},
+                {{"id":"bb","type":"wiring.controlled-buffer","pos":[0,0]}},
+                {{"id":"c","type":"gate.not","pos":[0,0]}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"bus"}}
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"ba","pin":"in"}}}},
+                {{"a":{{"comp":"ba","pin":"en"}},"b":{{"comp":"p","pin":"in"}}}},
+                {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"bb","pin":"in"}}}},
+                {{"a":{{"comp":"c","pin":"out"}},"b":{{"comp":"bb","pin":"en"}}}},
+                {{"a":{{"comp":"ba","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}},
+                {{"a":{{"comp":"bb","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}},
+                {{"a":{{"comp":"ba","pin":"out"}},"b":{{"comp":"c","pin":"in"}}}},
+                {{"a":{{"comp":"ba","pin":"out"}},"b":{{"comp":"ba","pin":"en"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 500);
+        // The loop is real in the *graph* — that is the whole point of the fixture.
+        let on = crate::engine_common::on_cycle(&eng.netlist, &eng.comps);
+        let idx = |id: &str| {
+            eng.netlist()
+                .comps
+                .iter()
+                .position(|c| c.def_id == id)
+                .expect("comp")
+        };
+        assert!(
+            on[idx("bb")] && on[idx("c")],
+            "the fixture must actually close a loop (bb -> bus -> c -> bb.en)"
+        );
+        // ...and it still runs: one stable state, no storm, no floating halt.
+        assert!(eng.halted().is_none(), "boot halt: {:?}", eng.halted());
+        eng.run(3)
+            .expect("a conservative loop must settle, not storm");
+        // The fixed point is definite: `ba` is gated *by* the bus (so it is off), `bb` is
+        // enabled by its complement and drives 0, and the two agree -- no contention, no X.
+        // The first version of this fixture seeded the bus to 0 and gated `ba` *on*, which
+        // put both drivers on the same `Z`-free net and settled at X: a fixture bug that
+        // looked exactly like the engine failing D3.
+        assert_eq!(
+            eng.named_value("bus"),
+            Some(k(1, 0)),
+            "the loop settles on 0, with no contention and no X"
+        );
+    }
+
+    /// **F4 (`docs/derived-clock.md` §10).** With **wire delay on**, the clock's own
+    /// transition reaches its sink the same way any other signal does — through the cascade
+    /// — rather than at a scheduled time. So lengthening the *clock's* wire lengthens the
+    /// period by the wire's delay: the edge cannot have been scheduled, or the wire would
+    /// not show up in the settle at all.
+    #[test]
+    fn the_clocks_own_propagation_is_part_of_the_cascade() {
+        let json = |points: &str| {
+            format!(
+                r##"{{
+                "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+                "circuits": [{{ "name": "main", "components": [
+                    {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                    {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                    {{"id":"zero","type":"wiring.constant","pos":[0,0]}},
+                    {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}},
+                    {{"id":"inv","type":"gate.not","pos":[0,0]}},
+                    {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out"}}
+                ], "wires": [
+                    {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}{points}}},
+                    {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                    {{"a":{{"comp":"zero","pin":"out"}},"b":{{"comp":"r","pin":"rst"}}}},
+                    {{"a":{{"comp":"inv","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}},
+                    {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"inv","pin":"in"}}}},
+                    {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"p","pin":"in"}}}}
+                ]}}]
+            }}"##
+            )
+        };
+        // The wire the transport test already pins: 200 grid units at the table's 1/10 ns
+        // per unit = 20 ns. The clock has no wire in the near case, so the difference
+        // between the two periods *is* the clock wire's delay.
+        const CLOCK_WIRE_NS: u64 = 20;
+        let t_near = wired_engine(&json(""), 500).run(2).expect("a cycle").t_obs;
+        let t_far = wired_engine(&json(r#","points":[[0,0],[100,0],[100,100]]"#), 500)
+            .run(2)
+            .expect("a cycle")
+            .t_obs;
+        assert!(
+            t_near > 0,
+            "the fixture must settle every cycle, or the delta below is 0 - 0"
+        );
+        assert_eq!(
+            t_far,
+            t_near + CLOCK_WIRE_NS,
+            "the clock's 200-unit wire must add its {CLOCK_WIRE_NS} ns to the settle \
+             ({t_near} -> {t_far})"
+        );
+    }
+
+    /// **E4 (`docs/derived-clock.md` §10).** The derived edge times reproduce exactly on a
+    /// second engine built from the same document — not just the final hash (E1) but *every*
+    /// edge, which is the stronger claim: a difference that cancelled out by the end would
+    /// still show up here.
+    #[test]
+    fn derived_edge_times_reproduce_across_engines() {
+        let json = pipeline_json();
+        let mut a = engine(&json, 500);
+        let mut b = engine(&json, 500);
+        let now = |e: &DelayEngine| -> u64 {
+            let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
+            v["now"].as_u64().expect("now")
+        };
+        for cycle in 0..4 {
+            a.run(1).expect("a cycle");
+            b.run(1).expect("a cycle");
+            assert_eq!(
+                now(&a),
+                now(&b),
+                "cycle {cycle}: the edge time must reproduce exactly"
+            );
+        }
+    }
+
+    /// **H2 (`docs/derived-clock.md` §10).** The divergence with CircuitSim CE, pinned in one
+    /// place so it is a known quantity rather than a surprise: a pulse **narrower than a
+    /// gate's `t_pd`** is swallowed by an inertial gate but survives a transport wire.
+    ///
+    /// CE has no time — its settle propagates until the pending set is empty — so it passes
+    /// a narrow pulse through both. We model the gate as inertial (a real gate that short a
+    /// pulse never sees, which is the physically honest reading) and the wire as transport.
+    /// The wire half agrees with CE; the gate half is where the two disagree, and this test
+    /// is the place that says so.
+    #[test]
+    fn a_narrow_pulse_survives_a_wire_but_not_a_gate() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"g","type":"gate.not","pos":[0,0]}},
+                {{"id":"gated","type":"wiring.probe","pos":[0,0],"name":"gated"}},
+                {{"id":"wire","type":"wiring.probe","pos":[0,0],"name":"wire"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"g","pin":"in"}}}},
+                {{"a":{{"comp":"g","pin":"out"}},"b":{{"comp":"gated","pin":"in"}}}},
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"wire","pin":"in"}},
+                 "points":[[0,0],[100,0],[100,100]]}}
+            ]}}]
+        }}"##
+        );
+        // Wires on: the transported half of the divergence needs the physics.
+        let mut eng = wired_engine(&json, 5000);
+        assert!(eng.poke_at("src", k(1, 1), 100));
+        assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns < the gate's 9 ns t_pd
+                                                   // The wire: passed, arriving 20 ns later and lasting the same 5 ns.
+        assert_eq!(eng.named_value("wire"), Some(k(1, 0)));
+        eng.run_until_time(121).unwrap();
+        assert_eq!(eng.named_value("wire"), Some(k(1, 1)), "leading edge @120");
+        eng.run_until_time(126).unwrap();
+        assert_eq!(eng.named_value("wire"), Some(k(1, 0)), "trailing edge @125");
+        // The gate: swallowed. `gated` was 1 and never moved.
+        eng.run_until_time(140).unwrap();
+        assert_eq!(
+            eng.named_value("gated"),
+            Some(k(1, 1)),
+            "an inertial gate swallows a pulse shorter than its t_pd (CE passes it)"
+        );
+        // And holding the input long enough does reach the gate.
+        assert!(eng.poke_at("src", k(1, 1), 300));
+        eng.run_until_time(309).unwrap();
+        assert_eq!(eng.named_value("gated"), Some(k(1, 1)));
+        eng.run_until_time(310).unwrap();
+        assert_eq!(eng.named_value("gated"), Some(k(1, 0)));
+    }
+
+    /// The shipped table with the `gate.not` propagation time replaced. Used to show that a
+    /// glitch-dependent design is **table-dependent** — the mechanism behind H1.
+    fn table_with_not_prop(prop: u64) -> TimingTable {
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+        v["components"]["gate.not"]["prop"] = serde_json::json!(prop);
+        TimingTable::from_json(&v.to_string()).unwrap()
+    }
+
+    /// **H1 (`docs/derived-clock.md` §10) — the mechanism, in miniature.** H1 is the corpus row
+    /// that will not stabilise under one table and halts under another, and it is the one
+    /// property in the plan that is still false. Its *cause* is public even though the design
+    /// that exhibits it is not: a design whose behaviour depends on a pulse narrower than a
+    /// gate's `t_pd` answers differently under a table with a different `t_pd`.
+    ///
+    /// So this is H1 without the private design — the same 5 ns pulse, two tables, two
+    /// different values — pinned where it can be seen. It is deliberately an *expectation*,
+    /// not a known-failure marker: it passes today and should keep passing, because it
+    /// records a divergence we have decided to keep (H2), and the day that decision changes,
+    /// this test and H1 change together.
+    #[test]
+    fn a_glitch_dependent_design_is_table_dependent() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"g","type":"gate.not","pos":[0,0]}},
+                {{"id":"p","type":"wiring.probe","pos":[0,0],"name":"out"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"g","pin":"in"}}}},
+                {{"a":{{"comp":"g","pin":"out"}},"b":{{"comp":"p","pin":"in"}}}}
+            ]}}]
+        }}"##
+        );
+        let pulse = |table: &TimingTable| -> Option<Value> {
+            let mut eng = engine_with(&json, 5000, table);
+            assert!(eng.poke_at("src", k(1, 1), 100));
+            assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns
+                                                       // Observe *during* the pulse: a gate that passes it has already come back by
+                                                       // the time a settle-and-look would check.
+            eng.run_until_time(103).expect("mid-pulse");
+            eng.named_value("out")
+        };
+        // A 9 ns gate never sees a 5 ns pulse; a 2 ns one does. Same design, same stimulus,
+        // different answer — because the answer is about a *glitch*.
+        assert_eq!(
+            pulse(&table_with_not_prop(9)),
+            Some(k(1, 1)),
+            "slow gate: the pulse is swallowed and the output never moves"
+        );
+        assert_eq!(
+            pulse(&table_with_not_prop(2)),
+            Some(k(1, 0)),
+            "fast gate: the same pulse passes, so the design's state differs by table"
+        );
+    }
+
     /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
     /// **C1 (`docs/derived-clock.md` §10).** A near-edge poke is **honoured**, and there is
     /// nothing to report. `we` *and* `din` both change 10 ns before the edge -- inside any
