@@ -4574,6 +4574,80 @@ mod tests {
         );
     }
 
+    /// **What `t_obs` is, exactly — and the open decision about what it should be.**
+    ///
+    /// Measured, on the two-stage pipeline (`clk→Q 20 + not 9 + and 10` = a 39 ns settle,
+    /// register `t_setup` 15):
+    ///
+    /// ```text
+    /// half=500  setup_wait=15  edges=[1500 2500 3500 4500]  periods=[1000 1000 1000]  t_obs=39
+    /// half=  5  setup_wait=15  edges=[  64  123  182  241]  periods=[  59   59   59]  t_obs=39
+    /// ```
+    ///
+    /// So `t_obs` is the **settle**: the time from the cycle's edge to the last input change
+    /// at a clocked part's pin. It is not the period (which is 1000 when the nominal floor
+    /// dominates and 59 when it does not), and it is not what the design *needs* either —
+    /// the edge cannot follow the data by less than `t_setup`, so the sustainable period is
+    /// `settle + setup_wait` = 54.
+    ///
+    /// **Why the gap goes missing:** the barrier *places* the edge `setup_wait` after the
+    /// drain, and the per-cycle measurement then runs *from that edge*. The gap is real in
+    /// the edge times (that is why the periods above are 59 rather than 44) and invisible in
+    /// every cycle's measurement, because it falls between the window that ends at the last
+    /// change and the window that starts at the next edge. Nobody measures it.
+    ///
+    /// The consequence is `est_time = cycles × t_obs` = `cycles × settle`: on a 1000-cycle
+    /// run of this fixture it reports 39 000 ns where the design needs 54 000, and `est_time`
+    /// is what `speedup_vs_baseline` divides by.
+    ///
+    /// This test pins the *current* semantics and both numbers, so that whichever way the
+    /// decision goes, exactly one assertion moves and the reason is written down. The plan's
+    /// B1/B3 rows say the period; B4's says `0` for a static design (which is why a *settle*
+    /// is the only thing that can be zero); §2's prose says the period; the retired STA note
+    /// in §2 said `t_sta` is "not comparable to `t_obs`" *because* STA included setup. The
+    /// field implements the last of those, and the decision is whether that is what was meant.
+    #[test]
+    fn t_obs_is_the_settle_and_the_requirement_is_settle_plus_setup() {
+        const SETTLE: u64 = 39;
+        const SETUP: u64 = 15;
+        let json = pipeline_json();
+        let edge_times = |half: u64| -> Vec<u64> {
+            let mut eng = engine(&json, half);
+            (0..4)
+                .map(|_| {
+                    eng.run(1).expect("a cycle");
+                    let v: serde_json::Value =
+                        serde_json::from_str(&eng.snapshot()).expect("snapshot");
+                    v["now"].as_u64().expect("now")
+                })
+                .collect()
+        };
+        // The floor dominates: the period is the nominal one, whatever the design needs.
+        let floored = edge_times(500);
+        assert_eq!(
+            floored.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>(),
+            [1000, 1000, 1000]
+        );
+        // Below the floor the periods are the design's own: the falling half-edge is placed
+        // `settle + setup` after the rising one (54), and the next rising only has to wait
+        // its nominal half (5) -- 59.
+        let derived = edge_times(5);
+        assert_eq!(
+            derived.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>(),
+            [59, 59, 59]
+        );
+        // And in both runs the reported number is the settle, floor-independent (B5).
+        let mut eng = engine(&json, 5);
+        eng.run(4).expect("cycles");
+        assert_eq!(eng.setup_wait, SETUP, "the table's register setup time");
+        assert_eq!(
+            eng.t_obs,
+            SETTLE,
+            "t_obs is the settle; the sustainable period would be {}",
+            SETTLE + SETUP
+        );
+    }
+
     /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
     /// **C1 (`docs/derived-clock.md` §10).** A near-edge poke is **honoured**, and there is
     /// nothing to report. `we` *and* `din` both change 10 ns before the edge -- inside any
