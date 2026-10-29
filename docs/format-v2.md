@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 5.
+> **current** format, version 6.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -12,7 +12,7 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
 - Top-level `version` must be `5`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 5 and walks older files forward one version at a
+  (§5.1); this build understands version 6 and walks older files forward one version at a
   time (see below).
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
@@ -176,7 +176,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `arith.comparator`                        | `a`, `b`, `lt`, `eq`, `gt`                                         | `bitsize` (1), `signed` (`true` = 2's complement, `false` = unsigned) |
 | `arith.negator`                           | `in`, `out`                                                        | `bitsize` (1)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `arith.shifter`                           | `in`, `amt`, `out`                                                 | `bitsize` (1), `shift` ("ll" \| "lr" \| "ar" \| "rl" \| "rr")                                                                                                                                                                                                                                                                                                                                                                      |
-| `arith.bit-extender`                      | `in`, `out`                                                        | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "sign")                                                                                                                                                                                                                                                                                                                                                                  |
+| `arith.bit-extender`                      | `in`, `out`                                                        | `inBits` (8), `outBits` (16; > inBits), `mode` ("zero" \| "one" \| "sign")                                                                                                                                                                                                                                                                                                                                                                  |
 | `mem.register`                            | `d`, `clk`, `en`, `rst`, `q`                                       | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only; `showClk`, `showRst` (false) — display-only                                                                                                                                                                                                                                                                                             |
 | `mem.ram`                                 | `addr`, `din`, `dout`, `we`, `clk`, `rst`                          | `bitsize` (1), `depth` (256; power of two, ≤ 2²⁰), `addrBits` (unset — the derived width `ceil(log2 depth)`, 1..=32), `autoload` (null — path, see §7), `contents` (null — RLE-hex, see §7), `showClk`, `showRst` (false) — display-only                                                                                                                                                                                           |
 | `mem.rom`                                 | `addr`, `out`                                                      | same as `mem.ram`                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -489,7 +489,7 @@ halt — F6).
 - The grading clock was a run parameter (`--clock-half-period-ns`, default 1000 ns; **retired** — the clock is derived, `docs/derived-clock.md`;
   docs/delay-table.md). The delay engine runs a **boot settle** (power-on events to
   quiescence, no clock edges) before cycle accounting, and closes the in-progress final
-  cycle at run end so its settle counts toward `T_obs` (F7).
+  cycle at run end so its settle counts toward `t_obs` (F7).
 - Wire delay is **per-path** per sink (F14; junctions attach at segment midpoints;
   Manhattan fallback for empty `points` — all in docs/delay-table.md).
 - **A component's pins that share a net arrive together.** Per-path transport is per *pin*, so
@@ -528,14 +528,14 @@ the schema constrains common shapes only.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://circuitsim-plus-plus/schema/csx-v4.json",
-  "title": "CircuitSim++ .csx v3",
+  ""$id": "https://circuitsim-plus-plus/schema/csx-v6.json",
+  "title": "CircuitSim++ .csx v6",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "name", "settings", "circuits"],
   "properties": {
     "format": { "const": "circuitsim-plus-plus" },
-    "version": { "const": 4 },
+    "version": { "const": 6 },
     "name": { "type": "string" },
     "settings": {
       "type": "object",

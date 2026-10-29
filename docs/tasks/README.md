@@ -71,7 +71,7 @@ Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). 
 | `net_diffs` | `{ cycle, full, changes: [{ net: u32, val: {v,x,z}, at?, contended? }] }` | Only changed nets (except the single `full: true` batch after load/resume/reset); `at` = ns; `contended` = a genuine driver fight; ≤ 1 batch per animation frame consumed; intermediate frames may be dropped — never queue a backlog |
 | `sim_status` | `{ running, cycle, eff_hz }` | On play/pause and ~1 Hz while running |
 | `sim_halted` | `{ cycle, reason, details }` | `reason`: `breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names component/pin for highlighting |
-| `timing_update` | `{ t_obs, est_time, violations, top_paths }` | After `sim_run_until` / pause |
+| `timing_update` | `{ t_obs, est_time, top_paths }` | After `sim_run_until` / pause |
 
 **LoadError** (collected, never thrown): `{ kind, message, circuit, comp_id? , wire_idx? }`.
 

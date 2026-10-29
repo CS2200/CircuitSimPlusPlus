@@ -35,7 +35,7 @@ saves go through `save_circuit { path, document }` (canonical serializer
 engine-side — never local JSON). Subcircuit sheets live in the
 Subcircuits menu (new/rename/switch). Still open:
 
-- Recent-files list, autosave-on-quit prompt.
+- Recent-files list (autosave-on-quit has since landed: `AutosaveController.flush("close")` + `ClosePrompt`).
 - Native-dialog smoke on Windows/macOS (CI drives the browser fallbacks;
   Linux verified).
 

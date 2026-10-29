@@ -7,9 +7,8 @@
 > so no single machine can build all three. We have one machine per OS; this is
 > the protocol that turns that into a release.
 >
-> **Planned change:** we intend to move builds, releases, and the update check
-> to a **public github.com mirror** (free hosted runners, works off-campus).
-> Decided but not built — see [`distribution.md`](distribution.md).
+> **Shipped:** builds, releases and the update check moved to a **public github.com mirror** —
+> `release.yml` builds on tag, and `frontend/src/update.ts` polls `api.github.com`.
 
 Related: [`DESIGN.md`](../DESIGN.md) §9 (rolling releases), decision **D14**
 (we ship unsigned). The commit gate is `node scripts/build.mjs check`.
@@ -58,7 +57,7 @@ github.com, which changes three things:
   `/releases/latest` unauthenticated — silently no-ops: a private repo 404s the
   API. Harmless, not a bug.
 
-The `.github/workflows/` files were therefore removed and replaced by
+`scripts/release.mjs` runs a tagged release by hand; the `.github/workflows/` files (`backend.yml`, `frontend.yml`, `release.yml`) are also present.
 `scripts/release.mjs`, run by hand on each OS.
 
 Support: TSO Help Desk `help@cc` (service front-end); OIT Technology Support
@@ -202,7 +201,7 @@ node scripts/release.mjs [options]
 
 ## Drafts and the update nudge
 
-The app polls `https://github.gatech.edu/api/v3/repos/<repo>/releases/latest`
+The app polls `https://api.github.com/repos/Mr-Thack/CircuitSimPlusPlus/releases/latest`
 (see `frontend/src/update.ts`) on startup and shows a dismissible "please
 upgrade" dialog if it is behind. Two consequences:
 

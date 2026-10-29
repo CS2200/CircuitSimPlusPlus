@@ -6,7 +6,7 @@ grades against (DESIGN.md §4.4, decision D13; BACKEND.md task B7).
 A delay table is **versioned data, not code**. Published tables ship as
 JSON files in `crates/core/data/` and are embedded into the `csim`
 binary, so every run is reproducible without external files and the
-numbers behind every reported `T_obs` are named exactly. A `.csx` file
+numbers behind every reported `t_obs` are named exactly. A `.csx` file
 selects a table by name via `settings.delayTable` (see
 `docs/format-v2.md`); an **unknown name is a load-time error** that lists
 the available tables — the engine never guesses or silently defaults.
@@ -145,7 +145,7 @@ Consequences, all normative:
   contributes the Manhattan distance between its endpoint *components'*
   `pos` positions (a single straight segment). The UI always saves drawn
   paths, so hand-drawn circuits get exact lengths.
-- STA uses the same per-path lengths (informational only, below).
+- The per-path lengths are the wires' grid lengths (`wire.num`/`wire.den`).
 - **While `wire.num = 0` (the shipped state) every term above is 0**: the lengths are
   computed, they simply do not contribute. See the section above.
 
@@ -159,12 +159,11 @@ designs (and their conversions) are built on.
 
 The delay engine's clock used to take a run parameter,
 `--clock-half-period-ns` / `clock_half_period_ns` (spec) — **retired**: the clock is derived, so
-every edge is placed by the drain. All that remains is the clock's **origin**, a constant of **1000
-ns** (2000 ns period). It does not affect correctness — it sets edge times
-for setup/hold detection — and it no longer bounds what can be graded: a
-design whose propagation exceeds the period produces setup/hold warnings and
-wrong-but-deterministic latching, never a floating-read halt (F6). The
-teaching point stands: `T_obs` tells you how fast the clock may go.
+every edge is placed by the drain. All that remains is the clock's **origin** (`delay::DEFAULT_CLOCK_START_NS`, 1000 ns) — the time
+of the first edge, and the only thing that number decides. It changes no result: the period is the
+design's own, every edge being placed by the drain, so a design whose propagation used to exceed
+the nominal no longer has a period to exceed. The teaching point stands and is now exactly true:
+`t_obs` is the derived period — `depth + setup` — i.e. how fast the clock may go.
 
 ## Timing conventions: DTA vs STA (F13) — STA retired
 
@@ -178,7 +177,7 @@ The two numbers in a report measure different things, deliberately:
 |---|---|---|
 | What | the derived period (max rise-to-rise) over the run | structural longest path |
 | Start of measurement | the clock **edge** (clk→Q of the launching register **included**) | the launching register's output (arrival 0; clk→Q **excluded**) |
-| End of measurement | last change at any register/RAM data-input view (setup **excluded**) | arrival at a register/RAM data input **plus the destination's setup time** (the textbook clock-period bound) |
+| End of measurement | the next rising edge: `t_obs` is the derived period, `depth + setup` (setup **included**) | arrival at a register/RAM data input **plus the destination's setup time** (the textbook clock-period bound) |
 | Paths | only sensitized ones | all structural ones — may include paths the design never uses |
 
 STA is informational only (decision D11): always labeled
@@ -229,7 +228,7 @@ A table is rejected (all issues reported at once) when:
 | mem.register               |   20 |      — |    15 |    5 |      — |
 | mem.ram                    |    — |      — |    15 |    5 |     50 |
 | mem.rom                    |    — |      — |     — |    — |     50 |
-| wire                       | 1 ns per 10 grid units                    |
+| wire                       | **0** — the shipped tables disable wire delay (`wire.num = 0`) |
 
 The JSON file is the source of truth; this table is documentation.
 
@@ -276,9 +275,9 @@ memories are priced by address bits, so a 32-word register file (15 ns) and a 64
 program store (37 ns, ≈ the R2000/12's 35 ns SRAM) are correctly different parts, and a
 16-word control table is 6 ns because at this node it is an on-chip ROM/PLA.
 
-### Measured against the corpus (pow, `T_obs`)
+### Measured against the corpus (pow, `t_obs`)
 
-| design | cycles | `T_obs` | clock | note |
+| design | cycles | `t_obs` | clock | note |
 |---|---:|---:|---:|---|
 | reference `pipeline-df.sim` | 1906 | **77 ns** | **13.0 MHz** | vs R2000/12 = 12.5 MHz — a 4% match |
 | reference `pipeline-pred.sim` | 1416 | 88 ns | 11.4 MHz | carries prediction logic |
@@ -399,7 +398,7 @@ Published machines to sanity-check a design against, rather than a made-up scale
 
 ### Measured: pricing the control ROM by depth is what fixed the ranking
 
-`T_obs` (ns, pow), measured on the corpus's design families. The middle column is v2
+`t_obs` (ns, pow), measured on the corpus's design families. The middle column is v2
 with the ROM still flat-priced (superseded), the last two are the shipped table
 (ripple adder) and its lookahead variant:
 

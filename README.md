@@ -21,7 +21,7 @@ CLI for Gradescope, and a Tauri + React desktop app.
 
 ```
 crates/
-  core/     csim-core — delay-aware simulation engine, .csx format, STA/DTA,
+  core/     csim-core — delay-aware simulation engine, .csx format, derived-clock timing,
             autograder API, Session (the api::Sim the UI drives)
   cli/      csim — headless autograder / CLI binary
   app/      csim-app — Tauri desktop shell (thin adapter over csim-core)
@@ -82,7 +82,7 @@ musl`); the raw invocations below are what it and CI execute.
 ```bash
 # Build + test the workspace default members (core + cli; not the Tauri shell)
 cargo build
-cargo test -p csim-core -p csim          # 200 tests (unit + 9 golden + CLI)
+cargo test -p csim-core -p csim          # 240 unit + 9 golden + 14 CLI tests
 cargo clippy -p csim-core -p csim --all-targets -- -D warnings
 cargo fmt --all -- --check
 
@@ -132,7 +132,7 @@ npm run dev            # Vite dev server on :1420 — runs against the in-app
                        # MOCK core (frontend/.env.development sets VITE_MOCK_CORE=1),
                        # so UI work needs no Rust
 
-npm run test           # unit tests (vitest, 342)
+npm run test           # unit tests (vitest, 462)
 npm run test:e2e       # Playwright (needs browsers, see prerequisites)
 npm run lint           # eslint + prettier --check
 npm run build          # tsc --noEmit && vite build → frontend/dist
@@ -143,7 +143,7 @@ The UI is a VS Code-style **top bar** (File / Edit / View / Help) over a
 `T_obs`), a **palette** rail of part families with a **search box** (`/` jumps to
 it; it filters every group at once), a **right-dock Inspector** for the
 selection, and a **sheet-tab strip** with one tab per circuit. Preferences —
-theme, accent, grid, live values, default label side, 12-/24-hour timestamps,
+theme, accent, grid, live values, 12-/24-hour timestamps,
 autosave — live in **Settings** (the header's gear, or **File → Settings…**; the
 only path to theme, light or dark); byte-level history is **File → Version
 history…** (Ctrl+Alt+H). A zoom control (slider, ±, and a percentage that resets
@@ -201,10 +201,8 @@ codes, assertions, test-spec files): `docs/autograder.md`.
 
 ## Releasing (DESIGN.md §9)
 
-There is **no CI**: `github.gatech.edu` is GT's on-prem GitHub Enterprise
-Server, which provides no hosted runners and has none registered. Tauri bundles
-are also per-OS, so releases are cut locally by the three OS owners (Mac /
-Windows / Linux) with `scripts/release.mjs`: the captain opens a **draft**
+CI runs in `.github/workflows/`: `backend.yml`, `frontend.yml`, and a tag-triggered
+`release.yml` that publishes a GitHub Release on the public mirror.
 release, each owner attaches their OS, then it is published.
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:

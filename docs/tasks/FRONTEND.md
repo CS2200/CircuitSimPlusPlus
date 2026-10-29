@@ -115,7 +115,7 @@ Execute in order. U9 (mock core) comes before anything that needs a running simu
 - Propagation animation: signals visibly travel wires (transport delay is in the engine; render edge-positioned pulses from event timestamps at low sim speeds).
 - `timing_update` → observed-critical-path highlight on canvas (component IDs from the report); setup/hold violation markers on the offending registers.
 
-**Done when:** demo fixture `pipeline5.csx`: run → `T_obs` banner updates → clicking it highlights the path; human sign-off on clarity.
+**Done when:** demo fixture `pipeline5.csx`: run → `t_obs` banner updates → clicking it highlights the path; human sign-off on clarity.
 
 ## U8 — Packaging & update nudge (M5)
 

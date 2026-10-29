@@ -11,7 +11,7 @@ addressing, and memory preloading + sandboxing.
 ```bash
 csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rss-cap-mb M]
     [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
-    [--expect-halt] [--pause-on-breakpoints] [--paths K]
+    [--expect-halt] [--pause-on-breakpoints] [--pause-on-unknown] [--compat] [--stop when:name[:n]] [--paths K]
     [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--json out.json]
@@ -55,7 +55,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | field                            | meaning                                                                                                                                             |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cycles`                         | rising edges executed                                                                                                                               |
-| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file"` — `"breakpoint"` only with `pause_on_breakpoints`, since a graded run ignores them by default (§1) |
+| `halt_reason`                    | `"completed" \| "cycle-limit" \| "oscillation" \| "floating-read" \| "contention" \| "breakpoint" \| "error" \| "timeout" \| "resource-limit" \| "malformed-file" | "stop"` — `"breakpoint"` only with `pause_on_breakpoints`, since a graded run ignores them by default (§1) |
 | `halt_details`                   | `comp <id> pin "<pin>": <message>` when attributable (root-sheet document-order id; see `docs/ipc.md` §3's `sim_halted`), else a plain message      |
 | `t_obs`                          | the derived period, ns: the max rise-to-rise interval (`docs/derived-clock.md` §3)                                                                                                              |
 | `est_time`                       | `cycles × t_obs`, saturating                                                                                                                        |
@@ -71,10 +71,9 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 ## 4. Assertion language
 
 ```text
-assertion := probe-expr | mem-expr | violations-expr
+assertion := probe-expr | mem-expr
 probe-expr := "probe(" "'" name "'" ")" cmp literal     # named probe OR register value
 mem-expr   := "mem(" "'" name "'" ")" "[" literal "]" cmp literal
-violations-expr := "violations" cmp literal            # setup/hold warning count
 cmp        := "==" | "!=" | "<" | "<=" | ">" | ">="
 literal    := "0x" hex+ | "0X" hex+ | "0b" bin+ | "0B" bin+ | dec+
 name       := any characters except "'"
@@ -108,7 +107,7 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   "rubric_full_credit_below": 90000, // §8.3 rubric hook
   "loads": [{ "memory": "imem", "file": "program.hex" }],
   "pokes": [{ "target": "reset_pin", "value": "0x1", "at": 0 }], // value: §4 literal syntax; at: ns
-  "assertions": ["probe('result') == 0x2A", "violations == 0"],
+  "assertions": ["probe('result') == 0x2A"],
 }
 ```
 
@@ -132,10 +131,10 @@ Self-contained JSON — the circuit travels with the state:
 ```jsonc
 {
   "format": "csim-snapshot",
-  "version": 2,
+  "version": 3,
   "cycles_run": 500,
   "circuit": {/* the full .csx document */},
-  "state": {/* delay-engine snapshot format version 2 */},
+  "state": {/* delay-engine snapshot format version 4 */},
 }
 ```
 

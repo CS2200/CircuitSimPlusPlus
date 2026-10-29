@@ -1,6 +1,6 @@
 # CircuitSim++ — Design & Specification
 
-**Status:** v1.0-draft — integrated. M0–M5 built and merged; contract **v1.2** (`docs/ipc.md`) is the live IPC norm and the file format is at **v4** (`docs/format-v2.md` is normative — §5 below is the original sketch, kept as design intent); amendments below are ratified.
+**Status:** v1.0-draft — integrated. M0–M5 built and merged; contract **v1.5** (`docs/ipc.md`) is the live IPC norm and the file format is at **v6** (`docs/format-v2.md` is normative — §5 below is the original sketch, kept as design intent); amendments below are ratified.
 
 **Changelog v0.4 → v1.0-draft (integration amendments, ratified after the parallel build)**
 
@@ -32,7 +32,7 @@ _Deferred:_ **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, dra
 **Changelog since v1.0-draft**
 
 - **IPC contract v1.2** (`docs/ipc.md`): `NamedComponent.value_net` — the engine net carrying a named part's watchable value, so a register's readout and the Watch panel work even when its value pin is unwired; and `NetChange.contended` — `X` that is a genuine driver fight, so the sim bar can call a short circuit a short circuit.
-- **File format v4** (`docs/format-v2.md` §1/§4): `mem.register` and `mem.ram` lost their `rst` pin (register `d, clk, en, q`; RAM `addr, din, dout, we, clk`). The pin existed because the old simulator had no memory autoload: a reset wire was how a circuit restarted. `sim_reset` (which re-applies autoload) replaced it, so the pin was dead weight — and a reset trace across a schematic hid what the clock was doing. A v3 → v4 migration drops wiring to the retired pins, so a file saved before this change still opens.
+- **File format v4** (`docs/format-v2.md` §1/§4): `mem.register` and `mem.ram` lost their `rst` pin (register `d, clk, en, q`; RAM `addr, din, dout, we, clk`). The pin existed because the old simulator had no memory autoload: a reset wire was how a circuit restarted. `sim_reset` (which re-applies autoload) replaced it, so the pin was dead weight — and a reset trace across a schematic hid what the clock was doing. A v3 → v4 migration drops wiring to the retired pins, so a file saved before this change still opens. (**They are back in v6** — the reset is level-sensitive and asynchronous now; see §7.1 and the v5→v6 migration.)
 - **One path to the theme, one bus colour:** the header's light/dark toggle was removed (Settings → Appearance is the only entry) and per-net rainbow hues narrowed to a single themeable bus colour — a wire's own `color` still wins (D8).
 - **UI robustness pass:** `misc.text` annotations gained an inert behavior (placing one used to make the whole document unloadable), readouts pad to their pin's declared width, a memory's `addr` pin is as wide as its address space, wired-up parts blink unconnected inputs, and the tester's transport/wiring fixes landed (typed cycle input, wiring hint in the status bar, 12-/24-hour timestamps, bottom zoom slider). Log: `docs/bugs.md`.
 
@@ -89,7 +89,7 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 | #   | Goal                                              | Success criterion                                                                                                                                                                                                              |
 | --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | G1  | Fast, small simulation core in Rust               | EC-project-scale circuit (~3.4k components) loads < 250 ms; course-scale programs (tens of thousands of cycles) grade in seconds in a 2 GB container; RSS < 256 MB                                                             |
-| G2  | Headless autograder with a **timing-fair metric** | Deterministic CLI: load circuit, preload multiple named memories, run N cycles on the delay-aware engine, assert state, measure observed timing, emit JSON report with `cycles`, `T_obs`, `est_time = cycles × T_obs`, speedup |
+| G2  | Headless autograder with a **timing-fair metric** | Deterministic CLI: load circuit, preload multiple named memories, run N cycles on the delay-aware engine, assert state, measure observed timing, emit JSON report with `cycles`, `t_obs`, `est_time = cycles × t_obs`, speedup |
 | G3  | Graph-based file format, "copper-first"           | Wires are explicit edges between pins (explicit junctions, no geometric inference, no named nets/tunnels); netlist derived by union-find at load                                                                               |
 | G4  | Pretty, modern desktop UI                         | Tauri + React; canvas-rendered; 60 FPS with ~5k visible wires on low-end iGPUs; DLS-style state-colored wires with real gate symbols                                                                                           |
 | G5  | Propagation-delay awareness                       | Delay-aware event-driven engine powers both the teaching visualization **and** the autograder's timing measurement — what you see is what you're graded on                                                                     |
@@ -134,8 +134,8 @@ Clean-sheet rewrite. The old codebase is reference reading only; no code or file
 │                    │    levelize, cycle detection)   │      │
 │                    │  • delay-aware event engine     │      │
 │                    │    (grading + DTA measurement)  │      │
-│                    │  • optional static timing       │      │
-│                    │    analysis (informational)     │      │
+│                    │  • derived-clock timing            │      │
+│                    │    (the period is an output)     │      │
 │                    │  • component behaviors          │      │
 │                    │  • autograder API (snapshots,   │      │
 │                    │    named access, assertions)    │      │
@@ -204,12 +204,12 @@ Event-driven: components and wires have delays from the published delay table (�
 
 **Decision (resolved D11): Dynamic Timing Analysis.**
 
-- The grading run executes on the **delay-aware engine** (§4.3) using the published delay table. For each clock cycle, the engine records that cycle's **settle time**: the timestamp of the last input change at any register/memory input, measured from cycle start. `T_obs` = maximum settle time over the whole run. Metric: `est_time = cycles × T_obs`; speedup vs. the course baseline processor's `est_time`.
+- The grading run executes on the **delay-aware engine** (§4.3) using the published delay table. For each clock cycle, the engine records that cycle's **settle time**: the timestamp of the last input change at any register/memory input, measured from cycle start. `t_obs` = maximum settle time over the whole run. Metric: `est_time = cycles × t_obs`; speedup vs. the course baseline processor's `est_time`.
 - **Why DTA over STA (static/worst-case), per the team:** students implement microcode in ROMs and reuse buses in patterns their control unit never actually exercises (double-back-to-back, indirect stores, …). STA would report and highlight structurally-possible paths the microcode can never sensitize — misleading grades _and_ confused students. The course test suite already exercises every instruction and every branch predict/mispredict combination, giving DTA effective coverage for this ISA.
 - **Residual caveat (documented, accepted):** DTA is only as good as the suite — a path never sensitized scores _optimistically_ (favors the student). Mitigations: the comprehensive suite; and the report may optionally include `T_sta` (STA worst-case, computed in linear time, clearly labeled "structural bound — may include paths your design never uses") as an informational field for TAs eyeballing anomalies. **Retired** (`docs/derived-clock.md`): the `sta` module, the `--sta` flag and the report's `t_sta`/`sta_note`/`sta_paths` are gone, so DTA is now the only timing analysis in the tool — the caveat above is why that is not a loss.
-- **Determinism:** the event engine's tie-breaking is fixed (§4.6), so DTA results are exactly reproducible — same file, same program, same `T_obs`, every run, every platform.
+- **Determinism:** the event engine's tie-breaking is fixed (§4.6), so DTA results are exactly reproducible — same file, same program, same `t_obs`, every run, every platform.
 - **Performance reality check:** course programs are small — baseline cycle counts: POW 8,129 / FIB 32,312 / TwoSum 12,314. Even at ~10⁴ events/cycle that's ~10⁸–10⁹ events total: seconds in Rust on the target container. (The team's memoize/parallelize idea stays in the back pocket if future workloads grow; not needed at course scale.)
-- **A 2-stage pipeline now loses honestly:** its single long register-to-register path is exercised on essentially every cycle, so `T_obs` reflects it immediately.
+- **A 2-stage pipeline now loses honestly:** its single long register-to-register path is exercised on essentially every cycle, so `t_obs` reflects it immediately.
 
 **Delay table (D13):** published, versioned (`settings.delayTable`, e.g. `"mips-r2000-2um-v1"`). Derive from **74LS-family TTL datasheet typical propagation delays** — period-authentic for the course's late-70s/80s/early-90s material. Two versions ship: `cs2200-74ls-v1` (the original draft anchors: NOT ≈ 9 ns; AND/NAND ≈ 10; XOR/XNOR ≈ 12; 2:1 MUX ≈ 12; adder per-bit *ripple*; register clk→Q ≈ 20/setup 15/hold 5; RAM/ROM access ≈ 50) and **`cs2200-74ls-v2`** (the 2026-10-25 recalibration against real parts: 62256‑70 SRAM 70 ns, 27C256‑120 EPROM 120 ns, 74LS181 *ripple* adder 208 ns @ 32 bits, 74LS374 register 15/20/5, 74LS157 mux 9). v1 paired a worst-case ALU with a best-case memory, which inverted the memory-dominated regime the course is about; v2 charges real parts and each row carries a `source` naming it. Wire delay stays **0** (Head-TA decision, see `docs/delay-table.md`). Calibrate against published machines, not invented scales: R2000/12 = 12.5 MHz @ 35 ns external SRAM; the Harvey Mudd MOSIS student MIPS = 7.25 MHz. Only ratios matter for scoring, but ns units let TAs say "your clock would run at X MHz".
 
@@ -415,7 +415,7 @@ Other subcommands: `csim validate file.csx`, `csim timing file.csx --paths 10` (
 ### 8.2 Report contract
 
 - Exit codes: 0 = all assertions passed; distinct non-zero for assertion-failure / cycle-limit / timeout / oscillation / **floating-read** / malformed-file.
-- JSON report: `cycles`, `halt_reason`, `T_obs`, `est_time`, `speedup_vs_baseline`, per-assertion results, top-k observed critical paths (with component identities for UI highlight), optional `T_sta` (informational, clearly labeled), peak RSS, wall time.
+- JSON report: `cycles`, `halt_reason`, `t_obs`, `est_time`, `speedup_vs_baseline`, per-assertion results, top-k observed critical paths (with component identities for UI highlight), optional `T_sta` (informational, clearly labeled), peak RSS, wall time.
 - Named access: any component with a `name` (RAM, ROM, register, probe) is addressable; names validated unique at load.
 - Determinism per §4.6; identical submissions get identical reports on any grader instance.
 
@@ -532,7 +532,7 @@ MVP for limited student pilot = M0–M3. Performance-project readiness = + M5. M
 | #   | Question                    | Recommendation                                                                                                                       | Status                    |
 | --- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
 | D1  | Delay model                 | **Hybrid: transport wires + inertial gates + register clk→Q/setup/hold (§4.3) — resolved (team; matches curriculum)**                | ✅ resolved               |
-| D2  | Hide clock pins?            | **No — resolved (team)**; de-emphasize + auto-connect. The `rst` inputs themselves were removed in format v4 — reset is `sim_reset`. | ✅ resolved               |
+| D2  | Hide clock pins?            | **No — resolved (team)**; de-emphasize + auto-connect. `rst` is a pin again (format v6), level-sensitive; `sim_reset` is the session-level reset. | ✅ resolved               |
 | D3  | Floating input semantics    | **Halt-on-consume — resolved (team)**; watch-item §13.5                                                                              | ✅ resolved               |
 | D4  | Extension                   | **`.csx` — resolved (team)**                                                                                                         | ✅ resolved               |
 | D7  | Tunnels?                    | **No tunnels, no named nets — resolved (team)**                                                                                      | ✅ resolved               |

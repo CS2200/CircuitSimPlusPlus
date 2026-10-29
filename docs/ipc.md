@@ -20,7 +20,7 @@ genuine short circuit (two enabled drivers disagreeing) rather than an `X` that 
 the UI can warn precisely.
 
 **Changelog v1.0 → v1.1:** `NetChange.at?` (engine event timestamps); `NetDiffs.full`
-(initial full-state batch exception); structured `TimingViolation[]`/`TimingPath[]` in
+(initial full-state batch exception); structured `TimingPath[]` in
 `timing_update` (replaces the bare count + bare id lists); `NamedComponent.circuit`;
 CompId redefined as document-order within the referenced circuit (net_map stays
 root-circuit-only for v1); halt attribution tightened for subcircuits; tick semantics pinned.
@@ -54,6 +54,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `mem_read` | `{ name: string, addr: number, len: number }` | `WireValue[]` |
 | `mem_write` | `{ name: string, addr: number, values: WireValue[] }` | — |
 | `snapshot` | `{ path: string }` | — |
+| `sim_set_pause_on_unknown` | `{ on: bool }` | ask (or do not ask) when the sim reads a net nothing drives |
 | `resume` | `{ path: string }` | — |
 
 `LoadResult` = `{ ok, errors: LoadError[], net_map: NetMapEntry[], named: NamedComponent[] }`.
@@ -93,11 +94,11 @@ truth).
 - **`CompId` = document-order component array index** (format-v2 §5): the component's position
   in the **referenced circuit's** `components` array — never a post-flatten engine index.
   Messages that can reference non-root circuits carry an explicit `circuit` field
-  (`TimingViolation`, `TimingPath`, `NamedComponent`); `LoadError.comp_id` is document-order
+  (`TimingPath`, `NamedComponent`); `LoadError.comp_id` is document-order
   within `LoadError.circuit`. **v1.4:** `LoadResult.net_map` carries an explicit `circuit` and
   `instance` per entry, so every instance's wires resolve to their own nets (see §2).
 - **`sim_halted.details` shape:** for component-attributable halts (floating-read, contention,
-  oscillation, setup/hold, breakpoint), `details` starts with `comp <CompId> pin "<name>": <message>` so
+  oscillation, stop, breakpoint), `details` starts with `comp <CompId> pin "<name>": <message>` so
   the UI can ring the offending component on the canvas. The CompId is the **root-sheet**
   document-order id: when the culprit is inside a subcircuit, the engine reports the enclosing
   subcircuit INSTANCE's root-sheet id (v1 UI highlights the root sheet only). Free-form text

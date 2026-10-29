@@ -2,7 +2,7 @@
 
 > **Status (2026-10-06, human): COMPLETE.** B1–B11 all landed and merged to master,
 > plus the integration fix round (panic-on-input cluster, boot-settle floating semantics,
-> final-cycle T_obs fold, per-path wire delays, Session/api::Sim keystone, CLI fixes,
+> final-cycle t_obs fold, per-path wire delays, Session/api::Sim keystone, CLI fixes,
 > docs/autograder.md + format-v2 §9 + delay-table conventions). Gates: 193 tests green,
 > clippy/fmt/doc clean, Gradescope image verified in a 2 GB container (both CPUs grade
 > in ~0.01 s; ~25× under the M1 time budget, ~3 MB RSS). Remaining known minor items:
@@ -94,10 +94,10 @@ Execute in order. Do not start a task until its dependencies are accepted. After
 
 - Event queue keyed `(time, seq)`; `seq` assigned in component-index order → bit-for-bit reproducibility (§4.6).
 - **Transport wires:** delay ∝ length (table constant; 0 disables). **Inertial gates:** cancel-and-reschedule pending output events on input revert. **Registers:** clk→Q; setup/hold violation **detection** → warning list (latch still happens, deterministically).
-- **DTA instrumentation:** per-cycle settle time (last register/memory-input event per cycle) → running `T_obs`; top-k observed critical paths (component IDs).
+- **DTA instrumentation:** per-cycle settle time (last register/memory-input event per cycle) → running `t_obs`; top-k observed critical paths (component IDs).
 - RAM/ROM access-time settling on reads.
 
-**Done when:** tests: glitch narrower than `t_pd` is swallowed (gate) but passes (wire); setup/hold violation fixtures produce warnings; **the same run executed twice produces identical event-trace hashes**; a fixture pipeline's `T_obs` matches a hand-computed value within 0 error.
+**Done when:** tests: glitch narrower than `t_pd` is swallowed (gate) but passes (wire); setup/hold violation fixtures produce warnings; **the same run executed twice produces identical event-trace hashes**; a fixture pipeline's `t_obs` matches a hand-computed value within 0 error.
 
 ## B7 — Delay table
 
@@ -128,10 +128,10 @@ Execute in order. Do not start a task until its dependencies are accepted. After
 
 **Spec:** DESIGN.md §8. **Depends on:** B9
 
-- `clap` subcommands: `run`, `validate`, `timing --paths k`, `snapshot`, `resume` (§8.1 surface). `--mode zero|delay` (default `delay`), `--load name=file` (repeatable), `--assert` (repeatable), `--json`.
+- `clap` subcommands: `run`, `validate`, `timing --paths k`, `snapshot`, `resume` (§8.1 surface). `--mode` (removed with the zero-delay engine), `--load name=file` (repeatable), `--assert` (repeatable), `--json`.
 - `gradescope/Dockerfile`: musl-static `csim` + fixture sanity self-test.
 
-**Done when (M1 acceptance):** end-to-end: grade `tests/fixtures/pipeline5.csx` running a provided program hex; report JSON contains correct `cycles`, `T_obs`, `est_time`, assertion results; total runtime < 10 s in a 2 GB container; RSS < 256 MB.
+**Done when (M1 acceptance):** end-to-end: grade `tests/fixtures/pipeline5.csx` running a provided program hex; report JSON contains correct `cycles`, `t_obs`, `est_time`, assertion results; total runtime < 10 s in a 2 GB container; RSS < 256 MB.
 
 ## B11 — Fixtures & golden tests
 

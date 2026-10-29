@@ -42,7 +42,7 @@ regression and is the CE-faithful rule.
 | `--compat` | 349/357 (8) | **353/357 (4)** — +4, **0 regressions** |
 
 Production's gain is `submission_410843919`; `compat` gains `submission_374337181`,
-`374593140`, `374625075`, `409848157`. Remaining under `compat`: `373713172`,
+`374593140`, `374625075`, `409848157`. Remaining under `compat`: `374625393` (the others in this list are fixed — see the boundary exclusion and `ExtendMode::One` below).
 `374299303` (never halts), `374625393`, `410460509`. A `csim nets --compat` flag was added
 (the dump and the graded run then agree on mode).
 
@@ -79,7 +79,7 @@ halted `pow` with `$v0 = 0xffffffff` (the post-`halt` instruction's value) inste
 it (`format-v2.md` §4/§9, `DESIGN.md`, the `behavior.rs` header) and so do a behavior unit
 test and an engine test.
 
-The timing model is unchanged (still DTA; `--sta`/`t_sta` untouched): this is a *value*
+The timing model is unchanged in kind (still DTA); `--sta`/`t_sta` have since been retired outright: this is a *value*
 path, not an ordering one, so it is orthogonal to the reverted zero-delay experiment below.
 
 ## Round — not done: the fixpoint ("zero-delay") engine does not fix the x-cascade class (2026-10-25)
@@ -152,7 +152,7 @@ dependency edges `levelize` orders by), i.e. the precise subset of the levelize
 merely downstream of a loop, and every `Deliver`/`Net`/`Clock`/`Poke`, keep their
 plain `(time, seq)` order. A design with no combinational feedback has no class-1
 event, so its event trace is bit-identical — the whole existing golden suite
-(`golden_traces_are_pinned`, `t_obs` 39/40/0/205/205) and all **211** core lib tests
+(`golden_traces_are_pinned`; the values have since been re-blessed twice, and `t_obs` is the derived period now, not the settle) and all **240** core lib tests
 pass unchanged, with no re-bless. A **genuine** oscillator is unaffected for the same
 reason: an odd-parity ring's stages are one `t_pd` apart, so no two of their commits
 share a timestamp and the cap still fires (`event_storm_halts_with_oscillation`, plus
@@ -375,7 +375,7 @@ microcode state doing the expected work.
 autograder's own `reg_states.csv` is a per-cycle reference, so the next step is to diff our
 register file against it cycle by cycle.
 
-**Current state (2026-10-21):** contract **v1.2**, file format **v5** (registers
+**Current state:** contract **v1.5**, file format **v6** (registers
 and RAMs have their `rst`/`clk` pins back, hidden unless `showClk`/`showRst` says
 otherwise — UI_OVERHAUL §93), **213 backend + 445 unit + 80 e2e** tests green. RAM powers
 on unknown (§9 of the format doc, below), registers still on 0 pending the Head TA. The
@@ -404,8 +404,8 @@ frontend planning docs, and the source comments that restated them.
   swatches with only its bottom margin; `.accent-row + .settings-toggle` now
   carries top spacing. _(commit `c42533f`)_
 - **The `rst` pin is gone, format-wide** — the item the previous two attempts
-  reverted. `mem.register` is `d, clk, en, q` and `mem.ram` is
-  `addr, din, dout, we, clk` in engine, format, fixtures, tests, frontend and
+  reverted. `mem.register` is `d, clk, en, rst, q` and `mem.ram` is
+  `addr, din, dout, we, clk, rst` (the reset pins are back in v6) in engine, format, fixtures, tests, frontend and
   docs. The pin only ever existed because the old simulator had no RAM autoload:
   a canvas button wired into every register's reset was how a circuit restarted.
   Both replacements exist now — memory autoload on load/reset, and the
@@ -652,7 +652,7 @@ format bump. _(this round)_
 5 ns` for a register), and a selected _wire_ shows its per-path delay — which is
   currently **0** for every wire, because wire propagation ships off (`wire.num = 0`,
   Head-TA decision, `docs/delay-table.md`). Both are **design** numbers; the transport's
-  `T_obs`/`top_paths` stay the measured ones.
+  `t_obs`/`top_paths` stay the measured ones.
 - ~~Animation pulse-rate slider~~ **done**: Settings → Canvas has a **Pulse speed**
   picker (50…200%); the pref is a percentage, and `PulseTracker` takes its
   duration from it, so the whole bullet is closed.
@@ -927,7 +927,7 @@ a guess.
 
 ## `compat` and the last four corpus rows (2026-10-26)
 
-Under `CSIM_COMPAT=1` the corpus stands at 353/357. The four that fail are
+Under `CSIM_COMPAT=1` the corpus is clean: 212 both-pass, 0 disagreements, 0 false passes. The only design that still differs from the old tool is `374625393`.
 `373713172` (4200 pipeline, X-cascade), `374299303` (4200 datapath, never halts),
 `374625393` (4200 datapath, wrong value) and `410460509` (5200 datapath, X-cascade).
 They are the same four that fail in production, which is why the earlier round concluded
@@ -936,7 +936,7 @@ evidence for it was gathered wrong.
 
 ### The measurement trap: `--pause-on-unknown` masks `compat`
 
-`eval_comb` checks `pause_on_unknown` **before** the `compat` branch and returns early:
+`eval_reading_unknowns` checks `pause_on_unknown` **before** the `compat` branch and returns early:
 
 ```rust
 if self.pause_on_unknown { return Err(self.halt_unknown(c, &fr.pin)); }
@@ -1035,7 +1035,7 @@ microcode address register `State` holds `X` at cycle 2 before and **`Z`** after
 design's `t_obs` moves 350 → 340. The machine still freezes, so the X was a *symptom*: the
 next-state logic is `Z` upstream of the register.
 
-The four are not one bug. `csim timing --sta` splits them cleanly:
+The four are not one bug. `csim timing` split them cleanly (the `--sta` flag no longer exists):
 
 | submission | `t_sta` | `sta_note` |
 |---|---|---|
@@ -2064,7 +2064,7 @@ Measured on the register file at cycle 3 afterwards: `c83/c153.sel` untied, `$sp
 **Measured, narrowed.** `report-compat-table.json`: compat 210 agree / 2 disagreements / 0 false
 passes / **0 flips** — so the table entry is a *correctness* fix for the converter that this
 design does not exercise (its tie is on the Datapath net that feeds the subcircuit pin, which the
-table cannot see through). `410460509` is therefore **diagnosed but not fixed**: the lever that
+table cannot see through). `410460509` was diagnosed here and has since been fixed (the same boundary exclusion): the lever that
 does fix it — refusing the tie on a net that crosses a subcircuit boundary — was measured, and it
 costs a production verdict, so it is reverted and recorded here with its reasoning rather than
 landed. The way forward is net surgery: tie the pins that are not the plexer's select and leave
@@ -2136,7 +2136,7 @@ advances an extra time, and the PC then fetches at `E` where the old tool jumps 
 This is the same *family* as Round 19's finding on the same design — a transient inside a cycle
 that the old tool's quiescence model never sees — so the next question is what makes the clock
 re-rise 189 ns into the cycle, and after that which signal selects the next-state source (the
-`SEQ` output or the `CC` patch). `t_obs` for this design is 350, so a real second edge inside
+`SEQ` output or the `CC` patch). `t_obs` for this design is the derived period, so a real second edge inside
 1000 ns of half-period is not a settling artefact: something is driving the clock net twice.
 
 ##### And what re-rises the clock: a glitch on the gate's select

@@ -91,7 +91,7 @@ no race, so the table cannot decide a value — it only changes the derived peri
 ## 5. Consequences
 
 - **`timing_violations` retires.** No design can violate setup or hold, because the edge is
-  never too early. `--assert "violations == 0"` becomes vacuous. (Do this *after* the mechanism
+  never too early. `--assert "violations == 0"`, and its `== 1` twin, leave the grammar entirely — both become *parse errors*, which is the only form of "gone" a grading script cannot misread. (Do this *after* the mechanism
   is proven — see §7.)
 - **A too-slow design can no longer fail**; it can only score badly. "Your clock is too fast"
   moves entirely into the number, which is where the rubric already lives
@@ -264,7 +264,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how |
 |---|---|---|
-| A1 | a chain **longer than the nominal period** still latches the **settled** value | unit: the old 250-inverter fixture, asserting the register's *value* rather than a warning. This is the fixture `overclocked_chain_…` must become |
+| A1 | a chain **longer than the nominal period** still latches the **settled** value | unit: the old 250-inverter fixture, asserting the register's *value* rather than a warning. This replaced the `overclocked_chain_completes_with_setup_violation` fixture |
 | A2 | no edge fires while data events are pending | unit: after each edge, assert the queue holds only the next clock (the barrier's contract, from the inside) |
 | A3 | edge times are **strictly increasing** | unit: run a long cascade, assert the edge-time sequence is monotone (this is the inversion guard) |
 | A4 | a cascade spilling past the nominal period is **completed** before the edge | unit: assert the value *and* that the edge lands after the spill |
@@ -314,7 +314,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | F1 | a **gated** clock works — the gate settles as part of the cascade | integration |
 | F2 | a **divided** clock (a counter bit on `clk`) works, and is count-based | integration |
 | F3 | a **self-oscillating** source (a ring driving `clk`) is an oscillation halt, not a hang | unit |
-| F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | **done**: lengthening the *clock's* wire lengthens the period by exactly the wire's delay — which can only be true if the clock's arrival is a cascade event rather than a scheduled time |
+| F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | **done**: lengthening the *clock's* wire lengthens the period by **twice** the wire's delay — the wire carries both transitions — which can only be true if the clock's arrival is a cascade event rather than a scheduled time |
 
 ### G. Corpus — the regression gate
 

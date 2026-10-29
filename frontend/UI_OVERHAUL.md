@@ -483,7 +483,7 @@ drag-wiring `wires.spec.ts` test, grid-based `memory.spec.ts`, a mock
 - **Simulation menu retired** (human decision; it was read as "the simulation
   tab"): its Hz speed presets were redundant with the slider, so the whole menu
   is gone. Nothing is lost: step tick / reset / run-to live in the transport
-  bar, the `T_obs` chip toggles the critical-path highlight, and the **status
+  bar, the `t_obs` chip toggles the critical-path highlight, and the **status
   chip now switches delay ↔ zero mode** (`ctl.setMode`), which was the only
   control the menu owned. Keyboard shortcuts are unchanged.
 - **Speed slider**: already exponential (`hz = 10^(exp/10)`, exp 0…30 = 1 Hz…
@@ -629,7 +629,7 @@ one `--update-snapshots` run on Linux.
   the canvas keeps repainting while any net disagrees, gated by the same
   _Animate signal pulses_ preference. `StrokeStyle` gained an `alpha` channel
   (batched, like the other style keys), `SceneOverlay` gained `now`, and
-  `DocScene.hasMismatch()` tells the host when to animate. Visual-regression
+  `DocScene.hasWarning()` tells the host when to animate. Visual-regression
   specs set `csx.pulses=0` so their baselines stay deterministic (the halo is
   then drawn at a fixed phase).
 - **Slider notches fixed.** They were positioned as a percentage of the input
@@ -640,7 +640,7 @@ one `--update-snapshots` run on Linux.
   notches at the round values (1, 2, 5, 10, … 1000 Hz), decades taller.
 - **Sim bar regrouped.** Transport (play/pause · tick · reset), run-to
   (cycle N · run to) and speed (label · slider · Hz) are three bordered pills,
-  and the telemetry (`cycle N · mode chip · eff Hz`, then `T_obs`) is pushed to
+  and the telemetry (`cycle N · mode chip · eff Hz`, then `t_obs`) is pushed to
   the right edge, instead of seven loose controls in a row.
 - **HUD aligned.** The fps/status chip was floating 8 px inside the canvas; it
   is now flush with the canvas's top-left corner, so it lines up with the
@@ -935,7 +935,7 @@ instead of owning a row of its own.
   desktop EDA tool, so they were dropped — the ☁ slot became the autosave chip
   (`SaveIndicator`, moved up out of the status bar).
 - **Row 2** — menu tabs on the left, transport on the right:
-  `File Edit View Tools Help` … `play tick reset run-to speed T_obs`.
+  `File Edit View Tools Help` … `play tick reset run-to speed t_obs`.
 - **New menus** — `View` (grid, live values, pulses, performance overlay,
   highlight critical path — previously Settings-only) and `Tools` (recover
   unsaved work, clear this file's history, settings, reset appearance — the
@@ -952,7 +952,7 @@ instead of owning a row of its own.
   third row of chrome.
 - **Sizing** — icon buttons are 34×30 with 19 px glyphs; the speed slider and
   the run-to input were tightened so the row fits a 1280 px window with both the
-  telemetry and the T_obs chip on screen.
+  telemetry and the t_obs chip on screen.
 
 **Acceptance:** 292 unit / 45 e2e green; Rust 170 core + 12 CLI + 8 golden + 14
 app. The header is taller than the old strip and §28 moved component labels, so
@@ -1038,7 +1038,7 @@ menu, and tidy the simulation bar.
   gone: one filled play button, flat text buttons that highlight on hover,
   hairline dividers between the clusters, a single 26px control height, a thinner
   slider with fainter preset ticks, and tabular-figure telemetry. The "speed"
-  word is gone (the slider plus the Hz readout already say it), and the T_obs
+  word is gone (the slider plus the Hz readout already say it), and the t_obs
   chip is a quiet outlined chip rather than a panel-coloured block.
 
 **Acceptance:** 292 unit / 45 e2e green. The transport is 2px taller, so the
@@ -1232,7 +1232,7 @@ canvas a few px, so the sim/timing screenshot baselines were re-blessed locally
   the core uses the wire's computed color (`stroke` — custom color, bus hue, or
   state color) and **blinks** it (opacity 0.3→1 and ring weight 2.1→3.1× at
   ~170 ms), so the part you drew pulses in its own color. `theme.violation`
-  stays for the setup/hold violation markers (§U7), which are a different signal.
+  is now used only by the contention underline and the waveform cursor.
 
 **Acceptance:** frontend lint / 302 unit / build green; 50-of-50 e2e green. The
 sim/timing screenshot baselines were re-blessed locally for the new halo color;
@@ -1762,7 +1762,7 @@ an adder `prop 15 ns + 4/bit`, an AND `prop 10 ns`; parts with no published cost
 (pins, subcircuits, text) show no row at all.
 
 This is the **design** number — what the part contributes and what STA bounds.
-The transport's `top_paths`/`T_obs` remain the _measured_ (DTA) quantity, and the
+The transport's `top_paths`/`t_obs` remain the _measured_ (DTA) quantity, and the
 row deliberately does not try to be a simulation result. A wire's own readout
 (path length × the table's per-unit wire delay) and the animation pulse-rate
 slider are the follow-ups.
@@ -1791,7 +1791,7 @@ A selected wire now shows its own per-path delay — the drawn length in grid un
 times the published table's per-unit wire fraction (0.1 ns), from the same
 build-time table the part readouts use (docs/delay-table.md, §67). A routed wire
 of 5.5 units reads `≈ 0.6 ns (5.5 units × 0.10 ns)`. Like a part's row, this is
-the **design** number: the transport's `T_obs` and `top_paths` remain what a run
+the **design** number: the transport's `t_obs` and `top_paths` remain what a run
 observed.
 
 ## 70. Follow-up batch BI (2026-10-19): pulse speed, and where it stops
@@ -2588,7 +2588,7 @@ changes, and **every class name the components and the e2e suite use is kept** �
 - **Transport bar.** Play / tick / reset sit in one pill with real icons (play is the
   only filled control and breathes while the clock runs); run-to is a joined
   field + verb; the cycle counter is a chip whose dot lights green while running;
-  `T_obs` is a chip that turns amber-bordered when there are violations. Tooltips
+  `t_obs` is a chip that toggles the critical-path highlight; the violation badge it once carried is gone. Tooltips
   carry the shortcuts (Ctrl+K / Ctrl+J / Ctrl+R). The accessible names are unchanged
   (`tick`, `run to`, `Run`/`Pause`).
 - **Header.** The app mark sits in an accent tile; the save chip has a status dot (green
@@ -2624,7 +2624,7 @@ changes, and **every class name the components and the e2e suite use is kept** �
 
 **Chrome heights are fixed in pixels** — header 40 + 35 (+1 border), tab strip 32,
 status bar 25 = 133 — so the editor area is the same size in every font
-environment. That is what keeps the six committed `*-chromium-linux.png` canvas
+environment. That is what keeps the five committed `*-chromium-linux.png` canvas
 baselines at 834 × 587: they screenshot `.editor-wrap`, whose only chrome is the zoom
 pill (within the 2 % pixel budget) and the resize handles, which no longer draw a
 resting hairline (the panels draw their own border instead).
@@ -2634,7 +2634,7 @@ Chromium) — the one failure, `subcircuit.spec.ts` "a definition is a place you
 and leave", fails identically on the tree before this pass (a double-click has opened the
 _instance_ view since the instance-scope change, and the test still expects the
 definition's "used by main" bar). The pinned-image Linux e2e run was not possible on the
-authoring machine (Docker Desktop's containerd store returned I/O errors), so the six
+authoring machine (Docker Desktop's containerd store returned I/O errors), so the five
 canvas baselines are argued, not re-measured: `.editor-wrap` is 834 × 587 at the e2e
 viewport with the fixed chrome heights above.
 
@@ -2756,7 +2756,7 @@ them depth and identity without changing a single shape, size, pin position or h
 **Acceptance:** frontend lint / 459 unit / build green; e2e 81 of 82 locally (the
 pre-existing `subcircuit.spec.ts` failure); U1 bench unchanged (~1.7 ms avg on the
 stress scene, which has its own renderer path). **The six Linux canvas baselines
-(`demo-{oled,dark,light}`, `sim-lit`, `timing-path`, `timing-violation`) are now stale by
+(`demo-{oled,dark,light}`, `sim-lit`, `timing-path`) are now stale by
 design** and must be regenerated in the pinned image before CI can pass:
 
     docker run --rm --ipc=host -v "$PWD:/work" -w /work/frontend \
