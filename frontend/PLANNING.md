@@ -60,7 +60,7 @@ Subcircuits menu (new/rename/switch). Still open:
   state" rule carries this exception. Full frames spawn no pulses.
 - **CompId redefinition (v1.1):** document-order index into the REFERENCED
   circuit's components array; messages that can reference non-root circuits
-  carry `circuit` (`TimingViolation`/`TimingPath`/`NamedComponent`).
+  carry `circuit` (`TimingPath`/`NamedComponent`).
   `net_map` stays root-circuit-only for v1 (documented limitation).
 - **Free wire endpoints** — still DEFERRED. The human holds this as
   amendment P1 (not scheduled). No editor/schema work until ratified.

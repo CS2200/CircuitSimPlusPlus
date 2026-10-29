@@ -218,7 +218,7 @@ the app falls back to a silent no-op if `api.github.com` can't be read.
 
 ## The update nudge
 
-**Today:** `checkForUpdate()` fetches
+  **Today:** `checkForUpdate()` fetches `https://api.github.com/repos/Mr-Thack/CircuitSimPlusPlus/releases/latest` unauthenticated.
 `https://github.gatech.edu/api/v3/repos/CS2200TAs/CircuitSimPlusPlus/releases/latest`
 unauthenticated. The repo is private → `404` → **silent no-op**. The version,
 dismissal-per-version, and the "check for updates" preference all work; only the
