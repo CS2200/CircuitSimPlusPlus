@@ -5086,19 +5086,30 @@ mod tests {
                 serde_json::from_str(&e.snapshot()).expect("snapshot parses");
             snap["now"].as_u64().expect("now present")
         };
-        // half-period 5 (nominal period 10) so the **settle dominates the floor**: with the
-        // nominal period longer than the settle the floor masks it and the test cannot
-        // discriminate. At half 50 the measured period was 128 — unexplained, and recorded
-        // rather than fitted.
-        let mut eng = engine(&json, 5);
-        eng.run(10).expect("10 cycles");
-        let t10 = now(&eng);
-        eng.run(1).expect("one more");
-        let period = now(&eng) - t10;
+        // The period is the design's own, so it is the **same at any origin**. This is also
+        // what closes the "128 at half-period 50" that used to be recorded here as
+        // unexplained: a period that exceeded both the nominal and the requirement is the
+        // signature of the nominal *binding* the period, which every edge being placed by the
+        // drain removes. The assertion below is a control — it fails if the origin ever
+        // decides a period again, at any origin, for any fixture.
+        let period_at = |half: u64| -> u64 {
+            let mut eng = engine(&json, half);
+            eng.run(10).expect("10 cycles");
+            let t10 = now(&eng);
+            eng.run(1).expect("one more");
+            now(&eng) - t10
+        };
+        let period = period_at(5);
         assert!(
             period >= 21,
             "the period must cover settle (19) + setup (2); measured {period}"
         );
+        assert_eq!(
+            period_at(50),
+            period,
+            "the origin must not decide the period (this was 128 before the derived period)"
+        );
+        assert_eq!(period_at(500), period, "…at any origin");
     }
 
     #[test]
