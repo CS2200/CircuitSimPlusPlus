@@ -51,6 +51,29 @@ verdict is the *ordering* of two arrivals, and it flips independently at both en
 zero delay fails too, because with every delay at 0 the order is decided by the engine's
 same-timestamp tie-break, which is not CE's order (CE passes this design, at 2709 cycles).
 
+**The fix, decided 2026-10-29 (and it is not "wait for quiescence").** A setup violation on a
+derived clock is fixed in hardware by delaying the clock, and this one is no different: the
+register's `clk` path is simply too short for the data it samples. So the rule is per-register and
+local rather than global --
+
+> on a **derived** `clk` rise, place the latch at
+> `max(rise, last change of this register's `d` + this register's `t_setup`)`,
+> and move it later again if `d` changes before it fires.
+
+That is "the clk wire is long enough for this register's data", made computable. It is better than
+deferring to quiescence because it is *local* (one register's wait does not delay another's), it
+uses the register's **own** `t_setup` rather than the design-wide maximum the global barrier must
+resort to, and it is justifiable as a number rather than as an abstraction.
+
+What it needs: a per-register "last change of `d`" time (the tracker removed as dead weight in the
+cleanup, back in a simpler form), a `d`-arrival reaction on a register so a pending latch can be
+pushed, a savestate field for the pending latch (format bump), and the consequences re-derived --
+`f2`'s test currently asserts the race as the hardware's own behaviour and inverts under this rule,
+the golden traces re-bless, and the corpus re-verifies (values move wherever a derived clock
+exists, which is the point).
+
+Acceptance: `374625393` passes under **both** tables, and the corpus stays 212/0/0.
+
 **So the property H1 asserts is not achievable while we model time.** A derived clock's race *is*
 table-dependent; the only ways to make the verdict table-independent are to treat every edge like
 the global one (make a derived edge wait for the data it samples — a real engine change, and one
