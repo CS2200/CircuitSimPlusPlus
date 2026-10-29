@@ -11,10 +11,10 @@ addressing, and memory preloading + sandboxing.
 ```bash
 csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rss-cap-mb M]
     [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
-    [--expect-halt] [--pause-on-breakpoints] [--clock-half-period-ns N] [--sta] [--paths K]
+    [--expect-halt] [--pause-on-breakpoints] [--paths K]
     [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
-csim timing file.csx [--paths K] [--cycles N] [--sta] [--json out.json]
+csim timing file.csx [--paths K] [--cycles N] [--json out.json]
 csim snapshot file.csx --out state.json [--cycles N] [--clock-half-period-ns N]
 csim resume state.json [--cycles N] [--json out.json]
 ```
@@ -24,10 +24,10 @@ csim resume state.json [--cycles N] [--json out.json]
 - `validate` — full load check: parse, document validation, **and netlist build** (a
   bitsize-mismatch net fails validation too, F8). Prints `{ "ok": bool, "errors": [LoadError] }`;
   exit 0 or 6.
-- `timing` — **observed (DTA) timing is primary** (F9): runs the grading engine for
-  `--cycles` cycles (default **1000**; 0 disables) and reports `dta.{cycles, t_obs, est_time,
-top_paths}`. `--sta` adds the informational structural bound (`t_sta`, `sta_paths`, and a
-  `sta_note` label; see docs/delay-table.md for the STA vs DTA conventions).
+- `timing` — **observed (DTA) timing** (F9): runs the grading engine for `--cycles` cycles
+  (default **1000**; 0 disables) and reports `dta.{cycles, t_obs, est_time, top_paths}`. The
+  informational structural bound (`--sta`, `t_sta`, `sta_paths`, `sta_note`) is **gone** —
+  retired with the derived clock (`docs/derived-clock.md`).
 - `snapshot`/`resume` — savestates, §5.
 
 ## 2. Exit codes (§8.2)
@@ -62,7 +62,6 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `speedup_vs_baseline`            | `baseline_est_time / est_time`; `null` without a baseline or when `est_time == 0`                                                                   |
 | `assertions`                     | per-assertion `{ assertion, passed, actual, expected }`                                                                                             |
 | `top_paths`                      | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
-| `t_sta`, `sta_note`              | informational structural bound (only with `--sta` / `include_sta`); STA totals include the destination register's setup time (docs/delay-table.md)  |
 | `delay_table`                    | table provenance, e.g. `"cs2200-74ls-v1 (DRAFT)"`                                                                                                   |
 | `trace_hash`                     | FNV-1a over the applied event stream (the §4.6 determinism tripwire); values are mixed as their raw width + mask words, not as rendered hex — see `Value::fold_bytes`                                                                                |
 | `rubric_full_credit`             | `est_time < rubric_full_credit_below` when a threshold was given, else `null`                                                                       |
@@ -106,7 +105,6 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
     { "when": "reaches", "name": "isHalt", "value": "1" }, // the pin becomes 1
   ],
   "top_paths": 10,
-  "include_sta": false,
   "rubric_full_credit_below": 90000, // §8.3 rubric hook
   "clock_half_period_ns": 1000, // delay-mode clock (default 1000)
   "loads": [{ "memory": "imem", "file": "program.hex" }],

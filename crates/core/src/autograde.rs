@@ -47,7 +47,6 @@ use crate::api::{self, CompId, HaltReason, LoadError, NamedKind};
 use crate::delay::{DelayEngine, Halt, RunReport};
 use crate::format::Document;
 use crate::netlist::{self, Netlist};
-use crate::sta;
 use crate::timing_table::TimingTable;
 use crate::value::Value;
 
@@ -441,8 +440,6 @@ pub struct GradeConfig {
     pub expect_halt: bool,
     /// Top-k observed critical paths in the report.
     pub top_k: usize,
-    /// Include informational STA (`t_sta`, §4.4 — clearly labeled).
-    pub include_sta: bool,
     /// §8.3 rubric hook: full credit when `est_time` is below this.
     pub rubric_full_credit_below: Option<u64>,
     /// Caller-defined stop conditions (§8.4): evaluated at every cycle boundary, the
@@ -483,7 +480,6 @@ impl Default for GradeConfig {
             pause_on_unknown: false,
             watch: Vec::new(),
             top_k: 10,
-            include_sta: false,
             rubric_full_credit_below: None,
             pause_on_breakpoints: false,
             compat: false,
@@ -520,8 +516,6 @@ pub struct TestSpec {
     pub pause_on_unknown: bool,
     /// Top-k observed critical paths in the report.
     pub top_paths: Option<usize>,
-    /// Include informational STA (`t_sta`, §4.4 — clearly labeled).
-    pub include_sta: Option<bool>,
     /// §8.3 rubric hook: full credit when `est_time` is below this.
     pub rubric_full_credit_below: Option<u64>,
     /// Memory preloads.
@@ -578,7 +572,6 @@ impl TestSpec {
         cfg.pause_on_breakpoints = self.pause_on_breakpoints.unwrap_or(false);
         cfg.pause_on_unknown = self.pause_on_unknown;
         cfg.top_k = self.top_paths.unwrap_or(10);
-        cfg.include_sta = self.include_sta.unwrap_or(false);
         cfg.rubric_full_credit_below = self.rubric_full_credit_below;
         for l in &self.loads {
             cfg.loads
@@ -662,13 +655,6 @@ pub struct Report {
     /// Top-k observed critical paths (§4.4), grouped per circuit with
     /// document-order component indices (contract v1.1).
     pub top_paths: Vec<api::TimingPath>,
-    /// Informational structural bound (§4.4) — may include paths the
-    /// design never sensitizes; STA totals INCLUDE the destination
-    /// register's setup time (docs/delay-table.md). `None` when not
-    /// requested or when STA failed (see `sta_note`).
-    pub t_sta: Option<u64>,
-    /// Labeling/provenance note for `t_sta` (§4.4), or the STA error.
-    pub sta_note: Option<String>,
     /// DRAFT-table provenance (`cs2200-74ls-v1 (DRAFT)`).
     pub delay_table: String,
     /// Determinism hash of the event trace (§4.6); delay mode only.
@@ -793,8 +779,6 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 speedup_vs_baseline: None,
                 assertions: Vec::new(),
                 top_paths: Vec::new(),
-                t_sta: None,
-                sta_note: None,
                 delay_table: table_name.to_string(),
                 trace_hash: None,
                 rubric_full_credit: None,
@@ -1101,19 +1085,6 @@ fn grade_delay(
         ),
     };
 
-    // -- STA (informational) ----------------------------------------------
-    let (t_sta, sta_note) = if cfg.include_sta {
-        match sta::analyze(&nl, table, cfg.top_k) {
-            Ok(r) => (
-                Some(r.t_sta),
-                Some("structural bound — may include paths your design never uses".to_string()),
-            ),
-            Err(e) => (None, Some(e.to_string())),
-        }
-    } else {
-        (None, None)
-    };
-
     let report = Report {
         cycles,
         halt_reason,
@@ -1132,8 +1103,6 @@ fn grade_delay(
             .take(cfg.top_k)
             .flat_map(|(settle, path)| api_path(&nl, *settle, path))
             .collect(),
-        t_sta,
-        sta_note,
         delay_table: format!("{} ({})", table.name(), table.status()),
         trace_hash: Some(eng.trace_hash()),
         rubric_full_credit: cfg.rubric_full_credit_below.map(|t| est_time < t),
@@ -1406,7 +1375,6 @@ mod tests {
         cfg.loads = vec![("dmem".into(), LoadSource::Words(vec![0, 0, 0x2A]))];
         cfg.baseline_est_time = Some(234);
         cfg.rubric_full_credit_below = Some(200);
-        cfg.include_sta = true;
         let out = grade(&doc(&counter_json()), &cfg).unwrap();
         assert_eq!(out.outcome, GradeOutcome::Passed);
         assert_eq!(out.outcome.exit_code(), EXIT_OK);
@@ -1423,8 +1391,6 @@ mod tests {
         assert_eq!(r.top_paths[0].circuit, "main");
 
         assert!(r.top_paths[0].comps.contains(&CompId(5)));
-        assert_eq!(r.t_sta, Some(34));
-        assert!(r.sta_note.as_deref().unwrap().contains("structural bound"));
         assert_eq!(r.delay_table, "cs2200-74ls-v1 (DRAFT)");
         assert!(r.trace_hash.is_some());
         assert_eq!(r.rubric_full_credit, Some(true));
@@ -1760,7 +1726,6 @@ mod tests {
                 "baseline_est_time": 234,
                 "expect_halt": false,
                 "top_paths": 5,
-                "include_sta": true,
                 "rubric_full_credit_below": 200,
                 "clock_half_period_ns": 500,
                 "loads": [{"memory": "dmem", "file": "data.hex"}],
@@ -1774,7 +1739,6 @@ mod tests {
         assert_eq!(cfg.limits.timeout, Some(Duration::from_millis(60000)));
         assert_eq!(cfg.baseline_est_time, Some(234));
         assert_eq!(cfg.top_k, 5);
-        assert!(cfg.include_sta);
         assert_eq!(cfg.rubric_full_credit_below, Some(200));
         assert_eq!(cfg.clock_half_period, 500);
         assert_eq!(cfg.assertions.len(), 2);

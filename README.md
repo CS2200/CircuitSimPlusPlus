@@ -94,7 +94,7 @@ cargo run -p csim -- run tests/fixtures/pipeline5.csx \
     --json report.json                   # exit code = grading outcome (docs/autograder.md)
 
 cargo run -p csim -- validate file.csx   # parse + netlist checks, all errors listed
-cargo run -p csim -- timing file.csx     # DTA observed critical paths (--sta for static)
+cargo run -p csim -- timing file.csx     # DTA observed critical paths
 cargo run -p csim -- snapshot/resume ... # deterministic savestates
 
 # Static musl binary (as deployed on Gradescope; needs rustup)

@@ -276,7 +276,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | integration |
 | C3 | `timing_violations` is **absent or always zero** in the report | integration |
 | C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration |
-| C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration |
+| C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration — **done**: the flags are rejected by clap and the report carries none of the three |
 
 ### D. Loops and non-quiescence — the "never hang" contract
 

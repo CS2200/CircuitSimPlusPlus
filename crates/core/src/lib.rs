@@ -24,6 +24,5 @@ pub mod format;
 pub mod ids;
 pub mod netlist;
 pub mod session;
-pub mod sta;
 pub mod timing_table;
 pub mod value;

@@ -34,9 +34,8 @@ enum Cmd {
         /// Circuit file (.csx).
         file: PathBuf,
     },
-    /// Timing analysis: observed (DTA) timing is primary — a grading
-    /// engine run of --cycles cycles (default 1000). STA is available
-    /// via --sta, clearly labeled informational (DESIGN.md §4.4, F9).
+    /// Timing analysis: observed (DTA) timing — a grading engine run of
+    /// --cycles cycles (default 1000).
     Timing {
         /// Circuit file (.csx).
         file: PathBuf,
@@ -46,10 +45,6 @@ enum Cmd {
         /// Cycles for the observed (DTA) run (default 1000; 0 disables).
         #[arg(long)]
         cycles: Option<u64>,
-        /// Include informational STA (structural bound — may include
-        /// paths the design never uses).
-        #[arg(long)]
-        sta: bool,
         /// Write the JSON output to this path instead of stdout.
         #[arg(long)]
         json: Option<PathBuf>,
@@ -168,9 +163,6 @@ struct RunArgs {
     /// Clock half-period in ns (delay mode).
     #[arg(long)]
     clock_half_period_ns: Option<u64>,
-    /// Include informational STA in the report (§4.4).
-    #[arg(long)]
-    sta: bool,
     /// Top-k observed critical paths in the report.
     #[arg(long, default_value_t = 10)]
     paths: usize,
@@ -347,7 +339,6 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
     if let Some(h) = args.clock_half_period_ns {
         cfg.clock_half_period = h;
     }
-    cfg.include_sta |= args.sta;
     cfg.top_k = args.paths;
     if cfg.limits.max_cycles == 0 {
         return Err("cycle limit is 0 — pass --cycles or a spec".to_string());
@@ -414,15 +405,8 @@ fn run(args: &RunArgs) -> ExitCode {
     }
 }
 
-/// `csim timing`: observed/DTA timing primary (default 1000 cycles);
-/// STA only behind --sta, labeled informational (F9).
-fn timing(
-    file: &Path,
-    paths: usize,
-    cycles: Option<u64>,
-    want_sta: bool,
-    json_out: Option<&Path>,
-) -> ExitCode {
+/// `csim timing`: observed/DTA timing (default 1000 cycles).
+fn timing(file: &Path, paths: usize, cycles: Option<u64>, json_out: Option<&Path>) -> ExitCode {
     let doc = match std::fs::read(file)
         .map_err(|e| e.to_string())
         .and_then(|b| format::load_document(&b).map_err(|e| format!("{e:?}")))
@@ -464,54 +448,6 @@ fn timing(
         }
     }
 
-    // -- STA (informational only, on request) -----------------------------
-    if want_sta {
-        let nl = match csim_core::netlist::build(&doc) {
-            Ok(nl) => nl,
-            Err(errors) => {
-                eprintln!(
-                    "csim: {}",
-                    serde_json::to_string(&errors).expect("serializes")
-                );
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        let table = match TimingTable::builtin(&doc.settings.delay_table) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("csim: {e}");
-                return ExitCode::from(exit::MALFORMED_FILE);
-            }
-        };
-        match csim_core::sta::analyze(&nl, &table, paths) {
-            Ok(r) => {
-                out["t_sta"] = serde_json::json!(r.t_sta);
-                out["sta_note"] = serde_json::json!(
-                    "informational structural bound — includes setup time; may include paths your design never uses"
-                );
-                out["sta_paths"] = r
-                    .top_paths
-                    .iter()
-                    .map(|p| {
-                        let (circuit, comp_id) = nl.doc_id(p.endpoint);
-                        serde_json::json!({
-                            "delay": p.delay,
-                            "endpoint": { "circuit": circuit, "comp_id": comp_id },
-                            "comps": p.comps.iter().map(|c| {
-                                let (cc, ci) = nl.doc_id(*c);
-                                serde_json::json!({ "circuit": cc, "comp_id": ci })
-                            }).collect::<Vec<_>>(),
-                        })
-                    })
-                    .collect::<Vec<_>>()
-                    .into();
-            }
-            Err(e) => {
-                out["t_sta"] = serde_json::Value::Null;
-                out["sta_note"] = serde_json::json!(e.to_string());
-            }
-        }
-    }
     let json = serde_json::to_string_pretty(&out).expect("serializes");
     print_or_write(&json, json_out)
 }
@@ -707,9 +643,8 @@ fn main() -> ExitCode {
             file,
             paths,
             cycles,
-            sta,
             json,
-        } => timing(file, *paths, *cycles, *sta, json.as_deref()),
+        } => timing(file, *paths, *cycles, json.as_deref()),
         Cmd::Nets {
             file,
             pin,
@@ -949,7 +884,6 @@ mod tests {
                 "mem('imem')[1] == 0x55",
                 "--baseline-est-time",
                 "234",
-                "--sta",
                 "--json",
                 report_path.to_str().unwrap(),
             ],
@@ -967,7 +901,6 @@ mod tests {
             .unwrap()
             .iter()
             .all(|a| a["passed"] == true));
-        assert_eq!(report["t_sta"], 34);
         assert!(report["trace_hash"].is_u64());
         // A failing assertion → exit 1.
         let args = run_args(
@@ -1025,34 +958,49 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// **C5 (`docs/derived-clock.md` §10).** The STA surface is **gone** -- the report
+    /// carries no `t_sta`/`sta_note`/`sta_paths`, and the flag is not merely ignored but
+    /// *rejected*, so a grading script that still passes `--sta` fails loudly instead of
+    /// silently grading against a field that no longer exists.
     #[test]
-    fn timing_subcommand_dta_primary_sta_on_request() {
+    fn the_sta_surface_is_gone() {
         let dir = counter_dir("timing");
         let out = dir.join("timing.json");
-        // F9: DTA is primary (default cycles when None → 1000); STA only
-        // behind --sta.
         assert_eq!(
-            timing(&dir.join("counter.csx"), 5, Some(3), true, Some(&out)),
+            timing(&dir.join("counter.csx"), 5, Some(3), Some(&out)),
             ExitCode::SUCCESS
         );
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(v["dta"]["cycles"], 3);
         assert_eq!(v["dta"]["t_obs"], 39);
-        // F13: STA totals include the destination register's setup time:
-        // not 9 + and 10 + setup 15 = 34.
-        assert_eq!(v["t_sta"], 34);
-        assert!(v["sta_note"].as_str().unwrap().contains("structural bound"));
-        // No --sta: STA fields absent, DTA present with the default run.
+        for key in ["t_sta", "sta_note", "sta_paths"] {
+            assert!(v.get(key).is_none(), "the report must not carry {key}");
+        }
+        // The default run length is unchanged by the removal.
         assert_eq!(
-            timing(&dir.join("counter.csx"), 5, None, false, Some(&out)),
+            timing(&dir.join("counter.csx"), 5, None, Some(&out)),
             ExitCode::SUCCESS
         );
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-        assert!(v.get("t_sta").is_none());
         assert_eq!(v["dta"]["cycles"], 1000, "default DTA run length");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Clap-level half of C5: the flags are gone from both subcommands, so an old
+    /// invocation is a usage error rather than a silently ignored argument.
+    #[test]
+    fn the_removed_flags_are_rejected_by_the_parser() {
+        for argv in [
+            vec!["csim", "timing", "c.csx", "--sta"],
+            vec!["csim", "run", "c.csx", "--sta"],
+        ] {
+            assert!(
+                Cli::try_parse_from(&argv).is_err(),
+                "must be rejected: {argv:?}"
+            );
+        }
     }
 
     /// F8: `csim validate` catches netlist-level load errors (bitsize

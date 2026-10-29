@@ -114,7 +114,7 @@ is not merely cosmetic:
   A converted CPU lost its first instruction to exactly that: the PC (clocked first)
   advanced, the new PC reached the I-MEM, and the IF/ID latch (clocked later) latched
   the *next* fetch instead. With wires off, that class of race is gone by construction;
-- `t_obs` and `t_sta` therefore measure **component delays only** while this is in
+- `t_obs` (and, when it existed, `t_sta`) therefore measure **component delays only** while this is in
   force, so their absolute values are not comparable with earlier runs;
 - the per-path machinery below is still built and still exercised by tests (which
   switch `wire.num` back on for themselves) — turning `num` back on restores it
@@ -165,7 +165,11 @@ design whose propagation exceeds the period produces setup/hold warnings and
 wrong-but-deterministic latching, never a floating-read halt (F6). The
 teaching point stands: `T_obs` tells you how fast the clock may go.
 
-## Timing conventions: DTA vs STA (F13)
+## Timing conventions: DTA vs STA (F13) — STA retired
+
+STA is retired (`docs/derived-clock.md`): the table below records the convention it used,
+and the `t_sta ≈ t_obs + setup` identity is still the reason DTA's number is the one worth
+grading, but nothing computes `t_sta` any more.
 
 The two numbers in a report measure different things, deliberately:
 
