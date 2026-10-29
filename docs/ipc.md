@@ -46,7 +46,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `save_circuit` | `{ path: string, document: unknown }` | `SaveResult` — **writes even when the document fails validation**, returning those problems as warnings in `errors` (`ok: true`); only a document that cannot be parsed at all is refused (`ok: false`, nothing written). Losing a mid-edit draft is worse than saving one, and the previous clean state remains in version history. |
 | `sim_play` | `{ hz: number }` | — |
 | `sim_pause` | `{}` | — |
-| `sim_step_tick` | `{}` | — one **tick**: a clock half-period (posedge/negedge) |
+| `sim_step_tick` | `{}` | — one **tick**: one clock phase, posedge or negedge (`docs/derived-clock.md` §2) |
 | `sim_step_cycles` | `{ n: number }` | — |
 | `sim_run_until` | `{ cycle: number }` | — |
 | `sim_reset` | `{}` | — fresh power-on state; every memory's autoload image re-applies (DESIGN.md §5.2 / G6); answered with a `full: true` `net_diffs` batch |

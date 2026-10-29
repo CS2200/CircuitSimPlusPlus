@@ -53,7 +53,7 @@ Subcircuits menu (new/rename/switch). Still open:
   `comp <CompId> pin "<pin>": <message>`; CompId = root-sheet
   document-order; subcircuit culprits report the enclosing INSTANCE's
   root-sheet id.
-- ~~**Tick semantics.**~~ RESOLVED: tick = one clock half-period in delay
+- ~~**Tick semantics.**~~ RESOLVED: tick = one clock phase in delay
   mode; one full cycle in zero mode (documented at `sim_step_tick`).
 - ~~**Initial full-state batch.**~~ RESOLVED: v1.1 `NetDiffs.full` — true
   exactly for the ONE initial batch after load/resume; the "never full

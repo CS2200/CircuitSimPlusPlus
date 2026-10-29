@@ -835,9 +835,9 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
     }
 
     // -- Engine (delay-aware only) ---------------------------------------
-    let half = crate::delay::DEFAULT_HALF_PERIOD_NS;
+    let clock_start = crate::delay::DEFAULT_CLOCK_START_NS;
     // `compat` is known at construction: the boot settle already reads floating inputs.
-    let mut eng = match DelayEngine::build(nl, half, &table, cfg.compat) {
+    let mut eng = match DelayEngine::build(nl, clock_start, &table, cfg.compat) {
         Ok(e) => e,
         Err(e) => return Ok(malformed(e, &table_name, started)),
     };

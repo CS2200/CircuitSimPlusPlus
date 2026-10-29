@@ -55,7 +55,7 @@ const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..", "/tests/fix
 /// A pinned scenario: pokes, run length, expected observables.
 struct Scenario {
     fixture: &'static str,
-    half: u64,
+    clock_start: u64,
     cycles: u64,
     pokes: &'static [(&'static str, u64, u64)], // (pin, value, at ns)
     t_obs: u64,
@@ -65,43 +65,43 @@ struct Scenario {
 const SCENARIOS: &[Scenario] = &[
     Scenario {
         fixture: "sanity.csx",
-        half: 1000,
+        clock_start: 1000,
         cycles: 3,
         pokes: &[],
         t_obs: 54,
-        trace_hash: 0x5231_7847_6633_ea41,
+        trace_hash: 0x13ac_6285_f34e_1da4,
     },
     Scenario {
         fixture: "fsm.csx",
-        half: 1000,
+        clock_start: 1000,
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 55,
-        trace_hash: 0xe6ea_5e23_47ed_a6b6,
+        trace_hash: 0x6f5b_3c68_c2a6_c31d,
     },
     Scenario {
         fixture: "alu.csx",
-        half: 1000,
+        clock_start: 1000,
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x0ca4_af9e_a6d4_7e8c,
+        trace_hash: 0x9f8c_2156_b9b5_714c,
     },
     Scenario {
         fixture: "multicycle.csx",
-        half: 500,
+        clock_start: 500,
         cycles: 100,
         pokes: &[],
         t_obs: 220,
-        trace_hash: 0x28a1_eb38_6758_4996,
+        trace_hash: 0x95e5_df98_d405_96a8,
     },
     Scenario {
         fixture: "pipeline5.csx",
-        half: 500,
+        clock_start: 500,
         cycles: 100,
         pokes: &[],
         t_obs: 220,
-        trace_hash: 0xeaa4_9cf7_9540_a28e,
+        trace_hash: 0x4071_45fd_b97c_c52c,
     },
 ];
 /// The CPU fixtures run the same program to the same architectural state
@@ -237,7 +237,7 @@ fn run_scenario(s: &Scenario) -> (u64, u64) {
                 .unwrap_or(1)
         })
         .collect();
-    let mut eng = DelayEngine::new(nl, s.half, &table).expect("engine builds");
+    let mut eng = DelayEngine::new(nl, s.clock_start, &table).expect("engine builds");
     for (&(pin, v, at), &w) in s.pokes.iter().zip(&widths) {
         assert!(eng.poke_at(pin, Value::from_u64(w, v), at), "poke {pin}");
     }
@@ -286,8 +286,8 @@ fn golden_traces_are_pinned() {
         let (t_obs, hash) = run_scenario(s);
         if bless {
             table.push_str(&format!(
-                "\n  {:<16} half={:<5} cycles={:<3} t_obs={:<4} hash={:#018x}",
-                s.fixture, s.half, s.cycles, t_obs, hash
+                "\n  {:<16} clock_start={:<5} cycles={:<3} t_obs={:<4} hash={:#018x}",
+                s.fixture, s.clock_start, s.cycles, t_obs, hash
             ));
             continue;
         }

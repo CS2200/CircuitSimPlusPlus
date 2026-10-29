@@ -68,11 +68,10 @@
 //!
 //! ## Clock, cycles, DTA
 //!
-//! The global clock is **derived** (`docs/derived-clock.md`): an edge fires
-//! when the cascade from the previous one has settled, so the nominal half
-//! period ([`DEFAULT_HALF_PERIOD_NS`]) is a **floor** rather than a schedule —
-//! it decides neither the values latched nor `T_obs`. Cycle 0 is the first
-//! full period after the boot settle. Per cycle, the engine records the
+//! The global clock is **derived** (`docs/derived-clock.md`): every edge is
+//! placed by the drain, so the period is the design's own and
+//! [`DEFAULT_CLOCK_START_NS`] decides only *when the clock starts*. Cycle 0 is
+//! the first period after the boot settle. Per cycle, the engine records the
 //! timestamp of the last input change at any register/memory input pin
 //! (its own view's arrival), measured from cycle start; `T_obs` is the
 //! maximum over the run — **including the final in-progress cycle, which
@@ -144,12 +143,11 @@ use crate::value::{Bit, Value};
 /// storm (§4.5).
 pub const DEFAULT_EVENTS_PER_CYCLE_CAP: u64 = 1_000_000;
 
-/// The clock's nominal half-period (ns): the derived clock's **floor**, and deliberately
-/// not a knob (`docs/derived-clock.md` §2). The period is an *output* — an edge fires when
-/// the cascade has settled — so the nominal value decides neither the values latched nor
-/// `t_obs` (B5 in the test plan). It survives at all because an edge still has to be
-/// scheduled somewhere, and the barrier is what re-stamps it from the last settle.
-pub const DEFAULT_HALF_PERIOD_NS: u64 = 1000;
+/// When the clock's first edge happens, in delay-table units (ns). It is the timeline's
+/// **origin** and nothing else: every later edge is placed by the drain
+/// (`docs/derived-clock.md` §2/§3), so this decides neither the values latched nor the period
+/// `t_obs` reports — only how far into simulated time the run starts moving.
+pub const DEFAULT_CLOCK_START_NS: u64 = 1000;
 
 /// The smallest step a transition can take. A transition may not land on the timestamp of the
 /// edge that scheduled it: with no clocked parts there is nothing to drain and no setup to
@@ -296,12 +294,11 @@ impl FromIterator<Ev> for EventQueue {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct DelaySnap {
     version: u32,
-    half_period: u64,
+    clock_start: u64,
     now: u64,
     seq: u64,
     next_rising: bool,
     rising_seen: u64,
-    next_boundary: u64,
     cycle_settle: u64,
     /// Simulated time of the last clock edge: the start of the cycle in progress. The
     /// clock is **derived** (`docs/derived-clock.md`) — an edge fires when the cascade
@@ -637,10 +634,9 @@ pub struct DelayEngine {
     queue: EventQueue,
     now: u64,
     seq: u64,
-    half_period: u64,
+    clock_start: u64,
     next_rising: bool,
     rising_seen: u64,
-    next_boundary: u64,
     /// How long after quiescence the edge is placed: the largest `t_setup` among the
     /// clocked parts (`docs/derived-clock.md` §2). Setup means the data must be stable
     /// `t_setup` *before* the edge, so an edge placed the instant the cascade ends would
@@ -820,17 +816,17 @@ fn comp_matches(nl: &Netlist, c: usize, spec: &[String]) -> bool {
 }
 
 impl DelayEngine {
-    /// Build the engine. `clock_half_period` is in delay-table units
+    /// Build the engine. `clock_start` is in delay-table units
     /// (ns); it should exceed the design's true critical path or setup
     /// violations pile up (that's the lesson, §4.3 — the engine no longer
     /// *halts* in that case, F6). All delays come from `table` (the
     /// published table named by `settings.delayTable`, B7).
     pub fn new(
         netlist: Netlist,
-        clock_half_period: u64,
+        clock_start: u64,
         table: &TimingTable,
     ) -> Result<DelayEngine, Vec<LoadError>> {
-        Self::build(netlist, clock_half_period, table, false)
+        Self::build(netlist, clock_start, table, false)
     }
 
     /// Like [`DelayEngine::new`], with the CE-compatibility diagnostic enabled from
@@ -838,10 +834,10 @@ impl DelayEngine {
     /// where the boot settle must already read floating inputs the way CE does.
     pub fn new_compat(
         netlist: Netlist,
-        clock_half_period: u64,
+        clock_start: u64,
         table: &TimingTable,
     ) -> Result<DelayEngine, Vec<LoadError>> {
-        Self::build(netlist, clock_half_period, table, true)
+        Self::build(netlist, clock_start, table, true)
     }
 
     /// Like [`DelayEngine::new`], but the CE-compatibility diagnostic mode is known
@@ -850,7 +846,7 @@ impl DelayEngine {
     /// part may not re-evaluate after boot).
     pub(crate) fn build(
         netlist: Netlist,
-        clock_half_period: u64,
+        clock_start: u64,
         table: &TimingTable,
         compat: bool,
     ) -> Result<DelayEngine, Vec<LoadError>> {
@@ -998,10 +994,9 @@ impl DelayEngine {
             queue: EventQueue::default(),
             now: 0,
             seq: 0,
-            half_period: clock_half_period,
+            clock_start,
             next_rising: true,
             rising_seen: 0,
-            next_boundary: 2 * clock_half_period,
             setup_wait,
             cycle_settle: 0,
             cycle_start: 0,
@@ -1152,10 +1147,9 @@ impl DelayEngine {
         // Time restarts at 0; cycle accounting begins.
         eng.in_boot = false;
         eng.now = 0;
-        eng.next_boundary = 2 * clock_half_period;
         eng.events_this_cycle = 0;
         if eng.halted.is_none() {
-            eng.schedule(2 * clock_half_period, EvKind::Clock { phase: true });
+            eng.schedule(clock_start, EvKind::Clock { phase: true });
         }
         // `CSIM_DEBUG_BOOT=<net idx>`: what every driver of that net had committed when the
         // boot settle finished. Env-gated; inert otherwise. (This is how the register's
@@ -1230,19 +1224,19 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 3: per-sink views (F14), and the
-    /// setup/hold tracker and its violations list are gone (`docs/derived-clock.md`).
+    /// (§4.6 — see the test). Snapshot version 4: per-sink views (F14); the setup/hold tracker
+    /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
+    /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 3,
-            half_period: self.half_period,
+            version: 4,
+            clock_start: self.clock_start,
             now: self.now,
             seq: self.seq,
             next_rising: self.next_rising,
             rising_seen: self.rising_seen,
-            next_boundary: self.next_boundary,
             cycle_settle: self.cycle_settle,
             cycle_start: self.cycle_start,
             last_rise: self.last_rise,
@@ -1290,11 +1284,11 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 3 {
+        if snap.version != 4 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
-        if snap.half_period != self.half_period {
-            return Err("snapshot clock half-period does not match".to_string());
+        if snap.clock_start != self.clock_start {
+            return Err("snapshot clock start does not match".to_string());
         }
         let n_comps = self.comps.len();
         let n_nets = self.netlist.nets.len();
@@ -1407,7 +1401,6 @@ impl DelayEngine {
         self.queue = queue.into_iter().collect();
         self.next_rising = snap.next_rising;
         self.rising_seen = snap.rising_seen;
-        self.next_boundary = snap.next_boundary;
         self.cycle_settle = snap.cycle_settle;
         self.cycle_start = snap.cycle_start;
         self.last_rise = snap.last_rise;
@@ -3468,19 +3461,19 @@ mod tests {
         }
     }
 
-    pub(super) fn engine(json: &str, half: u64) -> DelayEngine {
+    pub(super) fn engine(json: &str, clock_start: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
         let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
-        DelayEngine::new(nl, half, &table).expect("test engine builds")
+        DelayEngine::new(nl, clock_start, &table).expect("test engine builds")
     }
 
     /// The same, with the `compat` diagnostic set *before* the boot settle.
-    pub(super) fn compat_engine(json: &str, half: u64) -> DelayEngine {
+    pub(super) fn compat_engine(json: &str, clock_start: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
         let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
-        DelayEngine::build(nl, half, &table, true).expect("test engine builds")
+        DelayEngine::build(nl, clock_start, &table, true).expect("test engine builds")
     }
 
     /// The built-in table with wire propagation **on** (`wire.num = 1`).
@@ -3496,10 +3489,10 @@ mod tests {
     }
 
     /// As `engine`, but with wire propagation on.
-    pub(super) fn wired_engine(json: &str, half: u64) -> DelayEngine {
+    pub(super) fn wired_engine(json: &str, clock_start: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        DelayEngine::new(nl, half, &wired_table()).expect("test engine builds")
+        DelayEngine::new(nl, clock_start, &wired_table()).expect("test engine builds")
     }
 
     pub(super) fn k(width: u32, v: u64) -> Value {
@@ -4288,10 +4281,10 @@ mod tests {
 
     /// Build an engine from `json` with a caller-supplied table (the shipped table is the
     /// test helper's default, so any test that varies the *table* has to reach past it).
-    fn engine_with(json: &str, half: u64, table: &TimingTable) -> DelayEngine {
+    fn engine_with(json: &str, clock_start: u64, table: &TimingTable) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        DelayEngine::new(nl, half, table).expect("test engine builds")
+        DelayEngine::new(nl, clock_start, table).expect("test engine builds")
     }
 
     /// The shipped table with the register's setup time raised by `extra` — and nothing
@@ -4745,11 +4738,7 @@ mod tests {
         // The origin still holds: the first edge is *due* at 2 x 500 = 1000, and `max` leaves
         // it there (the queue in front of it is already empty, so `now + setup` is 15). `now`
         // after one cycle is the end of that cycle's drain — 1000 + the 39 ns pipeline.
-        assert_eq!(
-            now(&eng),
-            2 * 500 + DEPTH,
-            "the origin, then one cycle's drain"
-        );
+        assert_eq!(now(&eng), 500 + DEPTH, "the origin, then one cycle's drain");
     }
 
     /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
@@ -5754,7 +5743,7 @@ mod tests {
         assert_eq!(h.reason, HaltReason::Breakpoint);
         // The cycle count is a timeline fact: this fixture has no clocked parts, so its period
         // is the minimum step (2 ns) and the clock starts at 2 x 500 = 1000.
-        assert_eq!(h.cycle, 250);
+        assert_eq!(h.cycle, 500);
         assert!(h.details.contains("0x1"), "{}", h.details);
 
         // Held at the watched value, cycles pass quietly: nothing arrives.
@@ -5767,7 +5756,7 @@ mod tests {
             .expect("leaving the value is not a hit");
         assert!(eng.poke_at("p", k(1, 1), 10500));
         let h2 = eng.run_until_time(11000).expect_err("it arrived again");
-        assert_eq!(h2.cycle, 4250);
+        assert_eq!(h2.cycle, 4500);
     }
 
     /// Arriving at a value the net *already* carries at power-on is not a hit:

@@ -7,7 +7,7 @@ to be true afterwards.
 
 ## 1. The problem
 
-A cycle is bounded today by a **run parameter**: `--clock-half-period-ns`, default 1000 ns
+A cycle used to be bounded by a **run parameter**: `--clock-half-period-ns`, default 1000 ns
 (2000 ns period). It exists because three things need an edge time — the `wiring.clock`
 source (a square wave needs a period), setup/hold detection (comparing a data change to the
 edge), and the per-cycle `t_obs` fold (needing a cycle boundary).
@@ -39,6 +39,8 @@ loop:
     every second transition is a rising edge → latch, and count a cycle
 ```
 
+- The clock's **first** edge is at `clock_start` (`delay::DEFAULT_CLOCK_START_NS`) — the
+  timeline's origin, and the only thing that number decides.
 - The queue has just been drained when the placement is decided, which is what makes the
   placement the design's own number rather than the placeholder's.
 - `MIN_STEP` (1 ns) exists because a transition may not land on its own scheduler's timestamp:
@@ -284,7 +286,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 | C1 | **no** design reports a violation, for any poke pattern | **done**: there is no violation surface left to report. A near-edge register poke (golden) and a RAM `we`+`din` poke (delay.rs) assert the *values* they produce |
 | C2 | `--assert "violations == 0"` is vacuous; `violations == 1` can never pass | **done**: the keyword is out of the grammar, so both spellings are parse errors (autograde's bad-assertion list) |
 | C3 | `timing_violations` is **absent or always zero** in the report | **done**: absent — asserted on the serialized report, because "always zero" is what invites the vacuous assertion C2 retires |
-| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3). The floor is one shared constant |
+| C4 | `--clock-half-period-ns` is accepted and **ignored** (or removed) | integration — **done**: removed, rejected by clap, and a savestate carrying the field is refused (snapshot format 3). The origin is one shared constant, `delay::DEFAULT_CLOCK_START_NS` |
 | C5 | `--sta` / `t_sta` / `sta_paths` are gone | integration — **done**: the flags are rejected by clap and the report carries none of the three |
 
 ### D. Loops and non-quiescence — the "never hang" contract

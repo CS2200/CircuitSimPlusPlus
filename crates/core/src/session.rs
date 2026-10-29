@@ -14,7 +14,7 @@
 //! - Exactly one **full** [`NetDiffs`] batch (`full: true`, all nets) is
 //!   emitted after each successful `load_circuit_*`, `resume`, and
 //!   `reset`; every later batch is diff-only.
-//! - A **tick** is one clock half-period (advance to the next clock edge).
+//! - A **tick** is one clock phase — one transition (advance to the next clock edge).
 //! - `CompId`s on the wire are document-order indices within the
 //!   referenced circuit; the engine's post-flatten ids are mapped back
 //!   here.
@@ -91,7 +91,7 @@ struct Inner {
 struct SimState {
     engine: Engine,
     netlist: Netlist,
-    half: u64,
+    clock_start: u64,
     /// Root-circuit document-order index → engine id (poke mapping).
     root_flat: BTreeMap<u32, CompId>,
     /// Last emitted net values (diff baseline).
@@ -138,7 +138,7 @@ impl Engine {
         self.0.run(n).map(Some)
     }
 
-    /// One contract tick: one clock half-period (advance to the next edge).
+    /// One contract tick: one clock phase (advance to the next edge).
     fn tick(&mut self) -> Result<Option<RunReport>, Halt> {
         self.0.step_tick().map(|()| None)
     }
@@ -347,7 +347,7 @@ impl SimState {
 /// Build a fresh engine + netlist from a validated document.
 fn build_engine(
     doc: &Document,
-    half: u64,
+    clock_start: u64,
 ) -> Result<(Engine, Netlist, TimingTable), Vec<LoadError>> {
     let nl = netlist::build(doc)?;
     let table = TimingTable::builtin(&doc.settings.delay_table).map_err(|e| {
@@ -359,7 +359,7 @@ fn build_engine(
             wire_idx: None,
         }]
     })?;
-    let engine = Engine(DelayEngine::new(nl.clone(), half.max(1), &table)?);
+    let engine = Engine(DelayEngine::new(nl.clone(), clock_start, &table)?);
     Ok((engine, nl, table))
 }
 
@@ -413,7 +413,7 @@ impl Session {
                 return fail(errors);
             }
         };
-        match build_engine(&doc, crate::delay::DEFAULT_HALF_PERIOD_NS) {
+        match build_engine(&doc, crate::delay::DEFAULT_CLOCK_START_NS) {
             Err(errors) => {
                 inner.doc = None;
                 inner.state = None;
@@ -426,7 +426,7 @@ impl Session {
                 let st = SimState {
                     engine,
                     netlist: nl,
-                    half: crate::delay::DEFAULT_HALF_PERIOD_NS,
+                    clock_start: crate::delay::DEFAULT_CLOCK_START_NS,
                     root_flat,
                     last_values: Vec::new(),
                     last_contended: Vec::new(),
@@ -481,16 +481,16 @@ impl Session {
                 wire_idx: None,
             }]);
         };
-        let half = inner
+        let clock_start = inner
             .state
             .as_ref()
-            .map_or(crate::delay::DEFAULT_HALF_PERIOD_NS, |s| s.half);
-        let (engine, nl, _table) = build_engine(&doc, half)?;
+            .map_or(crate::delay::DEFAULT_CLOCK_START_NS, |s| s.clock_start);
+        let (engine, nl, _table) = build_engine(&doc, clock_start)?;
         let root_flat = root_flat_map(&doc, &nl);
         inner.state = Some(SimState {
             engine,
             netlist: nl,
-            half,
+            clock_start,
             root_flat,
             last_values: Vec::new(),
             last_contended: Vec::new(),

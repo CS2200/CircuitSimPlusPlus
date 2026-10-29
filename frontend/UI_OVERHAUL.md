@@ -2215,7 +2215,7 @@ The ≤ 1-per-frame rule stays exactly what it was: a painting rule.
 
 **What is recorded: every _event_, not every cycle.** This is the one thing the first version
 got wrong, and the clock made it obvious. A cycle is **not** the quantum of the simulation — a
-_tick_ (one clock half-period) is, and the contract says so: `cycle` advances once per clock
+_tick_ (one clock phase) is, and the contract says so: `cycle` advances once per clock
 period while `at` (ns since run start) advances per event. The mock states its own model
 outright (`cycle = tick / 2`; a tick is 50ns, and each tick emits two batches). Sampling once
 per cycle therefore **aliases** anything that moves more than once in a cycle, and the clock —

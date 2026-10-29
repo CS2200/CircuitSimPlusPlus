@@ -474,8 +474,8 @@ fn snapshot(file: &Path, out: &Path, cycles: u64) -> ExitCode {
         }
     };
     let table = TimingTable::builtin(&doc.settings.delay_table).expect("validated at load");
-    let half = csim_core::delay::DEFAULT_HALF_PERIOD_NS;
-    let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
+    let clock_start = csim_core::delay::DEFAULT_CLOCK_START_NS;
+    let mut eng = match csim_core::delay::DelayEngine::new(nl, clock_start, &table) {
         Ok(e) => e,
         Err(errors) => {
             eprintln!(
@@ -591,8 +591,8 @@ fn resume(snapshot_path: &Path, cycles: u64, json_out: Option<&Path>) -> ExitCod
         );
         return ExitCode::from(exit::MALFORMED_FILE);
     }
-    let half = csim_core::delay::DEFAULT_HALF_PERIOD_NS;
-    let mut eng = match csim_core::delay::DelayEngine::new(nl, half, &table) {
+    let clock_start = csim_core::delay::DEFAULT_CLOCK_START_NS;
+    let mut eng = match csim_core::delay::DelayEngine::new(nl, clock_start, &table) {
         Ok(e) => e,
         Err(errors) => {
             eprintln!(
