@@ -328,7 +328,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** for a chosen design | **unmeasured.** The counterexample this row recorded — `374625393` halting under one table and not the other — predates the derived clock, and under it the design *completes in both tools* (`old: 2709 cycles, new: 2734`, `agree: true`). The corpus pins one table, so nothing measures this property today; `a_glitch_dependent_design_is_table_dependent` pins the *glitch* route, which is H2's, not this one |
+| H1 | the **same verdict under any delay table** | corpus: `374625393` under both tables | **fails — reproduced 2026-10-29**: under `cs2200-74ls-v1` in the grading mode it stops on `changes:PC:10000` ("the program did not halt", 18421 cycles) where `mips-r2000-2um-v1` stops `stable` (2833) and passes. The corpus never sees it because the converter pins the MIPS table. Mechanism not yet named — see `docs/bugs.md` §1 |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: one test, `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
