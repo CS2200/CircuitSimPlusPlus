@@ -4648,6 +4648,68 @@ mod tests {
         );
     }
 
+    /// **Does the nominal bind, or is every edge placed by the drain?**
+    ///
+    /// `docs/derived-clock.md` §2 gives the edge as `edge = quiescence + max t_setup` — every
+    /// edge *placed* by the drain. The code schedules each edge at `edge + half_period` and
+    /// has the barrier **push it out** when work is still queued. Measured on the pipeline
+    /// (39 ns settle, 15 ns setup), those are different answers:
+    ///
+    /// ```text
+    /// half=500  periods=[1000, 1000, 1000]   the nominal binds (2 x 500)
+    /// half= 50  periods=[ 100,  100,  100]   the nominal binds
+    /// half=  5  periods=[  59,   59,   59]   derived: 54 + the 5 ns placeholder
+    /// half=  1  periods=[  55,   55,   55]   derived: 54 + 1
+    /// half=  0  periods=[  69,   69,   69]   derived, and 69 = 54 + 15
+    /// ```
+    ///
+    /// The mechanism is the barrier's trigger, `queue.len() > 1`: "the edge is due *and*
+    /// something is still queued, so push it out". That is a **safety** rule (never overtake
+    /// the logic), and a safety rule is satisfied by firing *late* — so whenever the logic
+    /// finishes before the nominal, the nominal wins and the period is the nominal. §2's
+    /// formula is the *derivation* rule (place the edge where the drain ends), which is not
+    /// what the code implements. The docs are ahead of the code here, not behind it.
+    ///
+    /// The last line is the trap on the way to fixing it: at a zero placeholder every edge is
+    /// derived, and the period is **69, not 54**, because `setup_wait` is added to *every*
+    /// edge — including the falling one, where no register latches. A cycle's requirement is
+    /// `settle + t_setup` for the edge that *acts*; a phase that samples nothing has no setup
+    /// requirement, or a rising-only design pays setup twice per cycle.
+    #[test]
+    fn the_nominal_binds_until_it_is_smaller_than_the_requirement() {
+        const SETTLE: u64 = 39;
+        const SETUP: u64 = 15;
+        let json = pipeline_json();
+        let periods = |half: u64| -> Vec<u64> {
+            let mut eng = engine(&json, half);
+            let edges: Vec<u64> = (0..4)
+                .map(|_| {
+                    eng.run(1).expect("a cycle");
+                    let v: serde_json::Value =
+                        serde_json::from_str(&eng.snapshot()).expect("snapshot");
+                    v["now"].as_u64().expect("now")
+                })
+                .collect();
+            let p: Vec<u64> = edges.windows(2).map(|w| w[1] - w[0]).collect();
+            assert_eq!(eng.t_obs, SETTLE, "the settle is the same at every nominal");
+            p
+        };
+        // The nominal binds when it exceeds what the design needs.
+        assert_eq!(periods(500), [1000, 1000, 1000]);
+        assert_eq!(periods(50), [100, 100, 100]);
+        // Below the requirement, the derived placement takes over and the period is the
+        // design's own number plus whatever placeholder is left.
+        assert_eq!(periods(5), [SETTLE + SETUP + 5; 3]);
+        assert_eq!(periods(1), [SETTLE + SETUP + 1; 3]);
+        // Zero placeholder: fully derived -- and one setup per *half-edge*, which is one too
+        // many. This is the line that says a "just derive it" fix is not a one-liner.
+        assert_eq!(
+            periods(0),
+            [SETTLE + 2 * SETUP; 3],
+            "the second setup is charged to the falling edge, which latches nothing"
+        );
+    }
+
     /// A chain of `n` inverters from the `src` pin to register `r2`'s `d`, long enough
     /// **C1 (`docs/derived-clock.md` §10).** A near-edge poke is **honoured**, and there is
     /// nothing to report. `we` *and* `din` both change 10 ns before the edge -- inside any
