@@ -60,8 +60,6 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `t_obs`                          | max observed per-cycle settle time, ns                                                                                                              |
 | `est_time`                       | `cycles × t_obs`, saturating                                                                                                                        |
 | `speedup_vs_baseline`            | `baseline_est_time / est_time`; `null` without a baseline or when `est_time == 0`                                                                   |
-| `timing_violations`              | **count** of setup/hold warnings (the §8.2 field name)                                                                                              |
-| `violation_details`              | the warnings: `[{ circuit, comp_id, kind: "setup"\|"hold", detail }]` with document-order `comp_id` within `circuit`                                |
 | `assertions`                     | per-assertion `{ assertion, passed, actual, expected }`                                                                                             |
 | `top_paths`                      | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
 | `t_sta`, `sta_note`              | informational structural bound (only with `--sta` / `include_sta`); STA totals include the destination register's setup time (docs/delay-table.md)  |

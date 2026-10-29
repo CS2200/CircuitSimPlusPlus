@@ -12,7 +12,7 @@ export type NetId = number;
  * Contract v1.1: a CompId on the wire is the **document-order index into
  * the referenced circuit's `components` array** — never a post-flatten
  * engine index. Messages that can reference non-root circuits carry an
- * explicit `circuit` field (`TimingViolation`, `TimingPath`,
+ * explicit `circuit` field (`TimingPath`,
  * `NamedComponent`); `LoadError.comp_id` is document-order within
  * `LoadError.circuit`. `LoadResult.net_map` carries an explicit `circuit`
  * and `instance` (v1.4), so the same circuit-relative wire index in two
@@ -152,19 +152,6 @@ export interface SimHalted {
   details: string;
 }
 
-/** Setup/hold violation classification (DESIGN.md §4.3). */
-export type ViolationKind = "setup" | "hold";
-
-/** One timed-register violation warning (v1.1 — replaces the bare count). */
-export interface TimingViolation {
-  /** Circuit the offending register lives in; `comp_id` is document-order within it. */
-  circuit: string;
-  comp_id: CompId;
-  kind: ViolationKind;
-  /** Human-readable explanation (e.g. "D changed 3 ns before the edge; t_setup = 15 ns"). */
-  detail: string;
-}
-
 /** One observed critical path (DTA, DESIGN.md §4.4). */
 export interface TimingPath {
   /** Circuit the path's components live in; `comps` are document-order within it. */
@@ -177,7 +164,6 @@ export interface TimingPath {
 export interface TimingUpdate {
   t_obs: number;
   est_time: number;
-  violations: TimingViolation[];
   top_paths: TimingPath[];
 }
 

@@ -581,19 +581,6 @@ export class MockCore implements CoreApi {
     this.events.emit(IpcEvents.TimingUpdate, {
       t_obs: MOCK_T_OBS_NS,
       est_time: this.cycle * MOCK_T_OBS_NS,
-      // Synthetic setup violation on the demo register so the UI's U7
-      // marker path is exercised against the mock (contract v1.1 list).
-      violations:
-        layout === null
-          ? []
-          : [
-              {
-                circuit: this.circuitName,
-                comp_id: layout.pcComp,
-                kind: "setup" as const,
-                detail: `D changed 6 ns before the edge; t_setup = 15 ns`,
-              },
-            ],
       top_paths:
         layout === null
           ? []

@@ -518,7 +518,7 @@ halt — F6).
 document-order indices within the defining circuit (contract v1.2).
 
 **Reporting pointers.** Exit-code taxonomy, assertion grammar, JSON test-spec, snapshot
-schema, and the `est_time`/`timing_violations`/`errors` report fields: docs/autograder.md.
+schema, and the `est_time`/`errors` report fields: docs/autograder.md.
 
 ## 10. JSON Schema
 

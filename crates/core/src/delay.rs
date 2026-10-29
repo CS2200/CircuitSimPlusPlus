@@ -25,13 +25,12 @@
 //!   reaches the output. If the recomputed outputs equal the already
 //!   scheduled ones, the pending commit keeps its original time (the
 //!   schedule is not deferred — U23).
-//! - **Registers — clk→Q + setup/hold.** On a rising `clk` view, D is
-//!   sampled (consuming `Z` halts, §4.1) and Q commits `clk→Q` later
-//!   (last edge wins, same generation mechanism). D changing within
-//!   `t_setup` before the edge (`edge − t_setup < change ≤ edge`) or
-//!   within `t_hold` after it (`edge ≤ change < edge + t_hold`) is
-//!   recorded as a **warning** (`TimingViolation`); the latch still
-//!   happens, deterministically.
+//! - **Registers — clk→Q.** On a rising `clk` view, D is sampled
+//!   (consuming `Z` halts, §4.1) and Q commits `clk→Q` later (last edge
+//!   wins, same generation mechanism). There is no setup/hold *check*
+//!   any more: the clock is **derived** (`docs/derived-clock.md`), so the
+//!   edge is placed after the cascade has settled and no data change can
+//!   race it.
 //! - **RAM/ROM** — reads settle `t_access` after an address change;
 //!   writes obey the same edge + setup/hold discipline as registers
 //!   (tracked on `din`, `addr`, and `we`).

@@ -12,7 +12,7 @@ import CanvasHost, { type CanvasHostProps } from "./CanvasHost";
 import type { CircuitDocument } from "../model/document";
 import { SelectionModel } from "../model/selection";
 import type { Vec2 } from "../render/geom";
-import { DocScene, type SimOverlay, type ViolationMarker } from "../editor/docScene";
+import { DocScene, type SimOverlay } from "../editor/docScene";
 import { applyClockDefaults, nextPlaceSeq } from "../editor/clockDefaults";
 import { ToolMachine, type CanvasMenuState } from "../editor/tools";
 import { compSize } from "../editor/catalog";
@@ -100,8 +100,6 @@ export default forwardRef<
     sim?: SimController;
     /** Observed critical path to highlight (U7), as document comp ids. */
     pathIds?: readonly string[] | null;
-    /** Setup/hold violation markers for the current sheet (U7). */
-    violations?: readonly ViolationMarker[] | null;
     /** Signal-pulse animation (Settings → Canvas); default on. */
     pulsesOn?: boolean;
     /** Pulse animation duration in ms (the user's speed pref; UI_OVERHAUL §70). */
@@ -126,7 +124,6 @@ export default forwardRef<
     onNotify,
     sim,
     pathIds,
-    violations,
     pulsesOn = true,
     pulseMs = PULSE_MS,
     gridOn = false,
@@ -307,14 +304,13 @@ export default forwardRef<
           },
           pokedRegister: (id) => sim?.pokedRegister(id),
           editingValue: sim?.registerEdit() ?? null,
-          // Halt/path/violation markers carry ROOT-sheet ids today; only show
+          // Halt/path markers carry ROOT-sheet ids today; only show
           // them on the root, so an instance view is never mis-annotated.
           haltCompId:
             viewInstance === "" && highlight !== null
               ? (viewCircuit.components[highlight]?.id ?? null)
               : null,
           path: viewInstance === "" ? (pathIds ?? null) : null,
-          violations: viewInstance === "" ? (violations ?? null) : null,
           pulses:
             viewInstance === ""
               ? activePulses?.flatMap((p) =>
@@ -347,7 +343,6 @@ export default forwardRef<
       sim,
       simVersion,
       pathIds,
-      violations,
       pulses,
       pulsesLive,
       pulsesOn,

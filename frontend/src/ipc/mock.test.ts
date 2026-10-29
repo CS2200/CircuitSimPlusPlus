@@ -211,14 +211,6 @@ describe("mock core (U9)", () => {
       expect(timings[0]).toEqual({
         t_obs: 42.5,
         est_time: 5 * 42.5,
-        violations: [
-          {
-            circuit: "main",
-            comp_id: MOCK_COMP.pc,
-            kind: "setup",
-            detail: "D changed 6 ns before the edge; t_setup = 15 ns",
-          },
-        ],
         top_paths: [
           {
             circuit: "main",

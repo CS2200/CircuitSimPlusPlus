@@ -79,14 +79,6 @@ describe("mock core: demo document mode (U5)", () => {
     core.events.on(IpcEvents.TimingUpdate, (t) => timings.push(t));
     await core.api.runUntil(2);
     expect(timings).toHaveLength(1);
-    expect(timings[0].violations).toEqual([
-      {
-        circuit: MOCK_DEMO_CIRCUIT,
-        comp_id: MOCK_DEMO_COMPS.pc,
-        kind: "setup",
-        detail: expect.stringContaining("t_setup"),
-      },
-    ]);
     expect(timings[0].top_paths).toEqual([
       {
         circuit: MOCK_DEMO_CIRCUIT,

@@ -15,7 +15,6 @@ import type {
   NamedComponent,
   NetId,
   SaveResult,
-  ViolationKind,
   WireIdx,
   WireValue,
 } from "../ipc/types";
@@ -433,26 +432,6 @@ export class SimController {
     }
     const byName = this.store.named.find((n) => halted.details.includes(n.name));
     return byName !== undefined ? byName.comp_id : null;
-  }
-
-  /**
-   * Setup/hold violation markers for the CURRENT sheet (U7): violations
-   * whose `circuit` matches the viewed sheet, resolved to document comp
-   * ids. Violations in other circuits are filtered out (contract v1.1).
-   */
-  violationMarkers(sheetName?: string): { compId: string; kind: ViolationKind; detail: string }[] {
-    const timing = this.store.timing;
-    if (timing === null || this.doc === null) return [];
-    const idx = sheetName === undefined ? 0 : this.doc.circuitIdxByName(sheetName);
-    if (idx < 0) return []; // stale sheet name (e.g. mid-open) — no markers
-    const sheet = this.doc.circuit(idx);
-    const out: { compId: string; kind: ViolationKind; detail: string }[] = [];
-    for (const v of timing.violations) {
-      if (v.circuit !== sheet.name) continue;
-      const comp = sheet.components[v.comp_id];
-      if (comp !== undefined) out.push({ compId: comp.id, kind: v.kind, detail: v.detail });
-    }
-    return out;
   }
 
   /**

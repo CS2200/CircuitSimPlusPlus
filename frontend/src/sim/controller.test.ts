@@ -216,19 +216,7 @@ describe("SimController", () => {
     expect(ctl.store.lastChanged.every((e) => e.at !== undefined)).toBe(true);
   });
 
-  it("violationMarkers resolves current-sheet violations to document comp ids", async () => {
-    const ctl = makeController();
-    await ctl.load(buildMockDemoDoc());
-    expect(ctl.violationMarkers()).toEqual([]); // no timing yet
-    await ctl.runUntil(3); // timing_update on run_until
-    const doc = buildMockDemoDoc();
-    const pcId = doc.circuit(0).components[MOCK_DEMO_COMPS.pc].id;
-    expect(ctl.violationMarkers()).toEqual([
-      { compId: pcId, kind: "setup", detail: "D changed 6 ns before the edge; t_setup = 15 ns" },
-    ]);
-  });
-
-  it("violationMarkers/topPathIds drop entries for other circuits (v1.1 filter)", async () => {
+  it("topPathIds drops entries for other circuits (v1.1 filter)", async () => {
     const ctl = makeController();
     await ctl.load(buildMockDemoDoc());
     await ctl.runUntil(3);
@@ -238,10 +226,8 @@ describe("SimController", () => {
     const foreign = ctl.store.timing!;
     ctl.store.onTiming({
       ...foreign,
-      violations: [{ circuit: "alu", comp_id: 0, kind: "hold", detail: "elsewhere" }],
       top_paths: [{ circuit: "alu", comps: [0, 1], delay_ns: 9 }],
     });
-    expect(ctl.violationMarkers()).toEqual([]); // filtered out
     expect(ctl.topPathIds()).toBeNull(); // filtered out
     expect(ctl.topPathDelay()).toBeNull(); // …delay too (same sheet filter)
   });

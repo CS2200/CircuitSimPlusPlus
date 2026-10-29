@@ -741,7 +741,7 @@ export class ToolMachine {
     // While wiring, pins + wires are live targets (junction preview); idle
     // hover is pins first (net-extent highlight), then a tunnel TAG (§91 — it is
     // the visible marker, and it sits over the invisible body edge it names, so it
-    // must win there), then component bodies (so violation markers can show their
+    // must win there), then component bodies (so markers can show their
     // detail card) — hovering a plain wire still does nothing.
     const hit =
       this.wiring !== null

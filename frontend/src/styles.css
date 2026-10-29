@@ -48,7 +48,7 @@
   --bus-d: #f368a0;
   --bus-e: #b8e34d;
 
-  /* Setup/hold violation markers (U7) */
+  /* Amber severity: error/contention markers, waveform cursors, the warn chip */
   --violation: #ff9e3d;
 
   --accent: #5b8def;
@@ -1541,10 +1541,6 @@ input[type="number"] {
   background: var(--accent-softer);
 }
 
-.sim-tobs.warn {
-  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
-}
-
 /* The waveform viewer's door (§96): a labelled pill beside the run controls. */
 .sim-wave {
   display: inline-flex;
@@ -1582,11 +1578,6 @@ input[type="number"] {
 .inspector-buttons-full button svg {
   width: 15px;
   height: 15px;
-}
-
-.sim-violations {
-  color: var(--danger);
-  font-weight: 600;
 }
 
 /* Halt / load-error banner: drops out from under the header as an overlay, so
@@ -1681,7 +1672,7 @@ input[type="number"] {
 }
 
 /* Paused at a breakpoint (UI_OVERHAUL §90): the run stopped, but nothing is
- * wrong — amber like the violation markers rather than the halt red. */
+ * wrong — amber like the contention markers rather than the halt red. */
 .sim-banner.breakpoint {
   background: color-mix(in srgb, var(--warn) 14%, var(--surface-1));
   border-bottom-color: color-mix(in srgb, var(--warn) 55%, transparent);

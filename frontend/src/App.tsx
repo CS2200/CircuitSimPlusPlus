@@ -118,7 +118,7 @@ import {
   type AccentId,
   type ThemeId,
 } from "./theme";
-import type { CompId, TimingUpdate, ViolationKind, WireValue } from "./ipc/types";
+import type { CompId, TimingUpdate, WireValue } from "./ipc/types";
 
 /** Stable empty selection while no status report has arrived yet. */
 const EMPTY_SELECTION: readonly string[] = [];
@@ -690,13 +690,6 @@ export default function App() {
     pathIds !== null && inspectorCompId !== null && pathIds.includes(inspectorCompId)
       ? sim.topPathDelay(sheetName)
       : null;
-
-  // U7: setup/hold violation markers for the current sheet.
-  const violationMarkers = useMemo(() => {
-    if (!sim.store.loaded || sim.store.timing === null) return null;
-    return sim.violationMarkers(sheetName);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
-  }, [sim, doc, sheetName, simVersion]);
 
   // A fresh load invalidates any path highlight.
   useEffect(() => {
@@ -1922,7 +1915,6 @@ export default function App() {
         memRead: (name: string, addr: number, len: number) => Promise<WireValue[]>;
         memWrite: (name: string, addr: number, values: WireValue[]) => Promise<void>;
         timing: () => TimingUpdate | null;
-        violationMarkers: () => { compId: string; kind: ViolationKind; detail: string }[];
       };
     };
     w.__sim = {
@@ -1938,7 +1930,6 @@ export default function App() {
       memRead: (name, addr, len) => sim.memRead(name, addr, len),
       memWrite: (name, addr, values) => sim.memWrite(name, addr, values),
       timing: () => sim.store.timing,
-      violationMarkers: () => sim.violationMarkers(),
     };
     return () => {
       delete w.__sim;
@@ -2404,7 +2395,6 @@ export default function App() {
                   onNotify={toast}
                   sim={sim}
                   pathIds={pathIds}
-                  violations={violationMarkers}
                   pulsesOn={pulsesOn}
                   gridOn={gridOn}
                   showValues={showValues}

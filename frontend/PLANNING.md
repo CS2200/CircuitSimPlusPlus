@@ -41,9 +41,9 @@ Subcircuits menu (new/rename/switch). Still open:
 
 ## 3. Contract gaps → RESOLVED by contract v1.1 (docs/ipc.md, human-ratified)
 
-- ~~**`timing_update.violations` is only a count.**~~ RESOLVED: v1.1
-  `violations: TimingViolation[]` = `{ circuit, comp_id, kind, detail }`;
-  the count is `violations.length`. U7 register markers are implemented
+- ~~**`timing_update.violations` is only a count.**~~ RESOLVED: v1.1 made it a list.
+  **RETIRED** with the derived clock (`docs/derived-clock.md`): no design can violate setup
+  or hold, so the field, the count badge and the U7 register markers are gone.
   (canvas ring + ⚠kind tag + hover detail card, current-sheet filter).
 - ~~**Event timestamps for pulses.**~~ RESOLVED: v1.1 `NetChange.at?` (ns
   since run start; delay mode only). Pulses stagger spawns from `at` within

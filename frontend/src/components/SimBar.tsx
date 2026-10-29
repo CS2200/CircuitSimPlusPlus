@@ -117,8 +117,6 @@ export default function SimBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctl, doc, hz, onReset]);
 
-  const violations = s.timing?.violations.length ?? 0;
-
   /**
    * What the banner is saying, as one string: dismissing it (×) hides THAT
    * message only — a different problem, or the same one coming back after a
@@ -262,25 +260,12 @@ export default function SimBar({
         )}
         {s.timing !== null && (
           <button
-            className={`sim-tobs${pathOn ? " active" : ""}${violations > 0 ? " warn" : ""}`}
+            className={`sim-tobs${pathOn ? " active" : ""}`}
             aria-pressed={pathOn}
-            title={
-              violations > 0
-                ? `Observed critical path (DTA) — click to highlight. Setup/hold: ${s.timing.violations
-                    .map((v) => `${v.kind} @ comp ${v.comp_id} (${v.circuit})`)
-                    .join(", ")}`
-                : "Observed critical path (DTA) — click to highlight it on the canvas"
-            }
+            title="Observed critical path (DTA) — click to highlight it on the canvas"
             onClick={onTogglePath}
           >
             T_obs {s.timing.t_obs} ns
-            {violations > 0 && (
-              <span className="sim-violations">
-                {" "}
-                · ⚠ {violations} violation
-                {violations === 1 ? "" : "s"}
-              </span>
-            )}
           </button>
         )}
       </div>
