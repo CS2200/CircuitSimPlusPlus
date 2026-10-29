@@ -328,7 +328,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** | corpus: `374625393` under both tables | **fails — reproduced 2026-10-29**: under `cs2200-74ls-v1` in the grading mode it stops on `changes:PC:10000` ("the program did not halt", 18421 cycles) where `mips-r2000-2um-v1` stops `stable` (2833) and passes. The corpus never sees it because the converter pins the MIPS table. Mechanism not yet named — see `docs/bugs.md` §1 |
+| H1 | the **same verdict under any delay table** | corpus: `374625393` under both tables | **fails — reproduced 2026-10-29**: under `cs2200-74ls-v1` in the grading mode it stops on `changes:PC:10000` ("the program did not halt", 18421 cycles) where `mips-r2000-2um-v1` stops `stable` (2833) and passes. The corpus never sees it because the converter pins the MIPS table. **Mechanism named 2026-10-29**: `PC`/`IR` are clocked by the microcode ROM's output — a derived clock — so the latch edge, its enable and its data all descend from one net and the table decides which arrives first. A derived clock's race is table-dependent *by nature*; see `docs/bugs.md` §1 |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: one test, `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
