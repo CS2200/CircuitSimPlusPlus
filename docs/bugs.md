@@ -31,9 +31,12 @@ The engine *detects* the shape and then discards it: `delay.rs:2336` prints `!M{
 affected pin, behind **`CSIM_DEBUG_SPLITTER_SHAPE`**, to stderr. Nothing reaches the report or the
 exit code.
 
-**Reachability: latent.** **0 of 357** corpus rows at HEAD reach it. It fired on **18** designs under a
-perturbing engine change (the reverted clock rule, the commit before `c783e35`), because changed latch
-times changed which nets contend:
+**Reachability: latent, and wide.** **0 of 357** corpus rows at HEAD reach it — the panic is **not** a
+live corpus failure. It fired on **18** designs under a perturbing engine change (the reverted clock
+rule, the commit before `c783e35`), because changed latch times changed which nets contend. Of those
+18, **11 had been passing** (true regressions) and **7 were already failing** — so on 7 rows the panic
+replaced a *verdict* with *no verdict* without moving the pass/fail agreement at all, which is exactly
+how a panic hides. The 18:
 
 | widths | designs |
 |---|---|
