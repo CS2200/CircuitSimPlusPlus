@@ -200,17 +200,24 @@ fn print_or_write(json: &str, out: Option<&Path>) -> ExitCode {
 /// failure too), print the complete error list as JSON. Exit 0 when
 /// valid, `MALFORMED_FILE` otherwise.
 fn validate(file: &Path) -> ExitCode {
-    let errors = match std::fs::read(file) {
+    // `named` is the autograder-visible component list (`NamedComponent.name`),
+    // returned so a caller (the corpus harness) can resolve register/probe names
+    // without a second process launch. Additive: a valid file's JSON gains one
+    // field; the error shape is unchanged.
+    let (errors, named) = match std::fs::read(file) {
         Ok(bytes) => match format::load_document(&bytes) {
             Ok(doc) => match csim_core::netlist::build(&doc) {
-                Ok(_) => Vec::new(),
-                Err(errors) => errors,
+                Ok(nl) => (
+                    Vec::new(),
+                    nl.named.iter().map(|n| n.name.clone()).collect(),
+                ),
+                Err(errors) => (errors, Vec::new()),
             },
-            Err(errors) => errors,
+            Err(errors) => (errors, Vec::new()),
         },
-        Err(e) => io_error(file, &e),
+        Err(e) => (io_error(file, &e), Vec::new()),
     };
-    let report = serde_json::json!({ "ok": errors.is_empty(), "errors": errors });
+    let report = serde_json::json!({ "ok": errors.is_empty(), "errors": errors, "named": named });
     println!(
         "{}",
         serde_json::to_string_pretty(&report).expect("JSON serialization cannot fail")

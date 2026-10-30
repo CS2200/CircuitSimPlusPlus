@@ -22,8 +22,10 @@ csim resume state.json [--cycles N] [--json out.json]
 - `run` — the grading flow: load → preload memories → run under limits → assertions →
   JSON report + exit code. The delay-aware engine (DTA) is the only engine.
 - `validate` — full load check: parse, document validation, **and netlist build** (a
-  bitsize-mismatch net fails validation too, F8). Prints `{ "ok": bool, "errors": [LoadError] }`;
-  exit 0 or 6.
+  bitsize-mismatch net fails validation too, F8). Prints
+  `{ "ok": bool, "errors": [LoadError], "named": [string] }` — `named` is the
+  autograder-visible component list (`NamedComponent.name`), so a caller can resolve
+  register/probe names without a second launch; exit 0 or 6.
 - `timing` — **observed (DTA) timing** (F9): runs the grading engine for `--cycles` cycles
   (default **1000**; 0 disables) and reports `dta.{cycles, t_obs, est_time, top_paths}`. The
   informational structural bound (`--sta`, `t_sta`, `sta_paths`, `sta_note`) is **gone** —
