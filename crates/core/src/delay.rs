@@ -929,7 +929,15 @@ pub struct DelayEngine {
     pub breakpoints_enabled: bool,
     events_this_cycle: u64,
     events_processed: u64,
+    /// FNV-style fingerprint of the applied event stream (the §4.6 determinism
+    /// tripwire). Only advanced when `trace_hash_enabled` (below).
     trace_hash: u64,
+    /// Whether `trace_hash` is computed. **Off by default**: it is ~12% of a run
+    /// and nothing *checks* it during grading (the golden suite is the tripwire).
+    /// Caller configuration, like `pause_on_unknown` — not part of a savestate.
+    /// `csim run --trace-hash` / `GradeConfig::trace_hash` turn it on; the golden
+    /// suite always does.
+    trace_hash_enabled: bool,
     halted: Option<Halt>,
     /// Caller-defined stop conditions (§8.4), evaluated at every cycle boundary. Like
     /// `breakpoints_enabled` this is caller configuration, so it is not part of a
@@ -1088,7 +1096,19 @@ impl DelayEngine {
         clock_start: u64,
         table: &TimingTable,
     ) -> Result<DelayEngine, Vec<LoadError>> {
-        Self::build(netlist, clock_start, table, false)
+        Self::build(netlist, clock_start, table, false, false)
+    }
+
+    /// Like [`DelayEngine::new`], with the trace hash enabled **from the boot
+    /// settle** (the determinism tripwire computes over the whole stream). The
+    /// golden suite and `csim run --trace-hash` use this; a graded run leaves the
+    /// hash off (it is ~12% of a run and nothing checks it).
+    pub fn new_traced(
+        netlist: Netlist,
+        clock_start: u64,
+        table: &TimingTable,
+    ) -> Result<DelayEngine, Vec<LoadError>> {
+        Self::build(netlist, clock_start, table, false, true)
     }
 
     /// Like [`DelayEngine::new`], with the CE-compatibility diagnostic enabled from
@@ -1099,7 +1119,7 @@ impl DelayEngine {
         clock_start: u64,
         table: &TimingTable,
     ) -> Result<DelayEngine, Vec<LoadError>> {
-        Self::build(netlist, clock_start, table, true)
+        Self::build(netlist, clock_start, table, true, false)
     }
 
     /// Like [`DelayEngine::new`], but the CE-compatibility diagnostic mode is known
@@ -1111,6 +1131,7 @@ impl DelayEngine {
         clock_start: u64,
         table: &TimingTable,
         compat: bool,
+        trace_hash: bool,
     ) -> Result<DelayEngine, Vec<LoadError>> {
         let comps = ec::build_behaviors(&netlist)?;
         let n = comps.len();
@@ -1276,6 +1297,7 @@ impl DelayEngine {
             events_this_cycle: 0,
             events_processed: 0,
             trace_hash: 0xcbf2_9ce4_8422_2325, // FNV offset basis
+            trace_hash_enabled: trace_hash,
             halted: None,
             watch: Vec::new(),
             cycle_comp: vec![false; n],
@@ -1482,6 +1504,13 @@ impl DelayEngine {
     /// FNV-1a hash over every applied event so far (§4.6).
     pub fn trace_hash(&self) -> u64 {
         self.trace_hash
+    }
+
+    /// Turn the trace hash on (off by default — see the field docs). Must be set
+    /// before `run`/`boot` for the hash to cover the whole stream; the golden suite
+    /// and `csim run --trace-hash` do.
+    pub fn enable_trace_hash(&mut self) {
+        self.trace_hash_enabled = true;
     }
 
     // -- Snapshot/restore (§8.1) ------------------------------------------
@@ -3129,7 +3158,9 @@ impl DelayEngine {
                 ),
             });
         }
-        self.hash_event(&ev);
+        if self.trace_hash_enabled {
+            self.hash_event(&ev);
+        }
         match ev.kind {
             EvKind::Clock { phase } => {
                 // The cycle that just ended is closed **at the edge** — the barrier below
@@ -3872,7 +3903,7 @@ mod tests {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
         let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
-        DelayEngine::new(nl, clock_start, &table).expect("test engine builds")
+        DelayEngine::new_traced(nl, clock_start, &table).expect("test engine builds")
     }
 
     /// The same, with the `compat` diagnostic set *before* the boot settle.
@@ -3880,7 +3911,7 @@ mod tests {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
         let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
-        DelayEngine::build(nl, clock_start, &table, true).expect("test engine builds")
+        DelayEngine::build(nl, clock_start, &table, true, false).expect("test engine builds")
     }
 
     /// The built-in table with wire propagation **on** (`wire.num = 1`).
@@ -4691,7 +4722,7 @@ mod tests {
     fn engine_with(json: &str, clock_start: u64, table: &TimingTable) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        DelayEngine::new(nl, clock_start, table).expect("test engine builds")
+        DelayEngine::build(nl, clock_start, table, false, true).expect("test engine builds")
     }
 
     /// The shipped table with the register's setup time raised by `extra` — and nothing

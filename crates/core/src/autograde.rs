@@ -461,6 +461,10 @@ pub struct GradeConfig {
     /// (`Behavior::z_compat`) instead of `X`. A debug switch to separate engine
     /// `Z`-semantics from converter connectivity; **off** by default.
     pub compat: bool,
+    /// Compute the trace hash (the §4.6 determinism tripwire). **Off** by default:
+    /// it is ~12% of a run and nothing checks it during grading. Turn it on to audit
+    /// determinism (run twice, compare the report's `trace_hash`).
+    pub trace_hash: bool,
 }
 
 impl Default for GradeConfig {
@@ -478,6 +482,7 @@ impl Default for GradeConfig {
             rubric_full_credit_below: None,
             pause_on_breakpoints: false,
             compat: false,
+            trace_hash: false,
         }
     }
 }
@@ -895,7 +900,7 @@ pub fn grade(doc: &Document, cfg: &GradeConfig) -> Result<GradeOutput, ConfigErr
     // -- Engine (delay-aware only) ---------------------------------------
     let clock_start = crate::delay::DEFAULT_CLOCK_START_NS;
     // `compat` is known at construction: the boot settle already reads floating inputs.
-    let mut eng = match DelayEngine::build(nl, clock_start, &table, cfg.compat) {
+    let mut eng = match DelayEngine::build(nl, clock_start, &table, cfg.compat, cfg.trace_hash) {
         Ok(e) => e,
         Err(e) => return Ok(malformed(e, &table_name, started)),
     };
@@ -1154,7 +1159,11 @@ fn grade_delay(
             .flat_map(|(settle, path)| api_path(&nl, *settle, path))
             .collect(),
         delay_table: format!("{} ({})", table.name(), table.status()),
-        trace_hash: Some(eng.trace_hash()),
+        trace_hash: if cfg.trace_hash {
+            Some(eng.trace_hash())
+        } else {
+            None
+        },
         net_width_mismatches: last_report
             .net_width_mismatches
             .iter()
@@ -1357,6 +1366,8 @@ mod tests {
                 max_cycles: 3,
                 ..RunLimits::default()
             },
+            // The suite is the determinism tripwire; graded runs leave it off.
+            trace_hash: true,
             ..GradeConfig::default()
         }
     }

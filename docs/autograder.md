@@ -12,7 +12,7 @@ addressing, and memory preloading + sandboxing.
 csim run submission.csx [--load name=file]... [--cycles N] [--timeout 60s] [--rss-cap-mb M]
     [--assert "..."]... [--spec spec.json] [--baseline-est-time N]
     [--expect-halt] [--pause-on-breakpoints] [--pause-on-unknown] [--compat] [--stop when:name[:n]] [--paths K]
-    [--allow-outside-autoload] [--json report.json]
+    [--trace-hash] [--allow-outside-autoload] [--json report.json]
 csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--json out.json]
 csim snapshot file.csx --out state.json [--cycles N]
@@ -65,7 +65,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `assertions`                     | per-assertion `{ assertion, passed, actual, expected }`                                                                                             |
 | `top_paths`                      | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
 | `delay_table`                    | table provenance, e.g. `"cs2200-74ls-v1 (DRAFT)"`                                                                                                   |
-| `trace_hash`                     | A word-wise FNV-style hash over the applied event stream (the §4.6 determinism tripwire); time/seq/ids and each value's raw width + mask limbs are folded one 64-bit word at a time, never as rendered hex or byte-by-byte — see `Value::fold_words`. The exact digest is an engine-internal fingerprint (re-blessed whenever an intentional engine change moves it), not a cross-version contract |
+| `trace_hash`                     | A word-wise FNV-style hash over the applied event stream (the §4.6 determinism tripwire). **`null` unless `--trace-hash`/`GradeConfig::trace_hash` is set**: it costs ~12% of a run and nothing checks it during grading, so a graded run omits it (the golden suite always computes it). With the flag on: time/seq/ids and each value's raw width + mask limbs are folded one 64-bit word at a time, never as rendered hex or byte-by-byte — see `Value::fold_words`. The digest is an engine-internal fingerprint (re-blessed whenever an intentional engine change moves it), not a cross-version contract; use it to audit determinism (run twice, compare the field). |
 | `clock_glitches`                 | clocked parts whose `clk` pin was driven **more than once inside one instant**, `[{cycle, component}]`. Omitted when empty. A *diagnostic* for this engine's one structural difference from CircuitSim CE, which coalesces a round; the engine takes one edge per instant from the level the instant entered with (`docs/derived-clock.md` §11/§12) |
 | `net_width_mismatches`           | nets where a driver committed a value whose width is not the net's, `[{cycle, net, component, value_width, net_width}]`. Omitted when empty. The value is **fitted** to the pin (CE resizes: `new WireValue(value, bitSize)`) and reported — it used to `panic!` the merge and yield `no run report` (`docs/bugs-archive.md`) |
 | `rubric_full_credit`             | `est_time < rubric_full_credit_below` when a threshold was given, else `null`                                                                       |

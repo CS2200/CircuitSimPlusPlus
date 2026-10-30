@@ -157,6 +157,11 @@ struct RunArgs {
     /// (§8.1).
     #[arg(long)]
     pause_on_breakpoints: bool,
+    /// Compute the report's `trace_hash` (the §4.6 determinism tripwire). Off by
+    /// default — it is ~12% of a run and nothing checks it during grading; turn it
+    /// on to audit determinism (run twice, compare the field).
+    #[arg(long)]
+    trace_hash: bool,
     /// Top-k observed critical paths in the report.
     #[arg(long, default_value_t = 10)]
     paths: usize,
@@ -337,6 +342,7 @@ fn run_config(args: &RunArgs) -> Result<GradeConfig, String> {
     cfg.pause_on_breakpoints |= args.pause_on_breakpoints;
     cfg.pause_on_unknown |= args.pause_on_unknown;
     cfg.compat |= args.compat;
+    cfg.trace_hash |= args.trace_hash;
     cfg.top_k = args.paths;
     if cfg.limits.max_cycles == 0 {
         return Err("cycle limit is 0 — pass --cycles or a spec".to_string());
@@ -887,6 +893,7 @@ mod tests {
                 "mem('imem')[1] == 0x55",
                 "--baseline-est-time",
                 "234",
+                "--trace-hash",
                 "--json",
                 report_path.to_str().unwrap(),
             ],

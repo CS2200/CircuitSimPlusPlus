@@ -243,7 +243,7 @@ fn run_scenario(s: &Scenario) -> (u64, u64) {
                 .unwrap_or(1)
         })
         .collect();
-    let mut eng = DelayEngine::new(nl, s.clock_start, &table).expect("engine builds");
+    let mut eng = DelayEngine::new_traced(nl, s.clock_start, &table).expect("engine builds");
     for (&(pin, v, at), &w) in s.pokes.iter().zip(&widths) {
         assert!(eng.poke_at(pin, Value::from_u64(w, v), at), "poke {pin}");
     }
