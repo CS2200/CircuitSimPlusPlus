@@ -2275,3 +2275,63 @@ a clock rule.
 that turns a value into an event — a clock, an enable, a reset — has to say what a transient
 means. A clock means *nothing* until it is a level: that is now the rule, and
 `derived-clock.md` §11 pins it.
+
+## Round — done (2026-10-29): H1 — a clocked part takes one edge per instant, from the level the instant entered with
+
+**The last table-dependent verdict.** `submission_374625393` halted under `mips-r2000-2um-v1` and
+never halted under `cs2200-74ls-v1`; `ce-zero-delay-v1` was worse still. Same design, same engine,
+only `settings.delayTable` different.
+
+**The mechanism** was a transient on the **gated clock's select**: a tri-state bus hand-off leaves
+the net all-`Z` for ~19 ns, the comparator's `prop` decides whether that `Z` survives to the clock
+gate (`mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it; `74ls-v1` 15 < 19 commits it), and the gate's
+recovery is read as a **second rising edge** — the register latches an extra time. CircuitSim CE
+never sees it: `Simulator.step()` moves a dirty *set* one wave at a time and `LinkState.propagate()`
+notifies a port only when the value it *received* changed, so every change inside one round collapses
+to the value the net settled to. This engine delivers every change — that is what being delay-aware
+means, and the derived period comes from it.
+
+**The rule, after three attempts.** A clocked part takes **at most one edge per instant**, and only
+when the instant *entered* with its `clk` at a definite low (the entry level is the level the
+previous instant ended at; a `Z`/`X` holds both). So `1 -> 0 -> 1` inside one instant is no edge,
+while `0 -> 1` is an edge at any distance.
+
+The two rejected attempts are the useful part:
+
+1. **Rises per cycle.** Lit up ~20 parts on *every* table, `mips` included — this design's `PC`
+   clock is a gated clock the microcode opens and closes mid-phase, so it legitimately rises more
+   than once per global cycle. The invariant was wrong, not the implementation.
+2. **"The low must be at an earlier instant"** (the arm keyed on the *delivery* of a low). Fixed the
+   target — all four tables halted — and **broke 34 corpus rows**, 21 of them with
+   `halt=floating-read ... pin "d"`: a register missed its edge, so its `q` stayed undriven. Cause: a
+   `Z -> 0 -> 1` recovery *delivers* a definite `0` at the rise's instant, which re-stamped the arm
+   and made the rule reject a genuine edge. Eleven more rows *crashed* (`no run report`) on
+   `contention_merge: driver width N != net width M` — a **latent** converter/engine bug (a
+   multi-driver net with mismatched driver widths) that only panics when the merge is *reached*,
+   which the perturbation changed. That panic is still there and should become a diagnostic.
+
+The third attempt keys on the **level the instant entered with**, which is what tells the two shapes
+apart: an instant that began high and recovered is a transient; a rise after a real low is an edge.
+The shipped `clock_glitches` diagnostic — which fires on a clock driven more than once inside one
+instant — measured **0 of 331** graded designs, and every one of the 34 regressions was a
+*legitimate* same-instant pair; so the corpus has the second shape and none of the first, which is
+exactly the split this rule respects.
+
+**Measured.** `374625393`, compat, the harness's own conversion:
+
+| table | before | after |
+|---|---|---|
+| `mips-r2000-2um-v1` | PASS 2833 | PASS 2833, `PC=0x11` |
+| `cs2200-74ls-v2` | PASS 2835 | PASS 2835, `PC=0x11` |
+| `cs2200-74ls-v1` | **never halts**, 18421 | **PASS 2835**, `PC=0x11` |
+| `ce-zero-delay-v1` | **never halts**, 18576 | **PASS 2835**, `PC=0x11` |
+
+The golden traces do not move. Corpus: 212 both-pass / 0 disagreements / 0 false passes, zero rows
+moved. Regression tests: `a_clock_hiccup_is_not_a_second_rising_edge` (a `Z`/`X` dip),
+`a_clock_edge_is_taken_once_per_instant` (a tri-state hand-off at one instant, reported not acted
+on), and `a_clock_edge_needs_the_instant_to_have_entered_low` (the four shapes, directly).
+
+**Lesson.** "Two clock edges at the same instant" is not one condition but two — a transient and a
+legitimate pulse — and only the level the instant *entered* with tells them apart. The census that
+preceded the rule measured the wrong quantity (edges, not entry levels), which is why the rule looked
+corpus-neutral when it wasn't.

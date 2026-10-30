@@ -327,9 +327,10 @@ struct DelaySnap {
     net_scheduled: Vec<crate::api::WireValue>,
     net_cause: Vec<Option<(u32, Option<u32>)>>,
     net_ever_driven: Vec<bool>,
-    clk_armed: Vec<bool>,
-    clk_rise_time: Vec<Option<u64>>,
-    clk_rises: Vec<u32>,
+    clk_entry_low: Vec<bool>,
+    clk_last_low: Vec<bool>,
+    clk_change_at: Vec<Option<u64>>,
+    clk_changes: Vec<u32>,
     clock_glitches: Vec<(u64, CompId)>,
     pending_gen: Vec<u64>,
     pending_val: Vec<Vec<crate::api::WireValue>>,
@@ -630,20 +631,23 @@ pub struct DelayEngine {
     /// Precomputed once: the `EvKind::Clock` arm used to rescan every component
     /// on every edge, which is 2 × cycles × components of pure filtering.
     clock_comps: Vec<u32>,
-    /// Per clocked part: the time of its most recent rising edge, and how many it has had at
-    /// that same instant. Two rises on one instant is two edges where CircuitSim CE's round
-    /// would deliver one — the design's clock glitched (`clock_glitches`, `docs/bugs.md` §1).
-    clk_rise_time: Vec<Option<u64>>,
-    clk_rises: Vec<u32>,
+    /// Per clocked part: the instant of its most recent `clk` delivery, and how many it has had
+    /// at that instant. More than one is the same-instant transient CE's round coalesces
+    /// (`clock_glitches`, `docs/bugs.md` §1).
+    clk_change_at: Vec<Option<u64>>,
+    clk_changes: Vec<u32>,
     /// Clocked parts that rose twice at one instant, as `(cycle, part)` (the diagnostic).
     clock_glitches: Vec<(u64, CompId)>,
-    /// Per clocked part (register/RAM): its `clk` pin has been seen at a *definite* low since
-    /// the last latch — so the next definite high is a genuine rising edge. A `Z`/`X` on the
-    /// clock holds this as it is: it is a hiccup (a floating value that a circuit without time
-    /// cannot have), not a level, so it can neither arm nor trigger. Without this, a gated
-    /// clock that dips to `Z` and recovers is read as a *second* rising edge inside one cycle
-    /// and the register latches an extra time (`docs/derived-clock.md` §11).
-    clk_armed: Vec<bool>,
+    /// Per clocked part (register/RAM): whether the **instant being processed entered with the
+    /// clock at a definite low** — and no edge taken for it yet. A `clk` delivery takes an edge
+    /// only when this holds, so a clocked part takes **at most one edge per instant**, and never
+    /// one whose instant began high (a `1 -> 0 -> 1` inside one instant is the transient this
+    /// engine delivers and CircuitSim CE's round coalesces: `docs/derived-clock.md` §11,
+    /// `docs/bugs.md` §1).
+    clk_entry_low: Vec<bool>,
+    /// Per clocked part: the clock's level as of the last definite delivery — what the *next*
+    /// instant enters with. A `Z`/`X` leaves it alone, so a floating clock holds the level.
+    clk_last_low: Vec<bool>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
     pending_gen: Vec<u64>,
@@ -1010,9 +1014,10 @@ impl DelayEngine {
             net_sinks,
             implicit_clk,
             clock_comps,
-            clk_armed: vec![true; n],
-            clk_rise_time: vec![None; n],
-            clk_rises: vec![0; n],
+            clk_entry_low: vec![true; n],
+            clk_last_low: vec![true; n],
+            clk_change_at: vec![None; n],
+            clk_changes: vec![0; n],
             clock_glitches: Vec::new(),
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
@@ -1252,16 +1257,16 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 6: the clock-arming state and the clock-glitch
-    /// diagnostic (`docs/derived-clock.md` §11, `docs/bugs.md` §1). Version 4 was per-sink
-    /// views (F14); the setup/hold tracker
+    /// (§4.6 — see the test). Snapshot version 7: the clocked parts' entry level and the
+    /// clock-glitch diagnostic (`docs/derived-clock.md` §11, `docs/bugs.md` §1). Version 4 was
+    /// per-sink views (F14); the setup/hold tracker
     /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
     /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 6,
+            version: 7,
             clock_start: self.clock_start,
             now: self.now,
             seq: self.seq,
@@ -1296,9 +1301,10 @@ impl DelayEngine {
                 .collect(),
             net_cause: self.net_cause.clone(),
             net_ever_driven: self.net_ever_driven.clone(),
-            clk_armed: self.clk_armed.clone(),
-            clk_rise_time: self.clk_rise_time.clone(),
-            clk_rises: self.clk_rises.clone(),
+            clk_entry_low: self.clk_entry_low.clone(),
+            clk_last_low: self.clk_last_low.clone(),
+            clk_change_at: self.clk_change_at.clone(),
+            clk_changes: self.clk_changes.clone(),
             clock_glitches: self.clock_glitches.clone(),
             pending_gen: self.pending_gen.clone(),
             pending_val: self
@@ -1318,7 +1324,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 6 {
+        if snap.version != 7 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.clock_start != self.clock_start {
@@ -1336,9 +1342,10 @@ impl DelayEngine {
             && snap.net_scheduled.len() == n_nets
             && snap.net_cause.len() == n_nets
             && snap.net_ever_driven.len() == n_nets
-            && snap.clk_armed.len() == n_comps
-            && snap.clk_rise_time.len() == n_comps
-            && snap.clk_rises.len() == n_comps;
+            && snap.clk_entry_low.len() == n_comps
+            && snap.clk_last_low.len() == n_comps
+            && snap.clk_change_at.len() == n_comps
+            && snap.clk_changes.len() == n_comps;
         if !shape_ok {
             return Err("snapshot does not match this circuit".to_string());
         }
@@ -1392,9 +1399,10 @@ impl DelayEngine {
         }
         self.net_cause = snap.net_cause;
         self.net_ever_driven = snap.net_ever_driven;
-        self.clk_armed = snap.clk_armed;
-        self.clk_rise_time = snap.clk_rise_time;
-        self.clk_rises = snap.clk_rises;
+        self.clk_entry_low = snap.clk_entry_low;
+        self.clk_last_low = snap.clk_last_low;
+        self.clk_change_at = snap.clk_change_at;
+        self.clk_changes = snap.clk_changes;
         self.clock_glitches = snap.clock_glitches;
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
@@ -2782,21 +2790,44 @@ impl DelayEngine {
         }
     }
 
-    /// Record a rising edge on a clocked part's `clk` pin. Two rises at the **same instant** are
-    /// two edges where CircuitSim CE — a round-based, coalescing fixed-point iteration — would
-    /// deliver one, because every change in a round collapses to the value the net settled to.
-    /// That is this engine's one structural difference from CE, and it is what lets a design's
-    /// verdict depend on the delay table (`docs/bugs.md` §1). Recorded, never acted on.
-    fn note_clock_rise(&mut self, c: usize, now: u64) {
-        if self.clk_rise_time[c] == Some(now) {
-            self.clk_rises[c] += 1;
-            if self.clk_rises[c] == 2 {
-                self.clock_glitches
-                    .push((self.rising_seen, CompId(c as u32)));
+    /// Fold one `clk`-pin delivery into the part's clock bookkeeping, returning `true` when it
+    /// is a rising edge to take.
+    ///
+    /// **A clocked part takes at most one edge per instant, and only if the instant *entered*
+    /// with the clock at a definite low.** A `1 -> 0 -> 1` inside one instant therefore takes no
+    /// edge, while a low at an earlier instant still arms the rise after it — which is the
+    /// distinction that matters: this engine *delivers* every change and CircuitSim CE's
+    /// round-based iteration coalesces a round, so an instant that began high and recovered is a
+    /// transient, whereas a rise after a real low is a genuine edge (`docs/bugs.md` §1,
+    /// `docs/derived-clock.md` §11).
+    ///
+    /// The delivery is also counted, so a clock driven more than once inside one instant is
+    /// *reported* rather than silent (`clock_glitches`) — never acted on beyond the rule above.
+    fn clock_delivery(&mut self, c: usize, level: Bit, now: u64) -> bool {
+        if self.clk_change_at[c] != Some(now) {
+            // A new instant enters with the level the previous one ended at.
+            self.clk_entry_low[c] = self.clk_last_low[c];
+            self.clk_change_at[c] = Some(now);
+            self.clk_changes[c] = 0;
+        }
+        self.clk_changes[c] += 1;
+        if self.clk_changes[c] == 2 && !self.in_boot {
+            self.clock_glitches
+                .push((self.rising_seen, CompId(c as u32)));
+        }
+        match level {
+            Bit::One => {
+                let edge = self.clk_entry_low[c];
+                self.clk_entry_low[c] = false; // at most one edge per instant
+                self.clk_last_low[c] = false;
+                edge
             }
-        } else {
-            self.clk_rise_time[c] = Some(now);
-            self.clk_rises[c] = 1;
+            Bit::Zero => {
+                self.clk_last_low[c] = true;
+                false
+            }
+            // A floating clock holds both the level and the entry: a hiccup, not a level.
+            _ => false,
         }
     }
 
@@ -3070,19 +3101,9 @@ impl DelayEngine {
                         .clk_slot
                         .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
-                    // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
-                    // delivery on the clock is a hiccup and holds the level: it can neither arm
-                    // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
-                    // twice inside one cycle (`docs/derived-clock.md` §11, the derived-clock glitch).
-                    match cur {
-                        Bit::Zero => self.clk_armed[c] = true,
-                        Bit::One if self.clk_armed[c] => {
-                            self.clk_armed[c] = false;
-                            self.note_clock_rise(c, time);
-                            self.arrive_together(c, slot, net);
-                            self.clock_edge(comp, time)?;
-                        }
-                        _ => {}
+                    if self.clock_delivery(c, cur, time) {
+                        self.arrive_together(c, slot, net);
+                        self.clock_edge(comp, time)?;
                     }
                 }
                 _ => {}
@@ -3095,19 +3116,9 @@ impl DelayEngine {
                         .clk_slot
                         .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
-                    // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
-                    // delivery on the clock is a hiccup and holds the level: it can neither arm
-                    // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
-                    // twice inside one cycle (`docs/derived-clock.md` §11, the derived-clock glitch).
-                    match cur {
-                        Bit::Zero => self.clk_armed[c] = true,
-                        Bit::One if self.clk_armed[c] => {
-                            self.clk_armed[c] = false;
-                            self.note_clock_rise(c, time);
-                            self.arrive_together(c, slot, net);
-                            self.clock_edge(comp, time)?;
-                        }
-                        _ => {}
+                    if self.clock_delivery(c, cur, time) {
+                        self.arrive_together(c, slot, net);
+                        self.clock_edge(comp, time)?;
                     }
                 }
                 // CE's reset (`ZERO`) is **level-sensitive and asynchronous**:
@@ -5283,38 +5294,62 @@ mod tests {
         );
     }
 
-    /// **The clock-glitch diagnostic (`docs/bugs.md` §1), the bookkeeping rule.** Two rising
-    /// edges on one clocked part at the **same instant** are one entry; two at different instants
-    /// are not a glitch (a gated clock legitimately re-clocks mid-phase, and a divided clock rises
-    /// every other cycle). The end-to-end case is a converted CPU under `ce-zero-delay-v1`:
-    /// 60 entries over 20 parts, on the one table whose verdict differs.
+    /// **The settled clock rule (`docs/bugs.md` §1, `docs/derived-clock.md` §11).** A clocked
+    /// part takes **one** edge per instant, and only when that instant *entered* with its clock
+    /// at a definite low. The two shapes that matter are mirror images, and this is the whole
+    /// rule: a `1 -> 0 -> 1` inside one instant (entered high) is not an edge, while a rise after
+    /// a real low is — including when the low is followed by a `Z`, because a floating clock
+    /// holds the level. A clock driven twice inside one instant is *reported*, never acted on.
     #[test]
-    fn a_second_rise_at_the_same_instant_is_one_glitch_entry() {
-        let mut eng = engine(
-            &format!(
-                r##"{{
+    fn a_clock_edge_needs_the_instant_to_have_entered_low() {
+        let json = format!(
+            r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
-                {{"id":"clk","type":"wiring.clock","pos":[0,0]}}
-            ], "wires": []}}]
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
         }}"##
-            ),
-            1000,
         );
-        eng.note_clock_rise(0, 5);
-        eng.note_clock_rise(0, 5);
-        eng.note_clock_rise(0, 5);
-        assert_eq!(
-            eng.clock_glitches,
-            vec![(eng.rising_seen, CompId(0))],
-            "two rises at one instant is exactly one entry, however many repeats follow"
+        let mut eng = engine(&json, 1000);
+        // Power-on enters low, so the first rise is an edge — and only one per instant.
+        assert!(
+            eng.clock_delivery(0, Bit::One, 100),
+            "entered low: take the edge"
         );
-        eng.note_clock_rise(0, 9);
+        assert!(
+            !eng.clock_delivery(0, Bit::One, 100),
+            "a second rise inside the same instant is not a second edge"
+        );
         assert_eq!(
             eng.clock_glitches.len(),
             1,
-            "a later rise is a new instant, not a glitch"
+            "two deliveries inside one instant are reported"
         );
+        // A definite low at an earlier instant arms the next rise.
+        assert!(
+            !eng.clock_delivery(0, Bit::Zero, 200),
+            "a low is not an edge"
+        );
+        assert!(
+            eng.clock_delivery(0, Bit::One, 300),
+            "a low at an earlier instant arms it"
+        );
+        // `1 -> 0 -> 1` inside one instant: it entered high, so the recovery is not an edge.
+        assert!(!eng.clock_delivery(0, Bit::Zero, 400));
+        assert!(
+            !eng.clock_delivery(0, Bit::One, 400),
+            "an instant that began high takes no edge, however it recovers"
+        );
+        // A floating clock holds the level, so the low survives the Z and still arms the rise.
+        assert!(!eng.clock_delivery(0, Bit::Zero, 500));
+        assert!(!eng.clock_delivery(0, Bit::Z, 600));
+        assert!(eng.clock_delivery(0, Bit::One, 700), "a Z held the low");
     }
 
     /// **The clock-glitch diagnostic (`docs/bugs.md` §1), the false-positive guard.** A register

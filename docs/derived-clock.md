@@ -340,7 +340,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** | corpus: `374625393` under all four tables | **mostly done 2026-10-29**: the *glitch* route is fixed — a rising edge now requires a definite low (`clk_armed`, §11), so `cs2200-74ls-v1` halts at 2835 cycles (`PC=0x11`) exactly like `cs2200-74ls-v2`/`mips-r2000-2um-v1`, where it used to run out of cycles (18421). The mechanism was a transient on the **gated clock's select** (a tri-state bus hand-off -> comparator -> gate -> `Z -> 1` read as a second edge; the comparator's `prop` vs the window is what made it table-dependent). What remains is that a clock returning to `1` **inside one instant** is two edges for us and one for CE (which coalesces a round): this is now *surfaced* by `clock_glitches` (§12, `docs/bugs.md` §1) — 60 entries over 20 parts under `ce-zero-delay-v1`, 0 on all three real tables |
+| H1 | the **same verdict under any delay table** | corpus: `374625393` under all four tables | **done 2026-10-29**: all four shipped tables halt at **2835 cycles, `PC=0x11`** — `ce-zero-delay-v1` and `cs2200-74ls-v1` used to run out of cycles (18576 / 18421). The mechanism was a transient on the **gated clock's select** (a tri-state bus hand-off -> comparator -> gate -> recovery read as a second edge), fixed by §11's rule: one edge per instant, and the instant must have entered with the clock low. The coalesced transients are still *reported* (§12), and the corpus stays 212 both-pass / 0 disagreements |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
 ### I. Fixtures to replace, not repair
@@ -364,62 +364,71 @@ The event queue, per-sink views, transport/inertial delays, the tie-break, the `
 priority class, snapshot/resume, and every other part of the delay-aware engine. The change
 is *how a cycle is bounded*, not how a value propagates.
 
-## 11. The clock rule: a rising edge requires a definite low (2026-10-29)
+## 11. The clock rule: one edge per instant, and the instant must have entered low (2026-10-29)
 
-**Why it was needed.** A **derived** clock (a gate/mux output) is not placed by the drain, so
-its edge is taken mid-cascade — and a *transient* on it was taken as an edge. In
+**Why it was needed.** A **derived** clock (a gate/mux output) is not placed by the drain, so its
+edge is taken mid-cascade — and a *transient* on it was taken as an edge. In
 `submission_374625393` the clock gate's select comes from the opcode, the opcode comes off a
-shared tri-state bus, and a bus hand-off leaves it all-`Z` for ~19 ns. The comparator's `prop`
-decides whether that `Z` survives to the gate — `mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it,
-`74ls-v1` 15 < 19 commits it — and the gate's `Z -> 1` recovery then latched `PC`/`IR` an extra
-time. Identical circuit, identical engine, only `settings.delayTable` different.
+shared tri-state bus, and a bus hand-off leaves it all-`Z` for ~19 ns; the comparator's `prop`
+decides whether that `Z` survives to the gate (`mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it,
+`74ls-v1` 15 < 19 commits it), and the gate's recovery then latched `PC`/`IR` an extra time.
+Identical circuit, identical engine, only `settings.delayTable` different.
 
-**The rule.** `react`'s clock arm no longer latches on "the view is `1`". Per clocked part it
-keeps `clk_armed`:
+**The rule.** A clocked part takes **at most one edge per instant**, and only when that instant
+**entered** with its `clk` at a definite low:
 
-- a delivery of a definite `0` **arms** it;
-- a delivery of a definite `1` latches **only if armed**, then disarms;
-- a delivery of `Z`/`X` does neither — a floating clock *holds* the level, because it is a
-  hiccup that a circuit without time cannot have.
+- the instant's entry level is the level the previous one ended at (so a `Z`/`X` delivery holds
+  both the level and the entry — a floating clock is a hiccup, not a level);
+- a definite `1` takes an edge iff the entry was low, and consumes it for that instant;
+- a definite `0` only records the level.
 
-So `1 -> Z -> 1` is one edge, not two, and `0 -> 1 -> 0 -> 1` is still two. Armed at
-power-on, so a register clocked by a constant still latches once, exactly as before.
+So `1 -> 0 -> 1` inside one instant is **no** edge — the transient this engine delivers and CE's
+round coalesces — while `0 -> 1` is an edge, at any distance. That distinction is the point: both
+shapes are "two clock deliveries at one instant", and only the *entry* level tells them apart.
 
-**Measured.** `374625393` under `--compat`: `mips` 2833 cycles / `PC=0x11`, `74ls-v2` 2835 /
-`0x11`, **`74ls-v1` 2835 / `0x11`** — where it used to run out of cycles (18421). The
-`ce-zero-delay-v1` diagnostic still differs: that is the `(time, seq)` tie-break, a separate
-route (§8c). Regression test `a_clock_hiccup_is_not_a_second_rising_edge` (delay.rs), which
-fails without the rule.
+**Two earlier attempts are recorded because they are what the rule is not.** Counting rises per
+**cycle** lit up ~20 parts on every table including `mips`: this design's `PC` clock is a gated
+clock that legitimately rises more than once per global cycle. And keying the arm on the
+**delivery** of a low ("the low must be at an earlier instant") broke **34 corpus rows** — 21 with
+`floating-read` on `d` — because a `Z -> 0 -> 1` recovery *delivers* a `0` at the rise's instant,
+which re-stamped the arm and rejected a genuine edge. Level, not delivery.
 
-**Not a deferral.** Taking the latch against the *settled* cloud was the other candidate and is
-**not** implemented: the guard alone restores CE's answer here. If a future design shows a
-register taking an edge on an enable that has not arrived yet, settle-point sampling is the
-next lever.
+**Measured.** `submission_374625393`, compat, the harness's own conversion: **all four shipped
+tables halt at 2835 cycles with `PC=0x11`** (`ce-zero-delay-v1` and `cs2200-74ls-v1` used to run
+out of cycles). The golden traces do not move. Regression tests:
+`a_clock_hiccup_is_not_a_second_rising_edge` (a `Z`/`X` dip),
+`a_clock_edge_is_taken_once_per_instant` (a tri-state hand-off), and
+`a_clock_edge_needs_the_instant_to_have_entered_low` (the four shapes, directly).
 
-**State.** `clk_armed` is part of the savestate (format version 5).
+**State.** The entry level and the last level are part of the savestate (format version 7).
 
 ## 12. The clock-glitch diagnostic (2026-10-29)
 
 A diagnostic, not a behaviour: `clock_glitches` on the report lists the clocked parts whose `clk`
-pin rose **twice at one instant** in a cycle, as `{cycle, component}`. It changes no verdict and
-nothing acts on it.
+pin was delivered to **more than once inside one instant**, as `{cycle, component}`. Nothing acts on
+it — §11 is what decides edges.
 
-**Why it exists.** `clk_armed` (§11) closed the `Z`-recovery route, but the deeper difference from
-CircuitSim CE remains and cannot be closed by a table. CE is a round-based, coalescing fixed-point
-iteration — `Simulator.step()` moves a dirty *set* one wave at a time and `LinkState.propagate()`
+**Why it exists.** The engine delivers every change; that is what being delay-aware means, and the
+derived period comes from it. CircuitSim CE does not: it is a round-based, coalescing fixed-point
+iteration — `Simulator.step()` moves a dirty *set* one wave at a time, and `LinkState.propagate()`
 notifies a port only when the value it *received* changed — so a signal that changes several times
-inside one round is delivered **once**, with the value the net settled to. We deliver every change,
-because that is what being delay-aware means (the derived period comes from it). So a `1 -> 0 -> 1`
-inside one instant is genuinely **two rising edges** for us. That is what still fails
-`ce-zero-delay-v1` on `374625393`: 60 double-rise entries over 20 parts there, 0 on all three real
-tables, where the verdicts agree (`docs/bugs.md` §1).
+inside one round is delivered **once**, with the value the net settled to. A clock driven more than
+once inside one instant is therefore a genuine difference between the two engines, and it was the
+mechanism behind the last table-dependent verdict (the gated clock's select, `docs/bugs-archive.md`).
 
-**Why "twice at one instant" and not "more than once a cycle".** The first version counted rises
+§11 takes one edge per instant from the level the instant *entered* with, so that difference no
+longer decides a verdict. This field is how the condition stays **visible** rather than silent:
+`ce-zero-delay-v1` reports 540 entries over 20 parts on `374625393`, the three real tables report 0,
+and all four halt at the same place.
+
+**Why "deliveries inside one instant" and not "rises per cycle".** The first version counted rises
 per cycle and was **wrong**: this design's `PC` clock is a *gated* clock the microcode opens and
 closes mid-phase, so it legitimately rises more than once per global cycle — the per-cycle rule lit
-up ~20 parts on *every* table, `mips` included. Two rises at one instant is the part CE's
-coalescing would have removed, and it is silent on a clean or merely mid-phase-reclocked design.
+up ~20 parts on *every* table, `mips` included. The condition that matters is per *instant*, and it
+is a count of deliveries, not of edges: §11 takes at most one edge per instant, and the two shapes
+that share the count — a `1 -> 0 -> 1` transient and a legitimate `0 -> 1` pulse — are told apart by
+the entry level.
 
-**The real fix** is §1's: separate *transport* (when a value arrives — keep the time) from
-*decision* (take the settled level, once per drain). That is a core change; this is the cheap half
-that makes the condition visible in the meantime.
+**What is still not CE.** We deliver a value for every change, where CE delivers the settled value
+of each round. That is a model difference that no delay table removes and that this engine *wants*
+for the derived period; it is now confined to the value path rather than deciding clock edges.

@@ -608,12 +608,14 @@ pub struct AssertionResult {
     pub expected: String,
 }
 
-/// A clocked part whose `clk` pin rose more than once inside one cycle (`docs/bugs.md` §1).
+/// A clocked part whose `clk` pin was driven **more than once inside one instant**
+/// (`docs/bugs.md` → the archive, `docs/derived-clock.md` §11/§12).
 ///
-/// This is the delay-aware engine's one structural difference from CircuitSim CE: CE coalesces
-/// a transient within a round and never delivers it, we deliver every change, so a clock that
-/// hiccups can latch an extra time — which is what makes a verdict depend on the timing table.
-/// The field is a *diagnostic*: it changes no verdict, it makes the dependence visible.
+/// This is the delay-aware engine's one structural difference from CircuitSim CE: CE's
+/// round-based, coalescing iteration delivers a net's *settled* value once per round, we deliver
+/// every change. The engine takes **one edge per instant**, and only when the instant entered
+/// with the clock low, so the difference does not move a verdict — this reports the transients
+/// instead of letting them be silent.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ClockGlitch {
     /// The cycle in which the clock rose twice (1-based; the cycle that just ended).
@@ -664,9 +666,9 @@ pub struct Report {
     pub delay_table: String,
     /// Determinism hash of the event trace (§4.6); delay mode only.
     pub trace_hash: Option<u64>,
-    /// Clocked parts whose clock rose more than once inside one cycle — a glitch, and the
-    /// reason a design's verdict can move with the delay table (`docs/bugs.md` §1). Empty on a
-    /// clean run, and omitted from the JSON when empty.
+    /// Clocked parts whose clock was driven more than once inside one instant — the transient
+    /// CircuitSim CE's round coalesces, reported rather than acted on (the engine takes one edge
+    /// per instant: `docs/derived-clock.md` §11). Empty on a clean run, omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub clock_glitches: Vec<ClockGlitch>,
     /// §8.3 rubric hook; `None` when no threshold was given.

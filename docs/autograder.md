@@ -64,7 +64,7 @@ Every simulation-derived field is bit-identical across runs and machines (§4.6)
 | `top_paths`                      | observed critical paths: `[{ circuit, comps: [comp_id], delay_ns }]`; a path crossing circuit boundaries is split into consecutive per-circuit runs |
 | `delay_table`                    | table provenance, e.g. `"cs2200-74ls-v1 (DRAFT)"`                                                                                                   |
 | `trace_hash`                     | FNV-1a over the applied event stream (the §4.6 determinism tripwire); values are mixed as their raw width + mask words, not as rendered hex — see `Value::fold_bytes`                                                                                |
-| `clock_glitches`                 | clocked parts whose `clk` pin rose **twice at one instant** in a cycle, `[{cycle, component}]`. Omitted when empty. This is a *diagnostic* — it changes no verdict — for this engine's one structural difference from CircuitSim CE, which coalesces a round (`docs/bugs.md` §1, `docs/derived-clock.md` §12) |
+| `clock_glitches`                 | clocked parts whose `clk` pin was driven **more than once inside one instant**, `[{cycle, component}]`. Omitted when empty. A *diagnostic* for this engine's one structural difference from CircuitSim CE, which coalesces a round; the engine takes one edge per instant from the level the instant entered with (`docs/derived-clock.md` §11/§12) |
 | `rubric_full_credit`             | `est_time < rubric_full_credit_below` when a threshold was given, else `null`                                                                       |
 | `errors`                         | the load/validation `[LoadError]` list when `halt_reason` is `"malformed-file"`; empty otherwise (F10: one malformed-file JSON shape everywhere)    |
 | `peak_rss_bytes`, `wall_time_ms` | telemetry                                                                                                                                           |
@@ -135,7 +135,7 @@ Self-contained JSON — the circuit travels with the state:
   "version": 3,
   "cycles_run": 500,
   "circuit": {/* the full .csx document */},
-  "state": {/* delay-engine snapshot format version 5 */},
+  "state": {/* delay-engine snapshot format version 7 */},
 }
 ```
 

@@ -27,19 +27,20 @@ the available tables — the engine never guesses or silently defaults.
 > **The clock transient is fixed (2026-10-29).** A shared tri-state bus hands off, the gate's
 > select goes `Z` for a window, and whether the comparator's `prop` is shorter than that
 > window decides if it survives — `mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it, `74ls-v1`
-> 15 < 19 committed it and `PC`/`IR` latched an extra time. A rising edge now requires a
-> definite low (`clk_armed`, `derived-clock.md` §11), so all three real tables agree
-> (2833/2835/2835, `PC` halts at `0x11`).
+> 15 < 19 committed it and `PC`/`IR` latched an extra time. A clocked part now takes **one edge
+> per instant, and only when the instant entered with the clock low** (`derived-clock.md` §11),
+> so **all four** tables agree (2833/2835/2835/2835, `PC` halts at `0x11`).
 >
-> What remains is not a timing value at all. CircuitSim CE is a round-based fixed-point iteration
-> that delivers a net's *settled* value once per round; we deliver every change, so a clock that
-> returns to `1` **inside one instant** is two edges for us and one for CE. Every delay `0` puts a
-> whole cycle's changes on one instant, which is why `ce-zero-delay-v1` still differs and why no
-> table fixes it (`ce-zero-delay-v1` is a diagnostic table, not graded).
+> The underlying model difference does remain, and it is not a timing value: CircuitSim CE is a
+> round-based fixed-point iteration that delivers a net's *settled* value once per round, while we
+> deliver every change. A clock driven more than once inside one instant is therefore still a thing
+> this engine sees and CE does not — every delay `0` puts a whole cycle's changes on one instant —
+> but it no longer decides a verdict: a clocked part takes one edge per instant, from the level the
+> instant entered with (`derived-clock.md` §11), so `ce-zero-delay-v1` agrees with the rest.
 >
-> **And it is now *visible*.** A design with such a clock is reported as `clock_glitches` on the
-> report (`docs/bugs.md` §1, `docs/derived-clock.md` §12). Check it before blaming a table: an
-> empty list means this engine saw no such edge; a non-empty one names the parts and cycles.
+> **And it is *visible*.** Such a clock is reported as `clock_glitches` on the report
+> (`docs/derived-clock.md` §12). Check it before blaming a table: an empty list means this engine
+> saw no such transient; a non-empty one names the parts and cycles.
 >
 > **Consequences for whoever touches this:**
 >
