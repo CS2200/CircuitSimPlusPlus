@@ -12,6 +12,7 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/format-v2.md`](docs/format-v2.md) | The `.csx` file format + simulation semantics (§9) |
 | [`docs/delay-table.md`](docs/delay-table.md) | Delay model, 74LS timing table, DTA/STA conventions |
 | [`docs/autograder.md`](docs/autograder.md) | Exit codes, assertion grammar, test-spec & snapshot schemas |
+| [`docs/profiling.md`](docs/profiling.md) | Profiling/benchmarking the engine: perf, the probe, HEAD A/B, what's already optimized |
 | [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
 | [`docs/releasing.md`](docs/releasing.md) | How releases are cut on GT's runner-less GHES (3 machines, one per OS) |
 | [`docs/distribution.md`](docs/distribution.md) | Distribution & update plan: public github.com mirror (decided, not built) |
