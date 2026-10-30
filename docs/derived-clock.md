@@ -88,6 +88,15 @@ no race, so the table cannot decide a value — it only changes the derived peri
 > Table-independent values and setup/hold can never firing are the same coin: **the design
 > never races the edge.**
 
+**Caveat (added 2026-10-29, H1).** This holds for the **global** transition, which the drain
+*places*. A **gated** clock is ordinary logic: its edge is not placed by anything, so it can
+still be read mid-cascade, and a transient on its select can be read as a *second* edge.
+That was `submission_374625393` under `cs2200-74ls-v1` — a tri-state bus hand-off left the
+gate's select `Z` for longer than the comparator's `prop`, the gate's `Z -> 1` recovery was
+taken as a rising edge, and `PC`/`IR` latched an extra time. The fix is the rule in §11:
+**a rising edge requires a definite low** (`clk_armed`). Verified: all three real tables now
+halt at the same point; only the *zero-delay* tie-break still differs (see H1).
+
 ## 5. Consequences
 
 - **`timing_violations` retires.** No design can violate setup or hold, because the edge is
@@ -105,9 +114,12 @@ no race, so the table cannot decide a value — it only changes the derived peri
   zero-depth design cannot give a zero period) and the wall clock is the runaway guard.
   `clockHz` in a document is the **UI playback speed** and is a different thing entirely.
 - **Self-oscillating clock sources are not permitted** (decision 2026-10-28): a design must
-  quiesce between edges. Gated and divided clocks are fine — they are logic driven by the
-  global transition and settle with the cascade. A ring used as a clock is an oscillation
-  halt by construction, which is the intended answer.
+  quiesce between edges. Gated and divided clocks work, but **not** for the reason first
+  written here ("logic driven by the global transition and settle with the cascade" — H1
+  disproved that): the gate's edge is not placed by the drain, so it is sampled mid-cascade,
+  and it is `clk_armed` (§11) that keeps a transient on its select from re-clocking the
+  machine. A ring used as a clock is an oscillation halt by construction, which is the
+  intended answer.
 
 ## 6. Risks
 
@@ -311,7 +323,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how |
 |---|---|---|
-| F1 | a **gated** clock works — the gate settles as part of the cascade | integration |
+| F1 | a **gated** clock works — the gate settles as part of the cascade — and (H1) a **glitch** on its select is not an edge | unit: `a_gated_clock_latches_only_when_the_gate_passes_it` + `a_clock_hiccup_is_not_a_second_rising_edge` |
 | F2 | a **divided** clock (a counter bit on `clk`) works, and is count-based | integration |
 | F3 | a **self-oscillating** source (a ring driving `clk`) is an oscillation halt, not a hang | unit |
 | F4 | with **wire delay on**, the same edge reaching sinks at different times still completes the cascade first | **done**: lengthening the *clock's* wire lengthens the period by **twice** the wire's delay — the wire carries both transitions — which can only be true if the clock's arrival is a cascade event rather than a scheduled time |
@@ -328,9 +340,8 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** | corpus: `374625393` under both tables | **fails — reproduced 2026-10-29**: under `cs2200-74ls-v1` in the grading mode it stops on `changes:PC:10000` ("the program did not halt", 18421 cycles) where `mips-r2000-2um-v1` stops `stable` (2833) and passes. The corpus never sees it because the converter pins the MIPS table. **Mechanism named 2026-10-29**: `PC`/`IR` are clocked by the microcode ROM's output — a derived clock — so the latch edge, its enable and its data all descend from one net and the table decides which arrives first. A derived clock's race is table-dependent *by nature*; see `docs/bugs.md` §1 |
+| H1 | the **same verdict under any delay table** | corpus: `374625393` under all four tables | **mostly done 2026-10-29**: the *glitch* route is fixed — a rising edge now requires a definite low (`clk_armed`, §11), so `cs2200-74ls-v1` halts at 2835 cycles (`PC=0x11`) exactly like `cs2200-74ls-v2`/`mips-r2000-2um-v1`, where it used to run out of cycles (18421). The mechanism was a transient on the **gated clock's select** (a tri-state bus hand-off -> comparator -> gate -> `Z -> 1` read as a second edge; the comparator's `prop` vs the window is what made it table-dependent). What remains is the `(time, seq)` tie-break at **zero** delay, which is a diagnostic table and not graded — see `docs/bugs-archive.md` |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
-| H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: one test, `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
 ### I. Fixtures to replace, not repair
 
@@ -352,3 +363,37 @@ value model with no time in it.
 The event queue, per-sink views, transport/inertial delays, the tie-break, the `on_cycle`
 priority class, snapshot/resume, and every other part of the delay-aware engine. The change
 is *how a cycle is bounded*, not how a value propagates.
+
+## 11. The clock rule: a rising edge requires a definite low (2026-10-29)
+
+**Why it was needed.** A **derived** clock (a gate/mux output) is not placed by the drain, so
+its edge is taken mid-cascade — and a *transient* on it was taken as an edge. In
+`submission_374625393` the clock gate's select comes from the opcode, the opcode comes off a
+shared tri-state bus, and a bus hand-off leaves it all-`Z` for ~19 ns. The comparator's `prop`
+decides whether that `Z` survives to the gate — `mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it,
+`74ls-v1` 15 < 19 commits it — and the gate's `Z -> 1` recovery then latched `PC`/`IR` an extra
+time. Identical circuit, identical engine, only `settings.delayTable` different.
+
+**The rule.** `react`'s clock arm no longer latches on "the view is `1`". Per clocked part it
+keeps `clk_armed`:
+
+- a delivery of a definite `0` **arms** it;
+- a delivery of a definite `1` latches **only if armed**, then disarms;
+- a delivery of `Z`/`X` does neither — a floating clock *holds* the level, because it is a
+  hiccup that a circuit without time cannot have.
+
+So `1 -> Z -> 1` is one edge, not two, and `0 -> 1 -> 0 -> 1` is still two. Armed at
+power-on, so a register clocked by a constant still latches once, exactly as before.
+
+**Measured.** `374625393` under `--compat`: `mips` 2833 cycles / `PC=0x11`, `74ls-v2` 2835 /
+`0x11`, **`74ls-v1` 2835 / `0x11`** — where it used to run out of cycles (18421). The
+`ce-zero-delay-v1` diagnostic still differs: that is the `(time, seq)` tie-break, a separate
+route (§8c). Regression test `a_clock_hiccup_is_not_a_second_rising_edge` (delay.rs), which
+fails without the rule.
+
+**Not a deferral.** Taking the latch against the *settled* cloud was the other candidate and is
+**not** implemented: the guard alone restores CE's answer here. If a future design shows a
+register taking an edge on an enable that has not arrived yet, settle-point sampling is the
+next lever.
+
+**State.** `clk_armed` is part of the savestate (format version 5).

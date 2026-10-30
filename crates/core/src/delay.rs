@@ -321,6 +321,7 @@ struct DelaySnap {
     net_scheduled: Vec<crate::api::WireValue>,
     net_cause: Vec<Option<(u32, Option<u32>)>>,
     net_ever_driven: Vec<bool>,
+    clk_armed: Vec<bool>,
     pending_gen: Vec<u64>,
     pending_val: Vec<Vec<crate::api::WireValue>>,
     pending_cause: Vec<Option<u32>>,
@@ -620,6 +621,13 @@ pub struct DelayEngine {
     /// Precomputed once: the `EvKind::Clock` arm used to rescan every component
     /// on every edge, which is 2 × cycles × components of pure filtering.
     clock_comps: Vec<u32>,
+    /// Per clocked part (register/RAM): its `clk` pin has been seen at a *definite* low since
+    /// the last latch — so the next definite high is a genuine rising edge. A `Z`/`X` on the
+    /// clock holds this as it is: it is a hiccup (a floating value that a circuit without time
+    /// cannot have), not a level, so it can neither arm nor trigger. Without this, a gated
+    /// clock that dips to `Z` and recovers is read as a *second* rising edge inside one cycle
+    /// and the register latches an extra time (`docs/bugs.md` §1).
+    clk_armed: Vec<bool>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
     pending_gen: Vec<u64>,
@@ -986,6 +994,7 @@ impl DelayEngine {
             net_sinks,
             implicit_clk,
             clock_comps,
+            clk_armed: vec![true; n],
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
             pending_cause: vec![None; n],
@@ -1224,14 +1233,15 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 4: per-sink views (F14); the setup/hold tracker
+    /// (§4.6 — see the test). Snapshot version 5: the clock-arming state (`clk_armed`,
+    /// docs/bugs.md §1). Version 4 was per-sink views (F14); the setup/hold tracker
     /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
     /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 4,
+            version: 5,
             clock_start: self.clock_start,
             now: self.now,
             seq: self.seq,
@@ -1266,6 +1276,7 @@ impl DelayEngine {
                 .collect(),
             net_cause: self.net_cause.clone(),
             net_ever_driven: self.net_ever_driven.clone(),
+            clk_armed: self.clk_armed.clone(),
             pending_gen: self.pending_gen.clone(),
             pending_val: self
                 .pending_val
@@ -1284,7 +1295,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 4 {
+        if snap.version != 5 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.clock_start != self.clock_start {
@@ -1301,7 +1312,8 @@ impl DelayEngine {
             && snap.net_values.len() == n_nets
             && snap.net_scheduled.len() == n_nets
             && snap.net_cause.len() == n_nets
-            && snap.net_ever_driven.len() == n_nets;
+            && snap.net_ever_driven.len() == n_nets
+            && snap.clk_armed.len() == n_comps;
         if !shape_ok {
             return Err("snapshot does not match this circuit".to_string());
         }
@@ -1355,6 +1367,7 @@ impl DelayEngine {
         }
         self.net_cause = snap.net_cause;
         self.net_ever_driven = snap.net_ever_driven;
+        self.clk_armed = snap.clk_armed;
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
         self.pending_net_cause = snap.pending_net_cause;
@@ -3010,9 +3023,18 @@ impl DelayEngine {
                         .clk_slot
                         .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
-                    if cur == Bit::One {
-                        self.arrive_together(c, slot, net);
-                        self.clock_edge(comp, time)?;
+                    // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
+                    // delivery on the clock is a hiccup and holds the level: it can neither arm
+                    // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
+                    // twice inside one cycle (`docs/bugs.md` §1, the derived-clock glitch).
+                    match cur {
+                        Bit::Zero => self.clk_armed[c] = true,
+                        Bit::One if self.clk_armed[c] => {
+                            self.clk_armed[c] = false;
+                            self.arrive_together(c, slot, net);
+                            self.clock_edge(comp, time)?;
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -3025,9 +3047,18 @@ impl DelayEngine {
                         .clk_slot
                         .map(|slot| self.views[c][slot].bit(0))
                         .unwrap_or(Bit::Z);
-                    if cur == Bit::One {
-                        self.arrive_together(c, slot, net);
-                        self.clock_edge(comp, time)?;
+                    // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
+                    // delivery on the clock is a hiccup and holds the level: it can neither arm
+                    // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
+                    // twice inside one cycle (`docs/bugs.md` §1, the derived-clock glitch).
+                    match cur {
+                        Bit::Zero => self.clk_armed[c] = true,
+                        Bit::One if self.clk_armed[c] => {
+                            self.clk_armed[c] = false;
+                            self.arrive_together(c, slot, net);
+                            self.clock_edge(comp, time)?;
+                        }
+                        _ => {}
                     }
                 }
                 // CE's reset (`ZERO`) is **level-sensitive and asynchronous**:
@@ -5104,9 +5135,11 @@ mod tests {
     #[test]
     /// **F1 (`docs/derived-clock.md` §10).** A **gated clock**: the register's `clk` is
     /// driven by logic (here an AND of the global clock and an enable) rather than the
-    /// global clock directly. Its own gate settling is *part of the cascade*, so the
-    /// barrier waits for it exactly as it waits for data — and with the enable held low the
-    /// register never sees a rising edge and must not latch.
+    /// global clock directly. Its settling is part of the cascade, and with the enable held
+    /// low the register never sees a rising edge and must not latch. (What makes a gated clock
+    /// safe when its *select* glitches — the H1 case — is `clk_armed`: the barrier places the
+    /// **global** edge, not a derived one, so a transient could otherwise be read as an edge.
+    /// See `a_clock_hiccup_is_not_a_second_rising_edge`.)
     fn a_gated_clock_latches_only_when_the_gate_passes_it() {
         let build = |en: &str| {
             format!(
@@ -5143,6 +5176,61 @@ mod tests {
             open.named_value("r"),
             Some(k(1, 1)),
             "a gated-open clock must latch"
+        );
+    }
+
+    /// **H1 (`docs/bugs.md` §1) — the derived-clock glitch.** A register's clock reads a
+    /// definite `1`, then a non-level (`X`/`Z`), then `1` again *without ever going low*. The
+    /// recovery is not a rising edge: the clock never went low, so there is nothing to rise
+    /// *from*. Before `clk_armed` this read as a second edge and the register latched twice
+    /// inside one cycle — which is how `submission_374625393` ran off the rails under
+    /// `cs2200-74ls-v1` while passing under `mips-r2000-2um-v1`.
+    ///
+    /// `poke_at` drives the clock pin directly, so the fixture is the rule itself rather than
+    /// a particular converter's tri-state bus.
+    #[test]
+    fn a_clock_hiccup_is_not_a_second_rising_edge() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"zclk","type":"wiring.pin","pos":[0,0],"name":"zclk"}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"inv","type":"gate.not","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"zclk","pin":"pin"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"r","pin":"q"}},"b":{{"comp":"inv","pin":"in"}}}},
+                {{"a":{{"comp":"inv","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
+        }}"##
+        );
+        // `d` = not `q`, so the register toggles on each real edge and a *second* latch inside
+        // the cycle would toggle it straight back — visible in the final value.
+        let mut hiccup = engine(&json, 1000);
+        assert!(hiccup.poke_at("zclk", k(1, 0), 100), "poke 0");
+        assert!(hiccup.poke_at("zclk", k(1, 1), 200), "poke 1");
+        assert!(hiccup.poke_at("zclk", Value::x(1), 300), "poke X");
+        assert!(hiccup.poke_at("zclk", k(1, 1), 400), "poke 1 again");
+        hiccup.run(1).expect("hiccup run");
+        assert_eq!(
+            hiccup.named_value("r"),
+            Some(k(1, 1)),
+            "a `1 -> X -> 1` clock hiccup latches ONCE: the clock never went low, so the \
+             recovery is not a rising edge"
+        );
+        // Control: a genuine low *does* arm the next edge — the rule is not "never latch twice".
+        let mut real = engine(&json, 1000);
+        assert!(real.poke_at("zclk", k(1, 0), 100), "poke 0");
+        assert!(real.poke_at("zclk", k(1, 1), 200), "poke 1");
+        assert!(real.poke_at("zclk", k(1, 0), 300), "poke 0 again");
+        assert!(real.poke_at("zclk", k(1, 1), 400), "poke 1 again");
+        real.run(1).expect("control run");
+        assert_eq!(
+            real.named_value("r"),
+            Some(k(1, 0)),
+            "a real `0 -> 1` between two `1`s is a second edge and must latch"
         );
     }
 

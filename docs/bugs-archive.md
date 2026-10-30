@@ -2204,3 +2204,65 @@ floating select is papered over with a `0`. Compatibility is the graded mode and
 **The decision, if it is taken:** prod reading a floating select as the old tool does (all-`Z`,
 inert) would fix both designs in both modes — compat `212/0`, prod `200/12` — and would not touch
 the `X` rule, which `mux_x_select` pins and which CE has no counterpart for.
+
+## Round — done (2026-10-29): H1, the derived clock's glitch — a rising edge needs a low
+
+**The last table-dependent verdict.** `submission_374625393` passed under
+`mips-r2000-2um-v1` and failed under `cs2200-74ls-v1`, same design, same engine, only
+`settings.delayTable` different:
+
+| mode | table | halt | stop | cycles | `t_obs` |
+|---|---|---|---|---|---|
+| compat | `mips-r2000-2um-v1` | stop | `stable` | 2833 | 135 |
+| compat | `cs2200-74ls-v2` | stop | `stable` | 2835 | 562 |
+| compat | `cs2200-74ls-v1` | stop | `changes` | 18421 | 480 |
+
+**The mechanism, to the end of the chain.** Round 26 had already named the shape — *"a
+transient on a gated clock's select becomes a real second edge"* — and stopped at the select.
+The full chain is:
+
+```
+c5  (the MAR/IR bus mux, sel = LdMAR)       <- net 38, four tri-state drivers (c106..c109)
+    a hand-off leaves all four disabled          -> the bus is all-Z for a window W
+c69 (splitter) = the opcode = bus[28..31]    -> Z
+c63 (comparator, opcode == 7)                -> eq = Z
+c3  (the clock gate = mux(CLOCK, 0, sel))    -> out = Z      (CE's invalid-select rule)
+    the recovery Z -> 1 is read as a rising edge -> PC/IR latch an extra time
+```
+
+Whether the `Z` survives to the gate is the comparator's `prop` against W — inertial
+cancellation: `mips` 6 vs 4 and `74ls-v2` 26 vs 19 swallow it, `74ls-v1` **15 vs 19 commits
+it**. That is the whole table-dependence, and it is why a *slower* table (`74ls-v2`, 562 ns
+cycles) passes while the flat-50 ns ROM read of `74ls-v1` fails. The engine is delay-aware and
+CE is not: the hand-off is atomic in CE, so the bus is never seen floating.
+
+Earlier analysis on this same submission went two ways that were both wrong, and the
+measurements that refuted them are worth keeping: (1) *a setup race* — instrumenting the
+actual `d`-arrival at each derived register fired `max(rise, last_d + t_setup)` **0 times**
+under `74ls-v1` and once (2 ns) under `mips`; the data is settled >= 51 ns before those
+latches, so no "wait for `d`" rule can move this verdict; (2) *`--compat` reading `Z` as `0`* —
+compat keeps `Z` as `Z` (CE's rule) and production promotes it to `X`; the same float is there
+in both modes, prod just dies sooner (frozen at `PC=2` by cycle 52).
+
+**The fix — `clk_armed`.** A latch requires a `0 -> 1` of the clock's **definite** level; a
+`Z`/`X` delivery on the clock *holds* the level, so it can neither arm nor trigger. The
+recovery from a hiccup is then not an edge. `1 -> Z -> 1` is one edge; `0 -> 1 -> 0 -> 1` is
+still two; a register clocked by a constant still latches once (armed at power-on).
+
+**Measured.**
+
+| table | before | after |
+|---|---|---|
+| `mips-r2000-2um-v1` | PASS 2833, `PC=0x11` | PASS 2833, `PC=0x11` |
+| `cs2200-74ls-v2` | PASS 2835, `PC=0x11` | PASS 2835, `PC=0x11` |
+| `cs2200-74ls-v1` | **FAIL — never halts, 18421** | **PASS 2835, `PC=0x11`** |
+| `ce-zero-delay-v1` | FAIL (tie-break) | FAIL (unchanged — diagnostic) |
+
+All 241 core unit tests + the golden traces are unmoved; the new regression test
+`a_clock_hiccup_is_not_a_second_rising_edge` fails without the rule, and the compat corpus
+stays verdict-neutral (212 both-pass / 0 disagreements / 0 false passes).
+
+**Lesson.** A delay-aware engine's edges are *values*, and a transient is a value. Anything
+that turns a value into an event — a clock, an enable, a reset — has to say what a transient
+means. A clock means *nothing* until it is a level: that is now the rule, and
+`derived-clock.md` §11 pins it.

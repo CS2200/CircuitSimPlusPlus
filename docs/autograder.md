@@ -134,7 +134,7 @@ Self-contained JSON — the circuit travels with the state:
   "version": 3,
   "cycles_run": 500,
   "circuit": {/* the full .csx document */},
-  "state": {/* delay-engine snapshot format version 4 */},
+  "state": {/* delay-engine snapshot format version 5 */},
 }
 ```
 

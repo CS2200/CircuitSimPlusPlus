@@ -18,10 +18,20 @@ the available tables — the engine never guesses or silently defaults.
 > `mips-r2000-2um-v1` (stop, 2834 cycles) and **never stabilises** under `cs2200-74ls-v1`
 > (runs out of cycles). Same design, same engine, only `settings.delayTable` different.
 >
-> The mechanism is that delays decide **values**, not just times: the settle can exceed the
-> period and latch a stale value, an inertial gate swallows a pulse CE would have passed,
-> and a different duration moves where equal timestamps fall for the `(time, seq)`
-> tie-break. CircuitSim CE has no time at all, so every one of these is a divergence.
+> The mechanism is that delays decide **values**, not just times: a transient on a **gated
+> clock's select** could be read as a second rising edge (this is the one that did it — fixed
+> 2026-10-29, below), an inertial gate swallows a pulse CE would have passed, and a different
+> duration moves where equal timestamps fall for the `(time, seq)` tie-break. CircuitSim CE
+> has no time at all, so every one of these is a divergence.
+>
+> **The clock transient is fixed (2026-10-29).** A shared tri-state bus hands off, the gate's
+> select goes `Z` for a window, and whether the comparator's `prop` is shorter than that
+> window decides if it survives — `mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it, `74ls-v1`
+> 15 < 19 committed it and `PC`/`IR` latched an extra time. A rising edge now requires a
+> definite low (`clk_armed`, `derived-clock.md` §11), so all three real tables agree
+> (2833/2835/2835, `PC` halts at `0x11`). The **zero-delay** route remains: with every delay
+> 0 the `(time, seq)` tie-break decides an order CE would not (`ce-zero-delay-v1` is a
+> diagnostic table, not graded).
 >
 > **Consequences for whoever touches this:**
 >
