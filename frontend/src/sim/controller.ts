@@ -288,6 +288,13 @@ export class SimController {
     if (!this.store.loaded) {
       const ok = await this.loadEditedAt(doc, path);
       if (!ok) return { ok: false, errors: [...this.store.loadErrors] };
+    } else {
+      // The document now lives at `path`: remember it, so a later re-sync of a
+      // file-backed document (the live edit re-sync, the waveform's load)
+      // resolves memory autoloads next to the file (§11) instead of against the
+      // process CWD. Without this, Save As left `loadedPath` null and every
+      // re-sync after the save loaded the bytes with no base directory.
+      this.loadedPath = path;
     }
     return this.core.api.saveCircuit(path, doc.data);
   }

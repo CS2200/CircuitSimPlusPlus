@@ -389,20 +389,8 @@ function SubcircuitGroupGlyph({ height }: { height: number }) {
   );
 }
 
-/** Two stacked sheets — the Circuits explorer (§99). */
-function CircuitsGroupGlyph({ height }: { height: number }) {
-  return (
-    <RailGlyph height={height}>
-      <path d="M0.95 0.75 V2.25 H2.55" strokeOpacity={0.5} />
-      <path d="M1.3 0.3 H2.4 L2.95 0.85 V1.85 H1.3 Z" fill="currentColor" fillOpacity={0.08} />
-      <path d="M2.4 0.3 V0.85 H2.95" />
-    </RailGlyph>
-  );
-}
-
 /** Rail glyph for a palette group (Gates, Wiring, …). */
 export function PaletteGroupIcon({ group, height = 26 }: { group: string; height?: number }) {
-  if (group === "Circuits") return <CircuitsGroupGlyph height={height} />;
   if (group === "Wiring") return <WireGroupGlyph height={height} />;
   if (group === "Memory") return <MemoryGroupGlyph height={height} />;
   if (group === "Misc") return <MiscGroupGlyph height={height} />;

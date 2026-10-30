@@ -1,9 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * UI_OVERHAUL §99: closing a tab keeps the circuit (the Circuits explorer reopens
- * it), deleting asks first, a new pin arrives named, and a load error clears on
- * its own once fixed.
+ * Circuits: the sheet tabs, the right-dock hierarchy tree, and deleting.
+ *
+ * The rail used to carry a separate "Circuits" explorer beside the Subcircuits
+ * group — two answers to "which circuits exist". The hierarchy now lives in the
+ * right dock's empty state (`CircuitTree`): every circuit nested from the
+ * simulation root, one click to open a sheet (reopening a closed tab).
  */
 
 async function newSubcircuit(page: Page): Promise<void> {
@@ -14,9 +17,16 @@ async function newSubcircuit(page: Page): Promise<void> {
 const docJson = async (page: Page) =>
   JSON.parse(
     await page.evaluate(() => (window as unknown as { __circuitDoc: () => string }).__circuitDoc()),
-  ) as { circuits: { name: string; components: { type: string; name?: string }[] }[] };
+  ) as {
+    circuits: {
+      name: string;
+      components: { type: string; name?: string; attrs?: Record<string, unknown> }[];
+    }[];
+  };
 
-test("closing a tab keeps the circuit; the explorer reopens it; delete asks", async ({ page }) => {
+const tree = (page: Page) => page.getByRole("tree", { name: "Circuits" });
+
+test("closing a tab keeps the circuit; the tree reopens it; delete asks", async ({ page }) => {
   await page.goto("/");
   await newSubcircuit(page);
   await expect(page.getByRole("tab", { name: "sub1" })).toHaveAttribute("aria-selected", "true");
@@ -27,25 +37,73 @@ test("closing a tab keeps the circuit; the explorer reopens it; delete asks", as
   await expect(page.getByRole("tab", { name: "main" })).toHaveAttribute("aria-selected", "true");
   expect((await docJson(page)).circuits.map((c) => c.name)).toEqual(["main", "sub1"]);
 
-  // The explorer lists it and opens it again.
-  await page.locator('[data-group="Circuits"]').click();
-  const explorer = page.getByRole("tabpanel", { name: "Circuits" });
-  await expect(explorer).toContainText("sub1");
-  await explorer.getByRole("button", { name: /^sub1\b/ }).click();
+  // The circuit tree lists it (nothing places it yet) and opens it again.
+  await expect(tree(page)).toContainText("sub1");
+  await tree(page).getByRole("treeitem", { name: /sub1/ }).click();
   await expect(page.getByRole("tab", { name: "sub1" })).toHaveAttribute("aria-selected", "true");
 
-  // Delete asks; Cancel keeps it, Delete removes it.
-  await page.locator('[data-group="Circuits"]').click();
-  await explorer.getByRole("button", { name: "Delete sub1" }).click();
+  // Delete asks, in the app's own dialog; Cancel keeps it, Delete removes it.
+  await page.getByRole("tab", { name: "sub1" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete…" }).click();
   const ask = page.getByRole("dialog", { name: 'Delete "sub1"?' });
   await ask.getByRole("button", { name: "Cancel" }).click();
   expect((await docJson(page)).circuits).toHaveLength(2);
-  await explorer.getByRole("button", { name: "Delete sub1" }).click();
+
+  await page.getByRole("tab", { name: "sub1" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Delete…" }).click();
   await page
     .getByRole("dialog", { name: 'Delete "sub1"?' })
     .getByRole("button", { name: "Delete" })
     .click();
   expect((await docJson(page)).circuits.map((c) => c.name)).toEqual(["main"]);
+});
+
+test("the tree nests instances from the root, and a node opens its sheet", async ({ page }) => {
+  await page.goto("/");
+  await newSubcircuit(page); // sub1 becomes active
+  await page.getByRole("tab", { name: "main" }).click();
+
+  // Place one instance of sub1 in main, so main → sub1 in the tree.
+  await page.locator('[data-group="Subcircuits"]').click();
+  await page.locator(".palette-group").getByRole("button", { name: "sub1" }).click();
+  const canvas = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (canvas === null) throw new Error("canvas not visible");
+  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+  await page.keyboard.press("Escape");
+  // Deselect so the right dock falls back to the hierarchy tree.
+  await page.mouse.click(canvas.x + 60, canvas.y + 60);
+
+  await expect(tree(page).getByRole("treeitem", { name: /main/ })).toBeVisible();
+  await expect(tree(page).getByRole("treeitem", { name: /sub1/ })).toBeVisible();
+
+  await tree(page).getByRole("treeitem", { name: /sub1/ }).click();
+  await expect(page.getByRole("tab", { name: "sub1" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("renaming a subcircuit retargets its instances", async ({ page }) => {
+  await page.goto("/");
+  await newSubcircuit(page);
+  await page.getByRole("tab", { name: "main" }).click();
+
+  // An instance of sub1 in main.
+  await page.locator('[data-group="Subcircuits"]').click();
+  await page.locator(".palette-group").getByRole("button", { name: "sub1" }).click();
+  const canvas = await page.locator("canvas.circuit-canvas").boundingBox();
+  if (canvas === null) throw new Error("canvas not visible");
+  await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+  await page.keyboard.press("Escape");
+
+  // Rename the definition's tab; the instance must follow (it addresses the
+  // circuit by name, so leaving the old name behind failed the whole file).
+  await page.getByRole("tab", { name: "sub1" }).dblclick();
+  const name = page.getByRole("textbox", { name: "Circuit name" });
+  await name.fill("alu");
+  await name.press("Enter");
+
+  const doc = (await docJson(page)).circuits;
+  expect(doc.map((c) => c.name)).toEqual(["main", "alu"]);
+  const instance = doc[0].components.find((c) => c.type === "subcircuit");
+  expect(instance?.attrs?.circuit).toBe("alu");
 });
 
 test("a placed pin is named, so nothing fails to load", async ({ page }) => {

@@ -2861,3 +2861,31 @@ clippy/fmt clean, `cargo check -p csim-app` green; frontend lint / 463 unit / bu
 e2e green, including a new test for an error on a closed sheet → Fix → name → banner gone.
 The desktop path itself was checked by unit test (the re-sync sends text + path), not by
 driving the native window.
+
+## 101. A definition's rename carries, and the hierarchy is one navigator (2026-10-29)
+
+Two things a student kept hitting, both about the two strings the hierarchy hangs on — a
+circuit's **name** and a port's **name**.
+
+- **A rename retargeted nothing.** A `subcircuit` instance addresses its target by
+  `attrs.circuit`, so renaming a sheet left every instance pointing at the old name and the
+  whole file failed to load ("subcircuit references unknown circuit 'sub1'"). `renameCircuit`
+  now rewrites `attrs.circuit` across the document in the same undo step. The same class of
+  bug lived on the other key: renaming a `wiring.pin` left the parent sheets' wires naming a
+  port that no longer existed ("component 'c3' has no pin 'CLK'"). `updateComponent` now
+  carries a port rename into every instance's wires — and drops them when the name is
+  cleared, mirroring its same-sheet dangling-pin cleanup.
+- **The rail had two answers to "which circuits exist".** A "Circuits" explorer sat beside the
+  "Subcircuits" group, and it was not clear which was the file and which were the definitions
+  to place. The rail now carries only the component groups plus **Subcircuits** (create and
+  place). The circuit **hierarchy** lives in the right dock's empty state — a `CircuitTree`
+  rooted at the simulation root (`main`, else the first circuit), each definition nested under
+  the sheet that places it, `×N` for repeat instances, and a "Not instantiated" list for the
+  definitions the root cannot reach. Clicking a row opens its sheet (reopening a closed tab).
+  The old explorer component, its rail group, its glyph and its CSS are gone; a definition is
+  opened from the tree, while a sheet's tab still renames/closes/deletes from its own menu.
+
+**Acceptance:** frontend lint / 466 unit / build green; e2e 87 green, including a rewritten
+`circuits.spec.ts` (close-and-reopen via the tree, delete-asks, an instance tree, and a sheet
+rename that stays wired). The renames are unit-tested in `model/document.test.ts`; the tree
+derivation in `lib/subcircuit.test.ts`.

@@ -239,11 +239,33 @@ export class CircuitDocument {
     return this.data.circuits.length - 1;
   }
 
+  /**
+   * Rename a circuit (its sheet). This is a **definition** rename: every
+   * `subcircuit` instance addresses its target by name (`attrs.circuit`), so the
+   * instances across the whole document are retargeted in the same undo step.
+   * Without this, renaming a sheet left every instance pointing at the old name
+   * and the file failed to load ("subcircuit references unknown circuit ...").
+   */
   renameCircuit(idx: number, name: string): void {
     const c = this.circuit(idx);
     if (c.name === name) return;
     this.assertCircuitNameFree(name);
-    this.exec(`rename circuit to "${name}"`, undefined, this.replaceCircuit(idx, { ...c, name }));
+    const from = c.name;
+    const circuits = this.data.circuits.map((circ, i) => {
+      if (i === idx) return { ...circ, name };
+      if (
+        !circ.components.some((comp) => comp.type === "subcircuit" && comp.attrs?.circuit === from)
+      ) {
+        return circ;
+      }
+      const components = circ.components.map((comp) =>
+        comp.type === "subcircuit" && comp.attrs?.circuit === from
+          ? { ...comp, attrs: { ...(comp.attrs ?? {}), circuit: name } }
+          : comp,
+      );
+      return { ...circ, components };
+    });
+    this.exec(`rename circuit to "${name}"`, undefined, circuits);
   }
 
   /**
@@ -600,11 +622,58 @@ export class CircuitDocument {
     // that edge (a constant's `out`): the wires glued to it follow (UI_OVERHAUL
     // §56), in this same undo step.
     wires = this.followGeometry(wires, new Set([id]), new Map([[id, updated]]));
-    this.exec(
-      `edit ${id}`,
-      coalesceKey,
-      this.replaceCircuit(circuitIdx, { ...c, components, wires }),
-    );
+    let next = this.replaceCircuit(circuitIdx, { ...c, components, wires });
+    // Renaming a `wiring.pin` renames a PORT on every instance of this circuit;
+    // a parent sheet's wires reach that port by name, so they follow in the same
+    // undo step (naming it empty drops them) — otherwise they dangle and the file
+    // fails to load ("component ... has no pin ...").
+    const oldPin = comp.type === "wiring.pin" ? (comp.name ?? "") : "";
+    const newPin = patch.name ?? oldPin;
+    if (comp.type === "wiring.pin" && oldPin !== "" && oldPin !== newPin) {
+      next = this.retargetInstancePorts(next, c.name, oldPin, newPin);
+    }
+    this.exec(`edit ${id}`, coalesceKey, next);
+  }
+
+  /**
+   * Carry a definition's port rename (`oldPin` → `newPin`) into every sheet that
+   * places an instance of `target`: a wire endpoint on such an instance that names
+   * the old port is rewritten. An empty `newPin` means the port is gone, so those
+   * wires are removed (junction dependents cascade), mirroring the same-circuit
+   * dangling-pin cleanup in `updateComponent`.
+   */
+  private retargetInstancePorts(
+    circuits: CsxCircuit[],
+    target: string,
+    oldPin: string,
+    newPin: string,
+  ): CsxCircuit[] {
+    return circuits.map((circ) => {
+      const instances = new Set(
+        circ.components
+          .filter((x) => x.type === "subcircuit" && x.attrs?.circuit === target)
+          .map((x) => x.id),
+      );
+      if (instances.size === 0) return circ;
+      const reaches = (e: CsxEndpoint): boolean =>
+        isPinEndpoint(e) && instances.has(e.comp) && e.pin === oldPin;
+      if (newPin === "") {
+        const drop = new Set<number>();
+        circ.wires.forEach((w, i) => {
+          if (reaches(w.a) || reaches(w.b)) drop.add(i);
+        });
+        return drop.size === 0 ? circ : { ...circ, wires: removeWiresCascade(circ.wires, drop) };
+      }
+      let touched = false;
+      const wires = circ.wires.map((w) => {
+        const a = reaches(w.a) && isPinEndpoint(w.a) ? { ...w.a, pin: newPin } : w.a;
+        const b = reaches(w.b) && isPinEndpoint(w.b) ? { ...w.b, pin: newPin } : w.b;
+        if (a === w.a && b === w.b) return w;
+        touched = true;
+        return { ...w, a, b };
+      });
+      return touched ? { ...circ, wires } : circ;
+    });
   }
 
   /** Delete components and every wire touching them (with junction cascades). */

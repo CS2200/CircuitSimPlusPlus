@@ -31,7 +31,6 @@ import WaveformView from "./components/WaveformView";
 import HistoryPreview from "./components/HistoryPreview";
 import ClosePrompt, { type CloseChoice } from "./components/ClosePrompt";
 import ConfirmDialog from "./components/ConfirmDialog";
-import CircuitExplorer from "./components/CircuitExplorer";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -392,7 +391,7 @@ export default function App() {
   useEffect(() => closeCanvasMenu(), [sheet, closeCanvasMenu]);
 
   /** The newest `showInWaveform` (declared further down), for the context menu. */
-  const showInWaveformRef = useRef<() => Promise<void>>(async () => {});
+  const showInWaveformRef = useRef<() => void>(() => {});
   /** Run one context-menu item through the editor's public commands (§75). */
   const onCanvasMenuAction = useCallback((action: CanvasMenuAction) => {
     const ed = editorRef.current;
@@ -514,9 +513,10 @@ export default function App() {
   // mutated in place, so there is no identity to memoize on.
   // The rail always carries a Subcircuits group (UI_OVERHAUL §80): a feature you
   // only find after making your first subcircuit is one most people never find, so
-  // the group has an empty state and its own "New subcircuit" button.
-  // "Circuits" (§99) is the explorer: every circuit in the file, open tab or not.
-  const paletteGroups = ["Circuits", ...PALETTE.map((g) => g.group), "Subcircuits"];
+  // the group has an empty state and its own "New subcircuit" button. The circuit
+  // *hierarchy* lives in the right dock's empty state (CircuitTree), not a second
+  // rail group — a definition list and its explorer were two answers to one thing.
+  const paletteGroups = [...PALETTE.map((g) => g.group), "Subcircuits"];
   const activePaletteGroup = paletteGroups.includes(paletteGroup) ? paletteGroup : PALETTE[0].group;
 
   // Preference persistence (best-effort; non-fatal without storage).
@@ -736,32 +736,46 @@ export default function App() {
    * ("load a circuit and run the sim first"), which hid the feature exactly
    * when someone went looking for it: now it loads the circuit itself and opens
    * on an empty trace that says to press Tick or Play.
+   *
+   * The viewer is shown **immediately** and the circuit is synced in the
+   * background (the viewer subscribes to the store, so its default rows appear
+   * as soon as the load lands). Syncing first and only then flipping the state
+   * made the button feel dead for the length of a load, and — worse — a second
+   * press started a *second* open whose late resolution re-opened the viewer
+   * after the user had already closed it. That is the "stuck in the waveform"
+   * report: the toggle must be synchronous.
    */
-  const openWaveform = useCallback(async () => {
-    const ok = await sim.resync(doc);
-    if (!ok) {
-      toast("The circuit does not load yet — fix the problems in the banner first");
-      return;
-    }
+  const openWaveform = useCallback(() => {
     setHistoryOpen(false);
+    // A fresh view: don't inherit the signals from an earlier "Show in
+    // waveform" (the viewer unmounts on close, but `waveAdd` outlives it).
+    setWaveAdd(null);
     setWaveOpen(true);
+    void sim.resync(doc).then((ok) => {
+      if (!ok) toast("The circuit does not load yet — the banner has the details");
+    });
   }, [sim, doc, toast]);
 
   /** Open the viewer with the current selection added to it (context menu / Inspector). */
-  const showInWaveform = useCallback(async () => {
-    const ok = await sim.resync(doc);
-    if (!ok) {
-      toast("The circuit does not load yet — fix the problems in the banner first");
-      return;
-    }
-    const signals = pickSelection();
-    if (signals.length === 0) {
-      toast("Nothing to trace there — select a wire, or a part with an output");
-      return;
-    }
-    setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
+  const showInWaveform = useCallback(() => {
+    // Show the viewer at once; the picked signal is added once the circuit is
+    // synced (the viewer consumes `waveAdd` whenever it arrives). Drop any
+    // previous pick first, so reopening never replays stale signals.
     setHistoryOpen(false);
+    setWaveAdd(null);
     setWaveOpen(true);
+    void sim.resync(doc).then((ok) => {
+      if (!ok) {
+        toast("The circuit does not load yet — the banner has the details");
+        return;
+      }
+      const signals = pickSelection();
+      if (signals.length === 0) {
+        toast("Nothing to trace there — select a wire, or a part with an output");
+        return;
+      }
+      setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
+    });
   }, [sim, doc, pickSelection, toast]);
   showInWaveformRef.current = showInWaveform;
   /** Click a toast to dismiss: bulge briefly, then remove it. */
@@ -860,13 +874,28 @@ export default function App() {
 
   // ---- file operations (File menu) ----
 
-  /** Replace the editor document (New/Open); the sim engine is re-synced by the caller. */
-  const adoptDoc = useCallback((d: CircuitDocument, path: string | null) => {
-    setDoc(d);
+  /**
+   * Set the document's path in React state AND in `filePathRef`, in the same
+   * tick. Async work reads the ref (version-history/recovery keying, the
+   * external-change guard), and `setFilePath` alone leaves it stale until the
+   * next render — so the version an explicit save took was keyed to the
+   * *pre-save* document, and a freshly saved file's history looked empty.
+   */
+  const setFilePathNow = useCallback((path: string | null) => {
+    filePathRef.current = path;
     setFilePath(path);
-    setSheet(0);
-    setClosedSheets(new Set()); // a new file opens with every tab
   }, []);
+
+  /** Replace the editor document (New/Open); the sim engine is re-synced by the caller. */
+  const adoptDoc = useCallback(
+    (d: CircuitDocument, path: string | null) => {
+      setDoc(d);
+      setFilePathNow(path);
+      setSheet(0);
+      setClosedSheets(new Set()); // a new file opens with every tab
+    },
+    [setFilePathNow],
+  );
 
   const confirmDiscard = useCallback(() => {
     if (!doc.dirty) return true;
@@ -877,6 +906,9 @@ export default function App() {
     if (!confirmDiscard()) return;
     sim.unload();
     adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
+    // A fresh document is a fresh session: without a new key it would inherit
+    // the previous unnamed document's recovery copy and version history.
+    docKeyRef.current = newDocKey();
     forgetSavedFileHandle(); // a new document must not overwrite the last file (§38)
     toast("New circuit");
   }, [confirmDiscard, adoptDoc, sim, toast]);
@@ -899,6 +931,10 @@ export default function App() {
       return;
     }
     adoptDoc(d, opened.path ?? opened.name);
+    // A different file is a different session: reset the key so an opened
+    // (path-less) document does not share the previous document's history or
+    // recovery. Path-backed documents key by path anyway.
+    docKeyRef.current = newDocKey();
     forgetSavedFileHandle(); // opened a different file (§38)
     // Engine side: path-load in the shell (autoloads resolve next to the
     // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
@@ -919,7 +955,7 @@ export default function App() {
           return;
         }
         doc.markClean();
-        setFilePath(path);
+        setFilePathNow(path);
         editorRef.current?.refresh(); // re-report the dirty flag
         setSaveState({ kind: "saved", at: Date.now() });
         void discardRecovery(); // the file on disk is now the truth
@@ -935,7 +971,7 @@ export default function App() {
         toast(`Save failed: ${String(err)}`);
       }
     },
-    [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion],
+    [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion, setFilePathNow],
   );
 
   /**
@@ -948,7 +984,7 @@ export default function App() {
       const saved = await saveTextFile(suggested, doc.toJson(), { forcePicker });
       if (!saved) return false; // cancelled — nothing was written
       doc.markClean();
-      setFilePath(doc.name);
+      setFilePathNow(doc.name);
       editorRef.current?.refresh();
       setSaveState({ kind: "saved", at: Date.now() });
       void discardRecovery();
@@ -956,7 +992,7 @@ export default function App() {
       toast(`Saved ${suggested}`);
       return true;
     },
-    [doc, discardRecovery, takeVersion, toast],
+    [doc, discardRecovery, takeVersion, toast, setFilePathNow],
   );
 
   /**
@@ -1067,7 +1103,7 @@ export default function App() {
         }
         void renameCircuitFile(realPath, siblingPath(realPath, `${clean}.csx`))
           .then((next) => {
-            setFilePath(next);
+            setFilePathNow(next);
             diskConflictRef.current = false;
             void recordWriteStat(next);
             void doSave(next); // the file's own `name` field follows
@@ -1083,7 +1119,7 @@ export default function App() {
         toast(`Save failed: ${String(err)}`),
       );
     },
-    [doc, doSave, recordWriteStat, saveInBrowser, toast],
+    [doc, doSave, recordWriteStat, saveInBrowser, toast, setFilePathNow],
   );
 
   // ---- autosave: crash recovery + optional atomic file rewrite -------------
@@ -1688,11 +1724,9 @@ export default function App() {
     [doc, switchSheet],
   );
 
-  /** Open a circuit from the explorer (reopening its tab if closed). */
-  const onOpenSheet = useCallback((idx: number) => switchSheet(idx), [switchSheet]);
-
-  // Whatever brings a closed circuit to the canvas — the explorer, a
-  // double-click into an instance, the scope bar's way back — reopens its tab.
+  // Whatever brings a closed circuit to the canvas — the hierarchy tree, the
+  // tab strip, a double-click into an instance, the scope bar's way back —
+  // reopens its tab.
   useEffect(() => {
     const name = doc.circuits[sheet]?.name;
     if (name === undefined || !closedSheets.has(name)) return;
@@ -2297,28 +2331,7 @@ export default function App() {
                     }}
                   />
                 </label>
-                {paletteResults === null && activePaletteGroup === "Circuits" ? (
-                  <>
-                    <div className="palette-group-title">Circuits</div>
-                    <CircuitExplorer
-                      entries={doc.circuits.map((c, i) => ({
-                        name: c.name,
-                        parts: c.components.length,
-                        note: i === 0 ? "" : usedByText(doc.circuits, c.name),
-                      }))}
-                      active={sheet}
-                      hidden={hiddenSheets}
-                      onOpen={onOpenSheet}
-                      onClose={onCloseSheet}
-                      onRename={(i) => {
-                        switchSheet(i);
-                        onRenameSheet(i);
-                      }}
-                      onDelete={onDeleteSheet}
-                      onNew={onNewSheet}
-                    />
-                  </>
-                ) : paletteResults !== null ? (
+                {paletteResults !== null ? (
                   <>
                     <div className="palette-group-title">
                       {paletteResults.length === 0

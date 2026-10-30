@@ -136,7 +136,10 @@ export default function WaveformView({
     });
   }, [defaults]);
 
-  // "Show in waveform": add the requested signals (once per request).
+  // "Show in waveform": add the requested signals (once per request). The
+  // opener clears `add` synchronously before showing the viewer, so a stale
+  // pick from a previous open can never be present at mount — only a new `seq`
+  // (which arrives once the circuit is synced) adds rows.
   const lastAddSeq = useRef(0);
   useEffect(() => {
     if (add === null || add.seq === lastAddSeq.current) return;

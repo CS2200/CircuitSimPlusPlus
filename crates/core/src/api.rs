@@ -379,8 +379,8 @@ pub struct TimingPath {
 /// Event: DTA timing results (DESIGN.md §4.4), emitted after `run_until` and
 /// on pause. `t_obs` is the derived **period** — the maximum rise-to-rise interval, i.e.
 /// `depth + setup` (`docs/derived-clock.md` §3) — in delay-table
-/// units (ns); `est_time` is `cycles × t_obs` (saturating); `violations` is
-/// `top_paths` are the observed critical paths for UI highlighting.
+/// units (ns); `est_time` is `cycles × t_obs` (saturating); `top_paths` are
+/// the observed critical paths for UI highlighting.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimingUpdate {
     /// The derived period in delay-table units (ns): `depth + setup`.

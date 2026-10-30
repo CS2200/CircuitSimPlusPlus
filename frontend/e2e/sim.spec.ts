@@ -296,6 +296,16 @@ test("waveform: one click from the transport, the View menu or a right-click (§
   await page.getByRole("button", { name: "Back to the circuit" }).click();
   await expect(page.locator(".wave-view")).toHaveCount(0);
 
+  // Toggling is synchronous and repeatable. Syncing the circuit *before*
+  // flipping the state left a second press's `resync` to re-open the viewer
+  // after the user had closed it — the "stuck in the waveform" report.
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole("button", { name: "Waveform viewer" }).click();
+    await expect(page.locator(".wave-view")).toBeVisible();
+    await page.getByRole("button", { name: "Back to the circuit" }).click();
+    await expect(page.locator(".wave-view")).toHaveCount(0);
+  }
+
   // The View menu carries it too.
   await page.getByRole("button", { name: "View", exact: true }).click();
   await page.getByRole("menuitem", { name: "Waveform viewer" }).click();
