@@ -747,6 +747,9 @@ export default function App() {
    */
   const openWaveform = useCallback(() => {
     setHistoryOpen(false);
+    // A fresh view: don't inherit the signals from an earlier "Show in
+    // waveform" (the viewer unmounts on close, but `waveAdd` outlives it).
+    setWaveAdd(null);
     setWaveOpen(true);
     void sim.resync(doc).then((ok) => {
       if (!ok) toast("The circuit does not load yet — the banner has the details");
@@ -756,8 +759,10 @@ export default function App() {
   /** Open the viewer with the current selection added to it (context menu / Inspector). */
   const showInWaveform = useCallback(() => {
     // Show the viewer at once; the picked signal is added once the circuit is
-    // synced (the viewer consumes `waveAdd` whenever it arrives).
+    // synced (the viewer consumes `waveAdd` whenever it arrives). Drop any
+    // previous pick first, so reopening never replays stale signals.
     setHistoryOpen(false);
+    setWaveAdd(null);
     setWaveOpen(true);
     void sim.resync(doc).then((ok) => {
       if (!ok) {
@@ -901,6 +906,9 @@ export default function App() {
     if (!confirmDiscard()) return;
     sim.unload();
     adoptDoc(initDoc(CircuitDocument.create("untitled")), null);
+    // A fresh document is a fresh session: without a new key it would inherit
+    // the previous unnamed document's recovery copy and version history.
+    docKeyRef.current = newDocKey();
     forgetSavedFileHandle(); // a new document must not overwrite the last file (§38)
     toast("New circuit");
   }, [confirmDiscard, adoptDoc, sim, toast]);
@@ -923,6 +931,10 @@ export default function App() {
       return;
     }
     adoptDoc(d, opened.path ?? opened.name);
+    // A different file is a different session: reset the key so an opened
+    // (path-less) document does not share the previous document's history or
+    // recovery. Path-backed documents key by path anyway.
+    docKeyRef.current = newDocKey();
     forgetSavedFileHandle(); // opened a different file (§38)
     // Engine side: path-load in the shell (autoloads resolve next to the
     // file, DESIGN.md §5.2); bytes-load in the browser/mock. Failures land
