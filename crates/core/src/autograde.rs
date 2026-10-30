@@ -608,6 +608,21 @@ pub struct AssertionResult {
     pub expected: String,
 }
 
+/// A clocked part whose `clk` pin rose more than once inside one cycle (`docs/bugs.md` §1).
+///
+/// This is the delay-aware engine's one structural difference from CircuitSim CE: CE coalesces
+/// a transient within a round and never delivers it, we deliver every change, so a clock that
+/// hiccups can latch an extra time — which is what makes a verdict depend on the timing table.
+/// The field is a *diagnostic*: it changes no verdict, it makes the dependence visible.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClockGlitch {
+    /// The cycle in which the clock rose twice (1-based; the cycle that just ended).
+    pub cycle: u64,
+    /// The part, rendered as its label when it has one (`PC`, `IR`), else its document
+    /// identity (`c0/c7`).
+    pub component: String,
+}
+
 /// The JSON report (§8.2). Simulation-derived fields are bit-identical
 /// across runs/machines; `wall_time_ms`/`peak_rss_bytes` are telemetry.
 ///
@@ -649,6 +664,11 @@ pub struct Report {
     pub delay_table: String,
     /// Determinism hash of the event trace (§4.6); delay mode only.
     pub trace_hash: Option<u64>,
+    /// Clocked parts whose clock rose more than once inside one cycle — a glitch, and the
+    /// reason a design's verdict can move with the delay table (`docs/bugs.md` §1). Empty on a
+    /// clean run, and omitted from the JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub clock_glitches: Vec<ClockGlitch>,
     /// §8.3 rubric hook; `None` when no threshold was given.
     pub rubric_full_credit: Option<bool>,
     /// Load/validation errors when `halt_reason` is `"malformed-file"`;
@@ -658,6 +678,17 @@ pub struct Report {
     pub peak_rss_bytes: Option<u64>,
     /// Wall-clock duration of the run (telemetry — varies by machine).
     pub wall_time_ms: u64,
+}
+
+/// Render a flat component for a message: its label when it has one, else its document identity.
+fn render_comp(nl: &Netlist, id: CompId) -> String {
+    let c = &nl.comps[id.idx()];
+    let base = c.name.clone().unwrap_or_else(|| c.def_id.clone());
+    if c.inst_path.is_empty() {
+        base
+    } else {
+        format!("{}/{}", c.inst_path, base)
+    }
 }
 
 /// Map a flat (engine) observed path to contract [`TimingPath`]s: split
@@ -771,6 +802,7 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 top_paths: Vec::new(),
                 delay_table: table_name.to_string(),
                 trace_hash: None,
+                clock_glitches: Vec::new(),
                 rubric_full_credit: None,
                 errors,
                 peak_rss_bytes: peak_rss_bytes(),
@@ -1015,6 +1047,7 @@ fn grade_delay(
         top_paths: Vec::new(),
         trace_hash: 0,
         events_processed: 0,
+        clock_glitches: Vec::new(),
     };
     while remaining > 0 && halt.is_none() {
         let chunk = remaining.min(RUN_CHUNK);
@@ -1095,6 +1128,14 @@ fn grade_delay(
             .collect(),
         delay_table: format!("{} ({})", table.name(), table.status()),
         trace_hash: Some(eng.trace_hash()),
+        clock_glitches: last_report
+            .clock_glitches
+            .iter()
+            .map(|&(cycle, id)| ClockGlitch {
+                cycle,
+                component: render_comp(&nl, id),
+            })
+            .collect(),
         rubric_full_credit: cfg.rubric_full_credit_below.map(|t| est_time < t),
         errors: Vec::new(),
         peak_rss_bytes: peak_rss_bytes(),

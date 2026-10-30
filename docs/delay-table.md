@@ -29,9 +29,17 @@ the available tables — the engine never guesses or silently defaults.
 > window decides if it survives — `mips` 6 > 4 and `74ls-v2` 26 > 19 swallow it, `74ls-v1`
 > 15 < 19 committed it and `PC`/`IR` latched an extra time. A rising edge now requires a
 > definite low (`clk_armed`, `derived-clock.md` §11), so all three real tables agree
-> (2833/2835/2835, `PC` halts at `0x11`). The **zero-delay** route remains: with every delay
-> 0 the `(time, seq)` tie-break decides an order CE would not (`ce-zero-delay-v1` is a
-> diagnostic table, not graded).
+> (2833/2835/2835, `PC` halts at `0x11`).
+>
+> What remains is not a timing value at all. CircuitSim CE is a round-based fixed-point iteration
+> that delivers a net's *settled* value once per round; we deliver every change, so a clock that
+> returns to `1` **inside one instant** is two edges for us and one for CE. Every delay `0` puts a
+> whole cycle's changes on one instant, which is why `ce-zero-delay-v1` still differs and why no
+> table fixes it (`ce-zero-delay-v1` is a diagnostic table, not graded).
+>
+> **And it is now *visible*.** A design with such a clock is reported as `clock_glitches` on the
+> report (`docs/bugs.md` §1, `docs/derived-clock.md` §12). Check it before blaming a table: an
+> empty list means this engine saw no such edge; a non-empty one names the parts and cycles.
 >
 > **Consequences for whoever touches this:**
 >

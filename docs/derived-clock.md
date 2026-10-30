@@ -340,7 +340,7 @@ clk→Q, setup 2 — all in `crates/core/data/mips-r2000-2um-v1.json`).
 
 | # | property | how | status |
 |---|---|---|---|
-| H1 | the **same verdict under any delay table** | corpus: `374625393` under all four tables | **mostly done 2026-10-29**: the *glitch* route is fixed — a rising edge now requires a definite low (`clk_armed`, §11), so `cs2200-74ls-v1` halts at 2835 cycles (`PC=0x11`) exactly like `cs2200-74ls-v2`/`mips-r2000-2um-v1`, where it used to run out of cycles (18421). The mechanism was a transient on the **gated clock's select** (a tri-state bus hand-off -> comparator -> gate -> `Z -> 1` read as a second edge; the comparator's `prop` vs the window is what made it table-dependent). What remains is the `(time, seq)` tie-break at **zero** delay, which is a diagnostic table and not graded — see `docs/bugs-archive.md` |
+| H1 | the **same verdict under any delay table** | corpus: `374625393` under all four tables | **mostly done 2026-10-29**: the *glitch* route is fixed — a rising edge now requires a definite low (`clk_armed`, §11), so `cs2200-74ls-v1` halts at 2835 cycles (`PC=0x11`) exactly like `cs2200-74ls-v2`/`mips-r2000-2um-v1`, where it used to run out of cycles (18421). The mechanism was a transient on the **gated clock's select** (a tri-state bus hand-off -> comparator -> gate -> `Z -> 1` read as a second edge; the comparator's `prop` vs the window is what made it table-dependent). What remains is that a clock returning to `1` **inside one instant** is two edges for us and one for CE (which coalesces a round): this is now *surfaced* by `clock_glitches` (§12, `docs/bugs.md` §1) — 60 entries over 20 parts under `ce-zero-delay-v1`, 0 on all three real tables |
 | H2 | a pulse narrower than `t_pd` is swallowed by us and **passed by CE** | **done**: `a_narrow_pulse_survives_a_wire_but_not_a_gate` — the wire half agrees with CE, the gate half is where we differ, and the test says so | known divergence, pinned |
 
 ### I. Fixtures to replace, not repair
@@ -397,3 +397,29 @@ register taking an edge on an enable that has not arrived yet, settle-point samp
 next lever.
 
 **State.** `clk_armed` is part of the savestate (format version 5).
+
+## 12. The clock-glitch diagnostic (2026-10-29)
+
+A diagnostic, not a behaviour: `clock_glitches` on the report lists the clocked parts whose `clk`
+pin rose **twice at one instant** in a cycle, as `{cycle, component}`. It changes no verdict and
+nothing acts on it.
+
+**Why it exists.** `clk_armed` (§11) closed the `Z`-recovery route, but the deeper difference from
+CircuitSim CE remains and cannot be closed by a table. CE is a round-based, coalescing fixed-point
+iteration — `Simulator.step()` moves a dirty *set* one wave at a time and `LinkState.propagate()`
+notifies a port only when the value it *received* changed — so a signal that changes several times
+inside one round is delivered **once**, with the value the net settled to. We deliver every change,
+because that is what being delay-aware means (the derived period comes from it). So a `1 -> 0 -> 1`
+inside one instant is genuinely **two rising edges** for us. That is what still fails
+`ce-zero-delay-v1` on `374625393`: 60 double-rise entries over 20 parts there, 0 on all three real
+tables, where the verdicts agree (`docs/bugs.md` §1).
+
+**Why "twice at one instant" and not "more than once a cycle".** The first version counted rises
+per cycle and was **wrong**: this design's `PC` clock is a *gated* clock the microcode opens and
+closes mid-phase, so it legitimately rises more than once per global cycle — the per-cycle rule lit
+up ~20 parts on *every* table, `mips` included. Two rises at one instant is the part CE's
+coalescing would have removed, and it is silent on a clean or merely mid-phase-reclocked design.
+
+**The real fix** is §1's: separate *transport* (when a value arrives — keep the time) from
+*decision* (take the settled level, once per drain). That is a core change; this is the cheap half
+that makes the condition visible in the meantime.

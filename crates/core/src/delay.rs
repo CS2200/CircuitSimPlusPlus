@@ -173,6 +173,12 @@ pub struct RunReport {
     pub trace_hash: u64,
     /// Total events applied over the run.
     pub events_processed: u64,
+    /// Clocked parts whose `clk` pin rose **more than once inside one cycle**, as
+    /// `(cycle, part)` — the design's clock glitched. This is the delay-aware engine's one
+    /// structural difference from CircuitSim CE, which never delivers a same-round transient
+    /// (`docs/bugs.md` §1). It is a diagnostic: it changes no verdict, it only makes a
+    /// timing-table-dependent design visible.
+    pub clock_glitches: Vec<(u64, CompId)>,
 }
 
 /// Event payload. Ordering is (time, seq) via `Ev`.
@@ -322,6 +328,9 @@ struct DelaySnap {
     net_cause: Vec<Option<(u32, Option<u32>)>>,
     net_ever_driven: Vec<bool>,
     clk_armed: Vec<bool>,
+    clk_rise_time: Vec<Option<u64>>,
+    clk_rises: Vec<u32>,
+    clock_glitches: Vec<(u64, CompId)>,
     pending_gen: Vec<u64>,
     pending_val: Vec<Vec<crate::api::WireValue>>,
     pending_cause: Vec<Option<u32>>,
@@ -621,6 +630,13 @@ pub struct DelayEngine {
     /// Precomputed once: the `EvKind::Clock` arm used to rescan every component
     /// on every edge, which is 2 × cycles × components of pure filtering.
     clock_comps: Vec<u32>,
+    /// Per clocked part: the time of its most recent rising edge, and how many it has had at
+    /// that same instant. Two rises on one instant is two edges where CircuitSim CE's round
+    /// would deliver one — the design's clock glitched (`clock_glitches`, `docs/bugs.md` §1).
+    clk_rise_time: Vec<Option<u64>>,
+    clk_rises: Vec<u32>,
+    /// Clocked parts that rose twice at one instant, as `(cycle, part)` (the diagnostic).
+    clock_glitches: Vec<(u64, CompId)>,
     /// Per clocked part (register/RAM): its `clk` pin has been seen at a *definite* low since
     /// the last latch — so the next definite high is a genuine rising edge. A `Z`/`X` on the
     /// clock holds this as it is: it is a hiccup (a floating value that a circuit without time
@@ -995,6 +1011,9 @@ impl DelayEngine {
             implicit_clk,
             clock_comps,
             clk_armed: vec![true; n],
+            clk_rise_time: vec![None; n],
+            clk_rises: vec![0; n],
+            clock_glitches: Vec::new(),
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
             pending_cause: vec![None; n],
@@ -1233,15 +1252,16 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 5: the clock-arming state (`clk_armed`,
-    /// `docs/derived-clock.md` §11). Version 4 was per-sink views (F14); the setup/hold tracker
+    /// (§4.6 — see the test). Snapshot version 6: the clock-arming state and the clock-glitch
+    /// diagnostic (`docs/derived-clock.md` §11, `docs/bugs.md` §1). Version 4 was per-sink
+    /// views (F14); the setup/hold tracker
     /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
     /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 5,
+            version: 6,
             clock_start: self.clock_start,
             now: self.now,
             seq: self.seq,
@@ -1277,6 +1297,9 @@ impl DelayEngine {
             net_cause: self.net_cause.clone(),
             net_ever_driven: self.net_ever_driven.clone(),
             clk_armed: self.clk_armed.clone(),
+            clk_rise_time: self.clk_rise_time.clone(),
+            clk_rises: self.clk_rises.clone(),
+            clock_glitches: self.clock_glitches.clone(),
             pending_gen: self.pending_gen.clone(),
             pending_val: self
                 .pending_val
@@ -1295,7 +1318,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 5 {
+        if snap.version != 6 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.clock_start != self.clock_start {
@@ -1313,7 +1336,9 @@ impl DelayEngine {
             && snap.net_scheduled.len() == n_nets
             && snap.net_cause.len() == n_nets
             && snap.net_ever_driven.len() == n_nets
-            && snap.clk_armed.len() == n_comps;
+            && snap.clk_armed.len() == n_comps
+            && snap.clk_rise_time.len() == n_comps
+            && snap.clk_rises.len() == n_comps;
         if !shape_ok {
             return Err("snapshot does not match this circuit".to_string());
         }
@@ -1368,6 +1393,9 @@ impl DelayEngine {
         self.net_cause = snap.net_cause;
         self.net_ever_driven = snap.net_ever_driven;
         self.clk_armed = snap.clk_armed;
+        self.clk_rise_time = snap.clk_rise_time;
+        self.clk_rises = snap.clk_rises;
+        self.clock_glitches = snap.clock_glitches;
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
         self.pending_net_cause = snap.pending_net_cause;
@@ -2190,6 +2218,7 @@ impl DelayEngine {
             top_paths: self.top_paths.clone(),
             trace_hash: self.trace_hash,
             events_processed: self.events_processed,
+            clock_glitches: self.clock_glitches.clone(),
         })
     }
 
@@ -2753,6 +2782,24 @@ impl DelayEngine {
         }
     }
 
+    /// Record a rising edge on a clocked part's `clk` pin. Two rises at the **same instant** are
+    /// two edges where CircuitSim CE — a round-based, coalescing fixed-point iteration — would
+    /// deliver one, because every change in a round collapses to the value the net settled to.
+    /// That is this engine's one structural difference from CE, and it is what lets a design's
+    /// verdict depend on the delay table (`docs/bugs.md` §1). Recorded, never acted on.
+    fn note_clock_rise(&mut self, c: usize, now: u64) {
+        if self.clk_rise_time[c] == Some(now) {
+            self.clk_rises[c] += 1;
+            if self.clk_rises[c] == 2 {
+                self.clock_glitches
+                    .push((self.rising_seen, CompId(c as u32)));
+            }
+        } else {
+            self.clk_rise_time[c] = Some(now);
+            self.clk_rises[c] = 1;
+        }
+    }
+
     /// Apply one event (the queue's minimum).
     fn apply(&mut self, ev: Ev) -> Result<(), Halt> {
         self.now = ev.time;
@@ -3031,6 +3078,7 @@ impl DelayEngine {
                         Bit::Zero => self.clk_armed[c] = true,
                         Bit::One if self.clk_armed[c] => {
                             self.clk_armed[c] = false;
+                            self.note_clock_rise(c, time);
                             self.arrive_together(c, slot, net);
                             self.clock_edge(comp, time)?;
                         }
@@ -3055,6 +3103,7 @@ impl DelayEngine {
                         Bit::Zero => self.clk_armed[c] = true,
                         Bit::One if self.clk_armed[c] => {
                             self.clk_armed[c] = false;
+                            self.note_clock_rise(c, time);
                             self.arrive_together(c, slot, net);
                             self.clock_edge(comp, time)?;
                         }
@@ -5231,6 +5280,72 @@ mod tests {
             real.named_value("r"),
             Some(k(1, 0)),
             "a real `0 -> 1` between two `1`s is a second edge and must latch"
+        );
+    }
+
+    /// **The clock-glitch diagnostic (`docs/bugs.md` §1), the bookkeeping rule.** Two rising
+    /// edges on one clocked part at the **same instant** are one entry; two at different instants
+    /// are not a glitch (a gated clock legitimately re-clocks mid-phase, and a divided clock rises
+    /// every other cycle). The end-to-end case is a converted CPU under `ce-zero-delay-v1`:
+    /// 60 entries over 20 parts, on the one table whose verdict differs.
+    #[test]
+    fn a_second_rise_at_the_same_instant_is_one_glitch_entry() {
+        let mut eng = engine(
+            &format!(
+                r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}}
+            ], "wires": []}}]
+        }}"##
+            ),
+            1000,
+        );
+        eng.note_clock_rise(0, 5);
+        eng.note_clock_rise(0, 5);
+        eng.note_clock_rise(0, 5);
+        assert_eq!(
+            eng.clock_glitches,
+            vec![(eng.rising_seen, CompId(0))],
+            "two rises at one instant is exactly one entry, however many repeats follow"
+        );
+        eng.note_clock_rise(0, 9);
+        assert_eq!(
+            eng.clock_glitches.len(),
+            1,
+            "a later rise is a new instant, not a glitch"
+        );
+    }
+
+    /// **The clock-glitch diagnostic (`docs/bugs.md` §1), the false-positive guard.** A register
+    /// clocked by the global clock rises once a cycle, at a different instant each time — nothing
+    /// to report. (A *gated* clock re-clocking mid-phase must also stay silent: this is the case
+    /// that made a per-cycle "one rise" rule unusable.)
+    #[test]
+    fn a_clean_clock_reports_no_glitch() {
+        let clean = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"and","type":"gate.and","pos":[0,0]}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"clk","pin":"out"}},"b":{{"comp":"and","pin":"in0"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"and","pin":"in1"}}}},
+                {{"a":{{"comp":"and","pin":"out"}},"b":{{"comp":"r","pin":"clk"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"d"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&clean, 1000);
+        let rep = eng.run(5).expect("clean run");
+        assert!(
+            rep.clock_glitches.is_empty(),
+            "a gated clock that follows the global clock must not be reported: {:?}",
+            rep.clock_glitches
         );
     }
 
