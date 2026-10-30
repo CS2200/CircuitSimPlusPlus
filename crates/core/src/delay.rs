@@ -128,8 +128,6 @@
 //! timestamp and the cap below still fires on it.
 
 use std::borrow::Cow;
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
@@ -228,33 +226,158 @@ struct Ev {
     kind: EvKind,
 }
 
-/// The event queue: a binary heap of *indices* into an event slab.
+/// Radix-heap buckets: bucket 0 for `time == last`, bucket `msd(time ^ last) + 1`
+/// for the rest — so `64 + 1` (an element can differ from `last` in any of the
+/// 64 bits). The `+ 1` is essential: `msd(x ^ last) == 0` (differ only in bit 0)
+/// is *not* the same as `x == last`.
+const RADIX_BUCKETS: usize = 65;
+
+/// The event queue: a **monotone radix heap** over `time`, with slab payloads.
 ///
-/// The original shape was a `BTreeMap<u64, [VecDeque<Ev>; 2]>` — one bucket per
-/// timestamp — which gave amortized `O(1)` same-timestamp push/pop but allocated
-/// (and freed) a fresh `VecDeque` for every *distinct* timestamp, so a design
-/// whose event times are mostly unique paid a `malloc`/`free` per event plus a
-/// B-tree insert/remove per bucket.
+/// The history, because each shape was chosen for a measured reason:
+/// * `BTreeMap<u64, [VecDeque<Ev>; 2]>` — one bucket per timestamp; `O(1)`
+///   same-timestamp, but a `malloc`/`free` per *distinct* timestamp.
+/// * `BinaryHeap` of `(time, prio, seq, idx)` + a slab — no per-timestamp
+///   allocation, but every sift is `O(log n)` comparisons and swaps.
+/// * this — a radix heap. The **derived clock drains the queue to quiescence
+///   before it timestamps the next transition**, so events are always scheduled
+///   at `now + delay >= now`: the queue is *monotone* (its minimum never
+///   decreases). A radix heap is the structure for exactly that, giving
+///   amortized `O(1)` push and pop (no comparisons, no `O(log n)` sift) and
+///   `O(1)` `peek`.
 ///
-/// A plain `BinaryHeap<Ev>` removes the per-timestamp allocation, but every sift
-/// then moves the whole `Ev` (~56 bytes) up and down the heap; at course scale
-/// that is gigabytes of `memmove` per run. So the heap holds only the ordering
-/// key `(time, prio, seq)` plus a `u32` slot index (a 32-byte element), and the
-/// `Ev` payloads live in a slab that is reused via a free list. The ordering is
-/// identical — `(time, prio, seq)` is a total order, `seq` being globally unique
-/// — and `peek` stays `O(1)`.
-#[derive(Debug, Default)]
+/// Keys are `time`; ties break by priority class then insertion order (`seq`,
+/// monotonic). Each bucket keeps **two FIFO lists** (priority 0 then 1), so those
+/// tie-breaks need no extra structure. Buckets hold `u32` indices into a reused
+/// `Ev` slab, so a redistribution moves four-byte indices, not whole events.
+///
+/// A radix heap needs every inserted key `>= last`. Engine inserts from a
+/// component's outputs are (`time = now + delay >= now`), but two rare sources
+/// are not: a **testbench poke** (`poke_at`, an absolute past time) and a
+/// **deferred clock** (`settle_cycle` re-queues an already-seen edge). Those go
+/// to `early`, a tiny list scanned linearly on consume — there are a handful at
+/// most, and the hot path (the cascade) stays a radix heap.
+///
+/// Invariant: when the radix part is non-empty, bucket 0 (`time == last`) holds
+/// its minimum.
+#[derive(Debug)]
 struct EventQueue {
-    heap: BinaryHeap<Reverse<(u64, u8, u64, u32)>>,
+    /// `buckets[i][p]`: slab indices in insertion order whose key's most
+    /// significant differing bit from `last` is `i`, priority class `p`.
+    buckets: Box<[[Vec<u32>; 2]; RADIX_BUCKETS]>,
+    /// Consumed prefix of each FIFO (only bucket 0 is ever consumed from).
+    heads: [[u32; 2]; RADIX_BUCKETS],
+    /// Events with `time < last` (testbench pokes, deferred clocks); linear scan.
+    early: Vec<u32>,
     slab: Vec<Option<Ev>>,
     free: Vec<u32>,
+    /// The radix origin: the last extracted (or promoted) key.
+    last: u64,
+    /// Live events in `buckets` (excludes `early`).
+    radix_len: usize,
+    /// Live events total.
+    len: usize,
+}
+
+impl Default for EventQueue {
+    fn default() -> Self {
+        EventQueue {
+            buckets: Box::new(std::array::from_fn(|_| [Vec::new(), Vec::new()])),
+            heads: [[0; 2]; RADIX_BUCKETS],
+            early: Vec::new(),
+            slab: Vec::new(),
+            free: Vec::new(),
+            last: 0,
+            radix_len: 0,
+            len: 0,
+        }
+    }
+}
+
+/// The `(time, prio, seq)` total order — the queue's sort key.
+#[inline]
+fn ev_key(ev: &Ev) -> (u64, u8, u64) {
+    (ev.time, ev.prio, ev.seq)
+}
+
+/// Most significant differing bit of a non-zero `u64` (0..=63).
+#[inline]
+fn radix_msd(x: u64) -> usize {
+    debug_assert!(x != 0);
+    (63 - x.leading_zeros()) as usize
+}
+
+/// The bucket for a key relative to the radix origin `last` (`time >= last`):
+/// bucket 0 when equal, else `msd(time ^ last) + 1`.
+#[inline]
+fn radix_bucket(time: u64, last: u64) -> usize {
+    if time == last {
+        0
+    } else {
+        radix_msd(time ^ last) + 1
+    }
 }
 
 impl EventQueue {
+    /// Has any unconsumed element in bucket `i`, class `p`?
     #[inline]
-    fn push(&mut self, ev: Ev) {
-        let key = (ev.time, ev.prio, ev.seq);
-        let idx = match self.free.pop() {
+    fn head_lt(&self, i: usize, p: usize) -> bool {
+        (self.heads[i][p] as usize) < self.buckets[i][p].len()
+    }
+
+    #[inline]
+    fn b0_empty(&self) -> bool {
+        !self.head_lt(0, 0) && !self.head_lt(0, 1)
+    }
+
+    fn bucket_empty(&self, i: usize) -> bool {
+        !self.head_lt(i, 0) && !self.head_lt(i, 1)
+    }
+
+    /// Materialize the minimum into bucket 0. Called at the **start** of a
+    /// consume (`peek`/`pop`), never after: the radix origin may only advance to
+    /// a key that future inserts cannot undercut. After a consume, `last` is the
+    /// key just consumed, so the next event's inserts — all at `now >= last` —
+    /// are legal. Promoting *after* a pop would set `last` to the next minimum,
+    /// which the next event's own (earlier-timestamped) outputs would undershoot.
+    ///
+    /// Each element is redistributed a bounded number of times (once per bit as
+    /// `last` climbs), which is what makes consume amortized `O(1)`.
+    fn promote(&mut self) {
+        if self.radix_len == 0 || !self.b0_empty() {
+            return;
+        }
+        let Some(i) = (1..RADIX_BUCKETS).find(|&i| !self.bucket_empty(i)) else {
+            return;
+        };
+        // New origin: the minimum key in bucket `i`.
+        let mut m = u64::MAX;
+        for p in 0..2 {
+            for &idx in &self.buckets[i][p] {
+                let t = self.slab[idx as usize].as_ref().expect("live slot").time;
+                if t < m {
+                    m = t;
+                }
+            }
+        }
+        self.last = m;
+        // Buckets >= 1 are never consumed from, so `heads[i]` is 0 and the whole
+        // list is live.
+        for p in 0..2 {
+            let items = std::mem::take(&mut self.buckets[i][p]);
+            self.heads[i][p] = 0;
+            for idx in items {
+                let ev = self.slab[idx as usize].as_ref().expect("live slot");
+                let b = radix_bucket(ev.time, self.last);
+                let pp = usize::from(ev.prio.min(1));
+                self.buckets[b][pp].push(idx);
+            }
+        }
+    }
+
+    #[inline]
+    fn alloc_slab(&mut self, ev: Ev) -> u32 {
+        match self.free.pop() {
             Some(i) => {
                 self.slab[i as usize] = Some(ev);
                 i
@@ -263,37 +386,110 @@ impl EventQueue {
                 self.slab.push(Some(ev));
                 (self.slab.len() - 1) as u32
             }
-        };
-        self.heap.push(Reverse((key.0, key.1, key.2, idx)));
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, ev: Ev) {
+        let (time, prio) = (ev.time, usize::from(ev.prio.min(1)));
+        let idx = self.alloc_slab(ev);
+        if time < self.last {
+            self.early.push(idx); // below the radix origin: rare (pokes/deferred)
+        } else {
+            let b = radix_bucket(time, self.last);
+            self.buckets[b][prio].push(idx);
+            self.radix_len += 1;
+        }
+        self.len += 1;
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.heap.len()
+        self.len
     }
 
     fn is_empty(&self) -> bool {
-        self.heap.is_empty()
+        self.len == 0
     }
 
     #[inline]
-    fn peek(&self) -> Option<&Ev> {
-        let Reverse((_, _, _, idx)) = self.heap.peek()?;
-        self.slab[*idx as usize].as_ref()
+    fn b0_front(&self) -> u32 {
+        let p = usize::from(!self.head_lt(0, 0));
+        self.buckets[0][p][self.heads[0][p] as usize]
+    }
+
+    /// The slab index of the smallest `early` event, if any.
+    fn early_min(&self) -> Option<u32> {
+        self.early
+            .iter()
+            .copied()
+            .min_by_key(|&i| ev_key(self.slab[i as usize].as_ref().expect("live slot")))
+    }
+
+    /// Index of the overall minimum: `true` when it is in `early`, plus its slab
+    /// index. Assumes `len > 0`.
+    fn min_index(&mut self) -> (bool, u32) {
+        let early = self.early_min();
+        if self.radix_len == 0 {
+            return (true, early.expect("non-empty"));
+        }
+        if self.b0_empty() {
+            self.promote();
+        }
+        let ridx = self.b0_front();
+        match early {
+            Some(eidx)
+                if ev_key(self.slab[eidx as usize].as_ref().unwrap())
+                    < ev_key(self.slab[ridx as usize].as_ref().unwrap()) =>
+            {
+                (true, eidx)
+            }
+            _ => (false, ridx),
+        }
+    }
+
+    /// The minimum event, promoting it into bucket 0 if needed — hence `&mut`.
+    /// Callers copy what they need and drop the borrow before mutating the engine.
+    #[inline]
+    fn peek(&mut self) -> Option<&Ev> {
+        if self.len == 0 {
+            return None;
+        }
+        let (is_early, idx) = self.min_index();
+        let _ = is_early;
+        self.slab[idx as usize].as_ref()
     }
 
     #[inline]
     fn pop(&mut self) -> Option<Ev> {
-        let Reverse((_, _, _, idx)) = self.heap.pop()?;
+        if self.len == 0 {
+            return None;
+        }
+        let (is_early, idx) = self.min_index();
+        if is_early {
+            let pos = self
+                .early
+                .iter()
+                .position(|&x| x == idx)
+                .expect("early index present");
+            self.early.swap_remove(pos);
+        } else {
+            let p = usize::from(!self.head_lt(0, 0));
+            self.heads[0][p] += 1;
+            if !self.head_lt(0, p) {
+                self.buckets[0][p].clear();
+                self.heads[0][p] = 0;
+            }
+            self.radix_len -= 1;
+        }
         let ev = self.slab[idx as usize].take().expect("slab slot is live");
         self.free.push(idx);
+        self.len -= 1;
         Some(ev)
     }
 
     fn iter(&self) -> impl Iterator<Item = &Ev> {
-        self.heap
-            .iter()
-            .map(move |r| self.slab[r.0 .3 as usize].as_ref().expect("live slot"))
+        self.slab.iter().filter_map(|e| e.as_ref())
     }
 
     fn into_vec(self) -> Vec<Ev> {
@@ -2134,12 +2330,13 @@ impl DelayEngine {
         if let Some(h) = &self.halted {
             return Err(h.clone());
         }
-        loop {
-            let Some(ev) = self.queue.peek() else {
-                return Ok(());
+        while let Some(ev) = self.queue.peek() {
+            let kind = match &ev.kind {
+                EvKind::Clock { phase } => Some(EvKind::Clock { phase: *phase }),
+                _ => None,
             };
-            if matches!(ev.kind, EvKind::Clock { .. }) {
-                let (due, kind) = (ev.time, ev.kind.clone());
+            let due = ev.time;
+            if let Some(kind) = kind {
                 self.queue.pop();
                 if self.queue.is_empty() {
                     self.apply_transition_now(due, kind)
@@ -2152,6 +2349,7 @@ impl DelayEngine {
             let ev = self.queue.pop().expect("peeked");
             self.apply(ev).inspect_err(|h| self.record_halt(h))?;
         }
+        Ok(())
     }
 
     /// Settle everything queued BEFORE the next clock edge — i.e. let an
@@ -2167,7 +2365,8 @@ impl DelayEngine {
         // it would leave an interactive poke unsettled — which is this function's whole job.
         let mut deferred: Vec<Ev> = Vec::new();
         while let Some(ev) = self.queue.peek() {
-            if matches!(ev.kind, EvKind::Clock { .. }) {
+            let is_clock = matches!(ev.kind, EvKind::Clock { .. });
+            if is_clock {
                 deferred.push(self.queue.pop().expect("peeked"));
                 continue;
             }
@@ -2187,11 +2386,15 @@ impl DelayEngine {
             return Err(h.clone());
         }
         while let Some(ev) = self.queue.peek() {
-            if ev.time >= t {
+            let due = ev.time;
+            let kind = match &ev.kind {
+                EvKind::Clock { phase } => Some(EvKind::Clock { phase: *phase }),
+                _ => None,
+            };
+            if due >= t {
                 break;
             }
-            if matches!(ev.kind, EvKind::Clock { .. }) {
-                let (due, kind) = (ev.time, ev.kind.clone());
+            if let Some(kind) = kind {
                 if self.transition_time(due, &kind) >= t {
                     break; // it lands at or after `t`: leave it for the caller
                 }
@@ -2213,15 +2416,15 @@ impl DelayEngine {
     fn run_inner(&mut self, cycles: u64) -> Result<RunReport, Halt> {
         let target = self.rising_seen + cycles;
         let mut run_cycles = 0;
+        // Copy what each iteration needs and let the queue borrow end immediately: every path
+        // below mutates the engine. (`peek` is `&mut` because a radix heap promotes its
+        // minimum lazily, at the point of consume.)
         while let Some(ev) = self.queue.peek() {
-            // Copy what this iteration needs and let the queue borrow end here: every path
-            // below mutates the engine.
             let due = ev.time;
             let is_rising = matches!(ev.kind, EvKind::Clock { phase: true });
-            let kind = if matches!(ev.kind, EvKind::Clock { .. }) {
-                Some(ev.kind.clone())
-            } else {
-                None
+            let kind = match &ev.kind {
+                EvKind::Clock { phase } => Some(EvKind::Clock { phase: *phase }),
+                _ => None,
             };
             if is_rising {
                 if self.rising_seen == target {
@@ -6159,6 +6362,53 @@ mod tests {
         eng.run(3)
             .expect("a watcher cannot consume a floating value");
         assert!(eng.halted().is_none());
+    }
+
+    /// The radix heap must pop in exactly `(time, prio, seq)` order — the whole
+    /// determinism story rests on it.
+    #[test]
+    fn radix_queue_preserves_key_order() {
+        use super::{Ev, EvKind, EventQueue};
+
+        fn key(ev: &Ev) -> (u64, u8, u64) {
+            (ev.time, ev.prio, ev.seq)
+        }
+
+        // Deterministic pseudo-random times (sparse: gaps force promotions),
+        // both priorities, insertion order = `seq`.
+        let mut seed = 0x1234_5678_9abc_def0u64;
+        let mut items: Vec<(u64, u8)> = Vec::new();
+        for _ in 0..2000 {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let time = (seed >> 13) % 5000;
+            let prio = ((seed >> 7) & 1) as u8;
+            items.push((time, prio));
+        }
+        let mut q = EventQueue::default();
+        for (seq, (time, prio)) in items.iter().enumerate() {
+            q.push(Ev {
+                time: *time,
+                prio: *prio,
+                seq: seq as u64,
+                kind: EvKind::Clock { phase: false },
+            });
+        }
+        let mut want: Vec<(u64, u8, u64)> = items
+            .iter()
+            .enumerate()
+            .map(|(seq, (t, p))| (*t, *p, seq as u64))
+            .collect();
+        want.sort();
+        let mut got: Vec<(u64, u8, u64)> = Vec::new();
+        while let Some(ev) = q.pop() {
+            got.push(key(&ev));
+        }
+        assert_eq!(got.len(), want.len(), "count");
+        for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+            assert!(g == w, "first mismatch at pop #{i}: got {g:?} want {w:?}");
+        }
     }
 }
 
