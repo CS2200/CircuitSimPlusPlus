@@ -197,5 +197,69 @@ Keeping this list saves the next person from re-deriving it.
   Reducing per-event cost pays; reducing *cycle* count does not exist as a lever.
 * `Arc<Value>` sharing was introduced to avoid deep-copying `Value` into every sink view;
   with `Value` now inline-small the trade-off has changed (see "left on the table").
-* The corpus wall time is mostly **harness** (Python conversion + process spawns), not the
-  engine — see the transpiler doc before promising a corpus speed-up.
+* The corpus end-to-end cost is **engine-bound** (~90% is `csim run`; conversion +
+  `validate` + the name-probe are the rest), so engine work is the lever — not the harness.
+  (An earlier note here said the opposite; the stage timings in the transpiler doc's
+  `corpus_bench` table correct it.)
+
+---
+
+## 8. Recorded profile & benchmark numbers
+
+Snapshot **2026-10-30**, post-optimization, on the machine used throughout (a 4-core/8-SMT
+i5-1135G7). Recorded so a future agent does not have to re-derive the baseline.
+
+### Engine hot symbols
+
+`perf record -F 9999 -g` on `csim run tests/fixtures/pipeline5.csx --cycles 100000`
+(release), flat, `--no-children`:
+
+| % | symbol | what |
+|--:|---|---|
+| 24.1 | `DelayEngine::apply` | the event dispatch; self-time is the `Fire`/`Deliver` arms |
+| 8.1 | `BinaryHeap::pop` | event queue |
+| 7.9 | `eval_and_schedule` | evaluate a part + schedule its commit |
+| 5.8 | `EventQueue::push` | event queue (slab) |
+| 4.5 | `EventQueue::pop` | event queue (slab) |
+| 4.5 | `Vec<Arc<Value>>::from_iter` (eval) | per-eval input list (`Arc` clones) |
+| 4.1 | `clock_edge` | register/RAM edge path |
+| 3.8 | `Value::bit` | clock/enable bit reads |
+| 3.3 | `Vec<Arc<Value>>::from_iter` (clock) | per-edge input list (`Arc` clones) |
+| 3.0 | `Behavior::eval_with` | the component behaviours |
+| 2.7 + 2.3 | `malloc` + `cfree` | allocations |
+| (tail) | `Value::clone`, `rising_edge_inner`, `clock_delivery`, `resolve*`, … | |
+
+The two biggest actionable buckets are **the event queue (~18% together)** and **the
+per-event `Arc`/`Value` traffic** (the `from_iter` rows + `Arc::new` inside `apply` + the
+`malloc`/`free`), which is why those are §7's "left on the table". The synthetic probe
+(`pipeline_100k_cycles`, ignored) is the quick relative check.
+
+### Corpus: new vs old (measured)
+
+Full 357-submission corpus (transpiler `tools/`); **normalize both sides** for concurrency
+(6 `csim` workers = 1.53×, 4 JVMs = 1.57× on this box — the factors nearly cancel):
+
+| | new (whole path) | new (sim only) | old (measured) |
+|---|--:|--:|--:|
+| raw as-run | 1227 s | 1096 s | 7035 s |
+| normalized | 802 s (13.4 min) | 716 s (11.9 min) | 4481 s (74.7 min) |
+| **speed-up** | — | — | **5.6× whole / 6.3× sim** |
+
+Old side: 335/357 ran (one fresh JVM each), median 18.9 s, max 408 s. New synthetic probe:
+266 ms / 9.4 Mevents/s. Fixture `pipeline5`, 100k cycles: ~2.3 s.
+
+### Where the raw artifacts are
+
+Under `/tmp/opencode/` (regenerate rather than rely on them surviving):
+
+| file | what |
+|---|---|
+| `perf-final.data`, `perf-final.txt` | the engine profile above (`perf report -i … --stdio --no-children`) |
+| `perfcli5.data`, `perf.data`, `perf2.data`, `perf3.data` | earlier profiles (pre/post each change) |
+| `corpus-bench.json` | `corpus_bench.py` output (new timings + old sample + verdict diff) |
+| `old-autograder-all.json` | all-357 old-autograder timings |
+| `timings.md`, `timings-normalized.md` | the old-vs-new comparison |
+| `corpus-new-compat.json`, `corpus-head-prod.json`, `corpus-new-prod.json` | corpus verdict reports |
+
+The corpus tooling and its own guide live in the transpiler repo:
+`circuitsim-transpiler/docs/05-corpus-benchmarking.md`.
