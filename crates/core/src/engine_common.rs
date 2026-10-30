@@ -270,12 +270,9 @@ pub(crate) fn resolve(
     let drivers = &net_drivers[net.idx()];
     match drivers.as_slice() {
         [] => Value::z(n.width),
-        [(c, slot)] => drives[*c as usize][*slot].clone(),
+        [(c, slot)] => drives[*c as usize][*slot],
         many => {
-            let vals: Vec<Value> = many
-                .iter()
-                .map(|&(c, s)| drives[c as usize][s].clone())
-                .collect();
+            let vals: Vec<Value> = many.iter().map(|&(c, s)| drives[c as usize][s]).collect();
             let merged = Value::contention_merge(n.width, &vals);
             // `CSIM_DEBUG_SHORTS=1`: name every net whose `X` came from drivers that
             // disagree — a short. CE throws `ShortCircuitException` on one, so a short we
@@ -349,7 +346,7 @@ pub(crate) fn resolve_except_visible<'a>(
         if !netlist.driver_visible(net, &netlist.comps[c as usize].inst_path, reader_path) {
             continue;
         }
-        acc.push(drives[c as usize][slot].clone());
+        acc.push(drives[c as usize][slot]);
     }
     match acc.len() {
         0 => Cow::Owned(Value::z(n.width)),
@@ -384,7 +381,7 @@ pub(crate) fn resolve_except<'a>(
                 let mut acc: Vec<Value> = Vec::with_capacity(drivers.len());
                 for &(c2, slot2) in drivers {
                     if c2 != except {
-                        acc.push(drives[c2 as usize][slot2].clone());
+                        acc.push(drives[c2 as usize][slot2]);
                     }
                 }
                 return Cow::Owned(Value::contention_merge(n.width, &acc));

@@ -1695,7 +1695,7 @@ impl DelayEngine {
 
     /// Current resolved value of a net.
     pub fn net_value(&self, net: NetId) -> Value {
-        self.net_values[net.idx()].clone()
+        self.net_values[net.idx()]
     }
 
     /// True when `net`'s drivers genuinely disagree — two enabled drivers
@@ -1710,7 +1710,7 @@ impl DelayEngine {
         let n = &self.netlist.nets[net.idx()];
         let vals: Vec<Value> = drivers
             .iter()
-            .map(|&(c, s)| self.drives[c as usize][s].clone())
+            .map(|&(c, s)| self.drives[c as usize][s])
             .collect();
         Value::contention_merge_detail(n.width, &vals).1
     }
@@ -1728,7 +1728,7 @@ impl DelayEngine {
                     .iter()
                     .enumerate()
                     .find(|(_, p)| p.dir == crate::components::PinDir::In)?;
-                Some(self.views[ci][slot].as_ref().clone())
+                Some(*self.views[ci][slot].as_ref())
             }
             NamedKind::Ram | NamedKind::Rom => None,
         }
@@ -2017,7 +2017,7 @@ impl DelayEngine {
                 let nidx = n.idx();
                 let drivers: Vec<Value> = self.net_drivers[nidx]
                     .iter()
-                    .map(|&(d, sl)| self.drives[d as usize][sl].clone())
+                    .map(|&(d, sl)| self.drives[d as usize][sl])
                     .collect();
                 let (_, shorted) =
                     Value::contention_merge_detail(self.netlist.nets[nidx].width, &drivers);
@@ -3186,7 +3186,7 @@ impl DelayEngine {
                         self.note_net_width_mismatch(net.0, comp, outs[i].width(), want);
                         outs[i] = outs[i].fitted(want);
                     }
-                    self.drives[c][*slot] = outs[i].clone();
+                    self.drives[c][*slot] = outs[i];
                     if !affected.contains(&net.0) {
                         affected.push(net.0);
                     }
@@ -3204,7 +3204,7 @@ impl DelayEngine {
                     // for this net, not the currently applied one (see
                     // `net_scheduled` field docs).
                     if *resolved != self.net_scheduled[net as usize] {
-                        self.net_scheduled[net as usize] = (*resolved).clone();
+                        self.net_scheduled[net as usize] = *resolved;
                         // The shared "latest" slot applies at the earliest
                         // sink's arrival; each sink pin's *view* is
                         // delivered at its own path delay (F14). The same
@@ -3257,7 +3257,7 @@ impl DelayEngine {
                                     ) {
                                         continue;
                                     }
-                                    others.push(self.drives[d as usize][sl].clone());
+                                    others.push(self.drives[d as usize][sl]);
                                 }
                                 let (merged, shorted) = Value::contention_merge_detail(
                                     self.netlist.nets[nidx].width,
@@ -3303,7 +3303,7 @@ impl DelayEngine {
                 if !value.is_fully_z() {
                     self.net_ever_driven[n] = true;
                 }
-                self.net_values[n] = (*value).clone();
+                self.net_values[n] = *value;
             }
             EvKind::Deliver {
                 net,
@@ -3338,7 +3338,7 @@ impl DelayEngine {
                 self.react(comp, net, slot as usize, kind, ev.time)?;
             }
             EvKind::Poke { comp, value } => {
-                self.comps[comp as usize].set_pin_value((*value).clone());
+                self.comps[comp as usize].set_pin_value(*value);
                 self.eval_and_schedule(comp, ev.time, None)?;
             }
         }

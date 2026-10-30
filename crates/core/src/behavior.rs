@@ -318,18 +318,14 @@ impl Behavior {
                 is_output: *is_output,
                 value: Value::zero(*bitsize),
             },
-            CompKind::Constant { value, .. } => BehaviorKind::Constant {
-                value: value.clone(),
-            },
+            CompKind::Constant { value, .. } => BehaviorKind::Constant { value: *value },
             CompKind::Clock => BehaviorKind::Clock { phase: false },
             CompKind::Splitter { splits, bus_width } => BehaviorKind::Splitter {
                 splits: splits.clone(),
                 bus_width: *bus_width,
             },
             CompKind::Probe { .. } => BehaviorKind::Probe,
-            CompKind::Breakpoint { value } => BehaviorKind::Breakpoint {
-                value: value.clone(),
-            },
+            CompKind::Breakpoint { value } => BehaviorKind::Breakpoint { value: *value },
             CompKind::Mux {
                 bitsize,
                 select_bits,
@@ -442,7 +438,7 @@ impl Behavior {
             }
             BehaviorKind::Buffer => {
                 consume(ins[0], "in")?;
-                Ok(vec![ins[0].clone()])
+                Ok(vec![*ins[0]])
             }
             BehaviorKind::Gate {
                 op,
@@ -463,7 +459,7 @@ impl Behavior {
                     let bubbled = if negate.contains(&(i as u32)) {
                         v.not()
                     } else {
-                        (*v).clone()
+                        *(*v)
                     };
                     acc = match base {
                         GateOp::And => acc.and(&bubbled),
@@ -485,7 +481,7 @@ impl Behavior {
                     Bit::Zero => Ok(vec![Value::z(*bitsize)]),
                     Bit::One => {
                         consume(data, "in")?;
-                        Ok(vec![data.clone()])
+                        Ok(vec![*data])
                     }
                     // gate = X: it might be conducting — consume the data
                     // conservatively, output unknown.
@@ -501,7 +497,7 @@ impl Behavior {
                     Bit::Zero | Bit::Z => Ok(vec![Value::z(*bitsize)]),
                     Bit::One => {
                         consume(data, "in")?;
-                        Ok(vec![data.clone()])
+                        Ok(vec![*data])
                     }
                     // en = X: the driver might be enabled — consume data
                     // conservatively, output unknown.
@@ -515,10 +511,10 @@ impl Behavior {
                 if *is_output {
                     Ok(vec![]) // observation point
                 } else {
-                    Ok(vec![value.clone()])
+                    Ok(vec![*value])
                 }
             }
-            BehaviorKind::Constant { value } => Ok(vec![value.clone()]),
+            BehaviorKind::Constant { value } => Ok(vec![*value]),
             BehaviorKind::Clock { phase } => Ok(vec![Value::from_u64(1, u64::from(*phase))]),
             BehaviorKind::Splitter { .. } => {
                 unreachable!("splitters evaluate via eval_splitter (bidirectional pins)")
@@ -538,7 +534,7 @@ impl Behavior {
                 if sel.is_fully_known() {
                     let i = sel.to_u64().expect("select fits in u64") as usize;
                     consume(data[i], format!("in{i}"))?;
-                    Ok(vec![data[i].clone()])
+                    Ok(vec![*data[i]])
                 } else {
                     // X select: any input might be selected — consume all.
                     for (i, v) in data.iter().enumerate() {
@@ -550,7 +546,7 @@ impl Behavior {
                         return Ok(vec![Value::z(*bitsize)]);
                     }
                     if data.iter().all(|v| v == &data[0]) {
-                        Ok(vec![data[0].clone()])
+                        Ok(vec![*data[0]])
                     } else {
                         Ok(vec![Value::x(*bitsize)])
                     }
@@ -567,7 +563,7 @@ impl Behavior {
                 if sel.is_fully_known() {
                     let i = sel.to_u64().expect("select fits in u64") as usize;
                     let mut outs = vec![Value::zero(*bitsize); n];
-                    outs[i] = data.clone();
+                    outs[i] = *data;
                     Ok(outs)
                 } else if compat {
                     // CE's `Demultiplexer`: an invalid select pushes all-`Z` on every
@@ -777,13 +773,13 @@ impl Behavior {
             // value in, so that is only the hand-written-doc edge case.
             BehaviorKind::Register { state } => match ins.get(3).map(|rst| rst.bit(0)) {
                 Some(Bit::One) => Ok(vec![Value::zero(state.width())]),
-                _ => Ok(vec![state.clone()]),
+                _ => Ok(vec![*state]),
             },
             BehaviorKind::Ram { bitsize, words, .. } => {
                 let addr = ins[0];
                 consume(addr, "addr")?;
                 Ok(vec![match addr.to_u64() {
-                    Some(a) if (a as usize) < words.len() => words[a as usize].clone(),
+                    Some(a) if (a as usize) < words.len() => words[a as usize],
                     // X in the address, or past-end address (non-power-of-2
                     // depth): data unknown (documented, module header).
                     _ => Value::x(*bitsize),
@@ -793,7 +789,7 @@ impl Behavior {
                 let addr = ins[0];
                 consume(addr, "addr")?;
                 Ok(vec![match addr.to_u64() {
-                    Some(a) if (a as usize) < words.len() => words[a as usize].clone(),
+                    Some(a) if (a as usize) < words.len() => words[a as usize],
                     // An address that is unknown or past the end leaves the ROM **inert**:
                     // CE's `ROM.valueChanged` pushes `new WireValue(dataBits)` — all `Z` —
                     // so it drives nothing and a shared microcode bus stays owned by the
@@ -857,7 +853,7 @@ impl Behavior {
                             if !latch_float {
                                 consume(d, "d")?;
                             }
-                            *state = d.clone();
+                            *state = *d;
                         }
                         Bit::X => {
                             if !latch_float {
@@ -917,7 +913,7 @@ impl Behavior {
                             match addr.to_u64() {
                                 Some(a) if (a as usize) < words.len() => {
                                     words[a as usize] = match we_bit {
-                                        Bit::One => din.clone(),
+                                        Bit::One => *din,
                                         // we = X: the write may have happened.
                                         _ => Value::x(*bitsize),
                                     };
@@ -1638,28 +1634,28 @@ mod tests {
         let out_a = a.eval(&refs(&[k(8, 0xFF), k(1, 1)])).unwrap();
         let out_b = b.eval(&refs(&[k(8, 0x00), k(1, 1)])).unwrap();
         assert_eq!(
-            Value::contention_merge(8, &[out_a[0].clone(), out_b[0].clone()]),
+            Value::contention_merge(8, &[out_a[0], out_b[0]]),
             Value::x(8)
         );
         // Both enabled, agreeing → no contention.
         let out_a = a.eval(&refs(&[k(8, 0xFF), k(1, 1)])).unwrap();
         let out_b = b.eval(&refs(&[k(8, 0xFF), k(1, 1)])).unwrap();
         assert_eq!(
-            Value::contention_merge(8, &[out_a[0].clone(), out_b[0].clone()]),
+            Value::contention_merge(8, &[out_a[0], out_b[0]]),
             k(8, 0xFF)
         );
         // One disabled (drives Z): the other wins.
         let out_a = a.eval(&refs(&[k(8, 0xFF), k(1, 0)])).unwrap();
         let out_b = b.eval(&refs(&[k(8, 0x2A), k(1, 1)])).unwrap();
         assert_eq!(
-            Value::contention_merge(8, &[out_a[0].clone(), out_b[0].clone()]),
+            Value::contention_merge(8, &[out_a[0], out_b[0]]),
             k(8, 0x2A)
         );
         // Both disabled: the bus idles at Z (legal — §4.1).
         let out_a = a.eval(&refs(&[k(8, 0xFF), k(1, 0)])).unwrap();
         let out_b = b.eval(&refs(&[k(8, 0x2A), k(1, 0)])).unwrap();
         assert_eq!(
-            Value::contention_merge(8, &[out_a[0].clone(), out_b[0].clone()]),
+            Value::contention_merge(8, &[out_a[0], out_b[0]]),
             Value::z(8)
         );
     }
@@ -1820,7 +1816,7 @@ mod tests {
         let first_out = p.eval(&refs(&first)).unwrap();
         assert_eq!(first_out[2], k(1, 1));
         let mut second = hit.to_vec();
-        second.push(first_out[2].clone()); // en_in ← stage one's en_out
+        second.push(first_out[2]); // en_in ← stage one's en_out
         assert_eq!(
             p.eval(&refs(&second)).unwrap(),
             vec![k(2, 2), k(1, 1), k(1, 0)]
@@ -1920,14 +1916,14 @@ mod tests {
         for (mode, expect) in cases {
             let sh = mk("arith.shifter", json!({"bitsize": 8, "shift": mode}));
             assert_eq!(
-                sh.eval(&refs(&[v.clone(), k(2, 1)])).unwrap(),
+                sh.eval(&refs(&[v, k(2, 1)])).unwrap(),
                 vec![k(8, expect)],
                 "shift {mode}"
             );
         }
         let sh = mk("arith.shifter", json!({"bitsize": 8}));
         assert_eq!(
-            sh.eval(&refs(&[v.clone(), Value::x(3)])).unwrap(),
+            sh.eval(&refs(&[v, Value::x(3)])).unwrap(),
             vec![Value::x(8)]
         );
         assert_eq!(
@@ -2039,7 +2035,7 @@ mod tests {
         // the same: it slices the bus value it *received*, and the net merge decides.
         assert_eq!(out[2], k(4, 0x0), "lo is driven with the bus's bits");
         assert_eq!(out[1], k(4, 0x0), "hi reads the bus's high nibble");
-        let (merged, contended) = Value::contention_merge_detail(8, &[k(8, 0x00), out[0].clone()]);
+        let (merged, contended) = Value::contention_merge_detail(8, &[k(8, 0x00), out[0]]);
         assert!(merged.has_x(), "0x00 vs 0x0f is a short: {merged:?}");
         assert!(contended);
     }
@@ -2179,7 +2175,7 @@ mod tests {
             vec![k(8, 0)]
         );
         // Only an exact 1 resets (CE tests `== State.ONE`): X/Z leave the value alone.
-        let held = r.register_value().unwrap().clone();
+        let held = *r.register_value().unwrap();
         assert_eq!(
             r.eval(&refs(&reg_ins_rst(k(8, 7), k(1, 1), Value::x(1))))
                 .unwrap(),
@@ -2232,7 +2228,7 @@ mod tests {
         // A register reads a floating enable as enabled, and a floating clk/rst as clear.
         let r = reg();
         let ins = [&Value::z(8), &z1, &z1, &z1];
-        assert_eq!(r.z_compat("en", &z1, &ins), Some(one1.clone()));
+        assert_eq!(r.z_compat("en", &z1, &ins), Some(one1));
         assert_eq!(r.z_compat("rst", &z1, &ins), Some(Value::zero(1)));
         // A gate folds `Z` as 0 while another input bit is definite...
         let g = mk("gate.and", json!({}));

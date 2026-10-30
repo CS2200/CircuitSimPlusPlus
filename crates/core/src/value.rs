@@ -89,7 +89,7 @@ pub enum ValueError {
 }
 
 /// An arbitrary-width four-state logic vector. See module docs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Value {
     width: u32,
     ones: Limbs,
@@ -103,55 +103,48 @@ impl AsRef<Value> for Value {
     }
 }
 
-/// Limb storage: one inline limb for width ≤ 64 (the universal case —
-/// `MAX_BITSIZE` is 32 and multiplier outputs are 64), heap Vec beyond
-/// (the API stays arbitrary-width). Engine hot paths clone `Value`s
-/// constantly; the inline case makes those clones allocation-free
-/// (callgrind on the delay engine showed malloc+free ≈ 30% of runtime,
-/// task B10).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Limb storage: **one inline limb**. A `Value` is `width` bits, and the
+/// engine caps that at 64 — `MAX_BITSIZE` is 32, an adder carries to 33, and the
+/// widest derived pin is a 32-bit multiplier's 64-bit output. So a mask is always
+/// exactly one `u64`, and there is no heap variant.
+///
+/// This is deliberately a single-variant enum (not a bare `u64`) only so the
+/// existing `Deref<Target = [u64]>` and the slice-indexing bit-twiddling keeps
+/// working unchanged; a one-variant enum has the payload's layout, so it costs
+/// 8 bytes and is `Copy`. The old `Heap(Vec<u64>)` variant made *every* `Limbs`
+/// 32 bytes (tag + `Vec`) and every `Value` 104 bytes; now `Value` is 32 bytes and
+/// `Copy`, which is what lets the event/view copies actually be cheap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Limbs {
     Inline(u64),
-    Heap(Vec<u64>),
 }
 
 impl Limbs {
-    /// `n` zero limbs, inline when possible. (`Inline` is exactly one
-    /// limb — a 0-limb slice, for 0-width values, must stay a Vec.)
+    /// `n` zero limbs; `n` is `n_limbs(width)`, so 0 (width 0) or 1 (width ≤ 64).
     fn zeroed(n: usize) -> Limbs {
-        if n == 1 {
-            Limbs::Inline(0)
-        } else {
-            Limbs::Heap(vec![0; n])
-        }
+        assert!(n <= 1, "value width exceeds the 64-bit cap");
+        Limbs::Inline(0)
     }
 
-    /// Wrap an existing limb vector (inline when it fits).
+    /// Wrap an existing limb vector (len ≤ 1).
     fn from_vec(v: Vec<u64>) -> Limbs {
-        if v.len() == 1 {
-            Limbs::Inline(v[0])
-        } else {
-            Limbs::Heap(v)
-        }
+        assert!(v.len() <= 1, "value width exceeds the 64-bit cap");
+        Limbs::Inline(v.first().copied().unwrap_or(0))
     }
 }
 
 impl std::ops::Deref for Limbs {
     type Target = [u64];
     fn deref(&self) -> &[u64] {
-        match self {
-            Limbs::Inline(limb) => std::slice::from_ref(limb),
-            Limbs::Heap(v) => v,
-        }
+        let Limbs::Inline(limb) = self;
+        std::slice::from_ref(limb)
     }
 }
 
 impl std::ops::DerefMut for Limbs {
     fn deref_mut(&mut self) -> &mut [u64] {
-        match self {
-            Limbs::Inline(limb) => std::slice::from_mut(limb),
-            Limbs::Heap(v) => v,
-        }
+        let Limbs::Inline(limb) = self;
+        std::slice::from_mut(limb)
     }
 }
 
@@ -492,6 +485,9 @@ impl Value {
 
     /// Every bit Z (nothing driven at all)?
     pub fn is_fully_z(&self) -> bool {
+        if self.width == 0 {
+            return true; // vacuously (degenerate width)
+        }
         self.zs
             .iter()
             .enumerate()
@@ -653,8 +649,8 @@ impl Value {
             d1.width, d0.width
         );
         match sel.bit(0) {
-            Bit::One => d1.clone(),
-            Bit::Zero => d0.clone(),
+            Bit::One => *d1,
+            Bit::Zero => *d0,
             Bit::X | Bit::Z => {
                 let n = n_limbs(d1.width);
                 let mut ones = vec![0u64; n];
@@ -851,7 +847,7 @@ impl Value {
         );
         assert!(self.width >= 1, "sign_extend: 0-bit value has no sign");
         if width == self.width {
-            return self.clone();
+            return *self;
         }
         let ext = width - self.width;
         let fill = match self.bit(self.width - 1) {
@@ -870,7 +866,7 @@ impl Value {
     /// its pin does not have — the engine reports the disagreement and fits (`docs/bugs-archive.md`).
     pub fn fitted(&self, width: u32) -> Value {
         if self.width == width {
-            return self.clone();
+            return *self;
         }
         if width < self.width {
             self.truncate(width)
@@ -1020,7 +1016,7 @@ impl Value {
     /// per-consumer coalescence of a floating input.
     pub fn z_to(&self, to: Bit) -> Value {
         if !self.has_z() {
-            return self.clone();
+            return *self;
         }
         let bits: Vec<Bit> = (0..self.width)
             .map(|i| match self.bit(i) {
@@ -1288,10 +1284,10 @@ mod tests {
 
     #[test]
     fn add_carry_chain_across_limbs() {
-        // 64-bit boundary carry: (2^64 - 1) + 1 = 2^64 in 128 bits.
-        let (s, c) = k(128, u64::MAX).add(&k(128, 1), false);
-        assert_eq!(s, Value::from_limbs(128, vec![0, 1]));
-        assert_eq!(c, k(1, 0));
+        // Carry out of the top of a full 64-bit add.
+        let (s, c) = k(64, u64::MAX).add(&k(64, 1), false);
+        assert_eq!(s, k(64, 0));
+        assert_eq!(c, k(1, 1));
         // Carry out of the top.
         let (s, c) = k(4, 0b1111).add(&k(4, 0b1111), true);
         assert_eq!(s, k(4, 0b1111));
@@ -1335,12 +1331,9 @@ mod tests {
         assert_eq!((q, r), (k(8, 1), k(8, 55)));
         // Divide by zero → None (component maps to X).
         assert!(k(8, 5).div_rem(&k(8, 0)).is_none());
-        // Wide division across limbs: (2^64-1) / 3 = 0x5555...5555 r 0.
-        let (q, r) = k(96, u64::MAX).div_rem(&k(96, 3)).unwrap();
-        assert_eq!(
-            (q, r),
-            (Value::from_limbs(96, vec![u64::MAX / 3]), k(96, 0))
-        );
+        // A full-64-bit dividend: (2^64-1) / 3 = 0x5555...5555 r 0.
+        let (q, r) = k(64, u64::MAX).div_rem(&k(64, 3)).unwrap();
+        assert_eq!((q, r), (k(64, u64::MAX / 3), k(64, 0)));
     }
 
     #[test]
@@ -1349,7 +1342,7 @@ mod tests {
         assert_eq!(k(8, 0).neg(), k(8, 0));
         assert_eq!(k(8, 9).compare(&k(8, 10)), Some(Ordering::Less));
         assert_eq!(k(8, 10).compare(&k(8, 10)), Some(Ordering::Equal));
-        assert_eq!(k(128, 0).compare(&k(128, 1)), Some(Ordering::Less));
+        assert_eq!(k(64, 0).compare(&k(64, 1)), Some(Ordering::Less));
         assert_eq!(Value::x(8).compare(&k(8, 1)), None);
     }
 
@@ -1482,8 +1475,8 @@ mod tests {
             Bit::X,
             Bit::Z,
         ];
-        // Repeat the 8-bit patterns to fill 1, 2, and 3 limbs (width 130).
-        for width in [8usize, 64, 65, 130] {
+        // Repeat the 8-bit patterns to fill the (single) limb and up to 64 bits.
+        for width in [8usize, 64] {
             let a = Value::from_bits(
                 &pat_a
                     .iter()
@@ -1558,7 +1551,7 @@ mod tests {
         // One driver, wrong width: the net is unknown.
         assert!(Value::contention_merge(1, std::slice::from_ref(&wide)).has_x());
         // With a well-formed driver beside it: still unknown, still no panic.
-        let merged = Value::contention_merge(1, &[narrow.clone(), wide.clone()]);
+        let merged = Value::contention_merge(1, &[narrow, wide]);
         assert!(merged.has_x(), "a mismatched driver makes the net unknown");
         assert_eq!(
             merged.width(),
@@ -1631,11 +1624,11 @@ mod tests {
         assert_eq!(bits(&m), vec![Bit::X, Bit::One]);
         assert_canonical(&m);
 
-        // Wide: two full 100-bit buses contending on every bit.
-        let a = Value::all_ones(100);
-        let b = Value::zero(100);
-        let m = Value::contention_merge(100, &[a, b]);
-        assert_eq!(m, Value::x(100));
+        // Wide: two full 64-bit buses contending on every bit.
+        let a = Value::all_ones(64);
+        let b = Value::zero(64);
+        let m = Value::contention_merge(64, &[a, b]);
+        assert_eq!(m, Value::x(64));
         assert_canonical(&m);
     }
 
@@ -1647,9 +1640,9 @@ mod tests {
         let e = v.zero_extend(64);
         assert_eq!(e.width(), 64);
         assert_eq!(e.to_u64(), Some(0xB));
-        let e = v.zero_extend(130);
-        assert_eq!(e.width(), 130);
-        for i in 0..130 {
+        let e = v.zero_extend(64);
+        assert_eq!(e.width(), 64);
+        for i in 0..64 {
             assert_eq!(e.bit(i), if i < 4 { v.bit(i) } else { Bit::Zero });
         }
         assert_canonical(&e);
@@ -1670,23 +1663,19 @@ mod tests {
         assert_eq!(v.truncate(4).to_u64(), Some(0xB));
         assert_eq!(v.truncate(8), v);
 
-        // extract, including across limb boundaries.
-        let mut pat = vec![Bit::Zero; 100];
+        // extract, up to the 64-bit cap.
+        let mut pat = vec![Bit::Zero; 64];
         pat[50] = Bit::One;
         pat[63] = Bit::X;
-        pat[64] = Bit::Z;
-        pat[89] = Bit::One;
         let v = Value::from_bits(&pat);
-        let e = v.extract(50, 40);
-        assert_eq!(e.width(), 40);
+        let e = v.extract(50, 14);
+        assert_eq!(e.width(), 14);
         assert_eq!(e.bit(0), Bit::One);
         assert_eq!(e.bit(13), Bit::X);
-        assert_eq!(e.bit(14), Bit::Z);
-        assert_eq!(e.bit(39), Bit::One);
-        assert_eq!(e.bit(20), Bit::Zero);
+        assert_eq!(e.bit(7), Bit::Zero);
         assert_canonical(&e);
-        assert_eq!(v.extract(0, 100), v);
-        assert_eq!(v.extract(99, 1), Value::zero(1));
+        assert_eq!(v.extract(0, 64), v);
+        assert_eq!(v.extract(0, 1), Value::zero(1));
 
         // concat: states preserved, high/low placement, cross-limb.
         let hi = Value::from_u64(8, 0xAB);
@@ -1695,21 +1684,21 @@ mod tests {
         let hi = Value::from_bits(&[Bit::X]);
         let lo = Value::from_bits(&[Bit::Z]);
         assert_eq!(bits(&Value::concat(&hi, &lo)), vec![Bit::Z, Bit::X]);
-        let hi = Value::all_ones(70);
-        let lo = Value::zero(60);
+        let hi = Value::all_ones(40);
+        let lo = Value::zero(24);
         let c = Value::concat(&hi, &lo);
-        assert_eq!(c.width(), 130);
-        for i in 0..130 {
+        assert_eq!(c.width(), 64);
+        for i in 0..64 {
             assert_eq!(
                 c.bit(i),
-                if i < 60 { Bit::Zero } else { Bit::One },
+                if i < 24 { Bit::Zero } else { Bit::One },
                 "bit {i}"
             );
         }
         assert_canonical(&c);
         // Round trip through extract.
-        assert_eq!(c.extract(60, 70), Value::all_ones(70));
-        assert_eq!(c.extract(0, 60), Value::zero(60));
+        assert_eq!(c.extract(24, 40), Value::all_ones(40));
+        assert_eq!(c.extract(0, 24), Value::zero(24));
     }
 
     #[test]
@@ -1719,7 +1708,6 @@ mod tests {
         assert_eq!(Value::zero(0).to_u64(), Some(0));
         assert_eq!(Value::x(8).to_u64(), None);
         assert_eq!(Value::z(8).to_u64(), None);
-        assert_eq!(Value::zero(65).to_u64(), None); // too wide
     }
 
     #[test]
@@ -1819,18 +1807,18 @@ mod tests {
         );
         assert_eq!(Value::from_wire_value(&wv, 16).unwrap(), v);
 
-        // Mixed states, crossing a limb boundary.
-        let mut pat = vec![Bit::Zero; 70];
+        // Mixed states, up to the top bit.
+        let mut pat = vec![Bit::Zero; 64];
         pat[0] = Bit::One;
         pat[1] = Bit::X;
         pat[2] = Bit::Z;
-        pat[69] = Bit::One;
+        pat[63] = Bit::One;
         let v = Value::from_bits(&pat);
         let wv = v.to_wire_value();
-        assert_eq!(wv.v, "200000000000000001");
+        assert_eq!(wv.v, "8000000000000001");
         assert_eq!(wv.x, "2");
         assert_eq!(wv.z, "4");
-        assert_eq!(Value::from_wire_value(&wv, 70).unwrap(), v);
+        assert_eq!(Value::from_wire_value(&wv, 64).unwrap(), v);
 
         // All-zero renders as empty masks and parses back.
         let v = Value::zero(32);
@@ -1871,6 +1859,18 @@ mod tests {
             Value::from_bits(&[Bit::One, Bit::X, Bit::Zero, Bit::Z]).to_string(),
             "0bz0x1"
         );
+    }
+
+    #[test]
+    fn value_is_small_and_copy() {
+        // The inline single-limb representation: `Value` must be `Copy` and small
+        // (the old `Limbs::Heap(Vec<u64>)` variant made it 104 bytes and non-Copy,
+        // which is why ``Arc<Value>`` felt necessary and direct copies felt costly).
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<Value>();
+        let sz = std::mem::size_of::<Value>();
+        assert!(sz <= 32, "Value is {sz} bytes; it should be ≤ 32");
+        assert_eq!(sz, 4 + 4 + 3 * std::mem::size_of::<u64>());
     }
 
     #[test]
