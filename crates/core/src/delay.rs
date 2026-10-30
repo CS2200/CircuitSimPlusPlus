@@ -3173,10 +3173,11 @@ impl DelayEngine {
                 if gen != self.pending_gen[c] {
                     return Ok(()); // cancelled (inertial swallow)
                 }
-                let mut outs = std::mem::take(&mut self.pending_val[c]);
-                // Pending committed; make a same-valued placeholder so a
-                // later identical recomputation is a no-op.
-                self.pending_val[c] = outs.clone();
+                // Commit `pending_val[c]` in place: `Value` is `Copy`, so we read
+                // each output out of it (leaving the same value in place, which is
+                // what makes a later identical recomputation a no-op) rather than
+                // `take`-ing and re-`clone`-ing the whole vector — saving an
+                // allocation per commit.
                 let out_pins = std::mem::take(&mut self.cdata[c].out_pins);
                 let mut affected = std::mem::take(&mut self.scratch_affected);
                 affected.clear();
@@ -3186,11 +3187,12 @@ impl DelayEngine {
                     // is *reported* and *fitted* here — the one choke point — so it neither
                     // panics the merge nor spreads (`docs/bugs-archive.md`).
                     let want = self.netlist.comps[c].pins[*slot].width;
-                    if outs[i].width() != want {
-                        self.note_net_width_mismatch(net.0, comp, outs[i].width(), want);
-                        outs[i] = outs[i].fitted(want);
+                    let mut v = self.pending_val[c][i];
+                    if v.width() != want {
+                        self.note_net_width_mismatch(net.0, comp, v.width(), want);
+                        v = v.fitted(want);
                     }
-                    self.drives[c][*slot] = outs[i];
+                    self.drives[c][*slot] = v;
                     if !affected.contains(&net.0) {
                         affected.push(net.0);
                     }
