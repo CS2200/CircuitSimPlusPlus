@@ -128,7 +128,6 @@
 //! timestamp and the cap below still fires on it.
 
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
 use crate::behavior::{Behavior, FloatingRead, Timing};
@@ -197,7 +196,7 @@ enum EvKind {
     /// every `Deliver` event for the same resolution: a net with S sinks used
     /// to clone its `Value` S times into S separate events, and the queue
     /// carried S copies of a 100-byte struct.
-    Net { net: u32, value: Arc<Value> },
+    Net { net: u32, value: Value },
     /// Deliver a resolved net value to one sink pin's view, at that
     /// sink's own path-delay arrival (per-path transport, F14). `kind`
     /// is the precomputed sink-pin classification (avoids a per-event
@@ -207,10 +206,10 @@ enum EvKind {
         comp: u32,
         slot: u32,
         kind: SinkKind,
-        value: Arc<Value>,
+        value: Value,
     },
     /// Drive a root input pin at an absolute time (testbench poking).
-    Poke { comp: u32, value: Arc<Value> },
+    Poke { comp: u32, value: Value },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -651,18 +650,18 @@ impl SnapEv {
             },
             "net" => EvKind::Net {
                 net: self.net,
-                value: Arc::new(value(width_of(self)?)?),
+                value: value(width_of(self)?)?,
             },
             "deliver" => EvKind::Deliver {
                 net: self.net,
                 comp: self.comp,
                 slot: self.slot,
                 kind: self.kind2,
-                value: Arc::new(value(width_of(self)?)?),
+                value: value(width_of(self)?)?,
             },
             "poke" => EvKind::Poke {
                 comp: self.comp,
-                value: Arc::new(value(width_of(self)?)?),
+                value: value(width_of(self)?)?,
             },
             other => return Err(format!("bad snapshot event kind '{other}'")),
         };
@@ -808,10 +807,9 @@ pub struct DelayEngine {
     /// Per-sink-pin views of each net, comp-major in `PinConn` order (like
     /// `drives`): what each input pin has *received* — per-path transport
     /// (F14). Splitter pins don't use views (they read other drivers'
-    /// drive slots directly). `Arc`: every sink on a net receives the *same*
-    /// value, so a delivery stores a shared pointer instead of deep-copying
-    /// the ~100-byte `Value` into each view.
-    views: Vec<Vec<Arc<Value>>>,
+    /// drive slots directly). Stored inline: `Value` is `Copy` and 32 bytes
+    /// (single inline limb), so a delivery stores the value directly.
+    views: Vec<Vec<Value>>,
     net_drivers: Vec<Vec<(u32, usize)>>,
     /// Latest *applied* resolved value per net (observation/probe value;
     /// applied at the earliest sink's arrival).
@@ -1146,16 +1144,13 @@ impl DelayEngine {
         }
         let net_values: Vec<Value> = netlist.nets.iter().map(|n| Value::z(n.width)).collect();
         let net_scheduled = net_values.clone();
-        let views: Vec<Vec<Arc<Value>>> = ec::drive_slots(&netlist)
-            .into_iter()
-            .map(|slots| slots.into_iter().map(Arc::new).collect())
-            .collect(); // all-Z, same shape
-                        // Per-sink path delays (F14): grid units × the table's wire
-                        // constant; min per net for the shared "latest value" slot.
-                        // Per-sink path delays (F14): grid units × the table's wire constant; min per net
-                        // for the shared "latest value" slot. Wire propagation is currently **off** — the
-                        // table ships `wire.num = 0` — so this is 0 everywhere and only component delays
-                        // count (see `timing_table.rs`); the per-path shape is kept for when wires return.
+        let views: Vec<Vec<Value>> = ec::drive_slots(&netlist); // all-Z, same shape
+                                                                // Per-sink path delays (F14): grid units × the table's wire
+                                                                // constant; min per net for the shared "latest value" slot.
+                                                                // Per-sink path delays (F14): grid units × the table's wire constant; min per net
+                                                                // for the shared "latest value" slot. Wire propagation is currently **off** — the
+                                                                // table ships `wire.num = 0` — so this is 0 everywhere and only component delays
+                                                                // count (see `timing_table.rs`); the per-path shape is kept for when wires return.
         let net_sink_delay: Vec<Vec<u64>> = netlist
             .nets
             .iter()
@@ -1305,7 +1300,7 @@ impl DelayEngine {
                 // never got an arrival (a splitter on a loop-driven bus) sat on its initial
                 // `Z` for the whole run while every wire was correct.
                 for sp in &eng.net_sinks[net.idx()] {
-                    eng.views[sp.comp as usize][sp.slot as usize] = Arc::new(Value::zero(width));
+                    eng.views[sp.comp as usize][sp.slot as usize] = Value::zero(width);
                 }
             }
         }
@@ -1601,7 +1596,7 @@ impl DelayEngine {
                 return Err("snapshot view slots do not match".to_string());
             }
             for (slot, wv) in slots.iter().enumerate() {
-                self.views[ci][slot] = Arc::new(values(wv, fc.pins[slot].width)?);
+                self.views[ci][slot] = values(wv, fc.pins[slot].width)?;
             }
         }
         for (i, wv) in snap.net_values.iter().enumerate() {
@@ -2222,7 +2217,7 @@ impl DelayEngine {
             at.max(self.now),
             EvKind::Poke {
                 comp: fc.id.0,
-                value: Arc::new(v),
+                value: v,
             },
         );
         true
@@ -2719,10 +2714,10 @@ impl DelayEngine {
                 None => {
                     // Take owned copies so `eval_reading_unknowns` can substitute the
                     // consumed pin(s) and retry.
-                    let mut ins: Vec<Arc<Value>> = cd
+                    let mut ins: Vec<Value> = cd
                         .in_pins
                         .iter()
-                        .map(|(slot, _)| self.views[c][*slot].clone())
+                        .map(|(slot, _)| self.views[c][*slot])
                         .collect();
                     let beh_ref = beh;
                     let compat = self.compat;
@@ -2849,9 +2844,9 @@ impl DelayEngine {
             .filter(|&&(s, n)| n.idx() == net as usize && s != slot)
             .map(|&(s, _)| s)
             .collect();
-        let value = self.views[c][slot].clone();
+        let value = self.views[c][slot];
         for s in slots {
-            self.views[c][s] = value.clone();
+            self.views[c][s] = value;
         }
     }
 
@@ -2871,11 +2866,11 @@ impl DelayEngine {
     fn eval_reading_unknowns<T: Default>(
         &self,
         c: usize,
-        ins: &mut [Arc<Value>],
+        ins: &mut [Value],
         mut run: impl FnMut(&[&Value]) -> Result<T, FloatingRead>,
     ) -> Result<Option<T>, Halt> {
         for _ in 0..=ins.len() {
-            let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+            let refs: Vec<&Value> = ins.iter().collect();
             match run(&refs) {
                 Ok(outs) => return Ok(Some(outs)),
                 Err(fr) => {
@@ -2887,19 +2882,19 @@ impl DelayEngine {
                     }
                     if self.compat {
                         let repl = {
-                            let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+                            let refs: Vec<&Value> = ins.iter().collect();
                             self.comps[c].z_compat(&fr.pin, refs[i], &refs)
                         };
                         match repl {
                             // CE reads this pin as a definite value: substitute and retry.
-                            Some(v) => ins[i] = Arc::new(v),
+                            Some(v) => ins[i] = v,
                             // CE pushes `Z` on every output (a comparator with an invalid
                             // input, an all-`Z` gate): the caller returns all-`Z`.
                             None => return Ok(None),
                         }
                     } else {
                         // Production: an unknown stays unknown.
-                        ins[i] = Arc::new(ins[i].z_to_x());
+                        ins[i] = ins[i].z_to_x();
                     }
                 }
             }
@@ -3194,29 +3189,25 @@ impl DelayEngine {
                 self.cdata[c].out_pins = out_pins;
                 let cause = (comp, self.pending_cause[c]);
                 for &net in &affected {
-                    let resolved = Arc::new(ec::resolve(
-                        &self.netlist,
-                        &self.net_drivers,
-                        &self.drives,
-                        NetId(net),
-                    ));
+                    let resolved =
+                        ec::resolve(&self.netlist, &self.net_drivers, &self.drives, NetId(net));
                     // Transport: compare against the last *scheduled* value
                     // for this net, not the currently applied one (see
                     // `net_scheduled` field docs).
-                    if *resolved != self.net_scheduled[net as usize] {
-                        self.net_scheduled[net as usize] = *resolved;
+                    if resolved != self.net_scheduled[net as usize] {
+                        self.net_scheduled[net as usize] = resolved;
                         // The shared "latest" slot applies at the earliest
-                        // sink's arrival; each sink pin's *view* is
-                        // delivered at its own path delay (F14). The same
-                        // `resolved` is shared with every delivery — `Arc`
-                        // clone, not a 100-byte `Value` clone per sink.
+                        // sink's arrival; each sink pin's *view* is delivered
+                        // at its own path delay (F14). `Value` is `Copy` and
+                        // 32 bytes, so each delivery gets its own copy — no
+                        // `Arc` handle, no allocation.
                         let nidx = net as usize;
                         let at = ev.time + self.net_min_delay[nidx];
                         self.schedule(
                             at,
                             EvKind::Net {
                                 net,
-                                value: Arc::clone(&resolved),
+                                value: resolved,
                             },
                         );
                         // Causal pointer lands at apply time (below).
@@ -3273,9 +3264,9 @@ impl DelayEngine {
                                 if shorted {
                                     continue;
                                 }
-                                Arc::new(merged)
+                                merged
                             } else {
-                                Arc::clone(&resolved)
+                                resolved
                             };
                             self.schedule(
                                 ev.time + self.net_sink_delay[nidx][i],
@@ -3303,7 +3294,7 @@ impl DelayEngine {
                 if !value.is_fully_z() {
                     self.net_ever_driven[n] = true;
                 }
-                self.net_values[n] = *value;
+                self.net_values[n] = value;
             }
             EvKind::Deliver {
                 net,
@@ -3315,7 +3306,7 @@ impl DelayEngine {
                 // Per-sink transport arrival: update the pin's view, then
                 // notify the sink (F14). DTA settle and setup/hold
                 // tracking happen at the pin's own arrival time.
-                self.views[comp as usize][slot as usize] = Arc::clone(&value);
+                self.views[comp as usize][slot as usize] = value;
                 // `rising_seen > 0`: nothing is measured before the first edge. Under the
                 // derived clock the first edge is deferred until the initial cascade has
                 // settled, so without this the whole boot stretch is measured from
@@ -3338,7 +3329,7 @@ impl DelayEngine {
                 self.react(comp, net, slot as usize, kind, ev.time)?;
             }
             EvKind::Poke { comp, value } => {
-                self.comps[comp as usize].set_pin_value(*value);
+                self.comps[comp as usize].set_pin_value(value);
                 self.eval_and_schedule(comp, ev.time, None)?;
             }
         }
@@ -3370,7 +3361,7 @@ impl DelayEngine {
                 // CE's `PORT_CLEAR` is level-sensitive too (`RAM.java`): while it is
                 // an exact `1` every word is cleared at once, not at the next edge.
                 SinkKind::Rst => {
-                    let rst = self.views[c][slot].clone();
+                    let rst = self.views[c][slot];
                     if !rst.has_z() && rst.bit(0) == Bit::One {
                         self.comps[c].clear_ram();
                     }
@@ -3411,7 +3402,7 @@ impl DelayEngine {
                 // latch the in-flight instruction). CE tests `== State.ONE`, so an
                 // `X`/`Z` reset does not reset (a converted design drives it).
                 SinkKind::Rst => {
-                    let rst = self.views[c][slot].clone();
+                    let rst = self.views[c][slot];
                     if !rst.has_z() && rst.bit(0) == Bit::One {
                         if let Some(w) = self.comps[c].register_value().map(|v| v.width()) {
                             self.comps[c].set_register(Value::zero(w));
@@ -3481,17 +3472,17 @@ impl DelayEngine {
             }
         }
         // A floating data input: take owned copies and substitute (consume rules).
-        let mut ins: Vec<Arc<Value>> = self.cdata[c]
+        let mut ins: Vec<Value> = self.cdata[c]
             .in_pins
             .iter()
-            .map(|(slot, _)| self.views[c][*slot].clone())
+            .map(|(slot, _)| self.views[c][*slot])
             .collect();
         // The edge path reads `d`/`din`, so a `Z` here is a value *about to be stored*.
         // It is read as `X`: a register that samples a floating input holds X, which is
         // the electrical truth (and only surfaces in the verdict if something reads it).
         let mut attempts = 0;
         loop {
-            let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+            let refs: Vec<&Value> = ins.iter().collect();
             // `compat` uses CE's edge (docs/bugs.md): a floating data pin is latched as
             // `Z` rather than promoted to `X`, which no consumer can recover from.
             let edge = if self.compat {
@@ -3514,12 +3505,12 @@ impl DelayEngine {
                     // floating data pin and a register would hold `Z`; the edge path keeps
                     // `X` — a documented limit of this diagnostic.)
                     let repl = if self.compat {
-                        let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+                        let refs: Vec<&Value> = ins.iter().collect();
                         self.comps[c].z_compat(&fr.pin, refs[i], &refs)
                     } else {
                         None
                     };
-                    ins[i] = Arc::new(repl.unwrap_or_else(|| ins[i].z_to_x()));
+                    ins[i] = repl.unwrap_or_else(|| ins[i].z_to_x());
                     if attempts > ins.len() {
                         break;
                     }
@@ -3609,19 +3600,19 @@ impl DelayEngine {
             if !any_z || !candidate {
                 continue;
             }
-            let mut ins: Vec<Arc<Value>> = cd
+            let mut ins: Vec<Value> = cd
                 .in_pins
                 .iter()
-                .map(|(slot, _)| self.views[c][*slot].clone())
+                .map(|(slot, _)| self.views[c][*slot])
                 .collect();
             for (v, &(_, net)) in ins.iter_mut().zip(cd.in_pins.iter()) {
                 if v.has_z()
                     && (self.net_ever_driven[net.idx()] || !self.netlist.nets[net.idx()].floating)
                 {
-                    *v = Arc::new(Value::zero(v.width()));
+                    *v = Value::zero(v.width());
                 }
             }
-            let ins_refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
+            let ins_refs: Vec<&Value> = ins.iter().collect();
             match beh.eval_with(&ins_refs, self.compat) {
                 Ok(_) => {}
                 Err(fr) => {
