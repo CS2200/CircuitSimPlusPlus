@@ -428,6 +428,15 @@ impl EventQueue {
     /// Index of the overall minimum: `true` when it is in `early`, plus its slab
     /// index. Assumes `len > 0`.
     fn min_index(&mut self) -> (bool, u32) {
+        // Fast path: `early` (testbench pokes / deferred clocks) is almost always
+        // empty, so skip its scan and the key comparisons entirely.
+        if self.early.is_empty() {
+            debug_assert!(self.radix_len > 0, "non-empty queue, empty early");
+            if self.b0_empty() {
+                self.promote();
+            }
+            return (false, self.b0_front());
+        }
         let early = self.early_min();
         if self.radix_len == 0 {
             return (true, early.expect("non-empty"));
