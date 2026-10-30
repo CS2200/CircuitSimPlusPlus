@@ -2631,12 +2631,11 @@ impl DelayEngine {
             outs
         } else {
             // Each input pin reads its own *view* of its net (per-path
-            // transport, F14).
-            let mut ins: Vec<Arc<Value>> = cd
-                .in_pins
-                .iter()
-                .map(|(slot, _)| self.views[c][*slot].clone())
-                .collect();
+            // transport, F14), **by reference**: the common case is that every
+            // input has arrived, so the part evaluates straight off the views
+            // with no per-evaluation clone at all. Only a consumed unknown needs
+            // owned copies (to substitute), below.
+            //
             // Combinational parts wait until every input has *arrived*
             // (module docs, §4.1). A `Z` view on a DRIVERLESS net can
             // never arrive — it is passed through so the behavior's
@@ -2659,6 +2658,7 @@ impl DelayEngine {
             // the cycle-close sweep exists to tell apart from a real floating
             // read (`floating_sweep`, the never-driven oracle).
             let mut first_eval: Option<Vec<Value>> = None;
+            let mut wait_net: Option<NetId> = None;
             if matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
                 // A `Z` may only stall the part if the part would *read* it: ask the
                 // behavior's own consume table (`eval`). A `Z` it never reads — a mux's
@@ -2670,34 +2670,42 @@ impl DelayEngine {
                 // input through. `floating_sweep` already states this oracle — "muxes
                 // consume only the selected input, disabled buffers nothing".
                 //
-                // A memory's asynchronous read path is the one exception: it waits on its
-                // `addr` only (`din`/`we`/`clk` are edge inputs and must not stall a read),
-                // so for RAM/ROM the pin is named directly rather than asked of `eval`.
-                let wakes: Option<usize> = if cd.class == Class::Comb {
-                    let refs: Vec<&Value> = ins.iter().map(|v| v.as_ref()).collect();
-                    // **Evaluate once**: in the common case every input has arrived, so
-                    // keep this result instead of asking the behaviour a second time below.
-                    match beh.eval_with(&refs, false) {
-                        Ok(outs) => {
-                            first_eval = Some(outs);
-                            None
+                // A memory's asynchronous read path waits on its `addr` only (`din`/`we`/
+                // `clk` are edge inputs and must not stall a read), so for RAM/ROM the pin
+                // is named directly rather than asked of `eval`.
+                //
+                // **Evaluate once, off the views**: in the common case every input has
+                // arrived, so keep this result instead of cloning the inputs and asking
+                // the behaviour a second time below.
+                let refs: Vec<&Value> = cd
+                    .in_pins
+                    .iter()
+                    .map(|(slot, _)| self.views[c][*slot].as_ref())
+                    .collect();
+                match beh.eval_with(&refs, false) {
+                    Ok(outs) => first_eval = Some(outs),
+                    Err(fr) => {
+                        let pin = if cd.class == Class::Comb {
+                            self.input_index_for(c, &fr.pin)
+                        } else {
+                            cd.in_pins.iter().position(|&(slot, _)| {
+                                self.netlist.comps[c].pins[slot].pin == "addr"
+                            })
+                        };
+                        if let Some(i) = pin {
+                            let (_, net) = cd.in_pins[i];
+                            if !self.netlist.nets[net.idx()].floating && self.net_in_flight(net) {
+                                wait_net = Some(net);
+                            }
                         }
-                        Err(fr) => self.input_index_for(c, &fr.pin),
                     }
-                } else {
-                    cd.in_pins
-                        .iter()
-                        .position(|&(slot, _)| self.netlist.comps[c].pins[slot].pin == "addr")
-                };
-                let waiting = wakes.is_some_and(|i| {
-                    let (_slot, net) = cd.in_pins[i];
-                    ins[i].has_z()
-                        && !self.netlist.nets[net.idx()].floating
-                        && self.net_in_flight(net)
-                });
-                if waiting {
-                    return Ok(());
                 }
+            }
+            if wait_net.is_some() {
+                // A `Z` still on its way: hold the part until it arrives. (A `Z` that
+                // survives — a net *nothing* drives — is not in flight, so it falls
+                // through and is read below.)
+                return Ok(());
             }
             // A `Z` that survives the wait is on a net **nothing drives**: it is not in
             // flight, it never arrives. When a behaviour consumes such a pin, read it as
@@ -2709,6 +2717,13 @@ impl DelayEngine {
             match first_eval {
                 Some(outs) => outs,
                 None => {
+                    // Take owned copies so `eval_reading_unknowns` can substitute the
+                    // consumed pin(s) and retry.
+                    let mut ins: Vec<Arc<Value>> = cd
+                        .in_pins
+                        .iter()
+                        .map(|(slot, _)| self.views[c][*slot].clone())
+                        .collect();
                     let beh_ref = beh;
                     let compat = self.compat;
                     match self.eval_reading_unknowns(c, &mut ins, |refs| {
@@ -3447,8 +3462,25 @@ impl DelayEngine {
     /// schedule the output commit.
     fn clock_edge(&mut self, comp: u32, time: u64) -> Result<(), Halt> {
         let c = comp as usize;
-        // Sample inputs from the pins' *views* and latch (consume rules
-        // fire here).
+        // Sample inputs from the pins' *views* and latch (consume rules fire here).
+        // The common case has no floating data input, so try the edge straight off
+        // the views (by reference, no clone) before taking owned copies.
+        {
+            let refs: Vec<&Value> = self.cdata[c]
+                .in_pins
+                .iter()
+                .map(|(slot, _)| self.views[c][*slot].as_ref())
+                .collect();
+            let edge = if self.compat {
+                self.comps[c].rising_edge_compat(&refs)
+            } else {
+                self.comps[c].rising_edge(&refs)
+            };
+            if edge.is_ok() {
+                return self.eval_and_schedule(comp, time, None);
+            }
+        }
+        // A floating data input: take owned copies and substitute (consume rules).
         let mut ins: Vec<Arc<Value>> = self.cdata[c]
             .in_pins
             .iter()
