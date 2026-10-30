@@ -187,24 +187,31 @@ Keeping this list saves the next person from re-deriving it.
   floating input. The common case has no floating input, so they now evaluate straight off
   the views by reference; owned copies are taken only when a consumed unknown forces a
   substitution. ~5–8% on 3.4k-component designs.
+* **Inline single-limb `Value` (32 bytes, `Copy`); width capped at 64.** `Limbs` was
+  `Inline(u64) | Heap(Vec<u64>)`, and the `Heap` variant made *every* `Limbs` 32 bytes (tag +
+  `Vec`) and every `Value` **104 bytes and non-`Copy`** — which is why `Arc<Value>` felt
+  necessary. The engine caps a value at 64 bits (bitsize ≤ 32, an adder carries to 33, the
+  widest derived pin is a 32-bit multiplier's 64-bit output), so a mask is always one `u64`;
+  `Limbs` is now a single-variant (payload-layout) enum, `Value` is 4+4+3×8 = 32 bytes and
+  `Copy`. Test `value_is_small_and_copy` pins it. **~30% on 3.4k-component designs.**
+* **Drop `Arc<Value>` (Arcless).** With `Value` `Copy` and 32 bytes, `Arc`'s heap allocation
+  and atomic refcount traffic are pure overhead, so events, views, and the floating-input
+  fallback store `Value` directly. Another **~20%**.
 
-**Tried and rejected (with the measurement):**
-
-* **Arcless events/views (`Arc<Value>` → `Value`).** The idea: `Value` is inline for every
-  width this course uses, so copying it should be cheap and `Arc`'s heap allocation + atomic
-  refcount traffic should go. **Measured: a wash to ~8% slower.** The reason is that `Value`
-  is ~104 bytes, not 64: the `Limbs` enum carries a `Heap(Vec<u64>)` variant, so *every*
-  `Value` is tag+`Vec`-sized (3 × 32 bytes) even when inline. `Arc`'s 8-byte pointer clone is
-  competitive with a 104-byte copy. **Arcless only pays off after `Value` is shrunk to a
-  genuinely small/Copy type** (e.g. `[u64; 2]` inline, which covers the course's ≤64 and the
-  tests' 128-bit values) — do that first, then revisit.
+**History — the Arcless attempt that failed first.** Arcless was tried *before* the `Value`
+shrink and **measured a wash to ~8% slower**: at 104 bytes, a `Value` copy cost more than an
+8-byte `Arc` clone. The lesson is the ordering — **shrink `Value` first, then drop `Arc`.**
+The other profitable change came from the same profile row that motivated Arcless
+(`Vec<Arc<Value>>::from_iter`): that row was mostly the `Vec` allocation, not the `Arc`
+clone, and "evaluate off the views" removes it more cheaply.
 
 **Left on the table:**
 
-* Shrink `Value` (see above), then Arcless again.
-* `apply` self-time (~25%) is per-event `resolve`, `Value` clones (`net_values`,
-  `pending_val`), and view updates.
-* `Value::bit` (~4%) is called from the clock/enable paths.
+* `apply` self-time (~25%) is the event dispatch — `resolve`, the per-sink delivery loop,
+  view/net_values updates.
+* The event queue is ~20% (`push` + `pop` + `min_index`).
+* `Vec` allocations still show as `malloc`/`cfree` ~8% (the `refs`/`ins` scratch vectors,
+  behaviour-internal `Vec`s).
 
 ### Gotchas discovered
 
@@ -234,23 +241,21 @@ i5-1135G7). Recorded so a future agent does not have to re-derive the baseline.
 | % | symbol | what |
 |--:|---|---|
 | 24.1 | `DelayEngine::apply` | the event dispatch; self-time is the `Fire`/`Deliver` arms |
-| 26.2 | `DelayEngine::apply` | the event dispatch |
-| 7.5 | `eval_and_schedule` | evaluate a part + schedule its commit |
+| 24.5 | `DelayEngine::apply` | the event dispatch |
+| 7.6 | `EventQueue::push` | radix heap |
+| 7.1 | `eval_and_schedule` | evaluate a part + schedule its commit |
+| 6.9 | `EventQueue::min_index` | radix heap peek |
 | 5.3 | `EventQueue::pop` | radix heap |
-| 5.0 | `EventQueue::push` | radix heap |
-| 4.6 | `Vec<Arc<Value>>::from_iter` (eval) | the **fallback** owned input list (floating-input substitution) |
-| 4.0 | `EventQueue::min_index` | radix heap peek |
-| 3.8 | `Value::bit` | clock/enable bit reads |
-| 3.6 | `Behavior::eval_with` | the component behaviours |
-| 2.8 + 2.4 | `malloc` + `cfree` | allocations |
+| 4.2 + 3.6 | `malloc` + `cfree` | `Vec` allocations (scratch/refs, behaviour-internal) |
+| 3.8 | `Behavior::eval_with` | the component behaviours |
+| 2.4 | `Behavior::eval_splitter` | splitters |
 | 2.3 | `DelayEngine::run` | the run loop |
-| 1.8 | `rising_edge_inner` | register/RAM edge |
-| 1.4 | `Vec<&Value>::from_iter` (clock) | clock-edge input list (borrowed) |
+| 2.2 | `clock_delivery` | clocked-part bookkeeping |
+| 2.2 | `Vec<&Value>::from_iter` (clock) | clock-edge input list |
 
-The queue is now the **radix heap** (~14% together: `pop` + `push` + `min_index`), and note
-the `Vec<Arc<Value>>` row is now only the *floating-input fallback* — the common
-by-reference path does not appear. `apply` (~26%) is the next target. The synthetic probe
-(`pipeline_100k_cycles`, ignored) is the quick relative check.
+No `Arc` rows remain. The queue is the **radix heap** (~20%: `push` + `min_index` + `pop`);
+`apply` (~25%) is the top target; `malloc`/`cfree` are now plain `Vec` traffic. The synthetic
+probe (`pipeline_100k_cycles`, ignored) is the quick relative check: ~**12.4 Mevents/s**.
 
 ### Corpus: new vs old (measured)
 
@@ -259,15 +264,16 @@ Full 357-submission corpus (transpiler `tools/`); **normalize both sides** for c
 
 | | new (whole path) | new (sim only) | old (measured) |
 |---|--:|--:|--:|
-| raw as-run | 1132 s | 1001 s | 7035 s |
-| normalized | 740 s (12.3 min) | 654 s (10.9 min) | 4481 s (74.7 min) |
-| **speed-up** | — | — | **6.1× whole / 6.9× sim** |
+| raw as-run | 710 s | 565 s | 7035 s |
+| normalized | 464 s (7.7 min) | 369 s (6.2 min) | 4481 s (74.7 min) |
+| **speed-up** | — | — | **9.7× whole / 12.1× sim** |
 
-These are the **post-optimization** numbers (radix queue + evaluate-off-the-views + the
-validate/named launch merge). Against the pre-session run at the same worker count, the new
-engine went **whole path 1227→1132 s (−7.8%)** and **simulation 1096→1001 s (−8.7%)**; the
-corpus stayed verdict-neutral (0 rows moved). Old side: 335/357 ran (one fresh JVM each),
-median ~19 s, max 408 s. Synthetic probe: ~9 Mevents/s; `pipeline5`, 100k cycles: ~2.3 s.
+These are the **final** numbers (radix queue + evaluate-off-the-views + 32-byte `Copy`
+`Value` + Arcless + the validate/named launch merge), all measured or normalized the same
+way as the old side. Against the pre-session run at the same worker count, the new engine
+went **whole path 1227→710 s (−42%)** and **simulation 1096→565 s (−48.5%)**; the corpus
+stayed verdict-neutral (0 rows moved). Old side: 335/357 ran (one fresh JVM each), median
+~19 s, max 408 s. Synthetic probe: ~12.4 Mevents/s; `pipeline5`, 100k cycles: ~1.2 s.
 
 ### Where the raw artifacts are
 
@@ -275,9 +281,9 @@ Under `/tmp/opencode/` (regenerate rather than rely on them surviving):
 
 | file | what |
 |---|---|
-| `perf-final2.data` | the engine profile above (post-optimization) |
-| `perf-final.data`, `perfcli5.data`, `perf.data`, `perf2.data`, `perf3.data` | earlier profiles (pre/post each change) |
-| `corpus-bench2.json`, `corpus-bench.json` | `corpus_bench.py` output (post- and pre-session; new timings + old sample + verdict diff) |
+| `perf-final4.data` | the engine profile above (final) |
+| `perf-final3.data`, `perf-final2.data`, `perf-final.data`, `perfcli5.data`, `perf.data`, `perf2.data`, `perf3.data` | earlier profiles (after each change) |
+| `corpus-bench4.json` … `corpus-bench.json` | `corpus_bench.py` output after each stage (final … pre-session; new timings + old sample + verdict diff) |
 | `old-autograder-all.json` | all-357 old-autograder timings |
 | `timings.md`, `timings-normalized.md` | the old-vs-new comparison |
 | `corpus-new-compat.json`, `corpus-head-prod.json`, `corpus-new-prod.json` | corpus verdict reports |
