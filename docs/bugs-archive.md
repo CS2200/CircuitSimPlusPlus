@@ -2262,6 +2262,15 @@ All 241 core unit tests + the golden traces are unmoved; the new regression test
 `a_clock_hiccup_is_not_a_second_rising_edge` fails without the rule, and the compat corpus
 stays verdict-neutral (212 both-pass / 0 disagreements / 0 false passes).
 
+**What still differs, and why it is a different route.** `ce-zero-delay-v1` is unchanged
+(it is a diagnostic table, not graded). Measured after the fix: its first **200 cycles match
+`mips` exactly** (106 `PC` latches, identical values), and its clock gate still shows 23 `Z`
+drives — the same hand-off transient, which `clk_armed` now suppresses. The verdict diverges
+only much later (18576 cycles, `PC=0x2e`). With every delay `0` the whole cascade shares one
+timestamp, so the order is the engine's `(time, prio, seq)` order, which is not CE's link
+order — the tie-break route `docs/delay-table.md` names, needing eval-order work rather than
+a clock rule.
+
 **Lesson.** A delay-aware engine's edges are *values*, and a transient is a value. Anything
 that turns a value into an event — a clock, an enable, a reset — has to say what a transient
 means. A clock means *nothing* until it is a level: that is now the rule, and
