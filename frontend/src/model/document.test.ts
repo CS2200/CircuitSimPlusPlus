@@ -1040,3 +1040,52 @@ describe("new pins arrive named (UI_OVERHAUL §99)", () => {
     expect(names(d.addComponent(0, { type: "gate.and", pos: [4, 4] }))).toBeUndefined();
   });
 });
+
+describe("renames propagate across the hierarchy", () => {
+  /** `main` places an instance of `sub`, wired from its port `a` to a NOT gate. */
+  function hierarchy() {
+    const doc = CircuitDocument.create("test"); // "main"
+    const sub = doc.addCircuit("sub");
+    const pin = doc.addComponent(sub, { type: "wiring.pin", pos: [0, 0], name: "a" });
+    const inst = doc.addComponent(0, {
+      type: "subcircuit",
+      pos: [10, 0],
+      attrs: { circuit: "sub" },
+    });
+    const not = doc.addComponent(0, { type: "gate.not", pos: [20, 0] });
+    doc.addWire(0, {
+      a: { comp: inst, pin: "a" },
+      b: { comp: not, pin: "in" },
+      points: [
+        [10, 1],
+        [20, 1],
+      ],
+    });
+    return { doc, sub, pin, inst, not };
+  }
+
+  it("renaming a circuit retargets its instances, as one undo step", () => {
+    const { doc, inst } = hierarchy();
+    doc.renameCircuit(1, "alu");
+    expect(doc.circuit(1).name).toBe("alu");
+    expect(doc.circuit(0).components.find((c) => c.id === inst)?.attrs?.circuit).toBe("alu");
+    doc.undo();
+    expect(doc.circuit(1).name).toBe("sub");
+    expect(doc.circuit(0).components.find((c) => c.id === inst)?.attrs?.circuit).toBe("sub");
+  });
+
+  it("renaming a definition's port rewrites the parent's wire endpoint", () => {
+    const { doc, pin, inst } = hierarchy();
+    doc.updateComponent(1, pin, { name: "x" });
+    expect(doc.circuit(0).wires[0].a).toEqual({ comp: inst, pin: "x" });
+    doc.undo();
+    expect(doc.circuit(0).wires[0].a).toEqual({ comp: inst, pin: "a" });
+    expect(doc.circuit(1).components.find((c) => c.id === pin)?.name).toBe("a");
+  });
+
+  it("clearing a port name drops the wires that reached it", () => {
+    const { doc, pin } = hierarchy();
+    doc.updateComponent(1, pin, { name: "" });
+    expect(doc.circuit(0).wires).toHaveLength(0);
+  });
+});
