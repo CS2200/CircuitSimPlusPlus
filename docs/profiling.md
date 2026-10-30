@@ -205,13 +205,34 @@ The other profitable change came from the same profile row that motivated Arcles
 (`Vec<Arc<Value>>::from_iter`): that row was mostly the `Vec` allocation, not the `Arc`
 clone, and "evaluate off the views" removes it more cheaply.
 
-**Left on the table:**
+**Micro-optimizations tried and their measured value (2026-10-30 follow-up):**
 
-* `apply` self-time (~25%) is the event dispatch — `resolve`, the per-sink delivery loop,
-  view/net_values updates.
-* The event queue is ~20% (`push` + `pop` + `min_index`).
-* `Vec` allocations still show as `malloc`/`cfree` ~8% (the `refs`/`ins` scratch vectors,
-  behaviour-internal `Vec`s).
+The next "obvious" profile rows turned out to be **worth much less than their percent** —
+a lesson in itself: `malloc`/`cfree` share is not time.
+
+* **`compat` delivery fast path — NEUTRAL, reverted.** `compat` delivers CE's
+  `getIncomingValue(port)` (all drivers *except the receiving port*); for a sink that is not a
+  driver the value equals the all-drivers merge already computed, so I added a fast path.
+  Measured neutral. A counter proved why: the slow path is taken **~6:1** (e.g. 1.46 M slow vs
+  247 k fast) because in these designs the frequent receivers are themselves **drivers**
+  (splitter InOut pins) or sit on nets with subcircuit boundaries, so the exclusion really
+  applies. Don't re-attempt this without a counter.
+* **Allocation reduction — ~1%, low ROI.** A counting `#[global_allocator]` showed the run
+  does **~10 allocations per event** (25 M allocs / 100 k cycles on `pipeline5`). Removing the
+  per-`Fire` `pending_val` clone (kept; `Value` is `Copy`, so the commit reads it in place)
+  cut allocations ~6% for **~1%** time. So the `malloc`/`cfree` rows do **not** justify the
+  wide `Behavior::eval` output-buffer refactor — the allocations are cheap.
+* **Queue `min_index` fast path — ~1–3%, kept.** Skip the `early` scan when it's empty.
+
+**Left on the table (the real levers):**
+
+* **`apply`** self-time (~25–31%) is the dispatch — `resolve`, the per-sink delivery loop, the
+  view/net updates. This is the honest next target and needs line-level `perf annotate`
+  (careful: on big designs the annotate line mapping is unreliable — match by source *text*).
+* The event queue (`push` + `pop` + `min_index`) ~16–20%.
+* The behavior evaluation itself (`eval_with` etc.) — a wide refactor, only worth it if
+  `annotate` shows the compute, not the allocation.
+* **Trace hash (~12%)** — opt-in behind a flag (a contract decision; see §C in the report).
 
 ### Gotchas discovered
 
