@@ -39,6 +39,14 @@ pin fires `max(rise, last_d + t_setup)` **zero** times under `74ls-v1` and once 
 `mips`. And it is not `--compat` reading `Z` as `0` — compat keeps `Z` as `Z` (CE's rule) and
 production promotes it to `X`.
 
+**Exposure, measured over the whole corpus.** A census of every design in the corpus — compat,
+the MIPS table the converter pins, **331 designs graded over 773 runs** (the rest fail conversion
+or kind detection before a run) — reports `clock_glitches` on **zero** of them. So the condition is
+real, and it is what separates the one table that disagrees from the three that agree, but **no
+design the course currently grades exercises it**. That is the honest severity: filed, surfaced, and
+not urgent; and it is the thing to re-check whenever a delay table, the converter, or the engine's
+value delivery changes.
+
 **What is fixed.** A rising edge now requires a **definite** low (`clk_armed`,
 `docs/derived-clock.md` §11), which removed the *other* route — a gated clock dipping to `Z` (a
 tri-state bus hand-off) and its recovery being read as an edge. That is what moved `74ls-v1` from
