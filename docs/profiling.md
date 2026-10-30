@@ -232,7 +232,8 @@ a lesson in itself: `malloc`/`cfree` share is not time.
 * The event queue (`push` + `pop` + `min_index`) ~16–20%.
 * The behavior evaluation itself (`eval_with` etc.) — a wide refactor, only worth it if
   `annotate` shows the compute, not the allocation.
-* **Trace hash (~12%)** — opt-in behind a flag (a contract decision; see §C in the report).
+* ~~**Trace hash (~12%)**~~ — **done**: opt-in (`--trace-hash` / `GradeConfig::trace_hash`),
+  ~8–12% for graded runs; the golden suite enables it.
 
 ### Gotchas discovered
 
@@ -256,27 +257,37 @@ i5-1135G7). Recorded so a future agent does not have to re-derive the baseline.
 
 ### Engine hot symbols
 
-`perf record -F 9999 -g` on `csim run tests/fixtures/pipeline5.csx --cycles 100000`
-(release), flat, `--no-children`:
+`perf record -F 9999` on `csim run <3.4k-component converted design> --compat --cycles
+300000` (current build: radix queue + `Copy` `Value` + Arcless + trace hash **off**), flat,
+`--no-children`:
 
 | % | symbol | what |
 |--:|---|---|
-| 24.1 | `DelayEngine::apply` | the event dispatch; self-time is the `Fire`/`Deliver` arms |
-| 24.5 | `DelayEngine::apply` | the event dispatch |
-| 7.6 | `EventQueue::push` | radix heap |
-| 7.1 | `eval_and_schedule` | evaluate a part + schedule its commit |
-| 6.9 | `EventQueue::min_index` | radix heap peek |
-| 5.3 | `EventQueue::pop` | radix heap |
-| 4.2 + 3.6 | `malloc` + `cfree` | `Vec` allocations (scratch/refs, behaviour-internal) |
-| 3.8 | `Behavior::eval_with` | the component behaviours |
-| 2.4 | `Behavior::eval_splitter` | splitters |
-| 2.3 | `DelayEngine::run` | the run loop |
-| 2.2 | `clock_delivery` | clocked-part bookkeeping |
-| 2.2 | `Vec<&Value>::from_iter` (clock) | clock-edge input list |
+| 28.1 | `DelayEngine::apply` | the event dispatch |
+| 7.3 | `eval_and_schedule` | evaluate a part + schedule its commit |
+| 6.2 + 4.7 + 3.2 | `EventQueue` push / pop / min_index | the radix heap (~14%) |
+| 5.5 + 4.4 + 2.8 + 1.8 | `malloc`/`cfree`/`realloc`/`alloc` | ~14.5%, mostly per-event `Vec`s |
+| 3.7 | `contention_merge_detail` | net resolution |
+| 3.4 + 2.4 | `clock_delivery` + `clock_edge` | clocked-part bookkeeping |
+| 3.2 + 2.7 | `Vec<&Value>`/`Vec<Value>` from_iter | per-event input/output `Vec`s |
+| 2.8 | `DelayEngine::run` | the run loop |
+| 2.0 | `Behavior::eval_with` | the component behaviours |
+| 1.8 | `Value::bit` | clock/enable reads |
 
-No `Arc` rows remain. The queue is the **radix heap** (~20%: `push` + `min_index` + `pop`);
-`apply` (~25%) is the top target; `malloc`/`cfree` are now plain `Vec` traffic. The synthetic
-probe (`pipeline_100k_cycles`, ignored) is the quick relative check: ~**12.4 Mevents/s**.
+No `Arc` rows. The synthetic probe (`pipeline_100k_cycles`, ignored) is the quick relative
+check: ~**13.2 Mevents/s**.
+
+### Conclusion: the engine is done (2026-10-30)
+
+**Stop here.** The remaining profile rows look big but don't pay: the allocator share is not
+time (A: neutral; B: ~1% for a 6% alloc cut), the radix queue is already `O(1)` amortized, and
+the two real rows — `apply` dispatch and behavior compute — are the two invariants we care
+about (bit-determinism, corpus verdicts), so changing them costs a golden re-bless *and* a full
+corpus run. Best-case, an invasive push is worth **~1.15–1.25×**; reaching 1.5× means a
+different engine shape. Meanwhile the product bar is met ~10× over: ~1 s of simulation per
+submission, ~6 MB RSS, the whole corpus in ~7 min vs the old JVM grader's ~75 min. The cheap
+contract win (trace hash opt-in, ~8–12%) is taken. **The next real lever is the harness
+(transpiler, ~20% of end-to-end), not the engine** — or correctness/features.
 
 ### Corpus: new vs old (measured)
 
@@ -285,16 +296,16 @@ Full 357-submission corpus (transpiler `tools/`); **normalize both sides** for c
 
 | | new (whole path) | new (sim only) | old (measured) |
 |---|--:|--:|--:|
-| raw as-run | 710 s | 565 s | 7035 s |
-| normalized | 464 s (7.7 min) | 369 s (6.2 min) | 4481 s (74.7 min) |
-| **speed-up** | — | — | **9.7× whole / 12.1× sim** |
+| raw as-run | 675 s | 534 s | 7035 s |
+| normalized | 441 s (7.4 min) | 349 s (5.8 min) | 4481 s (74.7 min) |
+| **speed-up** | — | — | **10.2× whole / 12.8× sim** |
 
-These are the **final** numbers (radix queue + evaluate-off-the-views + 32-byte `Copy`
-`Value` + Arcless + the validate/named launch merge), all measured or normalized the same
-way as the old side. Against the pre-session run at the same worker count, the new engine
-went **whole path 1227→710 s (−42%)** and **simulation 1096→565 s (−48.5%)**; the corpus
-stayed verdict-neutral (0 rows moved). Old side: 335/357 ran (one fresh JVM each), median
-~19 s, max 408 s. Synthetic probe: ~12.4 Mevents/s; `pipeline5`, 100k cycles: ~1.2 s.
+The **final** numbers: radix queue + evaluate-off-the-views + 32-byte `Copy` `Value` + Arcless
++ the validate/named launch merge + the trace hash opt-in. Against the pre-session run at the
+same worker count, the new engine went **whole path 1227→675 s (−45%)** and **simulation
+1096→534 s (−51%)**; the corpus stayed verdict-neutral (0 rows moved) at every step. Old side:
+335/357 ran (one fresh JVM each), median ~19 s, max 408 s. Synthetic probe ~13.2 Mevents/s;
+`pipeline5`, 100k cycles ~1.1 s.
 
 ### Where the raw artifacts are
 
