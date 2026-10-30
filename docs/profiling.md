@@ -284,10 +284,14 @@ time (A: neutral; B: ~1% for a 6% alloc cut), the radix queue is already `O(1)` 
 the two real rows — `apply` dispatch and behavior compute — are the two invariants we care
 about (bit-determinism, corpus verdicts), so changing them costs a golden re-bless *and* a full
 corpus run. Best-case, an invasive push is worth **~1.15–1.25×**; reaching 1.5× means a
-different engine shape. Meanwhile the product bar is met ~10× over: ~1 s of simulation per
+different engine shape. Meanwhile the product bar is met ~10× over: ~1–2 s of simulation per
 submission, ~6 MB RSS, the whole corpus in ~7 min vs the old JVM grader's ~75 min. The cheap
 contract win (trace hash opt-in, ~8–12%) is taken. **The next real lever is the harness
 (transpiler, ~20% of end-to-end), not the engine** — or correctness/features.
+
+The *substantial, higher-risk* ideas (folding zero-delay deliveries, a levelized engine,
+caching resolution, unifying `compat`) are written up separately, with expected gains and the
+gating invariants, in [`optimization-backlog.md`](optimization-backlog.md).
 
 ### Corpus: new vs old (measured)
 
