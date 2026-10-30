@@ -17,7 +17,8 @@ import { componentDelayText, wireDelayText } from "../editor/delayTable";
 import Select from "./Select";
 import { formatRadixValue, parseRadixValue } from "../lib/radix";
 import CompIcon, { PaletteGroupIcon } from "./CompIcon";
-import { CursorIcon, WaveIcon } from "./icons";
+import CircuitTree from "./CircuitTree";
+import { WaveIcon } from "./icons";
 
 /**
  * Inspector panel (frontend/UI_OVERHAUL.md §3): the component editor,
@@ -264,35 +265,40 @@ export default function InspectorPanel({
   }
 
   if (comp === undefined) {
-    // The empty dock teaches the three gestures that fill it (UI_OVERHAUL §94).
+    // The empty dock is the circuit **navigator**: the hierarchy rooted at the
+    // simulation root is always true of the document and needs no selection.
+    // (A multi-selection keeps its "pick one" nudge instead.)
+    const activeCircuit = doc.circuits[circuitIdx]?.name ?? doc.circuits[0]?.name ?? "";
     return (
       <div className="inspector">
-        <div className="inspector-empty">
-          <span className="inspector-empty-icon" aria-hidden="true">
-            <CursorIcon />
+        <div className="inspector-head">
+          <span className="inspector-glyph" aria-hidden="true">
+            <PaletteGroupIcon group="Subcircuits" height={18} />
           </span>
-          <p className="inspector-empty-title">
-            {selectionCount > 1 ? `${selectionCount} parts selected` : "Nothing selected"}
-          </p>
-          <p className="inspector-empty-text">
-            {selectionCount > 1
-              ? "Select exactly one part to edit its properties here."
-              : "Click a part or a wire on the canvas to edit it here."}
-          </p>
-          {selectionCount <= 1 && (
-            <ul className="inspector-tips">
-              <li>
-                <kbd>Click</kbd> a pin to start a wire
-              </li>
-              <li>
-                <kbd>R</kbd> rotates the selection
-              </li>
-              <li>
-                <kbd>?</kbd> lists every shortcut
-              </li>
-            </ul>
-          )}
+          <span className="inspector-id">Circuits</span>
         </div>
+        {selectionCount > 1 ? (
+          <div className="inspector-empty">
+            <p className="inspector-empty-title">{selectionCount} parts selected</p>
+            <p className="inspector-empty-text">
+              Select exactly one part to edit its properties here.
+            </p>
+          </div>
+        ) : (
+          <div className="inspector-tree">
+            <p className="settings-hint">
+              Every circuit, nested from the simulation root. Click one to open its sheet.
+            </p>
+            <CircuitTree
+              circuits={doc.circuits}
+              activeName={activeCircuit}
+              onOpen={(name) => onOpenCircuit?.(name)}
+            />
+            <p className="inspector-tree-help">
+              <kbd>Click</kbd> a pin to start a wire · <kbd>R</kbd> rotates · <kbd>?</kbd> shortcuts
+            </p>
+          </div>
+        )}
       </div>
     );
   }

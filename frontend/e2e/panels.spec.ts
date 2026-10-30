@@ -79,9 +79,9 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
 
   // One rail tab per registry group (Debugging included, §90), plus Subcircuits
   // — which is always on the rail now (UI_OVERHAUL §80), hint and all, so the
-  // feature is discoverable before anyone has made one.
-  // …and the Circuits explorer at the top (§99).
-  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(10);
+  // feature is discoverable before anyone has made one. The circuit hierarchy is
+  // NOT a rail group: it is the right dock's empty state (CircuitTree).
+  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(9);
 
   // Gates is the default group.
   await expect(page.getByRole("button", { name: "AND", exact: true })).toBeVisible();

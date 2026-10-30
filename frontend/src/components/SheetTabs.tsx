@@ -33,7 +33,7 @@ export default function SheetTabs({
   onDelete?: (i: number) => void;
   /**
    * Close a sheet's tab (UI_OVERHAUL §99): the circuit is NOT deleted — it stays
-   * in the file and in the Circuits explorer, from which it reopens.
+   * in the file and in the circuit tree (right dock), from which it reopens.
    */
   onClose?: (i: number) => void;
   /** Sheets whose tabs are closed (not drawn). */
@@ -135,7 +135,7 @@ export default function SheetTabs({
                 <button
                   className="sheet-tab-close"
                   aria-label={`Close ${name}`}
-                  title={`Close "${name}" — it stays in the file; reopen it from Circuits`}
+                  title={`Close "${name}" — it stays in the file; reopen it from the Circuits list`}
                   onClick={() => onClose(i)}
                   onDoubleClick={(e) => e.stopPropagation()}
                 >

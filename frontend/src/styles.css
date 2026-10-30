@@ -1970,166 +1970,6 @@ input[type="number"] {
   background: var(--accent-softer);
 }
 
-/* ---- Circuits explorer (§99) ---- */
-.explorer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.explorer-hint {
-  margin: 0 2px 2px;
-}
-
-.explorer-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.explorer-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  border-radius: 8px;
-}
-
-.explorer-row:hover {
-  background: var(--hover);
-}
-
-.explorer-row.active {
-  background: var(--accent-soft);
-}
-
-.explorer-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-dim);
-  text-align: left;
-  cursor: pointer;
-}
-
-.explorer-row.open .explorer-main {
-  color: var(--text);
-}
-
-.explorer-row.active .explorer-main {
-  color: var(--accent);
-}
-
-.explorer-glyph {
-  flex: none;
-  display: grid;
-  place-items: center;
-}
-
-.explorer-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.explorer-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-}
-
-.explorer-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-dim);
-  font-size: 10.5px;
-}
-
-.explorer-open-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  margin-left: auto;
-  border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.8;
-}
-
-/* Close / delete appear on hover (and stay reachable by keyboard). They float
- * over the row's right end rather than taking width: the palette is narrow, and
- * reserved space for invisible buttons squeezed the circuit's name to nothing. */
-.explorer-actions {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  display: flex;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--surface-2);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-50%);
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.explorer-row:hover .explorer-actions,
-.explorer-row:focus-within .explorer-actions {
-  opacity: 1;
-}
-
-.explorer-row:hover .explorer-open-dot {
-  display: none;
-}
-
-.explorer-act {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.explorer-act svg {
-  width: 14px;
-  height: 14px;
-}
-
-.explorer-act:hover {
-  background: var(--pressed);
-  color: var(--text);
-}
-
-.explorer-delete:hover {
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-  color: var(--danger);
-}
-
-.explorer-new {
-  gap: 6px;
-}
-
-.explorer-new svg {
-  width: 13px;
-  height: 13px;
-}
-
 /* =============================================================================
  * 5. Editor column: sheet tabs, canvas, overlays
  * ========================================================================== */
@@ -3287,27 +3127,11 @@ input[type="number"] {
   background: linear-gradient(135deg, var(--wire-low), var(--wire-high) 55%, var(--wire-z));
 }
 
-/* The empty dock teaches the gestures that fill it (§94). */
+/* The empty dock's multi-selection nudge (§94). */
 .inspector-empty {
   padding: 30px 8px 16px;
   text-align: center;
   color: var(--text-dim);
-}
-
-.inspector-empty-icon {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  margin: 0 auto 12px;
-  border-radius: 13px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.inspector-empty-icon svg {
-  width: 22px;
-  height: 22px;
 }
 
 .inspector-empty-title {
@@ -3323,20 +3147,98 @@ input[type="number"] {
   line-height: 1.5;
 }
 
-.inspector-tips {
-  display: inline-flex;
+/* The circuit hierarchy in the empty dock: every circuit, nested from the
+ * simulation root, one row per definition. */
+.inspector-tree {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 7px;
-  margin: 18px 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--fs-sm);
-  text-align: left;
+  gap: 8px;
 }
 
-.inspector-tips kbd {
-  margin-right: 4px;
+.circuit-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.circuit-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.circuit-node:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.circuit-node.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.circuit-node-caret {
+  flex: none;
+  width: 12px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.circuit-node.active .circuit-node-caret {
+  color: var(--accent);
+}
+
+.circuit-node-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.circuit-node-count,
+.circuit-node-note {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.circuit-node-note {
+  opacity: 0.75;
+}
+
+.circuit-tree-sep {
+  margin: 8px 8px 2px;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspector-tree-help {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.inspector-tree-help kbd {
+  margin-right: 3px;
 }
 
 /* =============================================================================

@@ -31,7 +31,6 @@ import WaveformView from "./components/WaveformView";
 import HistoryPreview from "./components/HistoryPreview";
 import ClosePrompt, { type CloseChoice } from "./components/ClosePrompt";
 import ConfirmDialog from "./components/ConfirmDialog";
-import CircuitExplorer from "./components/CircuitExplorer";
 import RecoveryDialog from "./components/RecoveryDialog";
 import ResizeHandle from "./components/ResizeHandle";
 import SaveIndicator, { type SaveState } from "./components/SaveIndicator";
@@ -514,9 +513,10 @@ export default function App() {
   // mutated in place, so there is no identity to memoize on.
   // The rail always carries a Subcircuits group (UI_OVERHAUL §80): a feature you
   // only find after making your first subcircuit is one most people never find, so
-  // the group has an empty state and its own "New subcircuit" button.
-  // "Circuits" (§99) is the explorer: every circuit in the file, open tab or not.
-  const paletteGroups = ["Circuits", ...PALETTE.map((g) => g.group), "Subcircuits"];
+  // the group has an empty state and its own "New subcircuit" button. The circuit
+  // *hierarchy* lives in the right dock's empty state (CircuitTree), not a second
+  // rail group — a definition list and its explorer were two answers to one thing.
+  const paletteGroups = [...PALETTE.map((g) => g.group), "Subcircuits"];
   const activePaletteGroup = paletteGroups.includes(paletteGroup) ? paletteGroup : PALETTE[0].group;
 
   // Preference persistence (best-effort; non-fatal without storage).
@@ -1724,11 +1724,9 @@ export default function App() {
     [doc, switchSheet],
   );
 
-  /** Open a circuit from the explorer (reopening its tab if closed). */
-  const onOpenSheet = useCallback((idx: number) => switchSheet(idx), [switchSheet]);
-
-  // Whatever brings a closed circuit to the canvas — the explorer, a
-  // double-click into an instance, the scope bar's way back — reopens its tab.
+  // Whatever brings a closed circuit to the canvas — the hierarchy tree, the
+  // tab strip, a double-click into an instance, the scope bar's way back —
+  // reopens its tab.
   useEffect(() => {
     const name = doc.circuits[sheet]?.name;
     if (name === undefined || !closedSheets.has(name)) return;
@@ -2333,28 +2331,7 @@ export default function App() {
                     }}
                   />
                 </label>
-                {paletteResults === null && activePaletteGroup === "Circuits" ? (
-                  <>
-                    <div className="palette-group-title">Circuits</div>
-                    <CircuitExplorer
-                      entries={doc.circuits.map((c, i) => ({
-                        name: c.name,
-                        parts: c.components.length,
-                        note: i === 0 ? "" : usedByText(doc.circuits, c.name),
-                      }))}
-                      active={sheet}
-                      hidden={hiddenSheets}
-                      onOpen={onOpenSheet}
-                      onClose={onCloseSheet}
-                      onRename={(i) => {
-                        switchSheet(i);
-                        onRenameSheet(i);
-                      }}
-                      onDelete={onDeleteSheet}
-                      onNew={onNewSheet}
-                    />
-                  </>
-                ) : paletteResults !== null ? (
+                {paletteResults !== null ? (
                   <>
                     <div className="palette-group-title">
                       {paletteResults.length === 0
