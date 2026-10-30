@@ -400,6 +400,11 @@ out of cycles). The golden traces do not move. Regression tests:
 `a_clock_edge_is_taken_once_per_instant` (a tri-state hand-off), and
 `a_clock_edge_needs_the_instant_to_have_entered_low` (the four shapes, directly).
 
+**What it deliberately does not change.** *Which* value a latch samples. The rule is about *when an
+edge happens*; a register still reads its `d`/`en` views as of the delivery, so F2's race
+(`a_divided_clock_latches_on_the_rise_only`, a clock rising before its data settles) is unchanged —
+it would have inverted only under the rejected `last_d + t_setup` rule, which is a different thing.
+
 **State.** The entry level and the last level are part of the savestate (format version 7).
 
 ## 12. The clock-glitch diagnostic (2026-10-29)

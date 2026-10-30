@@ -668,12 +668,14 @@ impl Value {
     /// unanimously → that state; any disagreement (or any driven X) → X.
     /// A driver bit that is Z is *not driving* that bit.
     pub fn contention_merge_detail(width: u32, drivers: &[Value]) -> (Value, bool) {
-        for d in drivers {
-            assert_eq!(
-                d.width, width,
-                "contention_merge: driver width {} != net width {width}",
-                d.width
-            );
+        // A driver whose width disagrees with the net's cannot be aligned bit-for-bit, so the
+        // net is **unknown**: `X` on every bit. It must never be a `panic!` — a malformed (but
+        // loadable) design has to produce a verdict and a diagnostic, not `no run report`
+        // (`docs/bugs-archive.md`), which is the same rule `init_words` states for an unvalidated
+        // path ("mask, never panic"). The engine reports the disagreement it can see
+        // (`Report::net_width_mismatches`).
+        if drivers.iter().any(|d| d.width != width) {
+            return (Value::x(width), false);
         }
         if drivers.is_empty() {
             return (Value::z(width), false);
@@ -806,6 +808,21 @@ impl Value {
     }
 
     /// Keep the low `width` bits.
+    /// `self` resized to `width`: low bits kept, zero-extended. This is what CircuitSim CE's
+    /// `new WireValue(value, bitSize)` does where a part's stored value and its port disagree
+    /// (`Register.init`, `Splitter.valueChanged`), so nothing downstream ever sees a width that
+    /// its pin does not have — the engine reports the disagreement and fits (`docs/bugs-archive.md`).
+    pub fn fitted(&self, width: u32) -> Value {
+        if self.width == width {
+            return self.clone();
+        }
+        if width < self.width {
+            self.truncate(width)
+        } else {
+            self.zero_extend(width)
+        }
+    }
+
     pub fn truncate(&self, width: u32) -> Value {
         assert!(width <= self.width, "truncate: {width} > {}", self.width);
         self.extract(0, width)
@@ -1454,6 +1471,32 @@ mod tests {
         let m = Value::mux(&v1(Bit::X), &d1, &d0);
         assert_eq!(bits(&m), vec![Bit::X, Bit::Zero, Bit::X, Bit::X]);
         assert_canonical(&m);
+    }
+
+    /// **A driver whose width disagrees with the net's is `X`, never a panic** (`docs/bugs-archive.md`).
+    /// This is the shape that used to abort the whole run — `no run report`, no verdict at all —
+    /// whenever the net happened to have two drivers. It must produce a value, and be reported.
+    #[test]
+    fn a_width_mismatched_driver_merges_to_x_and_never_panics() {
+        let narrow = Value::from_u64(1, 1);
+        let wide = Value::from_u64(4, 0x5);
+        // One driver, wrong width: the net is unknown.
+        assert!(Value::contention_merge(1, std::slice::from_ref(&wide)).has_x());
+        // With a well-formed driver beside it: still unknown, still no panic.
+        let merged = Value::contention_merge(1, &[narrow.clone(), wide.clone()]);
+        assert!(merged.has_x(), "a mismatched driver makes the net unknown");
+        assert_eq!(
+            merged.width(),
+            1,
+            "the merge still answers at the net's width"
+        );
+        let (_v, shorted) = Value::contention_merge_detail(1, &[narrow, wide]);
+        assert!(!shorted, "a width mismatch is not a driver disagreement");
+        // The well-formed case is unchanged.
+        assert_eq!(
+            Value::contention_merge(1, &[Value::from_u64(1, 1)]),
+            Value::from_u64(1, 1)
+        );
     }
 
     #[test]

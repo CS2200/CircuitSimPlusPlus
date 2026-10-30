@@ -2305,10 +2305,8 @@ The two rejected attempts are the useful part:
    target — all four tables halted — and **broke 34 corpus rows**, 21 of them with
    `halt=floating-read ... pin "d"`: a register missed its edge, so its `q` stayed undriven. Cause: a
    `Z -> 0 -> 1` recovery *delivers* a definite `0` at the rise's instant, which re-stamped the arm
-   and made the rule reject a genuine edge. Eleven more rows *crashed* (`no run report`) on
-   `contention_merge: driver width N != net width M` — a **latent** converter/engine bug (a
-   multi-driver net with mismatched driver widths) that only panics when the merge is *reached*,
-   which the perturbation changed. That panic is still there and should become a diagnostic.
+   and made the rule reject a genuine edge. Eleven more rows *crashed* (`no run report`) on a
+   latent `contention_merge` width assert — a separate bug, fixed in its own round above.
 
 The third attempt keys on the **level the instant entered with**, which is what tells the two shapes
 apart: an instant that began high and recovered is a transient; a rise after a real low is an edge.
@@ -2335,3 +2333,57 @@ on), and `a_clock_edge_needs_the_instant_to_have_entered_low` (the four shapes, 
 legitimate pulse — and only the level the instant *entered* with tells them apart. The census that
 preceded the rule measured the wrong quantity (edges, not entry levels), which is why the rule looked
 corpus-neutral when it wasn't.
+
+## Round — done (2026-10-29): a wrong-width driver panicked the merge — report and fit instead
+
+**Found while reverting the clock rule.** `Value::contention_merge_detail` asserted that every driver
+of a net carries the net's width:
+
+```rust
+assert_eq!(d.width, width, "contention_merge: driver width {} != net width {width}", d.width);
+```
+
+A driver value of the wrong width therefore **panicked** the engine. A panic is the one failure mode
+that produces **no report** — the harness records `no run report`, so the design cannot be graded at
+all — and the shape is *invisible* unless the net happens to have two drivers, because `resolve`'s
+single-driver path returns the value unchecked. The engine already knew: `delay.rs` prints `!M{map_len}`
+for a splitter whose map disagrees with its pin, behind `CSIM_DEBUG_SPLITTER_SHAPE`, to stderr — and
+nothing reached the report.
+
+The codebase had already stated the rule for exactly this situation. `init_words` (a memory's
+`contents` image):
+
+> `// Mask, never panic: from_u64 asserts fit, and an unvalidated path (engine built by hand) must`
+> `// not crash.`
+
+**The fix, at the one choke point (the `Fire` commit).**
+1. **Never panic.** `contention_merge_detail` treats a width disagreement as an unknown value — `X`
+   on every bit of the net — instead of asserting.
+2. **Fit and report.** A behaviour must drive its pin at the pin's *width* (CE builds every port's
+   value at its link's width: `new WireValue(value, bitSize)` in `Register.init` and
+   `Splitter.valueChanged`). So a committed value is fitted to its pin (`Value::fitted`: low bits
+   kept, zero-extended) and the disagreement is recorded in `Report::net_width_mismatches` as
+   `{cycle, net, component, value_width, net_width}`. Fitting also stops the wrong width from
+   *spreading* — before, it propagated through a register into its own `q` and produced a second,
+   downstream report.
+3. Savestate version 8.
+
+**Can a user author it?** Not through the format: every pin votes on its net's width
+(`netlist.rs:426`) and a disagreement is already `LoadErrorKind::BitsizeMismatch`, and a memory's
+`contents` words are masked (`init_words`). So the wrong width enters the engine from a path that is
+*not* a pin width — a testbench poke can carry one (`poke_at` does not check it; the regression test
+uses exactly that), and a behaviour can compute one — which is why the fix is *report and fit at the
+runtime choke point* rather than a load-time rejection. There is nothing to reject: the document is
+well-formed.
+
+**Evidence.** Under the perturbing clock rule the panic fired on **18** designs (of which 11 had been
+passing) — `374337181 374503283 374539543 374615381 374622735 374624040 374624058 374625075 404296506
+408346931 409547175 409848157 409950542 410231691 410421963 410460509 410758907 410961281`, with four
+distinct width pairs (`4 != 1` twelve times, `16 != 32`, `4 != 16`, `4 != 32`). At HEAD, **0 of 357**
+rows reach it — it is latent, not a live failure. After the fix the same designs produce a *verdict*
+and a named diagnostic.
+
+**Measured.** The four-table staircase is unchanged (2833/2835/2835/2835, `PC=0x11`, 0 mismatches);
+golden traces unchanged; corpus 212 both-pass / 0 disagreements. Regression tests:
+`a_width_mismatched_driver_merges_to_x_and_never_panics` (value.rs) and
+`a_width_mismatched_driver_is_reported_not_fatal` (delay.rs).

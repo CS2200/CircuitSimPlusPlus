@@ -176,9 +176,12 @@ pub struct RunReport {
     /// Clocked parts whose `clk` pin rose **more than once inside one cycle**, as
     /// `(cycle, part)` — the design's clock glitched. This is the delay-aware engine's one
     /// structural difference from CircuitSim CE, which never delivers a same-round transient
-    /// (`docs/bugs.md` §1). It is a diagnostic: it changes no verdict, it only makes a
+    /// (`docs/bugs-archive.md`). It is a diagnostic: it changes no verdict, it only makes a
     /// timing-table-dependent design visible.
     pub clock_glitches: Vec<(u64, CompId)>,
+    /// Nets whose driver values disagree with the net's width, as
+    /// `(cycle, net, driver, value width, net width)` (`docs/bugs-archive.md`).
+    pub net_width_mismatches: Vec<(u64, u32, CompId, u32, u32)>,
 }
 
 /// Event payload. Ordering is (time, seq) via `Ev`.
@@ -332,6 +335,7 @@ struct DelaySnap {
     clk_change_at: Vec<Option<u64>>,
     clk_changes: Vec<u32>,
     clock_glitches: Vec<(u64, CompId)>,
+    net_width_mismatches: Vec<(u64, u32, CompId, u32, u32)>,
     pending_gen: Vec<u64>,
     pending_val: Vec<Vec<crate::api::WireValue>>,
     pending_cause: Vec<Option<u32>>,
@@ -633,17 +637,21 @@ pub struct DelayEngine {
     clock_comps: Vec<u32>,
     /// Per clocked part: the instant of its most recent `clk` delivery, and how many it has had
     /// at that instant. More than one is the same-instant transient CE's round coalesces
-    /// (`clock_glitches`, `docs/bugs.md` §1).
+    /// (`clock_glitches`, `docs/bugs-archive.md`).
     clk_change_at: Vec<Option<u64>>,
     clk_changes: Vec<u32>,
     /// Clocked parts that rose twice at one instant, as `(cycle, part)` (the diagnostic).
     clock_glitches: Vec<(u64, CompId)>,
+    /// Nets whose *driver values* disagree with the net's width, as
+    /// `(cycle, net, driver, value width, net width)`. The merge yields `X` for such a net and
+    /// never panics (`docs/bugs-archive.md`); this is how the cause becomes visible.
+    net_width_mismatches: Vec<(u64, u32, CompId, u32, u32)>,
     /// Per clocked part (register/RAM): whether the **instant being processed entered with the
     /// clock at a definite low** — and no edge taken for it yet. A `clk` delivery takes an edge
     /// only when this holds, so a clocked part takes **at most one edge per instant**, and never
     /// one whose instant began high (a `1 -> 0 -> 1` inside one instant is the transient this
     /// engine delivers and CircuitSim CE's round coalesces: `docs/derived-clock.md` §11,
-    /// `docs/bugs.md` §1).
+    /// `docs/bugs-archive.md`).
     clk_entry_low: Vec<bool>,
     /// Per clocked part: the clock's level as of the last definite delivery — what the *next*
     /// instant enters with. A `Z`/`X` leaves it alone, so a floating clock holds the level.
@@ -1018,6 +1026,7 @@ impl DelayEngine {
             clk_last_low: vec![true; n],
             clk_change_at: vec![None; n],
             clk_changes: vec![0; n],
+            net_width_mismatches: Vec::new(),
             clock_glitches: Vec::new(),
             pending_gen: vec![0; n],
             pending_val: vec![Vec::new(); n],
@@ -1257,16 +1266,16 @@ impl DelayEngine {
     /// Full engine state as deterministic JSON (savestate; §8.1). The
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
-    /// (§4.6 — see the test). Snapshot version 7: the clocked parts' entry level and the
-    /// clock-glitch diagnostic (`docs/derived-clock.md` §11, `docs/bugs.md` §1). Version 4 was
-    /// per-sink views (F14); the setup/hold tracker
+    /// (§4.6 — see the test). Snapshot version 8: the clocked parts' entry level, the
+    /// clock-glitch diagnostic and the net-width diagnostic (`docs/derived-clock.md` §11,
+    /// `docs/bugs-archive.md`). Version 4 was per-sink views (F14); the setup/hold tracker
     /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
     /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
         let mut queue: Vec<&Ev> = self.queue.iter().collect();
         queue.sort_by_key(|e| (e.time, e.prio, e.seq));
         let snap = DelaySnap {
-            version: 7,
+            version: 8,
             clock_start: self.clock_start,
             now: self.now,
             seq: self.seq,
@@ -1306,6 +1315,7 @@ impl DelayEngine {
             clk_change_at: self.clk_change_at.clone(),
             clk_changes: self.clk_changes.clone(),
             clock_glitches: self.clock_glitches.clone(),
+            net_width_mismatches: self.net_width_mismatches.clone(),
             pending_gen: self.pending_gen.clone(),
             pending_val: self
                 .pending_val
@@ -1324,7 +1334,7 @@ impl DelayEngine {
     pub fn restore(&mut self, json: &str) -> Result<(), String> {
         let snap: DelaySnap =
             serde_json::from_str(json).map_err(|e| format!("bad snapshot: {e}"))?;
-        if snap.version != 7 {
+        if snap.version != 8 {
             return Err(format!("unsupported snapshot version {}", snap.version));
         }
         if snap.clock_start != self.clock_start {
@@ -1404,6 +1414,7 @@ impl DelayEngine {
         self.clk_change_at = snap.clk_change_at;
         self.clk_changes = snap.clk_changes;
         self.clock_glitches = snap.clock_glitches;
+        self.net_width_mismatches = snap.net_width_mismatches;
         self.pending_gen = snap.pending_gen;
         self.pending_cause = snap.pending_cause;
         self.pending_net_cause = snap.pending_net_cause;
@@ -2227,6 +2238,7 @@ impl DelayEngine {
             trace_hash: self.trace_hash,
             events_processed: self.events_processed,
             clock_glitches: self.clock_glitches.clone(),
+            net_width_mismatches: self.net_width_mismatches.clone(),
         })
     }
 
@@ -2790,6 +2802,24 @@ impl DelayEngine {
         }
     }
 
+    /// Report a component that drove a value whose width is not its pin's, once per net.
+    ///
+    /// The shape used to `panic!` inside `contention_merge` — `no run report`, no verdict at all —
+    /// and stayed invisible unless the net happened to have two drivers (`docs/bugs-archive.md`). The
+    /// value is now fitted to the pin and the merge yields `X` for any residual disagreement; this
+    /// is the engine telling the user *which* part is the wrong width, and what the two widths are.
+    fn note_net_width_mismatch(&mut self, net: u32, comp: u32, got: u32, want: u32) {
+        if self
+            .net_width_mismatches
+            .iter()
+            .any(|&(_, n, _, _, _)| n == net)
+        {
+            return;
+        }
+        self.net_width_mismatches
+            .push((self.rising_seen, net, CompId(comp), got, want));
+    }
+
     /// Fold one `clk`-pin delivery into the part's clock bookkeeping, returning `true` when it
     /// is a rising edge to take.
     ///
@@ -2798,7 +2828,7 @@ impl DelayEngine {
     /// edge, while a low at an earlier instant still arms the rise after it — which is the
     /// distinction that matters: this engine *delivers* every change and CircuitSim CE's
     /// round-based iteration coalesces a round, so an instant that began high and recovered is a
-    /// transient, whereas a rise after a real low is a genuine edge (`docs/bugs.md` §1,
+    /// transient, whereas a rise after a real low is a genuine edge (`docs/bugs-archive.md`,
     /// `docs/derived-clock.md` §11).
     ///
     /// The delivery is also counted, so a clock driven more than once inside one instant is
@@ -2898,7 +2928,7 @@ impl DelayEngine {
                 if gen != self.pending_gen[c] {
                     return Ok(()); // cancelled (inertial swallow)
                 }
-                let outs = std::mem::take(&mut self.pending_val[c]);
+                let mut outs = std::mem::take(&mut self.pending_val[c]);
                 // Pending committed; make a same-valued placeholder so a
                 // later identical recomputation is a no-op.
                 self.pending_val[c] = outs.clone();
@@ -2906,6 +2936,15 @@ impl DelayEngine {
                 let mut affected = std::mem::take(&mut self.scratch_affected);
                 affected.clear();
                 for (i, (slot, net)) in out_pins.iter().enumerate() {
+                    // A behaviour must drive its pin at the pin's width (CE builds every port's
+                    // value at its link's width: `new WireValue(value, bitSize)`). A disagreement
+                    // is *reported* and *fitted* here — the one choke point — so it neither
+                    // panics the merge nor spreads (`docs/bugs-archive.md`).
+                    let want = self.netlist.comps[c].pins[*slot].width;
+                    if outs[i].width() != want {
+                        self.note_net_width_mismatch(net.0, comp, outs[i].width(), want);
+                        outs[i] = outs[i].fitted(want);
+                    }
                     self.drives[c][*slot] = outs[i].clone();
                     if !affected.contains(&net.0) {
                         affected.push(net.0);
@@ -5294,7 +5333,7 @@ mod tests {
         );
     }
 
-    /// **The settled clock rule (`docs/bugs.md` §1, `docs/derived-clock.md` §11).** A clocked
+    /// **The settled clock rule (`docs/bugs-archive.md`, `docs/derived-clock.md` §11).** A clocked
     /// part takes **one** edge per instant, and only when that instant *entered* with its clock
     /// at a definite low. The two shapes that matter are mirror images, and this is the whole
     /// rule: a `1 -> 0 -> 1` inside one instant (entered high) is not an edge, while a rise after
@@ -5352,7 +5391,7 @@ mod tests {
         assert!(eng.clock_delivery(0, Bit::One, 700), "a Z held the low");
     }
 
-    /// **The clock-glitch diagnostic (`docs/bugs.md` §1), the false-positive guard.** A register
+    /// **The clock-glitch diagnostic (`docs/bugs-archive.md`), the false-positive guard.** A register
     /// clocked by the global clock rises once a cycle, at a different instant each time — nothing
     /// to report. (A *gated* clock re-clocking mid-phase must also stay silent: this is the case
     /// that made a per-cycle "one rise" rule unusable.)
@@ -5381,6 +5420,46 @@ mod tests {
             rep.clock_glitches.is_empty(),
             "a gated clock that follows the global clock must not be reported: {:?}",
             rep.clock_glitches
+        );
+    }
+
+    /// **A net whose driver value carries the wrong width is reported, not fatal**
+    /// (`docs/bugs-archive.md`). A testbench poke is where a wrong-width value can enter
+    /// (`poke_at` does not check the width), so the fixture pokes a 1-bit pin with a 4-bit value:
+    /// the net merges to `X`, the run finishes, and the report names the driver and both widths —
+    /// where before, the merge `panic!`ed and the run produced *no report at all*.
+    #[test]
+    fn a_width_mismatched_driver_is_reported_not_fatal() {
+        let json = format!(
+            r##"{{
+            "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
+            "circuits": [{{ "name": "main", "components": [
+                {{"id":"src","type":"wiring.pin","pos":[0,0],"name":"src"}},
+                {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
+                {{"id":"r","type":"mem.register","pos":[0,0],"name":"r"}}
+            ], "wires": [
+                {{"a":{{"comp":"src","pin":"pin"}},"b":{{"comp":"r","pin":"d"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"r","pin":"en"}}}}
+            ]}}]
+        }}"##
+        );
+        let mut eng = engine(&json, 1000);
+        assert!(
+            eng.poke_at("src", k(4, 0x5), 100),
+            "poke a 4-bit value onto a 1-bit pin"
+        );
+        let rep = eng.run(1).expect("the run must finish, not panic");
+        assert_eq!(
+            rep.net_width_mismatches.len(),
+            1,
+            "{:?}",
+            rep.net_width_mismatches
+        );
+        let (cycle, _net, _comp, got, want) = rep.net_width_mismatches[0];
+        assert_eq!(
+            (cycle, got, want),
+            (0, 4, 1),
+            "named the driver width and the net width (cycle 0: the poke is before the first edge)"
         );
     }
 

@@ -625,6 +625,25 @@ pub struct ClockGlitch {
     pub component: String,
 }
 
+/// A net whose **driver values** do not all carry the net's width (`docs/bugs-archive.md`).
+///
+/// The shape used to `panic!` inside `contention_merge` — `no run report`, no verdict at all — and
+/// it stays invisible unless the net happens to have two drivers. The merge yields `X` instead;
+/// this names the driver and the two widths so the cause is actionable.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NetWidthMismatch {
+    /// The cycle in which it was first seen.
+    pub cycle: u64,
+    /// The net, as its flat netlist index.
+    pub net: u32,
+    /// The driver whose committed value carried the wrong width.
+    pub component: String,
+    /// The width of that driver's value.
+    pub value_width: u32,
+    /// The net's width.
+    pub net_width: u32,
+}
+
 /// The JSON report (§8.2). Simulation-derived fields are bit-identical
 /// across runs/machines; `wall_time_ms`/`peak_rss_bytes` are telemetry.
 ///
@@ -671,6 +690,10 @@ pub struct Report {
     /// per instant: `docs/derived-clock.md` §11). Empty on a clean run, omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub clock_glitches: Vec<ClockGlitch>,
+    /// Nets whose driver values disagree with the net's width — the shape that used to panic the
+    /// engine (`docs/bugs-archive.md`). The merge yields `X`; this reports it. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub net_width_mismatches: Vec<NetWidthMismatch>,
     /// §8.3 rubric hook; `None` when no threshold was given.
     pub rubric_full_credit: Option<bool>,
     /// Load/validation errors when `halt_reason` is `"malformed-file"`;
@@ -805,6 +828,7 @@ impl From<(GradeOutcome, Vec<LoadError>, &str, Instant)> for GradeOutput {
                 delay_table: table_name.to_string(),
                 trace_hash: None,
                 clock_glitches: Vec::new(),
+                net_width_mismatches: Vec::new(),
                 rubric_full_credit: None,
                 errors,
                 peak_rss_bytes: peak_rss_bytes(),
@@ -1050,6 +1074,7 @@ fn grade_delay(
         trace_hash: 0,
         events_processed: 0,
         clock_glitches: Vec::new(),
+        net_width_mismatches: Vec::new(),
     };
     while remaining > 0 && halt.is_none() {
         let chunk = remaining.min(RUN_CHUNK);
@@ -1130,6 +1155,19 @@ fn grade_delay(
             .collect(),
         delay_table: format!("{} ({})", table.name(), table.status()),
         trace_hash: Some(eng.trace_hash()),
+        net_width_mismatches: last_report
+            .net_width_mismatches
+            .iter()
+            .map(
+                |&(cycle, net, id, value_width, net_width)| NetWidthMismatch {
+                    cycle,
+                    net,
+                    component: render_comp(&nl, id),
+                    value_width,
+                    net_width,
+                },
+            )
+            .collect(),
         clock_glitches: last_report
             .clock_glitches
             .iter()
