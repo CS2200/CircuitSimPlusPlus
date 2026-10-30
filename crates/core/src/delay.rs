@@ -626,7 +626,7 @@ pub struct DelayEngine {
     /// clock holds this as it is: it is a hiccup (a floating value that a circuit without time
     /// cannot have), not a level, so it can neither arm nor trigger. Without this, a gated
     /// clock that dips to `Z` and recovers is read as a *second* rising edge inside one cycle
-    /// and the register latches an extra time (`docs/bugs.md` §1).
+    /// and the register latches an extra time (`docs/derived-clock.md` §11).
     clk_armed: Vec<bool>,
     /// Inertial bookkeeping: current generation, scheduled outputs,
     /// triggering input net.
@@ -1234,7 +1234,7 @@ impl DelayEngine {
     /// queue is serialized in pop order `(time, prio, seq)`; restoring into
     /// an engine built from the same circuit + table continues bit-identically
     /// (§4.6 — see the test). Snapshot version 5: the clock-arming state (`clk_armed`,
-    /// docs/bugs.md §1). Version 4 was per-sink views (F14); the setup/hold tracker
+    /// `docs/derived-clock.md` §11). Version 4 was per-sink views (F14); the setup/hold tracker
     /// and its violations list are gone, `half_period`/`next_boundary` are gone, and the clock
     /// origin is `clock_start` (`docs/derived-clock.md`).
     pub fn snapshot(&self) -> String {
@@ -3026,7 +3026,7 @@ impl DelayEngine {
                     // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
                     // delivery on the clock is a hiccup and holds the level: it can neither arm
                     // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
-                    // twice inside one cycle (`docs/bugs.md` §1, the derived-clock glitch).
+                    // twice inside one cycle (`docs/derived-clock.md` §11, the derived-clock glitch).
                     match cur {
                         Bit::Zero => self.clk_armed[c] = true,
                         Bit::One if self.clk_armed[c] => {
@@ -3050,7 +3050,7 @@ impl DelayEngine {
                     // A rising edge is a `0 -> 1` of the clock's **definite** level. A `Z`/`X`
                     // delivery on the clock is a hiccup and holds the level: it can neither arm
                     // nor trigger, so a gated clock that dips to `Z` and recovers does not latch
-                    // twice inside one cycle (`docs/bugs.md` §1, the derived-clock glitch).
+                    // twice inside one cycle (`docs/derived-clock.md` §11, the derived-clock glitch).
                     match cur {
                         Bit::Zero => self.clk_armed[c] = true,
                         Bit::One if self.clk_armed[c] => {
@@ -5179,7 +5179,7 @@ mod tests {
         );
     }
 
-    /// **H1 (`docs/bugs.md` §1) — the derived-clock glitch.** A register's clock reads a
+    /// **H1 (`docs/derived-clock.md` §11) — the derived-clock glitch.** A register's clock reads a
     /// definite `1`, then a non-level (`X`/`Z`), then `1` again *without ever going low*. The
     /// recovery is not a rising edge: the clock never went low, so there is nothing to rise
     /// *from*. Before `clk_armed` this read as a second edge and the register latched twice
