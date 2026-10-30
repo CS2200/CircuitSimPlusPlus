@@ -392,7 +392,7 @@ export default function App() {
   useEffect(() => closeCanvasMenu(), [sheet, closeCanvasMenu]);
 
   /** The newest `showInWaveform` (declared further down), for the context menu. */
-  const showInWaveformRef = useRef<() => Promise<void>>(async () => {});
+  const showInWaveformRef = useRef<() => void>(() => {});
   /** Run one context-menu item through the editor's public commands (§75). */
   const onCanvasMenuAction = useCallback((action: CanvasMenuAction) => {
     const ed = editorRef.current;
@@ -736,32 +736,41 @@ export default function App() {
    * ("load a circuit and run the sim first"), which hid the feature exactly
    * when someone went looking for it: now it loads the circuit itself and opens
    * on an empty trace that says to press Tick or Play.
+   *
+   * The viewer is shown **immediately** and the circuit is synced in the
+   * background (the viewer subscribes to the store, so its default rows appear
+   * as soon as the load lands). Syncing first and only then flipping the state
+   * made the button feel dead for the length of a load, and — worse — a second
+   * press started a *second* open whose late resolution re-opened the viewer
+   * after the user had already closed it. That is the "stuck in the waveform"
+   * report: the toggle must be synchronous.
    */
-  const openWaveform = useCallback(async () => {
-    const ok = await sim.resync(doc);
-    if (!ok) {
-      toast("The circuit does not load yet — fix the problems in the banner first");
-      return;
-    }
+  const openWaveform = useCallback(() => {
     setHistoryOpen(false);
     setWaveOpen(true);
+    void sim.resync(doc).then((ok) => {
+      if (!ok) toast("The circuit does not load yet — the banner has the details");
+    });
   }, [sim, doc, toast]);
 
   /** Open the viewer with the current selection added to it (context menu / Inspector). */
-  const showInWaveform = useCallback(async () => {
-    const ok = await sim.resync(doc);
-    if (!ok) {
-      toast("The circuit does not load yet — fix the problems in the banner first");
-      return;
-    }
-    const signals = pickSelection();
-    if (signals.length === 0) {
-      toast("Nothing to trace there — select a wire, or a part with an output");
-      return;
-    }
-    setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
+  const showInWaveform = useCallback(() => {
+    // Show the viewer at once; the picked signal is added once the circuit is
+    // synced (the viewer consumes `waveAdd` whenever it arrives).
     setHistoryOpen(false);
     setWaveOpen(true);
+    void sim.resync(doc).then((ok) => {
+      if (!ok) {
+        toast("The circuit does not load yet — the banner has the details");
+        return;
+      }
+      const signals = pickSelection();
+      if (signals.length === 0) {
+        toast("Nothing to trace there — select a wire, or a part with an output");
+        return;
+      }
+      setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
+    });
   }, [sim, doc, pickSelection, toast]);
   showInWaveformRef.current = showInWaveform;
   /** Click a toast to dismiss: bulge briefly, then remove it. */
@@ -860,13 +869,28 @@ export default function App() {
 
   // ---- file operations (File menu) ----
 
-  /** Replace the editor document (New/Open); the sim engine is re-synced by the caller. */
-  const adoptDoc = useCallback((d: CircuitDocument, path: string | null) => {
-    setDoc(d);
+  /**
+   * Set the document's path in React state AND in `filePathRef`, in the same
+   * tick. Async work reads the ref (version-history/recovery keying, the
+   * external-change guard), and `setFilePath` alone leaves it stale until the
+   * next render — so the version an explicit save took was keyed to the
+   * *pre-save* document, and a freshly saved file's history looked empty.
+   */
+  const setFilePathNow = useCallback((path: string | null) => {
+    filePathRef.current = path;
     setFilePath(path);
-    setSheet(0);
-    setClosedSheets(new Set()); // a new file opens with every tab
   }, []);
+
+  /** Replace the editor document (New/Open); the sim engine is re-synced by the caller. */
+  const adoptDoc = useCallback(
+    (d: CircuitDocument, path: string | null) => {
+      setDoc(d);
+      setFilePathNow(path);
+      setSheet(0);
+      setClosedSheets(new Set()); // a new file opens with every tab
+    },
+    [setFilePathNow],
+  );
 
   const confirmDiscard = useCallback(() => {
     if (!doc.dirty) return true;
@@ -919,7 +943,7 @@ export default function App() {
           return;
         }
         doc.markClean();
-        setFilePath(path);
+        setFilePathNow(path);
         editorRef.current?.refresh(); // re-report the dirty flag
         setSaveState({ kind: "saved", at: Date.now() });
         void discardRecovery(); // the file on disk is now the truth
@@ -935,7 +959,7 @@ export default function App() {
         toast(`Save failed: ${String(err)}`);
       }
     },
-    [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion],
+    [doc, sim, toast, discardRecovery, recordWriteStat, takeVersion, setFilePathNow],
   );
 
   /**
@@ -948,7 +972,7 @@ export default function App() {
       const saved = await saveTextFile(suggested, doc.toJson(), { forcePicker });
       if (!saved) return false; // cancelled — nothing was written
       doc.markClean();
-      setFilePath(doc.name);
+      setFilePathNow(doc.name);
       editorRef.current?.refresh();
       setSaveState({ kind: "saved", at: Date.now() });
       void discardRecovery();
@@ -956,7 +980,7 @@ export default function App() {
       toast(`Saved ${suggested}`);
       return true;
     },
-    [doc, discardRecovery, takeVersion, toast],
+    [doc, discardRecovery, takeVersion, toast, setFilePathNow],
   );
 
   /**
@@ -1067,7 +1091,7 @@ export default function App() {
         }
         void renameCircuitFile(realPath, siblingPath(realPath, `${clean}.csx`))
           .then((next) => {
-            setFilePath(next);
+            setFilePathNow(next);
             diskConflictRef.current = false;
             void recordWriteStat(next);
             void doSave(next); // the file's own `name` field follows
@@ -1083,7 +1107,7 @@ export default function App() {
         toast(`Save failed: ${String(err)}`),
       );
     },
-    [doc, doSave, recordWriteStat, saveInBrowser, toast],
+    [doc, doSave, recordWriteStat, saveInBrowser, toast, setFilePathNow],
   );
 
   // ---- autosave: crash recovery + optional atomic file rewrite -------------

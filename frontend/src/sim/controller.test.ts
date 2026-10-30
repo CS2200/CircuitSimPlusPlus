@@ -41,6 +41,33 @@ describe("SimController", () => {
     expect(calls[1].text).toBe(doc.toJson());
   });
 
+  it("remembers a saved document's path, so a re-sync still resolves autoloads there", async () => {
+    // Save As used to leave `loadedPath` null: the file-backed document then
+    // re-synced from bytes with no base directory, so a relative autoload
+    // resolved against the process CWD and the load (and the waveform's own
+    // re-sync) failed. A save must record where the document now lives.
+    const core = createMockCore();
+    const realLoad = core.api.loadCircuit.bind(core.api);
+    const calls: { path?: string; text?: string }[] = [];
+    core.api.loadCircuit = async (src) => {
+      calls.push({
+        path: src.path,
+        text: src.bytes === undefined ? undefined : new TextDecoder().decode(src.bytes),
+      });
+      return realLoad(src);
+    };
+    const ctl = new SimController(core, (cb) => cb());
+    const doc = buildMockDemoDoc();
+    expect(await ctl.load(doc)).toBe(true); // untitled: bytes only
+    await ctl.save(doc, "/work/cpu.csx"); // Save As
+
+    doc.updateComponent(0, doc.circuit(0).components[0].id, { name: "renamed" });
+    expect(await ctl.resync(doc)).toBe(true);
+    const last = calls[calls.length - 1];
+    expect(last.path).toBe("/work/cpu.csx"); // autoloads resolve next to it
+    expect(last.text).toBe(doc.toJson());
+  });
+
   it("retries a FAILED load once the document changes, so a fixed error clears (§99)", async () => {
     // The engine refuses an unnamed pin; this core refuses until the pin has a name.
     const core = createMockCore();
