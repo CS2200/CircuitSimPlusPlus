@@ -163,11 +163,17 @@ Keeping this list saves the next person from re-deriving it.
   effect is the `pause_on_unknown` pause; its evaluations are pure reads that are otherwise
   discarded. It now returns immediately when `pause_on_unknown` is off (graded/default runs)
   (~5%). Set `pause_on_unknown` and the sweep runs as before.
-* **Event queue: slab-indexed binary heap** (`EventQueue`). The old shape was
-  `BTreeMap<u64, [VecDeque<Ev>; 2]>` — one `VecDeque` allocated+freed per *distinct
-  timestamp*. Now a `BinaryHeap<Reverse<(time, prio, seq, u32)>>` of slab indices, with the
-  `Ev` payloads in a reused slab. Ordering is identical: `(time, prio, seq)` is a total order
-  (`seq` is unique).
+* **Event queue: monotone radix heap** (`EventQueue`). History: `BTreeMap<u64,
+  [VecDeque<Ev>;2]>` (a `malloc`/`free` per distinct timestamp) → `BinaryHeap` of
+  `(time,prio,seq,idx)` + a slab → **radix heap**. The derived clock drains the queue to
+  quiescence before timestamping the next transition, so events are scheduled at `now+delay
+  ≥ now`: the queue is *monotone*, which is exactly what a radix heap exploits (amortized
+  `O(1)` push/pop, `O(1)` peek). Buckets hold `u32` slab indices split into two FIFOs
+  (priority 0/1; `seq` is insertion order), so the `(time,prio,seq)` order is unchanged. Two
+  engine inserts are *below* the radix origin and go to a small linear `early` list:
+  testbench pokes and deferred clocks. `peek` became `&mut` (it promotes the minimum at the
+  point of consume). ~9% faster on 3.4k-component designs; ~3% slower on a 120-component
+  fixture (tiny-queue constant overhead).
 * **Word-wise trace hash.** `Value::fold_bytes` fed byte-wise FNV-1a; the serial recurrence
   was ~20% of a run. `hash_event` now mixes `Value::fold_words` (one 64-bit word per limb)
   with a word-wise FNV-style mix. The digest changed → the golden hashes were re-blessed
@@ -176,17 +182,28 @@ Keeping this list saves the next person from re-deriving it.
 * **`Value` single-limb fast paths.** `and`/`or`/`xor`, `not`, and `contention_merge_detail`
   allocated three one-element `Vec<u64>`s per call for any width ≤ 64 (i.e. almost every
   value); they now compute on the stack (`Limbs::Inline`). `n == 0` keeps the general path.
+* **Evaluate off the views** (`eval_and_schedule`, `clock_edge`). They used to clone every
+  input pin's view into an owned `Vec` before evaluating, then clone again to substitute a
+  floating input. The common case has no floating input, so they now evaluate straight off
+  the views by reference; owned copies are taken only when a consumed unknown forces a
+  substitution. ~5–8% on 3.4k-component designs.
+
+**Tried and rejected (with the measurement):**
+
+* **Arcless events/views (`Arc<Value>` → `Value`).** The idea: `Value` is inline for every
+  width this course uses, so copying it should be cheap and `Arc`'s heap allocation + atomic
+  refcount traffic should go. **Measured: a wash to ~8% slower.** The reason is that `Value`
+  is ~104 bytes, not 64: the `Limbs` enum carries a `Heap(Vec<u64>)` variant, so *every*
+  `Value` is tag+`Vec`-sized (3 × 32 bytes) even when inline. `Arc`'s 8-byte pointer clone is
+  competitive with a 104-byte copy. **Arcless only pays off after `Value` is shrunk to a
+  genuinely small/Copy type** (e.g. `[u64; 2]` inline, which covers the course's ≤64 and the
+  tests' 128-bit values) — do that first, then revisit.
 
 **Left on the table:**
 
-* The event queue is still ~15–18% (`BinaryHeap::pop` + slab push/pop). A **radix/bucket
-  queue** is viable because times are nondecreasing in schedule order (the derived clock
-  drains before it schedules), but it is a larger change.
-* `apply` self-time (~25%) is dominated by per-event `Arc::new(resolve(..))`, `Arc::clone`
-  into `views`, and `Value` clones (`net_values`, `pending_val`). Dropping
-  `Arc<Value>` for `Value` (now inline-small) is the candidate rewrite.
-* The per-evaluation `Vec<Arc<Value>>` construction (~7%) is **`Arc` clone cost, not
-  allocation** — reusing a scratch buffer was tried and did **not** help; do not bother.
+* Shrink `Value` (see above), then Arcless again.
+* `apply` self-time (~25%) is per-event `resolve`, `Value` clones (`net_values`,
+  `pending_val`), and view updates.
 * `Value::bit` (~4%) is called from the clock/enable paths.
 
 ### Gotchas discovered
@@ -217,21 +234,22 @@ i5-1135G7). Recorded so a future agent does not have to re-derive the baseline.
 | % | symbol | what |
 |--:|---|---|
 | 24.1 | `DelayEngine::apply` | the event dispatch; self-time is the `Fire`/`Deliver` arms |
-| 8.1 | `BinaryHeap::pop` | event queue |
-| 7.9 | `eval_and_schedule` | evaluate a part + schedule its commit |
-| 5.8 | `EventQueue::push` | event queue (slab) |
-| 4.5 | `EventQueue::pop` | event queue (slab) |
-| 4.5 | `Vec<Arc<Value>>::from_iter` (eval) | per-eval input list (`Arc` clones) |
-| 4.1 | `clock_edge` | register/RAM edge path |
+| 26.2 | `DelayEngine::apply` | the event dispatch |
+| 7.5 | `eval_and_schedule` | evaluate a part + schedule its commit |
+| 5.3 | `EventQueue::pop` | radix heap |
+| 5.0 | `EventQueue::push` | radix heap |
+| 4.6 | `Vec<Arc<Value>>::from_iter` (eval) | the **fallback** owned input list (floating-input substitution) |
+| 4.0 | `EventQueue::min_index` | radix heap peek |
 | 3.8 | `Value::bit` | clock/enable bit reads |
-| 3.3 | `Vec<Arc<Value>>::from_iter` (clock) | per-edge input list (`Arc` clones) |
-| 3.0 | `Behavior::eval_with` | the component behaviours |
-| 2.7 + 2.3 | `malloc` + `cfree` | allocations |
-| (tail) | `Value::clone`, `rising_edge_inner`, `clock_delivery`, `resolve*`, … | |
+| 3.6 | `Behavior::eval_with` | the component behaviours |
+| 2.8 + 2.4 | `malloc` + `cfree` | allocations |
+| 2.3 | `DelayEngine::run` | the run loop |
+| 1.8 | `rising_edge_inner` | register/RAM edge |
+| 1.4 | `Vec<&Value>::from_iter` (clock) | clock-edge input list (borrowed) |
 
-The two biggest actionable buckets are **the event queue (~18% together)** and **the
-per-event `Arc`/`Value` traffic** (the `from_iter` rows + `Arc::new` inside `apply` + the
-`malloc`/`free`), which is why those are §7's "left on the table". The synthetic probe
+The queue is now the **radix heap** (~14% together: `pop` + `push` + `min_index`), and note
+the `Vec<Arc<Value>>` row is now only the *floating-input fallback* — the common
+by-reference path does not appear. `apply` (~26%) is the next target. The synthetic probe
 (`pipeline_100k_cycles`, ignored) is the quick relative check.
 
 ### Corpus: new vs old (measured)
@@ -241,12 +259,15 @@ Full 357-submission corpus (transpiler `tools/`); **normalize both sides** for c
 
 | | new (whole path) | new (sim only) | old (measured) |
 |---|--:|--:|--:|
-| raw as-run | 1227 s | 1096 s | 7035 s |
-| normalized | 802 s (13.4 min) | 716 s (11.9 min) | 4481 s (74.7 min) |
-| **speed-up** | — | — | **5.6× whole / 6.3× sim** |
+| raw as-run | 1132 s | 1001 s | 7035 s |
+| normalized | 740 s (12.3 min) | 654 s (10.9 min) | 4481 s (74.7 min) |
+| **speed-up** | — | — | **6.1× whole / 6.9× sim** |
 
-Old side: 335/357 ran (one fresh JVM each), median 18.9 s, max 408 s. New synthetic probe:
-266 ms / 9.4 Mevents/s. Fixture `pipeline5`, 100k cycles: ~2.3 s.
+These are the **post-optimization** numbers (radix queue + evaluate-off-the-views + the
+validate/named launch merge). Against the pre-session run at the same worker count, the new
+engine went **whole path 1227→1132 s (−7.8%)** and **simulation 1096→1001 s (−8.7%)**; the
+corpus stayed verdict-neutral (0 rows moved). Old side: 335/357 ran (one fresh JVM each),
+median ~19 s, max 408 s. Synthetic probe: ~9 Mevents/s; `pipeline5`, 100k cycles: ~2.3 s.
 
 ### Where the raw artifacts are
 
@@ -254,9 +275,9 @@ Under `/tmp/opencode/` (regenerate rather than rely on them surviving):
 
 | file | what |
 |---|---|
-| `perf-final.data`, `perf-final.txt` | the engine profile above (`perf report -i … --stdio --no-children`) |
-| `perfcli5.data`, `perf.data`, `perf2.data`, `perf3.data` | earlier profiles (pre/post each change) |
-| `corpus-bench.json` | `corpus_bench.py` output (new timings + old sample + verdict diff) |
+| `perf-final2.data` | the engine profile above (post-optimization) |
+| `perf-final.data`, `perfcli5.data`, `perf.data`, `perf2.data`, `perf3.data` | earlier profiles (pre/post each change) |
+| `corpus-bench2.json`, `corpus-bench.json` | `corpus_bench.py` output (post- and pre-session; new timings + old sample + verdict diff) |
 | `old-autograder-all.json` | all-357 old-autograder timings |
 | `timings.md`, `timings-normalized.md` | the old-vs-new comparison |
 | `corpus-new-compat.json`, `corpus-head-prod.json`, `corpus-new-prod.json` | corpus verdict reports |
