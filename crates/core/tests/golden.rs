@@ -44,6 +44,12 @@
 //! is also why the earlier note that `t_obs` "did not move" was telling us something: it was
 //! measuring the settle.
 
+//! Re-blessed again by the **word-wise trace hash** (§4.6): the digest was byte-by-byte
+//! FNV-1a, whose strictly-serial recurrence was ~20% of a 100k-cycle run; it is now the
+//! same fingerprint computed one 64-bit word per step (`Value::fold_words`). `t_obs` did
+//! not move (54/55/0/220/220) and the architectural checks pass — the drift is the digest,
+//! not a result.
+
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
 use csim_core::format::load_document;
@@ -69,7 +75,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 3,
         pokes: &[],
         t_obs: 54,
-        trace_hash: 0x13ac_6285_f34e_1da4,
+        trace_hash: 0xf30c_622f_b495_199d,
     },
     Scenario {
         fixture: "fsm.csx",
@@ -77,7 +83,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 4,
         pokes: &[("car", 1, 0)],
         t_obs: 55,
-        trace_hash: 0x6f5b_3c68_c2a6_c31d,
+        trace_hash: 0x16fc_3f40_2c31_9589,
     },
     Scenario {
         fixture: "alu.csx",
@@ -85,7 +91,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0x9f8c_2156_b9b5_714c,
+        trace_hash: 0xe58e_ceb0_48f1_a7f4,
     },
     Scenario {
         fixture: "multicycle.csx",
@@ -93,7 +99,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 220,
-        trace_hash: 0x95e5_df98_d405_96a8,
+        trace_hash: 0xffc3_1118_ea41_127c,
     },
     Scenario {
         fixture: "pipeline5.csx",
@@ -101,7 +107,7 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 100,
         pokes: &[],
         t_obs: 220,
-        trace_hash: 0x4071_45fd_b97c_c52c,
+        trace_hash: 0x013e_254b_4091_dea3,
     },
 ];
 /// The CPU fixtures run the same program to the same architectural state

@@ -544,6 +544,26 @@ impl Value {
             self.width, rhs.width
         );
         let n = n_limbs(self.width);
+        // Width ≤ 64 is one limb — nearly every value in a course design. Compute it
+        // on the stack instead of allocating three one-element `Vec`s per gate op
+        // (the temporaries were heap-allocated only to be inlined into `Limbs`).
+        if n == 1 {
+            let bad_a = self.xs[0] | self.zs[0];
+            let bad_b = rhs.xs[0] | rhs.zs[0];
+            let (o, x) = f(
+                self.ones[0],
+                bad_a,
+                rhs.ones[0],
+                bad_b,
+                limb_mask(self.width, 0),
+            );
+            return Value {
+                width: self.width,
+                ones: Limbs::Inline(o),
+                xs: Limbs::Inline(x),
+                zs: Limbs::Inline(0),
+            };
+        }
         let mut ones = vec![0u64; n];
         let mut xs = vec![0u64; n];
         for i in 0..n {
@@ -595,6 +615,16 @@ impl Value {
     /// 4-state NOT: `¬0 = 1`; `¬1 = 0`; `¬X = ¬Z = X`.
     pub fn not(&self) -> Value {
         let n = n_limbs(self.width);
+        if n == 1 {
+            let bad = self.xs[0] | self.zs[0];
+            let mask = limb_mask(self.width, 0);
+            return Value {
+                width: self.width,
+                ones: Limbs::Inline(!self.ones[0] & !bad & mask),
+                xs: Limbs::Inline(bad & mask),
+                zs: Limbs::Inline(0),
+            };
+        }
         let mut ones = vec![0u64; n];
         let mut xs = vec![0u64; n];
         for i in 0..n {
@@ -681,6 +711,32 @@ impl Value {
             return (Value::z(width), false);
         }
         let n = n_limbs(width);
+        // Single-limb fast path (see `gate_binop`): no `Vec` temporaries. `n == 1`
+        // is the overwhelming case; `n == 0` still takes the general path.
+        if n == 1 {
+            let mask = limb_mask(width, 0);
+            let mut any_driven = 0u64;
+            let mut any_one = 0u64;
+            let mut all_one_or_z = u64::MAX;
+            let mut any_x = 0u64;
+            for d in drivers {
+                any_driven |= !d.zs[0];
+                any_one |= d.ones[0];
+                any_x |= d.xs[0];
+                all_one_or_z &= d.ones[0] | d.zs[0];
+            }
+            let disagree = any_one & !all_one_or_z;
+            let x = (any_x | disagree) & mask;
+            return (
+                Value {
+                    width,
+                    ones: Limbs::Inline(all_one_or_z & any_driven & !x & mask),
+                    xs: Limbs::Inline(x),
+                    zs: Limbs::Inline(!any_driven & mask),
+                },
+                disagree & mask != 0,
+            );
+        }
         let mut ones = vec![0u64; n];
         let mut xs = vec![0u64; n];
         let mut zs = vec![0u64; n];
@@ -1088,6 +1144,25 @@ impl Value {
         for mask in [&self.ones, &self.xs, &self.zs] {
             for limb in mask.iter() {
                 sink(&limb.to_le_bytes());
+            }
+        }
+    }
+
+    /// Fold the raw representation into a **word** sink: the `width`, then each of the
+    /// three masks limb by limb — the same information as [`Value::fold_bytes`], one
+    /// whole limb per step instead of eight bytes.
+    ///
+    /// This is what the §4.6 trace hash mixes. Byte-wise FNV-1a was the tripwire's
+    /// original form, but its recurrence is strictly serial per byte, so on a
+    /// 100k-cycle pipeline it was ~20% of the run (measured — every event's value went
+    /// through eight multiply steps per limb). A word-wise mix has the same job — a
+    /// deterministic, platform-independent fingerprint of the applied event stream —
+    /// at a fraction of the cost.
+    pub fn fold_words(&self, mut sink: impl FnMut(u64)) {
+        sink(u64::from(self.width));
+        for mask in [&self.ones, &self.xs, &self.zs] {
+            for &limb in mask.iter() {
+                sink(limb);
             }
         }
     }

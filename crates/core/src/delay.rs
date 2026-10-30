@@ -84,12 +84,12 @@
 //! per cycle (`events_per_cycle_cap`) and halts with
 //! `HaltReason::Oscillation`; the simulator never hangs.
 //!
-//! A running **FNV-1a trace hash** over every applied event (time, seq,
-//! kind, ids, value masks) is the determinism tripwire: same circuit +
-//! same inputs ⇒ same hash, every platform. Values go in as their raw
-//! `width` + mask words (`Value::fold_bytes`), never as rendered text —
-//! rendering three hex `String`s per event cost ~8% of a run to hash the
-//! same bits.
+//! A running **word-wise FNV-style trace hash** over every applied event
+//! (time, seq, kind, ids, value masks) is the determinism tripwire: same
+//! circuit + same inputs ⇒ same hash, every platform. Values go in as their
+//! raw `width` + mask words (`Value::fold_words`), one limb per step, never
+//! as rendered text — and never byte-by-byte, whose serial recurrence cost
+//! ~20% of a run.
 //!
 //! ## Same-timestamp tie-break (a symmetric settle)
 //!
@@ -128,7 +128,8 @@
 //! timestamp and the cap below still fires on it.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, VecDeque};
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use crate::api::{CompId, HaltReason, LoadError, LoadErrorKind, NamedKind, NetId};
@@ -227,63 +228,76 @@ struct Ev {
     kind: EvKind,
 }
 
-/// The event queue: one bucket per timestamp, each split by priority class.
+/// The event queue: a binary heap of *indices* into an event slab.
 ///
-/// Ordering is exactly `Ev`'s old `(time, prio, seq)` key — times come out in
-/// `BTreeMap` order, and inside one timestamp priority 0 before priority 1,
-/// each in insertion (`seq`) order, which is `VecDeque` order. It replaces a
-/// `BinaryHeap`, whose every push/pop was `O(log N)` comparisons and swaps of
-/// a whole `Ev`; here a same-timestamp push/pop is amortized `O(1)`, and the
-/// only logarithmic part is the number of *distinct future times*.
+/// The original shape was a `BTreeMap<u64, [VecDeque<Ev>; 2]>` — one bucket per
+/// timestamp — which gave amortized `O(1)` same-timestamp push/pop but allocated
+/// (and freed) a fresh `VecDeque` for every *distinct* timestamp, so a design
+/// whose event times are mostly unique paid a `malloc`/`free` per event plus a
+/// B-tree insert/remove per bucket.
+///
+/// A plain `BinaryHeap<Ev>` removes the per-timestamp allocation, but every sift
+/// then moves the whole `Ev` (~56 bytes) up and down the heap; at course scale
+/// that is gigabytes of `memmove` per run. So the heap holds only the ordering
+/// key `(time, prio, seq)` plus a `u32` slot index (a 32-byte element), and the
+/// `Ev` payloads live in a slab that is reused via a free list. The ordering is
+/// identical — `(time, prio, seq)` is a total order, `seq` being globally unique
+/// — and `peek` stays `O(1)`.
 #[derive(Debug, Default)]
 struct EventQueue {
-    buckets: BTreeMap<u64, [VecDeque<Ev>; 2]>,
+    heap: BinaryHeap<Reverse<(u64, u8, u64, u32)>>,
+    slab: Vec<Option<Ev>>,
+    free: Vec<u32>,
 }
 
 impl EventQueue {
+    #[inline]
     fn push(&mut self, ev: Ev) {
-        self.buckets.entry(ev.time).or_default()[usize::from(ev.prio.min(1))].push_back(ev);
+        let key = (ev.time, ev.prio, ev.seq);
+        let idx = match self.free.pop() {
+            Some(i) => {
+                self.slab[i as usize] = Some(ev);
+                i
+            }
+            None => {
+                self.slab.push(Some(ev));
+                (self.slab.len() - 1) as u32
+            }
+        };
+        self.heap.push(Reverse((key.0, key.1, key.2, idx)));
     }
 
     #[cfg(test)]
     fn len(&self) -> usize {
-        self.buckets.values().map(|b| b[0].len() + b[1].len()).sum()
+        self.heap.len()
     }
 
     fn is_empty(&self) -> bool {
-        self.buckets.is_empty()
+        self.heap.is_empty()
     }
 
+    #[inline]
     fn peek(&self) -> Option<&Ev> {
-        let (_, b) = self.buckets.iter().next()?;
-        b[0].front().or_else(|| b[1].front())
+        let Reverse((_, _, _, idx)) = self.heap.peek()?;
+        self.slab[*idx as usize].as_ref()
     }
 
+    #[inline]
     fn pop(&mut self) -> Option<Ev> {
-        let time = *self.buckets.keys().next()?;
-        let b = self.buckets.get_mut(&time).expect("keys() said it exists");
-        let ev = if let Some(e) = b[0].pop_front() {
-            e
-        } else {
-            b[1].pop_front().expect("bucket is never empty")
-        };
-        if b[0].is_empty() && b[1].is_empty() {
-            self.buckets.remove(&time);
-        }
+        let Reverse((_, _, _, idx)) = self.heap.pop()?;
+        let ev = self.slab[idx as usize].take().expect("slab slot is live");
+        self.free.push(idx);
         Some(ev)
     }
 
     fn iter(&self) -> impl Iterator<Item = &Ev> {
-        self.buckets
-            .values()
-            .flat_map(|b| b.iter().flat_map(|d| d.iter()))
+        self.heap
+            .iter()
+            .map(move |r| self.slab[r.0 .3 as usize].as_ref().expect("live slot"))
     }
 
     fn into_vec(self) -> Vec<Ev> {
-        self.buckets
-            .into_values()
-            .flat_map(|b| b.into_iter().flat_map(|d| d.into_iter()))
-            .collect()
+        self.slab.into_iter().flatten().collect()
     }
 }
 
@@ -795,6 +809,15 @@ pub struct NetDump {
 fn debug_splitter_shape() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("CSIM_DEBUG_SPLITTER_SHAPE").is_ok())
+}
+
+/// `CSIM_DEBUG_SETTLE`, read once. The old inline `std::env::var(..).is_ok()`
+/// sat in the `Deliver` apply arm, so it ran `getenv` — a full scan of the
+/// process environment — on every delivered event (measured ~3% of a 100k-cycle
+/// run). Cached, the hot path is one `OnceLock` load.
+fn debug_settle() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CSIM_DEBUG_SETTLE").is_ok())
 }
 
 fn debug_boot() -> Option<u32> {
@@ -3083,7 +3106,7 @@ impl DelayEngine {
                 if !self.in_boot && self.rising_seen > 0 && self.state_input_net[net as usize] {
                     let cycle_start = self.cycle_start;
                     let dt = ev.time - cycle_start;
-                    if std::env::var("CSIM_DEBUG_SETTLE").is_ok() {
+                    if debug_settle() {
                         eprintln!(
                             "SETTLE t={} cycle_start={} dt={} rising_seen={} in_boot={}",
                             ev.time, cycle_start, dt, self.rising_seen, self.in_boot
@@ -3313,6 +3336,16 @@ impl DelayEngine {
     /// value this run. Driven-then-idle nets (tri-state buses) and
     /// in-flight arrivals (overclocked designs) are immune.
     fn floating_sweep(&mut self) -> Result<(), Halt> {
+        // The sweep's only observable effect is the `pause_on_unknown` pause below;
+        // every other path evaluates a part and discards the result. `eval` is a pure
+        // read of the behaviour (`&self`), so when the pause is off the whole sweep is
+        // a no-op and can be skipped — which matters because it is O(components) per
+        // closed cycle and re-evaluates every part that has a `Z` input. (Measured
+        // ~5% of a 100k-cycle pipeline run.) A graded run leaves `pause_on_unknown`
+        // off; the editor turns it on and gets the sweep.
+        if !self.pause_on_unknown {
+            return Ok(());
+        }
         for c in 0..self.comps.len() {
             let cd = &self.cdata[c];
             if !matches!(cd.class, Class::Comb | Class::Ram | Class::Rom) {
@@ -3388,36 +3421,43 @@ impl DelayEngine {
         path
     }
 
-    /// FNV-1a over the applied event — the determinism tripwire (§4.6).
+    /// A word-wise FNV-style mix over the applied event — the determinism tripwire
+    /// (§4.6). Each event's fields and its (`≤ 64`-bit) value limbs are folded one
+    /// 64-bit word at a time, with a final `>> 29` fold so a difference in a high
+    /// word reaches the low bits too (a bare `(h ^ w) * P` only propagates upward).
+    ///
+    /// This is what the old `FNV-1a` byte loop did, one byte per multiply step; at
+    /// 125M byte-steps per 100k-cycle run that byte loop was ~20% of the engine.
+    /// The stream it fingerprints is unchanged — every applied event, its time and
+    /// sequence, its kind, and its full four-state value — so the property it guards
+    /// (a determinism break flips the hash) is unchanged.
     fn hash_event(&mut self, ev: &Ev) {
         let mut h = self.trace_hash;
-        let mut mix = |bytes: &[u8]| {
-            for &b in bytes {
-                h ^= u64::from(b);
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
-            }
+        let mut mix = |word: u64| {
+            h = (h ^ word).wrapping_mul(0x0000_0100_0000_01b3);
+            h ^= h >> 29;
         };
-        mix(&ev.time.to_le_bytes());
-        mix(&ev.seq.to_le_bytes());
+        mix(ev.time);
+        mix(ev.seq);
         match &ev.kind {
             EvKind::Clock { phase } => {
-                mix(&[0]);
-                mix(&[u8::from(*phase)]);
+                mix(0);
+                mix(u64::from(*phase));
             }
             EvKind::Fire { comp, gen } => {
-                mix(&[1]);
-                mix(&comp.to_le_bytes());
-                mix(&gen.to_le_bytes());
+                mix(1);
+                mix(u64::from(*comp));
+                mix(*gen);
             }
             EvKind::Net { net, value } => {
-                mix(&[2]);
-                mix(&net.to_le_bytes());
-                value.fold_bytes(|b| mix(b));
+                mix(2);
+                mix(u64::from(*net));
+                value.fold_words(&mut mix);
             }
             EvKind::Poke { comp, value } => {
-                mix(&[3]);
-                mix(&comp.to_le_bytes());
-                value.fold_bytes(|b| mix(b));
+                mix(3);
+                mix(u64::from(*comp));
+                value.fold_words(&mut mix);
             }
             EvKind::Deliver {
                 net,
@@ -3426,11 +3466,11 @@ impl DelayEngine {
                 value,
                 ..
             } => {
-                mix(&[4]);
-                mix(&net.to_le_bytes());
-                mix(&comp.to_le_bytes());
-                mix(&slot.to_le_bytes());
-                value.fold_bytes(|b| mix(b));
+                mix(4);
+                mix(u64::from(*net));
+                mix(u64::from(*comp));
+                mix(u64::from(*slot));
+                value.fold_words(&mut mix);
             }
         }
         self.trace_hash = h;
