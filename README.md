@@ -203,30 +203,32 @@ codes, assertions, test-spec files): `docs/autograder.md`.
 
 ## Releasing (DESIGN.md §9)
 
-CI runs in `.github/workflows/`: `backend.yml`, `frontend.yml`, and a tag-triggered
-`release.yml` that publishes a GitHub Release on the public mirror.
-release, each owner attaches their OS, then it is published.
+CI runs on a **public github.com mirror** (`github.com/CS2200/CircuitSimPlusPlus`)
+on free hosted runners; GT's GHES stays the private source of truth. A `v*` tag
+builds macOS + Windows + Linux and publishes one public GitHub Release, which the
+in-app update nudge reads.
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
 
 ```bash
-# once per teammate:  gh auth login --hostname github.gatech.edu
-# captain, after bumping the version in BOTH crates/app/tauri.conf.json and
-# frontend/package.json, and pushing master:
-node scripts/release.mjs --tag v0.2.0 --draft
-# the other two, once the tag is pushed:
-git fetch --tags && git checkout v0.2.0
-node scripts/release.mjs --tag v0.2.0 --attach-only
-# captain, when --status shows all three platforms:
-node scripts/release.mjs --tag v0.2.0 --status
-node scripts/release.mjs --tag v0.2.0 --publish
+# bump the SAME version in crates/app/tauri.conf.json AND frontend/package.json, then:
+git push origin master && git push public master
+git tag v0.2.0 && git push public v0.2.0     # tag the MIRROR — that is where CI runs
 ```
 
 ## CI
 
-The commit gate is `node scripts/build.mjs check` (backend fixture
-drift/fmt/clippy/test, then frontend lint/test/build). Run it locally before
-committing — there are no runners to run it for you.
+Three workflows in `.github/workflows/` run on the **mirror only** (each job is
+gated with `if: github.server_url == 'https://github.com'`, because GHES has no
+runners, so a GHES push is skipped rather than queued):
+
+- `backend.yml` — fixture drift, `fmt`, `clippy -D warnings`, tests, static-musl
+  `csim`, Gradescope image build.
+- `frontend.yml` — lint + unit tests, a **3-OS bundle matrix**, and e2e in a
+  pinned Playwright image.
+- `release.yml` — a `v*` tag → **one** public GitHub Release.
+
+Locally, `node scripts/build.mjs check` is the same commit gate.
 
 ## Conventions for contributors
 

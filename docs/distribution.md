@@ -1,10 +1,10 @@
-# Distribution & Updates — plan
+# Distribution & Updates — retrospective
 
-> **Status: live (2026-10-25).** The public mirror exists
-> (`github.com/Mr-Thack/CircuitSimPlusPlus`) and its CI runs; the update nudge
-> now points at it. Remaining: tag a `v*` release.
-> [`releasing.md`](releasing.md) still describes the local three-machine
-> process.
+> **Status: done (2026-11-02).** Option **C** is live: the public mirror is
+> `github.com/CS2200/CircuitSimPlusPlus` (CS2200 org), its CI builds and
+> releases, and the in-app nudge points at it. **Read
+> [`releasing.md`](releasing.md) for the process that actually runs** — this doc
+> is kept as the decision record (why the mirror, and what we rejected).
 
 ## The problem, in one paragraph
 
