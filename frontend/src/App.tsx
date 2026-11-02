@@ -1282,12 +1282,9 @@ export default function App() {
 
   const restoreRecovery = useCallback(
     async (key: string) => {
-      let text: string | null = null;
-      try {
-        text = await recoveryStore().read(key);
-      } catch {
-        text = null;
-      }
+      const text = await recoveryStore()
+        .read(key)
+        .catch(() => null);
       if (text === null) {
         toast("That autosaved copy is no longer available");
         setRecoveries((rs) => rs.filter((r) => r.key !== key));

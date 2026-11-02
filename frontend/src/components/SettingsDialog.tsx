@@ -1,5 +1,5 @@
 import { PULSE_SPEEDS } from "../sim/pulses";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type JSX } from "react";
 import { bytesLabel } from "../lib/time";
 import { ACCENTS, THEMES, type AccentId, type ThemeId } from "../theme";
 import type { HistoryUsage } from "../model/versionStore";
