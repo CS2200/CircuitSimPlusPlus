@@ -1,0 +1,6 @@
+# One Rust toolchain for everyone — local `rustup` reads this file, and CI's
+# dtolnay/rust-toolchain@stable matches it. rustfmt + clippy because the commit
+# gate (`node scripts/build.mjs check`) runs both.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
