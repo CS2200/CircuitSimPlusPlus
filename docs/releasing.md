@@ -128,7 +128,7 @@ curl -s https://api.github.com/repos/CS2200/CircuitSimPlusPlus/releases/latest |
 
 The canvas snapshot tests are pixel-exact only for a known font + browser, so
 `frontend.yml` runs e2e inside the **pinned Playwright image**
-(`mcr.microsoft.com/playwright:v1.63.0-noble`) rather than on the bare runner.
+(`mcr.microsoft.com/playwright:v1.64.1-noble`) rather than on the bare runner.
 The committed `*-chromium-linux.png` baselines were generated inside that image.
 
 After a UI change that legitimately moves pixels, regenerate them in the same
@@ -136,7 +136,7 @@ image and commit:
 
 ```bash
 docker run --rm --ipc=host -v "$PWD:/work" -w /work/frontend \
-  mcr.microsoft.com/playwright:v1.63.0-noble \
+  mcr.microsoft.com/playwright:v1.64.1-noble \
   bash -lc 'npm ci && npx playwright test --update-snapshots'
 ```
 

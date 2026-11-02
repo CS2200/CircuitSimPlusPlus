@@ -2760,7 +2760,7 @@ stress scene, which has its own renderer path). **The six Linux canvas baselines
 design** and must be regenerated in the pinned image before CI can pass:
 
     docker run --rm --ipc=host -v "$PWD:/work" -w /work/frontend \
-      mcr.microsoft.com/playwright:v1.63.0-noble \
+      mcr.microsoft.com/playwright:v1.64.1-noble \
       bash -lc 'npm ci && npx playwright test --update-snapshots'
 
 The authoring machine's Docker store returned I/O errors, so that step is still owed.
