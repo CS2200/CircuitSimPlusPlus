@@ -958,7 +958,7 @@ export default function App() {
         setFilePathNow(path);
         editorRef.current?.refresh(); // re-report the dirty flag
         setSaveState({ kind: "saved", at: Date.now() });
-        void discardRecovery(); // the file on disk is now the truth
+        await discardRecovery(); // the file on disk is now the truth
         diskConflictRef.current = false;
         void recordWriteStat(path);
         void takeVersion(0); // an explicit save is always its own version
@@ -987,7 +987,7 @@ export default function App() {
       setFilePathNow(doc.name);
       editorRef.current?.refresh();
       setSaveState({ kind: "saved", at: Date.now() });
-      void discardRecovery();
+      await discardRecovery();
       void takeVersion(0);
       toast(`Saved ${suggested}`);
       return true;
@@ -1069,7 +1069,7 @@ export default function App() {
     if (choice === "save" && !(await saveNow(false))) return false;
     // Any resolved decision ends the recovery copy's purpose: it exists for
     // sessions that ended without one (a crash).
-    void discardRecovery();
+    await discardRecovery();
     return true;
   }, [saveNow, discardRecovery]);
 
