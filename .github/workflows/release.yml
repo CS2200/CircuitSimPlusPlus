@@ -43,7 +43,7 @@ env:
     - **macOS:** right-click the app → **Open** → Open. (Or: `xattr -d com.apple.quarantine "CircuitSim++.app"`)
     - **Windows:** SmartScreen → **More info** → **Run anyway**.
 
-    Windows ships an NSIS `-setup.exe`, an MSI, and a portable zip.
+    Windows ships an NSIS `-setup.exe` and a portable zip.
     macOS is a universal build (Apple Silicon + Intel).
 
     Linux: `.deb` / `.AppImage` / `.rpm`, plus the static autograder CLI
@@ -121,7 +121,6 @@ jobs:
           name: windows
           path: |
             target/release/bundle/nsis/*.exe
-            target/release/bundle/msi/*.msi
             circuitsimpp-windows.zip
           if-no-files-found: error
 
