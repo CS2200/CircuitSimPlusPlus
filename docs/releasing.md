@@ -104,7 +104,7 @@ git push public v0.2.0
 gh release view v0.2.0 --repo CS2200/CircuitSimPlusPlus
 ```
 Expect a macOS **universal** `.dmg` (Apple Silicon + Intel), a Windows NSIS `.exe`
-(+ zip), and Linux `.deb` / `.rpm` / `.AppImage`.
+(+ zip), Linux `.deb` / `.rpm` / `.AppImage`, and the static `csim` autograder CLI.
 
 5. Verify the update channel (exactly what the app calls):
 

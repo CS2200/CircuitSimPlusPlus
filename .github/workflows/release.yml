@@ -43,7 +43,10 @@ env:
     - **macOS:** right-click the app → **Open** → Open. (Or: `xattr -d com.apple.quarantine "CircuitSim++.app"`)
     - **Windows:** SmartScreen → **More info** → **Run anyway**.
 
-    macOS is a universal build (Apple Silicon + Intel). Linux: `.deb` / `.AppImage` / `.rpm`.
+    macOS is a universal build (Apple Silicon + Intel).
+
+    Linux: `.deb` / `.AppImage` / `.rpm`, plus the static autograder CLI
+    (`csim`, x86_64-musl) for headless / Gradescope use.
 
 jobs:
   build:
@@ -94,6 +97,14 @@ jobs:
           $exe = Get-ChildItem target/release/bundle/nsis/*.exe | Select-Object -First 1
           Compress-Archive -Path $exe.FullName -DestinationPath "circuitsimpp-windows.zip"
 
+      # The static autograder CLI is the headless Linux artifact (DESIGN.md §8):
+      # ship it alongside the desktop packages.
+      - name: Build static autograder CLI (musl)
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build -p csim --release --target x86_64-unknown-linux-musl
+
       - name: Upload macOS bundle
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
@@ -121,6 +132,7 @@ jobs:
             target/release/bundle/deb/*.deb
             target/release/bundle/rpm/*.rpm
             target/release/bundle/appimage/*.AppImage
+            target/x86_64-unknown-linux-musl/release/csim
           if-no-files-found: error
 
   # One publisher, so the three build jobs never race to create the release.
