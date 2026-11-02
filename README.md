@@ -15,8 +15,9 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/profiling.md`](docs/profiling.md) | Profiling/benchmarking the engine: perf, the probe, HEAD A/B, what's already optimized |
 | [`docs/optimization-backlog.md`](docs/optimization-backlog.md) | Parked higher-risk optimization ideas + current performance stats |
 | [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
-| [`docs/releasing.md`](docs/releasing.md) | How releases are cut on GT's runner-less GHES (3 machines, one per OS) |
-| [`docs/distribution.md`](docs/distribution.md) | Distribution & update plan: public github.com mirror (decided, not built) |
+| [`docs/releasing.md`](docs/releasing.md) | How releases are cut (public github.com mirror + CI; universal macOS) |
+| [`docs/distribution.md`](docs/distribution.md) | Why the mirror: decision record (option C) and the update nudge |
+| [`docs/dependencies.md`](docs/dependencies.md) | Keeping deps current: the couplings, the caps, how to bump |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
 ## Repository layout
@@ -207,6 +208,11 @@ CI runs on a **public github.com mirror** (`github.com/CS2200/CircuitSimPlusPlus
 on free hosted runners; GT's GHES stays the private source of truth. A `v*` tag
 builds macOS + Windows + Linux and publishes one public GitHub Release, which the
 in-app update nudge reads.
+
+**Prebuilt installers** live on the [releases
+page](https://github.com/CS2200/CircuitSimPlusPlus/releases): macOS universal
+`.dmg`, Windows `.exe`, Linux `.deb`/`.rpm`/`.AppImage`, and the static `csim`
+autograder CLI. All unsigned (decision D14).
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
 
