@@ -773,7 +773,7 @@ enum WatchKind {
     Reaches,
     /// Equals the wanted value (a level).
     Is,
-    /// Changed at this many cycle boundaries (an instruction counter).
+    /// Changed at this many cycle boundaries (an N-transitions counter).
     Changes(u64),
 }
 
@@ -4173,10 +4173,12 @@ mod tests {
         assert_eq!(err.cycle, 3, "the halt's cycle is the stop's cycle");
     }
 
-    /// `changes` is the other half of the CS 2200 rule pair: `MAX_INSTR_COUNT = 10000`
-    /// instructions, counted as moves of the PC. It exists so a grader can bound a runaway
-    /// *without* guessing a cycle budget — a too-small `--cycles` reports a working design
-    /// as hung, which is what a 30,000 cap did to submissions that legitimately run 32,312.
+    /// `changes` is the other half of the CS 2200 rule pair: `MAX_INSTR_COUNT = 10000`,
+    /// counted as moves of the PC — a **runaway bound**, not a CPI's instruction count (a
+    /// design can move its PC more than once per instruction). It exists so a grader can
+    /// bound a runaway *without* guessing a cycle budget — a too-small `--cycles` reports a
+    /// working design as hung, which is what a 30,000 cap did to submissions that legitimately
+    /// run 32,312.
     #[test]
     fn watch_changes_counts_moves() {
         use crate::api::Watch;

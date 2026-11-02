@@ -301,7 +301,7 @@ program store (37 ns, ≈ the R2000/12's 35 ns SRAM) are correctly different par
 | reference `pipeline-df.sim` | 1906 | **77 ns** | **13.0 MHz** | vs R2000/12 = 12.5 MHz — a 4% match |
 | reference `pipeline-pred.sim` | 1416 | 88 ns | 11.4 MHz | carries prediction logic |
 | best student pipeline | 1909 | **52 ns** | 19.2 MHz | |
-| multicycle baseline `none.sim` | 8229 | 69 ns | 14.5 MHz | short clock, 5.35 CPI — where the real loss is |
+| multicycle baseline `none.sim` | 8229 | 69 ns | 14.5 MHz | short clock, 6.65 CPI — where the real loss is |
 | one-cycle datapath (one RAM) | 1376 | 101 ns | 9.9 MHz | 1.94× the best pipeline |
 | a second datapath | 1398 | 108 ns | 9.3 MHz | |
 
@@ -451,23 +451,29 @@ equally.
 
 ### Measured: cycles per instruction (why a "one-cycle" design is competitive at all)
 
-Cycles per PC change (a `changes:` stop), i.e. cycles per instruction issued:
+CPI is `retire_cycles / committed_instructions` for `pow`, with the **committed** count
+**1223** — derived by the ISA simulator at assembly time and shipped as
+`<program>/instruction_count` (see `ec-project/build.sh`; every run's `timing` carries
+`instructions`/`cpi`/`ipc`). It is *not* a PC-change count: a design can write its PC more
+than once per instruction, which inflates that count and fakes a better IPC.
 
-| design | CPI | note |
-|---|---:|---|
-| multicycle baseline `none.sim` | **5.35** | microcoded; this is what pipelining/one-cycle buys back |
-| reference `pipeline-pred.sim` | **1.01** | 5 stages, prediction |
-| fastest-clock 5-stage (corpus) | **1.01** | BTFNT + careful paths |
-| one-cycle datapath (corpus) | **1.10** | hardwired control, no pipeline latches |
+| design | `retire_cycles` | CPI | note |
+|---|---:|---:|---|
+| multicycle baseline `none.sim` | 8129 | **6.65** | microcoded; this is what pipelining/one-cycle buys back |
+| reference `pipeline-df.sim` | 1806 | **1.48** | 5 stages, forwarding |
+| reference `pipeline-pred.sim` | 1316 | **1.08** | 5 stages, prediction |
+| one-cycle datapath (one RAM, corpus) | 1276 | **1.04** | hardwired control, no pipeline latches |
+| a second datapath (corpus) | 1298 | **1.06** | |
 
-So the one-cycle design is *not* free lunch: it issues at 1.10 cycles/instruction
-against the best pipeline's 1.01. It wins the clock because it carries two costs a
-pipeline does not — a **control ROM** in a stage (a 16-entry ROM on the critical
-path, 120 ns at real ROM timing) and **forwarding/hazard logic**. A pipeline whose
-stage is longer than a one-cycle machine's whole instruction path cannot win, no
-matter how many stages it has. That is the CISC-vs-RISC lesson arriving on its own,
-and it is the whole reason the adder choice matters: a cheap adder makes the
-one-cycle machine's only real penalty (serialized adds) free.
+CPI is essentially a wash among the working designs (all ≈1.0–1.1; the multicycle baseline
+is the outlier at 6.65): the one-cycle machine issues at ~1.04, the best pipeline at ~1.08.
+So the pipeline's win is *not* CPI but the clock — and the one-cycle machine pays for its
+short CPI with two costs a pipeline does not — a **control ROM** in a stage (a 16-entry ROM on
+the critical path, 120 ns at real ROM timing) and **forwarding/hazard logic**. A pipeline
+whose stage is longer than a one-cycle machine's whole instruction path cannot win, no matter
+how many stages it has. That is the CISC-vs-RISC lesson arriving on its own, and it is the
+whole reason the adder choice matters: a cheap adder makes the one-cycle machine's only real
+penalty (serialized adds) free.
 
 This is a **staff decision** (D13). Either table is self-consistent; v2 states which
 it is, and every row names its part.
