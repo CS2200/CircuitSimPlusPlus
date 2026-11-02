@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { RELEASES_API } from "../src/update";
+import { APP_VERSION, RELEASES_API } from "../src/update";
 
 /**
  * U8: the update nudge — fetches the latest release tag (stubbed here),
@@ -47,7 +47,7 @@ test("U8: About card shows version + unsigned-build workaround", async ({ page }
   await page.getByRole("button", { name: "Help", exact: true }).click();
   await page.getByRole("menuitem", { name: "About CircuitSim++" }).click();
   const card = page.locator(".help-card");
-  await expect(card).toContainText("Version 0.1.0");
+  await expect(card).toContainText(`Version ${APP_VERSION}`);
   await expect(card).toContainText("unsigned");
   await expect(card).toContainText("SmartScreen");
   await page.keyboard.press("Escape");
