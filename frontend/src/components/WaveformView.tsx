@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { resolveTheme } from "../render/theme";
 import type { SimController } from "../sim/controller";
@@ -191,7 +199,9 @@ export default function WaveformView({
   const origin = follow ? maxOrigin : Math.min(maxOrigin, Math.max(domainStart, originState));
 
   const viewRef = useRef<View>({ origin, px, laneW, domainStart, domainEnd, follow });
-  viewRef.current = { origin, px, laneW, domainStart, domainEnd, follow };
+  useLayoutEffect(() => {
+    viewRef.current = { origin, px, laneW, domainStart, domainEnd, follow };
+  });
 
   /** Move the window's left edge; landing on the live end re-engages Follow. */
   const panTo = useCallback((next: number, atPx?: number) => {

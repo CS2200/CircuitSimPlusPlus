@@ -138,10 +138,8 @@ export default function InspectorPanel({
     onFocusHandled?.();
   }, [focusField, compId, onFocusHandled]);
   const [memOpen, setMemOpen] = useState(false);
-  useEffect(() => {
-    setDraft((d) => (d !== null && !d.key.startsWith(`${compId ?? ""}:`) ? null : d));
-    setMemOpen(false);
-  }, [compId, circuitIdx]);
+  // Per-selection state (this draft, memOpen) resets because App remounts the
+  // panel with a selection-scoped `key` — no reset effect/state needed.
 
   // Memory-image summary (words set in `attrs.contents`) — parsed only for
   // reasonably sized images; the Inspector re-renders on hover.
@@ -159,6 +157,10 @@ export default function InspectorPanel({
     } catch {
       return -1;
     }
+    // The React Compiler cannot preserve this memo (the panel still has patterns
+    // it cannot compile); keep it — parsing RLE on every hover render is exactly
+    // the cost this memo exists to avoid.
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
   }, [contentsImage]);
 
   const wire =
@@ -701,9 +703,13 @@ function SplitsField({
 }) {
   const [rows, setRows] = useState<SplitRow[]>(() => splitsToRows(value));
   const serialized = JSON.stringify(value ?? null);
-  useEffect(() => {
+  // Re-seed the editable rows when the committed value changes — adjust during
+  // render rather than in an effect (compiler: no setState in effects).
+  const [rowsFor, setRowsFor] = useState(serialized);
+  if (rowsFor !== serialized) {
+    setRowsFor(serialized);
     setRows(splitsToRows(JSON.parse(serialized)));
-  }, [serialized]);
+  }
 
   const commit = (next: SplitRow[]): void => {
     setRows(next);

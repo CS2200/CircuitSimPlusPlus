@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -387,8 +388,14 @@ export default function App() {
       document.removeEventListener("keydown", onKey, true);
     };
   }, [canvasMenu]);
-  // The state names sheet-local ids, so switching sheets closes the menu.
-  useEffect(() => closeCanvasMenu(), [sheet, closeCanvasMenu]);
+  // The menu names sheet-local ids, so switching sheets closes it. Adjust during
+  // render (React's "reset state when input changes" pattern) instead of via an
+  // effect, which the compiler forbids.
+  const [menuSheet, setMenuSheet] = useState(sheet);
+  if (menuSheet !== sheet) {
+    setMenuSheet(sheet);
+    setCanvasMenu(null);
+  }
 
   /** The newest `showInWaveform` (declared further down), for the context menu. */
   const showInWaveformRef = useRef<() => void>(() => {});
@@ -532,7 +539,7 @@ export default function App() {
   useEffect(() => {
     saveBoolPref(PREF_PULSES, pulsesOn);
     saveNumPref(PREF_PULSE_SPEED, pulseSpeed);
-  }, [pulsesOn]);
+  }, [pulsesOn, pulseSpeed]);
   useEffect(() => {
     saveBoolPref(PREF_GRID, gridOn);
   }, [gridOn]);
@@ -691,10 +698,13 @@ export default function App() {
       ? sim.topPathDelay(sheetName)
       : null;
 
-  // A fresh load invalidates any path highlight.
-  useEffect(() => {
+  // A fresh load invalidates any path highlight. Adjust during render (the
+  // compiler forbids setState inside an effect).
+  const [pathLoaded, setPathLoaded] = useState(sim.store.loaded);
+  if (pathLoaded !== sim.store.loaded) {
+    setPathLoaded(sim.store.loaded);
     if (!sim.store.loaded && pathOn) setPathOn(false);
-  }, [sim.store, pathOn, simVersion]);
+  }
 
   const toast = useCallback((text: string) => {
     setToasts((t) => [...t, { id: Date.now() + Math.random(), text }]);
@@ -710,7 +720,7 @@ export default function App() {
       ...named,
       ...clockSignals({ wires: circuit.wires, wireToNet, components: circuit.components }),
     ];
-    // simVersion keeps the net map fresh across a reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion is a deliberate cache-buster: the store mutates in place, which the rule cannot see
   }, [doc, sheet, sim.store.named, sim.store.wireToNet, simVersion, bitsOfNamed]);
 
   /**
@@ -728,7 +738,7 @@ export default function App() {
       wireToNet,
       components: circuit.components,
     });
-    // simVersion keeps the net map fresh across a reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion is a deliberate cache-buster: the store mutates in place, which the rule cannot see
   }, [doc, sheet, sim.store.wireToNet, simVersion]);
 
   /**
@@ -777,7 +787,9 @@ export default function App() {
       setWaveAdd((prev) => ({ signals, seq: (prev?.seq ?? 0) + 1 }));
     });
   }, [sim, doc, pickSelection, toast]);
-  showInWaveformRef.current = showInWaveform;
+  useLayoutEffect(() => {
+    showInWaveformRef.current = showInWaveform;
+  });
   /** Click a toast to dismiss: bulge briefly, then remove it. */
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, closing: true } : t)));
@@ -1212,14 +1224,15 @@ export default function App() {
 
   // One controller for the app lifetime (the stress harness has no document to
   // protect). `flush` returns its promise so a close can await the write.
-  if (autosaveRef.current === null && !stress) {
+  useEffect(() => {
+    if (autosaveRef.current !== null || stress) return;
     autosaveRef.current = new AutosaveController({
       // Autosave off ⇒ never dirty, as far as the scheduler is concerned.
       isDirty: () => autosaveOnRef.current && docRef.current.dirty,
       revision: () => docRef.current.revision,
       flush: () => flushAutosave(),
     });
-  }
+  }, [stress, flushAutosave]);
 
   // Flush on blur — losing focus is a natural "done for now" point.
   useEffect(() => {
@@ -1398,10 +1411,7 @@ export default function App() {
 
   // The preview follows the selection (read on demand — versions can be large).
   useEffect(() => {
-    if (!historyOpen || historySelectedId === null) {
-      setHistoryPreview(null);
-      return;
-    }
+    if (!historyOpen || historySelectedId === null) return;
     let cancelled = false;
     void historyStore()
       .read(historyTarget(), historySelectedId)
@@ -1724,15 +1734,16 @@ export default function App() {
   // Whatever brings a closed circuit to the canvas — the hierarchy tree, the
   // tab strip, a double-click into an instance, the scope bar's way back —
   // reopens its tab.
-  useEffect(() => {
-    const name = doc.circuits[sheet]?.name;
-    if (name === undefined || !closedSheets.has(name)) return;
+  // A sheet that is open right now is no longer "closed" — adjust during render
+  // (an effect would be setState-in-effect, which the compiler forbids).
+  const openSheetName = doc.circuits[sheet]?.name;
+  if (openSheetName !== undefined && closedSheets.has(openSheetName)) {
     setClosedSheets((prev) => {
       const next = new Set(prev);
-      next.delete(name);
+      next.delete(openSheetName);
       return next;
     });
-  }, [sheet, doc, closedSheets]);
+  }
 
   const hiddenSheets = useMemo(
     () =>
@@ -2501,6 +2512,9 @@ export default function App() {
             </div>
             <aside className="right-dock" aria-label="Details" style={{ width: panelWidths.dock }}>
               <InspectorPanel
+                // Remount per selection so the panel's per-part editing state
+                // resets (React's recommended reset mechanism — see the panel).
+                key={`${sheet}:${inspectorCompId ?? ""}:${inspectorWireIdx ?? ""}`}
                 doc={doc}
                 compId={inspectorCompId}
                 criticalPathNs={criticalPathNs}

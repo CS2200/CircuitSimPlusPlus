@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+} from "react";
 import { encodeRleHex, hexWidthFor, maskFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 
 /**
@@ -60,19 +68,25 @@ export default function MemContentsDialog({
   const [error, setError] = useState<string | null>(null);
   /** Set by `Clear all`: Apply drops the autoload file too. */
   const [clearAutoload, setClearAutoload] = useState(false);
-  // Cell 0 starts focused/selected so a paste works without a first click.
-  const [focusAddr, setFocusAddr] = useState<number | null>(0);
+  // Cell 0 starts focused/selected so a paste works without a first click. A
+  // request carries a seq, so re-targeting the same cell re-runs the focus
+  // effect — which reads it without having to setState (the compiler forbids
+  // setState in an effect).
+  const [focusReq, setFocusReq] = useState<{ addr: number; seq: number }>({ addr: 0, seq: 0 });
+  const focusCell = useCallback(
+    (addr: number) => setFocusReq((r) => ({ addr, seq: r.seq + 1 })),
+    [],
+  );
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // Move the caret to the cell a paste/keyboard jump landed on (its focus also
-  // scrolls the grid to it).
-  useEffect(() => {
-    if (focusAddr === null) return;
-    const input = gridRef.current?.querySelector<HTMLInputElement>(`[data-addr="${focusAddr}"]`);
+  // Move the caret to the requested cell (its focus also scrolls the grid to it).
+  useLayoutEffect(() => {
+    const input = gridRef.current?.querySelector<HTMLInputElement>(
+      `[data-addr="${focusReq.addr}"]`,
+    );
     input?.focus();
     input?.select();
-    setFocusAddr(null);
-  }, [focusAddr]);
+  }, [focusReq]);
 
   // Escape closes without applying, like every other dialog (UI_OVERHAUL §94) —
   // captured, so the editor's own Escape (cancel placement) does not also fire.
@@ -131,7 +145,7 @@ export default function MemContentsDialog({
     );
     const landed = Math.min(start + take, depth - 1);
     setSel(landed);
-    setFocusAddr(landed);
+    focusCell(landed);
   };
 
   /** Arrow keys walk the grid like a spreadsheet. */
@@ -142,7 +156,7 @@ export default function MemContentsDialog({
     const target = sel + delta;
     if (target < 0 || target >= depth) return;
     setSel(target);
-    setFocusAddr(target);
+    focusCell(target);
   };
 
   const apply = (): void => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Camera } from "../render/camera";
 import { Canvas2DRenderer } from "../render/canvas2d";
 import type { Rect, Vec2 } from "../render/geom";
@@ -157,7 +157,11 @@ export default function CanvasHost({
   const themeRef = useRef<Theme | null>(null);
   const dirtyRef = useRef(true);
   const drawRef = useRef(draw);
-  drawRef.current = draw;
+  // Keep the animation loop's `draw` current without touching the ref during
+  // render (the loop reads it outside React's render phase).
+  useLayoutEffect(() => {
+    drawRef.current = draw;
+  });
   const panRef = useRef<{ x: number; y: number } | null>(null);
   const pendingRef = useRef<PendingPan | null>(null);
   const spaceRef = useRef(false);

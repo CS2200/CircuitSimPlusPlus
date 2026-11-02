@@ -52,10 +52,13 @@ Couplings and current holds:
 - **`@types/node` tracks the Node runtime**, not "latest". We run Node 24, so the
   types are `^24`. Bumping the types to 26 while running 24 would let code use
   APIs that do not exist at runtime.
-- **`react-hooks` v7 bundles the React Compiler ruleset.** `eslint.config.js`
-  keeps those as **warnings** (the code predates the compiler); only
-  `rules-of-hooks` / `exhaustive-deps` are authoritative. Removing that
-  boundary means actually satisfying the compiler rules.
+- **`react-hooks` v7 bundles the React Compiler ruleset** (refs, purity,
+  set-state-in-effect, …). `eslint.config.js` enforces it at its recommended
+  level; the code satisfies it. The one exception is a scoped
+  `eslint-disable` on the Inspector panel's memory-image `useMemo` (the compiler
+  can't preserve that memo; the memo is a real perf guard). New violations are
+  lint errors — if one is a genuine false positive, suppress it *at the line*
+  with a reason, not by weakening the config.
 - **`minimatch` is force-pinned to `^11`** via `overrides` because eslint 10 /
   typescript-eslint 8 still resolve the vulnerable 10.x. Drop the override once
   they ship a fix.
