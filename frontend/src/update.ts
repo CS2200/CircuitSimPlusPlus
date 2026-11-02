@@ -12,7 +12,7 @@ import pkg from "../package.json" with { type: "json" };
  * are read with no auth — GT's GHES cannot serve them (it forbids public repos,
  * so an anonymous read gets a 404). See docs/distribution.md.
  */
-export const GITHUB_REPO = "Mr-Thack/CircuitSimPlusPlus";
+export const GITHUB_REPO = "CS2200/CircuitSimPlusPlus";
 
 /** Where releases are served: the public github.com mirror, not GT's GHES. */
 export const RELEASES_HOST = "github.com";
