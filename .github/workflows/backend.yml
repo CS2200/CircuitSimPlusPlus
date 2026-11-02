@@ -9,9 +9,9 @@ name: backend
 
 on:
   push:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock", ".github/workflows/**"]
   pull_request:
-    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock"]
+    paths: ["crates/core/**", "crates/cli/**", "tests/**", "scripts/**", "gradescope/**", "Cargo.toml", "Cargo.lock", ".github/workflows/**"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,7 +21,7 @@ jobs:
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The committed .csx fixtures are generated artifacts (BACKEND.md B11).
       # Nothing forced them to track tests/gen/*.py, so they drifted once
@@ -43,13 +43,13 @@ jobs:
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p csim --release --target x86_64-unknown-linux-musl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: csim-linux-x86_64-musl
           path: target/x86_64-unknown-linux-musl/release/csim
@@ -61,5 +61,5 @@ jobs:
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t csim-autograder -f gradescope/Dockerfile .
