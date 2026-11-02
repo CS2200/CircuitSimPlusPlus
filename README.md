@@ -39,7 +39,7 @@ docs/       Specs and task lists (above)
 | Tool | Version | Notes |
 |---|---|---|
 | Rust | recent stable (developed on 1.98) | via rustup preferred (needed for the musl target) |
-| Node.js | ≥ 22 | includes npm |
+| Node.js | ≥ 24 | includes npm |
 | Python | 3.8+ | fixture drift gate (`node scripts/build.mjs fixtures`); `PYTHON=` overrides the interpreter |
 | Playwright browsers | — | `npx playwright install --with-deps chromium` (e2e only) |
 | Linux webview deps | — | desktop app only: `sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` (Ubuntu; equivalents on other distros) |
@@ -50,7 +50,7 @@ anywhere Rust does, and statically links for the autograder.
 ## Build runner
 
 `scripts/build.mjs` is a thin, cross-platform wrapper over the exact commands
-below and is the project's commit gate. It adds no dependency (Node ≥ 22 is
+below and is the project's commit gate. It adds no dependency (Node ≥ 24 is
 already required).
 
 ```bash

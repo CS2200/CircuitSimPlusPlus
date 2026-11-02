@@ -1,0 +1,10 @@
+# Normalize text to LF everywhere (the project is developed on Linux and built
+# on Linux/macOS/Windows), and keep binary assets untouched.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.dmg binary
+*.exe binary
+*.AppImage binary

@@ -55,6 +55,12 @@ are **skipped** instead of queueing forever on a runner-less server.
 
 `release.yml` is the only one that ships anything, and it only runs on a tag.
 
+**Environment (pinned for reproducibility):** GitHub-hosted runners, Linux pinned
+to `ubuntu-24.04` (ubuntu-latest is migrating to 26), **Node 24**, Rust from
+`rust-toolchain.toml`. macOS ships a **universal** `.dmg` (Apple Silicon +
+Intel). Every job has a timeout; CI runs cancel on a newer push, releases never
+do. No secrets are needed — `GITHUB_TOKEN` is automatic.
+
 ---
 
 ## Versioning — the one thing that must match
@@ -97,8 +103,8 @@ git push public v0.2.0
 ```bash
 gh release view v0.2.0 --repo CS2200/CircuitSimPlusPlus
 ```
-Expect a macOS `.dmg`, a Windows NSIS `.exe` (+ zip), and Linux `.deb` / `.rpm` /
-`.AppImage`.
+Expect a macOS **universal** `.dmg` (Apple Silicon + Intel), a Windows NSIS `.exe`
+(+ zip), and Linux `.deb` / `.rpm` / `.AppImage`.
 
 5. Verify the update channel (exactly what the app calls):
 

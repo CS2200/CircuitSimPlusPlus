@@ -9,7 +9,7 @@
 //   node scripts/build.mjs --list     # show every target
 //   node scripts/build.mjs musl ui    # run targets in order
 //
-// Node >= 22 is already a hard prerequisite of this repo (see README), so this
+// Node >= 24 is already a hard prerequisite of this repo (see README), so this
 // needs no new tooling on any of the three release OSes.
 
 import { spawnSync } from "node:child_process";
