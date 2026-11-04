@@ -7,6 +7,20 @@ frontend/test-results
 __pycache__/
 frontend/tmp-*.png
 
+# Playwright last-run state, also written at the repo root by a root-level run.
+/test-results
+
+# Vite's dev dependency cache (node_modules is already ignored).
+frontend/.vite
+
+# Local env overrides (Vite). `.env.development` is committed on purpose.
+.env.local
+.env.*.local
+
+# Editor / OS / incremental-build noise.
+.DS_Store
+*.tsbuildinfo
+
 # Local Playwright screenshot baselines: only the Linux ones are committed
 # (CI renders on Linux), so a Windows/macOS run must not re-add its own.
 frontend/e2e/**/*-win32.png

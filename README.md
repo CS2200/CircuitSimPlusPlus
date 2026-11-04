@@ -20,6 +20,32 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/dependencies.md`](docs/dependencies.md) | Keeping deps current: the couplings, the caps, how to bump |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
+## Install (prebuilt binaries)
+
+No Rust or Node needed — grab the latest build from the
+[releases page](https://github.com/CS2200/CircuitSimPlusPlus/releases/latest)
+(`<version>` below is the tag, e.g. `0.2.1`):
+
+| Platform | Asset | How |
+|---|---|---|
+| macOS (Apple Silicon + Intel) | `CircuitSim++_<version>_universal.dmg` | open the `.dmg`, drag **CircuitSim++** to Applications |
+| Windows | `CircuitSim++_<version>_x64-setup.exe` | run the NSIS installer (or unzip `circuitsimpp-windows.zip` for a portable copy) |
+| Debian / Ubuntu | `CircuitSim++_<version>_amd64.deb` | `sudo apt install ./CircuitSim++_<version>_amd64.deb` |
+| Fedora / RHEL | `CircuitSim++-<version>-1.x86_64.rpm` | `sudo dnf install ./CircuitSim++-<version>-1.x86_64.rpm` |
+| Any Linux, no install | `CircuitSim++_<version>_amd64.AppImage` | `chmod +x` it, then run it |
+| Headless autograder CLI | `csim` | static x86_64-musl binary — `chmod +x csim`, then run it |
+
+**These builds are unsigned** (decision D14 — no paid signing certificate), so
+the OS warns on first launch:
+
+- **macOS:** right-click the app → **Open** → **Open**. (Or:
+  `xattr -d com.apple.quarantine "CircuitSim++.app"`.)
+- **Windows:** SmartScreen → **More info** → **Run anyway**.
+
+The desktop app reads this same releases feed and shows a dismissible "please
+upgrade" nudge when a newer version is out — never forced, never auto-installs
+(see [`docs/distribution.md`](docs/distribution.md)).
+
 ## Repository layout
 
 ```
