@@ -1002,6 +1002,8 @@ fn endpoint_raw(
             .map(|&n| RecEnd::Pin(n))
             .unwrap_or(RecEnd::None),
         Endpoint::Join(j) => RecEnd::Join(rec_base + j.join.wire as usize, j.join.segment),
+        // A free end is electrically open: no node, no edge.
+        Endpoint::Free(_) => RecEnd::None,
     }
 }
 
@@ -1019,6 +1021,8 @@ fn endpoint_node(
             local.get(&(idx, p.pin.clone())).copied()
         }
         Endpoint::Join(j) => resolve_join(circuit, by_id, local, j.join.wire as usize),
+        // A free end connects to nothing.
+        Endpoint::Free(_) => None,
     }
 }
 
@@ -1221,6 +1225,7 @@ fn resolve_join(
                     }
                 }
                 Endpoint::Join(j) => stack.push(j.join.wire as usize),
+                Endpoint::Free(_) => { /* open: contributes no reachable pin */ }
             }
         }
     }

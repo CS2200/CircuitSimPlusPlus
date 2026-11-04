@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 6;
+pub const FORMAT_VERSION: u32 = 7;
 
 /// A whole `.csx` document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -201,8 +201,10 @@ impl Wire {
     }
 }
 
-/// A wire endpoint: either a component pin or a junction onto a segment of
-/// another wire (§5.2). At least one endpoint of every wire is a pin.
+/// A wire endpoint: a component pin, a junction onto a segment of another wire,
+/// or a **free** hanging end (§5.2). At least one endpoint of every wire is a pin
+/// or a free end (join–join wires are invalid); a free end only carries the drawn
+/// coordinate, and the engine treats it as electrically open.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Endpoint {
@@ -210,6 +212,8 @@ pub enum Endpoint {
     Pin(PinEndpoint),
     /// Endpoint junctioned onto a segment of another wire.
     Join(JoinEndpoint),
+    /// A free, unconnected end: a hanging wire stop. Electrically open.
+    Free(FreeEndpoint),
 }
 
 impl Endpoint {
@@ -217,15 +221,23 @@ impl Endpoint {
     pub fn as_pin(&self) -> Option<(&str, &str)> {
         match self {
             Endpoint::Pin(p) => Some((&p.comp, &p.pin)),
-            Endpoint::Join(_) => None,
+            Endpoint::Join(_) | Endpoint::Free(_) => None,
         }
     }
 
     /// The join reference if this endpoint is a junction.
     pub fn as_join(&self) -> Option<&JoinRef> {
         match self {
-            Endpoint::Pin(_) => None,
             Endpoint::Join(j) => Some(&j.join),
+            Endpoint::Pin(_) | Endpoint::Free(_) => None,
+        }
+    }
+
+    /// The `[x, y]` if this endpoint is a free, hanging end.
+    pub fn as_free(&self) -> Option<[f64; 2]> {
+        match self {
+            Endpoint::Free(f) => Some(f.free),
+            Endpoint::Pin(_) | Endpoint::Join(_) => None,
         }
     }
 }
@@ -246,6 +258,16 @@ pub struct PinEndpoint {
 pub struct JoinEndpoint {
     /// Junction target (wire index + segment).
     pub join: JoinRef,
+}
+
+/// Wire endpoint that is free: a hanging stop, with no electrical connection.
+/// The engine leaves it open (it drives and consumes nothing), so drawing a wire
+/// into empty space is harmless until it is later attached.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FreeEndpoint {
+    /// Drawn end coordinate `[x, y]` in grid units.
+    pub free: [f64; 2],
 }
 
 /// A junction onto `segment` of the circuit's wire index `wire`
@@ -303,9 +325,9 @@ fn parse_error(message: String) -> LoadError {
 
 /// Apply the version-migration chain in place (§5.1). Each step upgrades a
 /// document **one** version and the steps run in order, so a file several
-/// versions behind is walked forward (a v2 file also predates v3, v5 and v6 —
-/// v2 → v3 → v5 → v6 is the real path). Unknown or newer versions match no step
-/// and are left untouched, for `validate` to report.
+/// versions behind is walked forward (a v2 file also predates v3, v5, v6 and v7 —
+/// v2 → v3 → v5 → v6 → v7 is the real path). Unknown or newer versions match no
+/// step and are left untouched, for `validate` to report.
 ///
 /// v4 is skipped on purpose: it was the version that *removed* the `rst` pin,
 /// and v5 has it back (UI_OVERHAUL §93). A v3 or v4 file therefore keeps every
@@ -327,6 +349,11 @@ fn migrate(v: &mut Json) {
     if version == 5 {
         materialise_unwired_resets(v);
         version = 6;
+    }
+    if version == 6 {
+        // v7 adds the free (dangling) wire endpoint. Purely additive: a v6 file
+        // has no free ends, so only the version stamp changes.
+        version = 7;
     }
     if version != start {
         v["version"] = Json::from(version);

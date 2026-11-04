@@ -118,6 +118,17 @@ struct CompInfo {
 fn validate_circuit(doc: &Document, circuit: &super::Circuit, errors: &mut Vec<LoadError>) {
     let cname = &circuit.name;
 
+    // The simulation root (mirrors `netlist::root_circuit`): named `main` when it
+    // exists, else the first circuit. Instantiating it as a subcircuit is always a
+    // structural mistake (the engine only ever expands it once, from the top), so
+    // reject it here instead of letting a file smuggle in a second entry point.
+    let root_name: Option<&str> = doc
+        .circuits
+        .iter()
+        .find(|c| c.name == "main")
+        .or_else(|| doc.circuits.first())
+        .map(|c| c.name.as_str());
+
     // Circuit lookup for subcircuit pin resolution (first occurrence wins;
     // duplicates are already reported).
     let circuit_by_name: BTreeMap<&str, &super::Circuit> = {
@@ -173,6 +184,20 @@ fn validate_circuit(doc: &Document, circuit: &super::Circuit, errors: &mut Vec<L
                 errors,
             );
             match comp.attrs.get("circuit").and_then(|v| v.as_str()) {
+                Some(target) if Some(target) == root_name => {
+                    errors.push(LoadError {
+                        kind: LoadErrorKind::Other,
+                        message: format!(
+                            "component '{}': subcircuit references the simulation root '{target}', \
+                             which cannot be instantiated as a subcircuit",
+                            comp.id
+                        ),
+                        circuit: cname.clone(),
+                        comp_id: Some(CompId(idx as u32)),
+                        wire_idx: None,
+                    });
+                    None
+                }
                 Some(target) => match circuit_by_name.get(target) {
                     Some(target_circuit) => {
                         let mut pins: BTreeSet<String> = BTreeSet::new();
@@ -211,10 +236,14 @@ fn validate_circuit(doc: &Document, circuit: &super::Circuit, errors: &mut Vec<L
 
     // Pass 2: wires.
     for (widx, wire) in circuit.wires.iter().enumerate() {
-        let mut pin_endpoints = 0;
+        // A wire must land on SOMETHING at at least one end: a pin or a free
+        // (dangling) stop. Two junctions would be a wire that connects nothing.
+        let mut anchored_endpoints = 0;
         for (label, endpoint) in [("a", &wire.a), ("b", &wire.b)] {
-            if let Some((comp_id, pin)) = endpoint.as_pin() {
-                pin_endpoints += 1;
+            if endpoint.as_free().is_some() {
+                anchored_endpoints += 1;
+            } else if let Some((comp_id, pin)) = endpoint.as_pin() {
+                anchored_endpoints += 1;
                 match by_id.get(comp_id) {
                     None => errors.push(LoadError {
                         kind: LoadErrorKind::UnresolvedPin,
@@ -277,11 +306,12 @@ fn validate_circuit(doc: &Document, circuit: &super::Circuit, errors: &mut Vec<L
                 }
             }
         }
-        if pin_endpoints == 0 {
+        if anchored_endpoints == 0 {
             errors.push(LoadError {
                 kind: LoadErrorKind::UnresolvedJoin,
                 message: format!(
-                    "wire {widx} has no pin endpoint (at least one endpoint must be a pin)"
+                    "wire {widx} has no pin or free endpoint \
+                     (at least one endpoint must be a pin or a free end)"
                 ),
                 circuit: cname.clone(),
                 comp_id: None,
@@ -657,7 +687,21 @@ mod tests {
         ]}"#;
         let errors = check(&header(circuit));
         assert_eq!(kinds(&errors), vec![LoadErrorKind::UnresolvedJoin]);
-        assert!(errors[0].message.contains("no pin endpoint"));
+        assert!(errors[0].message.contains("no pin or free endpoint"));
+    }
+
+    #[test]
+    fn wire_with_a_free_endpoint_is_valid() {
+        // A wire drawn from a pin into empty space: the free end is open, so the
+        // document is legal (v7) and the pin end still forms a net.
+        let circuit = r#"{"name":"main","components":[
+            {"id":"c0","type":"wiring.clock","pos":[0,0]},
+            {"id":"c1","type":"wiring.probe","pos":[5,0]}
+        ],"wires":[
+            {"a":{"comp":"c0","pin":"out"},"b":{"free":[9,3]}},
+            {"a":{"free":[1,1]},"b":{"free":[2,2]}}
+        ]}"#;
+        assert_eq!(check(&header(circuit)), Vec::new());
     }
 
     #[test]
@@ -666,8 +710,13 @@ mod tests {
             {"id":"c0","type":"subcircuit","pos":[0,0],"attrs":{"circuit":"a"}}
         ]}"#;
         let errors = check(&header(a));
-        assert_eq!(kinds(&errors), vec![LoadErrorKind::HierarchyCycle]);
-        assert!(errors[0].message.contains("a -> a"));
+        // Two errors: "a" is also the root, so instantiating it is rejected as a
+        // root reference (in addition to the cycle).
+        assert_eq!(
+            kinds(&errors),
+            vec![LoadErrorKind::Other, LoadErrorKind::HierarchyCycle]
+        );
+        assert!(errors.iter().any(|e| e.message.contains("a -> a")));
     }
 
     #[test]
@@ -679,8 +728,12 @@ mod tests {
             {"id":"c0","type":"subcircuit","pos":[0,0],"attrs":{"circuit":"a"}}
         ]}"#;
         let errors = check(&header(&format!("{a},{b}")));
-        assert_eq!(kinds(&errors), vec![LoadErrorKind::HierarchyCycle]);
-        assert!(errors[0].message.contains("a -> b -> a"));
+        // "a" is the first circuit, so the root reference is reported too.
+        assert_eq!(
+            kinds(&errors),
+            vec![LoadErrorKind::Other, LoadErrorKind::HierarchyCycle]
+        );
+        assert!(errors.iter().any(|e| e.message.contains("a -> b -> a")));
     }
 
     #[test]

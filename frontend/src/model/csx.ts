@@ -17,7 +17,7 @@
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
 /** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
-export const CSX_VERSION = 6;
+export const CSX_VERSION = 7;
 
 export interface CsxSettings {
   clockHz: number;
@@ -57,7 +57,16 @@ export interface CsxJoinEndpoint {
   join: { wire: number; segment: number };
 }
 
-export type CsxEndpoint = CsxPinEndpoint | CsxJoinEndpoint;
+/**
+ * A wire endpoint with no electrical connection: a hanging wire stop. The engine
+ * treats it as open, so it neither drives nor consumes anything — a wire drawn
+ * into empty space is harmless until it is later attached.
+ */
+export interface CsxFreeEndpoint {
+  free: [number, number];
+}
+
+export type CsxEndpoint = CsxPinEndpoint | CsxJoinEndpoint | CsxFreeEndpoint;
 
 export interface CsxWire {
   a: CsxEndpoint;
@@ -95,6 +104,16 @@ export interface CsxDocument {
 
 export function isPinEndpoint(e: CsxEndpoint): e is CsxPinEndpoint {
   return "comp" in e;
+}
+
+/** True for a junction endpoint (onto another wire's segment). */
+export function isJoinEndpoint(e: CsxEndpoint): e is CsxJoinEndpoint {
+  return "join" in e;
+}
+
+/** True for a free (dangling) endpoint. */
+export function isFreeEndpoint(e: CsxEndpoint): e is CsxFreeEndpoint {
+  return "free" in e;
 }
 
 /** Editor-side pin identity: "compId:pin". */

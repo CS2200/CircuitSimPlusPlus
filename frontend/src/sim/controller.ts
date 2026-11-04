@@ -21,7 +21,7 @@ import type {
 import { IpcEvents } from "../ipc/types";
 import type { Unlisten } from "../ipc/events";
 import { CircuitDocument } from "../model/document";
-import { isPinEndpoint, type CsxEndpoint } from "../model/csx";
+import { isJoinEndpoint, isPinEndpoint, type CsxEndpoint } from "../model/csx";
 import { DiffPump } from "./diffPump";
 import { SimStore } from "./simStore";
 import { WaveformRecorder } from "./waveform";
@@ -37,9 +37,14 @@ const VALUE_PIN: Record<NamedComponent["kind"], string> = {
   probe: "in",
 };
 
-/** Connectivity of one wire endpoint: a pin, or the wire a junction joins. */
+/** Connectivity of one wire endpoint: a pin, the wire a junction joins, or a free stop. */
 function endpointKey(e: CsxEndpoint): string {
-  return isPinEndpoint(e) ? `${e.comp}.${e.pin}` : `#${e.join.wire}`;
+  if (isPinEndpoint(e)) return `${e.comp}.${e.pin}`;
+  if (isJoinEndpoint(e)) return `#${e.join.wire}`;
+  // A free end is open; its drawn coordinate is geometry, not connectivity, so
+  // it is excluded from the engine fingerprint (cursor-driven redraws must not
+  // trigger a reload).
+  return "free";
 }
 
 /**
@@ -100,18 +105,20 @@ export class SimController {
    */
   private loading: Promise<boolean> = Promise.resolve(true);
   /**
-   * Locally poked register values (component id → hex). The register readout
-   * comes from its `q` net, which is delay-gated (updates only when the engine's
-   * time advances) and absent entirely when `q` is unwired — so a live poke is
-   * shown optimistically here until the next command supersedes it.
+   * Locally poked values (component id → hex) for parts the user drives inline
+   * on the canvas: a register's stored value and an input `wiring.pin`'s driven
+   * value. Both readouts come from a net that is delay-gated (updates only when
+   * the engine's time advances) and can be absent when the value pin is unwired —
+   * so a live poke is shown optimistically here until the next command
+   * supersedes it.
    */
-  private readonly pokedRegs = new Map<string, string>();
+  private readonly pokedValues = new Map<string, string>();
   /**
-   * In-progress inline register edit (component id + the text typed so far).
-   * Each keystroke appends a digit and pokes immediately (no Enter); a command
-   * or Escape ends the edit.
+   * In-progress inline value edit (component id + the text typed so far). Each
+   * keystroke appends a digit and pokes immediately (no Enter); a command or
+   * Escape ends the edit. Used by registers and input pins alike.
    */
-  private regEdit: { compId: string; text: string } | null = null;
+  private inlineEditState: { compId: string; text: string } | null = null;
 
   constructor(
     private readonly core: Core,
@@ -354,35 +361,35 @@ export class SimController {
     return this.core.api.poke(compId, pin, value);
   }
 
-  /** Record a poked register value so the canvas shows it immediately. */
-  rememberPokedRegister(compId: string, hex: string): void {
-    this.pokedRegs.set(compId, hex);
+  /** Record a poked value so the canvas shows it immediately. */
+  rememberPoked(compId: string, hex: string): void {
+    this.pokedValues.set(compId, hex);
   }
 
-  /** The optimistic value poked into a register, if any (see `pokedRegs`). */
-  pokedRegister(compId: string): string | undefined {
-    return this.pokedRegs.get(compId);
+  /** The optimistic value poked into a part, if any (see `pokedValues`). */
+  poked(compId: string): string | undefined {
+    return this.pokedValues.get(compId);
   }
 
-  /** Begin/continue an inline register edit (App drives the keystrokes). */
-  setRegisterEdit(compId: string, text: string): void {
-    this.regEdit = { compId, text };
+  /** Begin/continue an inline value edit (App drives the keystrokes). */
+  setInlineEdit(compId: string, text: string): void {
+    this.inlineEditState = { compId, text };
   }
 
-  /** End the inline register edit (Escape/Enter or a command). */
-  clearRegisterEdit(): void {
-    this.regEdit = null;
+  /** End the inline value edit (Escape/Enter or a command). */
+  clearInlineEdit(): void {
+    this.inlineEditState = null;
   }
 
-  /** The in-progress inline register edit, if any. */
-  registerEdit(): { compId: string; text: string } | null {
-    return this.regEdit;
+  /** The in-progress inline value edit, if any. */
+  inlineEdit(): { compId: string; text: string } | null {
+    return this.inlineEditState;
   }
 
   /** Any command supersedes an optimistic poke (the readout comes from nets). */
   private clearPoked(): void {
-    if (this.pokedRegs.size > 0) this.pokedRegs.clear();
-    this.regEdit = null;
+    if (this.pokedValues.size > 0) this.pokedValues.clear();
+    this.inlineEditState = null;
   }
 
   memRead(name: string, addr: number, len: number): Promise<WireValue[]> {

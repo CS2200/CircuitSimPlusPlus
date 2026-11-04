@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
-import { showsBodyCaption, compPins, compSize, compSpec, type PinSpec } from "../editor/catalog";
+import {
+  showsBodyCaption,
+  compPins,
+  compSize,
+  compSpec,
+  gateInputCount,
+  type PinSpec,
+} from "../editor/catalog";
 import { probePath, chipPath, bubblePaths, gateShape } from "../editor/shapes";
 import type { PathCmd } from "../render/renderer";
 
@@ -88,7 +95,7 @@ export default function CompIcon({
   const pad = 0.75;
   const vbW = w + 2 * pad;
   const vbH = h + 2 * pad;
-  const shape = gateShape(type, 0, 0, w, h);
+  const shape = gateShape(type, 0, 0, w, h, [], gateInputCount(attrs));
   const glyph = GLYPHS[type];
   const caption = compSpec(type).caption(attrs);
   // A shaped body that says which part it is (§17 rule 3 / §83): MUX, DEMUX, power,

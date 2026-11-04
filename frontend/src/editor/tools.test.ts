@@ -31,7 +31,7 @@ function setup() {
     () => {},
   );
   const sync = () => scene.sync(doc, 0);
-  // AND at [10,10]: in0 (10,11), in1 (10,12), out (15,11.5)
+  // AND at [10,10]: in0 (10,11), in1 (10,12), out (14,11.5)
   const and = doc.addComponent(0, { type: "gate.and", pos: [10, 10] });
   // NOT at [20,10]: in (20,11), out (23,11)
   const not = doc.addComponent(0, { type: "gate.not", pos: [20, 10] });
@@ -106,7 +106,7 @@ describe("placing", () => {
 describe("wiring", () => {
   it("routes pin → pin orthogonally with a facing escape + Z jog", () => {
     const { doc, tool, and, not } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI()); // and.out
+    tool.down({ x: 14, y: 11.5 }, PI()); // and.out
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI()); // not.in
     tool.up(PI());
@@ -116,7 +116,7 @@ describe("wiring", () => {
     expect(wires[0].b).toEqual({ comp: not, pin: "in" });
     // leaves the output east, jogs late, enters the input pin from the west
     expect(wires[0].points).toEqual([
-      [15, 11.5],
+      [14, 11.5],
       [19, 11.5],
       [19, 11],
       [20, 11],
@@ -164,6 +164,41 @@ describe("wiring", () => {
     expect(doc.circuit(0).wires).toHaveLength(1);
     expect(attrsOf(konst)?.bitsize).toBe(32); // the driver is untouched
     expect(attrsOf(probe)?.bitsize).toBe(32); // the probe matched it
+  });
+
+  it("a probe adopts a wire's width when attached by a junction, not just a pin", () => {
+    const { doc, sync, attrsOf, connect } = bareTool();
+    const konst = doc.addComponent(0, {
+      type: "wiring.constant",
+      pos: [10, 10],
+      attrs: { value: "1", bitsize: 32 },
+    });
+    const sink = doc.addComponent(0, {
+      type: "wiring.probe",
+      pos: [20, 10],
+      attrs: { bitsize: 32 },
+    });
+    sync();
+    // A 32-bit bus wire, pin → pin.
+    connect(
+      pinPosition(doc.circuit(0).components[0], "out")!,
+      pinPosition(doc.circuit(0).components[1], "in")!,
+    );
+    void konst;
+    void sink;
+
+    // A second probe attaches to that WIRE (a junction), not to a pin.
+    const probe = doc.addComponent(0, { type: "wiring.probe", pos: [20, 20] });
+    sync();
+    const wire0 = doc.circuit(0).wires[0];
+    const mid = {
+      x: (wire0.points[0][0] + wire0.points[1][0]) / 2,
+      y: (wire0.points[0][1] + wire0.points[1][1]) / 2,
+    };
+    connect(pinPosition(doc.circuit(0).components[2], "in")!, mid);
+
+    expect(doc.circuit(0).wires).toHaveLength(2);
+    expect(attrsOf(probe)?.bitsize).toBe(32);
   });
 
   it("a breakpoint adopts the width of what it watches (§90)", () => {
@@ -251,7 +286,7 @@ describe("wiring", () => {
 
   it("plants bends with clicks, each segment orthogonally routed", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.move({ x: 17, y: 11 });
     tool.down({ x: 17, y: 8 }, PI()); // waypoint above-right of the out pin
@@ -259,7 +294,7 @@ describe("wiring", () => {
     tool.down({ x: 20, y: 11 }, PI()); // finish on not.in
     tool.up(PI());
     expect(doc.circuit(0).wires[0].points).toEqual([
-      [15, 11.5],
+      [14, 11.5],
       [17, 11.5],
       [17, 8],
       [19, 8],
@@ -270,7 +305,7 @@ describe("wiring", () => {
 
   it("dragging pin → pin finishes the wire on release (UI_OVERHAUL §13)", () => {
     const { doc, tool, and, not } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI()); // press on and.out
+    tool.down({ x: 14, y: 11.5 }, PI()); // press on and.out
     tool.move({ x: 17, y: 9 }); // sweep out
     tool.move({ x: 20, y: 11 }); // over not.in
     tool.up(PI(), { x: 20, y: 11 }); // release → the wire commits HERE
@@ -279,7 +314,7 @@ describe("wiring", () => {
     expect(wires[0].a).toEqual({ comp: and, pin: "out" });
     expect(wires[0].b).toEqual({ comp: not, pin: "in" });
     expect(wires[0].points).toEqual([
-      [15, 11.5],
+      [14, 11.5],
       [19, 11.5],
       [19, 11],
       [20, 11],
@@ -293,19 +328,23 @@ describe("wiring", () => {
     expect(tool.isWiring).toBe(false);
   });
 
-  it("a swept release over empty space keeps routing (nothing to attach to)", () => {
+  it("a swept release over empty space hangs the wire (free end)", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.move({ x: 15, y: 6 });
     tool.up(PI(), { x: 15, y: 6 });
-    expect(tool.isWiring).toBe(true);
-    expect(doc.circuit(0).wires).toHaveLength(0);
-    tool.cancel();
+    // Nothing to attach to, so the wire is committed with a FREE endpoint — a
+    // dangling stop the engine treats as open. No longer stuck in routing mode.
+    expect(tool.isWiring).toBe(false);
+    const wires = doc.circuit(0).wires;
+    expect(wires).toHaveLength(1);
+    expect(wires[0].a).toEqual({ comp: "c1", pin: "out" });
+    expect(wires[0].b).toEqual({ free: [15, 6] });
   });
 
   it("a swept release on a part's body attaches to its nearest pin", () => {
     const { doc, tool, and, not } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI()); // press on and.out
+    tool.down({ x: 14, y: 11.5 }, PI()); // press on and.out
     tool.move({ x: 20.8, y: 11.2 }); // onto the NOT's body, nearest in (20,11)
     tool.up(PI(), { x: 20.8, y: 11.2 });
     const wires = doc.circuit(0).wires;
@@ -315,31 +354,20 @@ describe("wiring", () => {
     expect(tool.isWiring).toBe(false);
   });
 
-  it("after a drag, a click plants the waypoint where clicked and keeps routing", () => {
+  it("Enter finishes a click-click wire with a free (hanging) end", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
-    tool.move({ x: 15, y: 6 }); // drag the ghost out
-    tool.up(PI()); // release: still wiring, nothing planted
-    expect(tool.isWiring).toBe(true);
-    expect(doc.circuit(0).wires).toHaveLength(0);
-    tool.down({ x: 15, y: 6 }, PI()); // click plants the waypoint
-    tool.up(PI());
-    tool.down({ x: 20, y: 11 }, PI()); // click finishes
-    tool.up(PI());
-    expect(doc.circuit(0).wires[0].points).toEqual([
-      [15, 11.5],
-      [16, 11.5],
-      [16, 6],
-      [15, 6],
-      [15, 11],
-      [20, 11],
-    ]);
+    tool.down({ x: 14, y: 11.5 }, PI());
+    tool.up(PI()); // start routing from and.out
+    tool.move({ x: 15, y: 6 }); // position the hanging end
+    tool.finishFree();
+    expect(tool.isWiring).toBe(false);
+    expect(doc.circuit(0).wires[0].b).toEqual({ free: [15, 6] });
   });
 
   it("dropping onto a wire creates a junction (dot) onto the right segment", () => {
     const { doc, tool, not } = setup();
     // base wire: and.out → not.in, straight horizontal segment
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -362,16 +390,15 @@ describe("wiring", () => {
 
   it("dragging off a wire starts wiring from a junction", () => {
     const { doc, tool, not } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
-    // press on the wire, drag away, drop on not.out
+    // press on the wire, drag onto not.out, release there → the branch commits
+    // on the pin (a release in empty space would hang a free end instead).
     tool.down({ x: 17, y: 11.3 }, PI());
-    tool.move({ x: 20, y: 14 });
-    tool.up(PI());
-    tool.down({ x: 23, y: 11 }, PI());
-    tool.up(PI());
+    tool.move({ x: 23, y: 11 });
+    tool.up(PI(), { x: 23, y: 11 });
     const wires = doc.circuit(0).wires;
     expect(wires).toHaveLength(2);
     expect(wires[1].a).toEqual({ join: { wire: 0, segment: 0 } });
@@ -380,22 +407,22 @@ describe("wiring", () => {
 
   it("X flips the corner preference while routing", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.flipRoute(); // flip the Z: turn early instead of late
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
     expect(doc.circuit(0).wires[0].points).toEqual([
+      [14, 11.5],
       [15, 11.5],
-      [16, 11.5],
-      [16, 11],
+      [15, 11],
       [20, 11],
     ]);
   });
 
   it("dragging a wire bend re-routes the adjacent legs (one undo step)", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -405,7 +432,7 @@ describe("wiring", () => {
     tool.move({ x: 21, y: 9 }); // drag it up-right
     tool.up(PI());
     expect(doc.circuit(0).wires[0].points).toEqual([
-      [15, 11.5],
+      [14, 11.5],
       [21, 11.5],
       [21, 9],
       [19, 9],
@@ -417,9 +444,35 @@ describe("wiring", () => {
     expect(doc.circuit(0).components).toHaveLength(2);
   });
 
+  it("dragging a SELECTED wire's segment slides it perpendicular from the middle", () => {
+    const { doc, tool, sel, sync } = setup();
+    tool.down({ x: 14, y: 11.5 }, PI());
+    tool.up(PI());
+    tool.down({ x: 20, y: 11 }, PI());
+    tool.up(PI());
+    // wire is [[14,11.5],[19,11.5],[19,11],[20,11]]
+    sync();
+    // Select the wire first (a sweep on an UNselected wire branches instead).
+    tool.down({ x: 17, y: 11.5 }, PI());
+    tool.up(PI());
+    expect(sel.hasWire(0)).toBe(true);
+    // Now grab the first segment's middle and slide it down. The pin end stays;
+    // a bend is inserted so the wire remains orthogonal.
+    tool.down({ x: 16.5, y: 11.5 }, PI());
+    tool.move({ x: 16.5, y: 13 });
+    tool.up(PI());
+    expect(doc.circuit(0).wires[0].points).toEqual([
+      [14, 11.5],
+      [14, 13],
+      [19, 13],
+      [19, 11],
+      [20, 11],
+    ]);
+  });
+
   it("a dragged bend deselects the wire on release; pressing it re-selects (§55)", () => {
     const { sel, tool, sync } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -440,12 +493,12 @@ describe("wiring", () => {
   it("a second click narrows a wire to the segment under the cursor (§65)", () => {
     const { doc, sel, tool, sync } = setup();
     // Draw a wire, then give it a bend we can point at.
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
     doc.updateWirePoints(0, 0, [
-      [15, 11.5],
+      [14, 11.5],
       [18, 11.5],
       [20, 11],
     ]);
@@ -476,7 +529,7 @@ describe("wiring", () => {
     tool.hover({ x: 10, y: 11 });
     expect(tool.cursor).toBe("crosshair");
     // draw a wire, then hover its body → draggable
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -490,7 +543,7 @@ describe("wiring", () => {
 
   it("a bend drag that cannot move does not change the wire", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -503,7 +556,7 @@ describe("wiring", () => {
 
   it("Esc cancels an in-progress wire", () => {
     const { doc, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 17, y: 8 }, PI()); // bend
     tool.up(PI());
@@ -528,19 +581,19 @@ describe("manhattanRoute", () => {
 describe("hover + info + double-click", () => {
   it("idle hover over a wire does nothing", () => {
     const { tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
     tool.hover({ x: 17, y: 11.3 }); // over wire 0
     expect(tool.overlay().hoverHit).toBeNull();
-    tool.hover({ x: 15, y: 11.5 }); // over and.out pin
+    tool.hover({ x: 14, y: 11.5 }); // over and.out pin
     expect(tool.overlay().hoverHit).toMatchObject({ kind: "pin", pin: "out" });
   });
 
   it("hovering a tunnel tag targets the wire it names (UI_OVERHAUL §91)", () => {
     const { doc, tool, sync } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -557,7 +610,7 @@ describe("hover + info + double-click", () => {
 
   it("shift+click a wire shows its info card; any click dismisses it", () => {
     const { tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -646,7 +699,7 @@ describe("selection + drag", () => {
 describe("delete / copy / paste / rotate", () => {
   it("delete removes selection with junction cascade, one undo step", () => {
     const { doc, sel, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -670,7 +723,7 @@ describe("delete / copy / paste / rotate", () => {
 
   it("copy/paste duplicates with new ids, offset, and remapped endpoints", () => {
     const { doc, sel, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI());
+    tool.down({ x: 14, y: 11.5 }, PI());
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI());
     tool.up(PI());
@@ -814,7 +867,7 @@ describe("context menu (§75)", () => {
 
   it("right-clicking a wire offers the wire menu", () => {
     const { doc, scene, sel, tool } = setup();
-    tool.down({ x: 15, y: 11.5 }, PI()); // and.out
+    tool.down({ x: 14, y: 11.5 }, PI()); // and.out
     tool.up(PI());
     tool.down({ x: 20, y: 11 }, PI()); // not.in
     tool.up(PI());

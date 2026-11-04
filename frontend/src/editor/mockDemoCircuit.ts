@@ -172,22 +172,19 @@ export function buildMockDemoDoc(): CircuitDocument {
     const j = i % COLS;
     const k = Math.floor(i / COLS);
     if (k === ROWS - 1) continue; // bottom row is the trunks' endpoints
-    const [gx, gy] = gateAt(i);
+    // Read the pins rather than assuming the old 3-tall gate's row offsets: a
+    // gate's input pins move when its size changes (4-tall, CE-shaped).
+    const in0 = pinAt(gates[i], "in0");
+    const in1 = pinAt(gates[i], "in1");
     doc.addWire(c, {
       a: { comp: gates[i], pin: "in0" },
       b: { join: { wire: j === 0 ? 2 : 30 + (j - 1), segment: 1 } },
-      points: [
-        [gx, gy + 1],
-        [TRUNK_X(j), gy + 1],
-      ],
+      points: [in0, [TRUNK_X(j), in0[1]]],
     });
     doc.addWire(c, {
       a: { comp: gates[i], pin: "in1" },
       b: { join: { wire: 30 + (COLS - 1) + j, segment: 1 } },
-      points: [
-        [gx, gy + 2],
-        [TRUNK_X(j) + 0.5, gy + 2],
-      ],
+      points: [in1, [TRUNK_X(j) + 0.5, in1[1]]],
     });
   }
   // enables / the +1 constant

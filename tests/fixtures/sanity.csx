@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 6,
+  "version": 7,
   "name": "sanity",
   "settings": {
     "clockHz": 1,

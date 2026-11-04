@@ -27,7 +27,7 @@ _Schema/semantics ratifications (now normative in docs/format-v2.md §9, docs/de
 - `wiring.controlled-buffer` added to the component registry (required by §4.1 tri-state; omitted from the original list).
 - Gate pins are named `in0..inN`/`out` (the §5.2 sketch's `a`/`b` was illustrative).
 
-_Deferred:_ **P1 — free wire endpoints** (`{free: [x,y]}`: dangling wires, draw-wires-first, delete-component-keep-wires). Proposed by the frontend build; needs schema + editor op + engine semantics. Not scheduled.
+_Implemented:_ **P1 — free wire endpoints** (`{free: [x,y]}`, format v7): a wire may end in empty space as a hanging stop (electrically open; the engine gives it no net), and a selected wire's **segment** can be slid perpendicular from its middle as well as its corners. Additive v6 → v7 migration.
 
 **Changelog since v1.0-draft**
 

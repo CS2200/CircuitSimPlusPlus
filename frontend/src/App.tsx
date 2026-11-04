@@ -41,7 +41,7 @@ import SimBar from "./components/SimBar";
 import { AboutCard, UpdateNudge } from "./components/UpdateNudge";
 import { StressScene } from "./render/stressScene";
 import { AutosaveController } from "./model/autosave";
-import { CircuitDocument } from "./model/document";
+import { CircuitDocument, simulationRoot } from "./model/document";
 import type { CsxCircuit, CsxComponent } from "./model/csx";
 import { formatRadixValue, parseRadixValueMasked } from "./lib/radix";
 import { saveToastText } from "./lib/saveMessage";
@@ -151,6 +151,18 @@ const VERSION_COALESCE_MS = 60_000;
  */
 const LIVE_RESYNC_MS = 140;
 
+/**
+ * Parts whose value the user can type straight onto the canvas, and the pin
+ * that edit drives. A register's stored value is its `q` output; an INPUT
+ * `wiring.pin` (one that drives its own circuit) is poked on its `pin` terminal.
+ * An output pin is driven by its circuit, so it is not inline-editable.
+ */
+function inlineValuePin(comp: CsxComponent): string | null {
+  if (comp.type === "mem.register") return "q";
+  if (comp.type === "wiring.pin" && comp.attrs?.isOutput !== true) return "pin";
+  return null;
+}
+
 /** Fresh docs get the editor's pin knowledge so type/attr edits prune dangling wires. */
 function initDoc(d: CircuitDocument): CircuitDocument {
   d.pinResolver = (comp) => compPins(comp, d.circuits).map((p) => p.name);
@@ -184,7 +196,10 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
       ["Click a pin", "start a wire (each click plants a bend)"],
       ["X (while wiring)", "flip the corner direction"],
       ["Drag a wire bend", "move that corner point"],
+      ["Drag a wire segment", "slide it from its middle"],
       ["Drop on a wire", "finish with a junction (dot)"],
+      ["Release in empty space", "hang the wire (free end)"],
+      ["Enter (while wiring)", "finish with a hanging end"],
       ["Drag from a wire", "start a wire from a junction"],
       ["Shift+click wire", "show the value on that wire"],
     ],
@@ -513,6 +528,9 @@ export default function App() {
   const scopeParents =
     scope !== null && sheetName !== undefined ? instantiators(doc.circuits, sheetName) : [];
   const scopeParentName = scopeParents[0] ?? doc.circuits[0]?.name;
+  // The simulation's top level (mirrors the engine): it can never be instantiated
+  // as a subcircuit, so the palette and the Inspector's target picker exclude it.
+  const rootCircuit = simulationRoot(doc.circuits);
 
   // Palette rail groups (UI_OVERHAUL §8): Subcircuits only exists while the
   // document has more than one circuit; if the active group disappears the
@@ -671,6 +689,18 @@ export default function App() {
     () => (waveOpen ? pickSelection() : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
     [waveOpen, pickSelection, simVersion],
+  );
+  /**
+   * Whether the current selection maps to at least one traceable signal. The
+   * Inspector only offers "Show in waveform" when it does — otherwise the button
+   * opens the viewer and does nothing (the toast "Nothing to trace there"). The
+   * live re-sync keeps `wireToNet` fresh, so an unwired part on the sheet is
+   * correctly reported as untraceable.
+   */
+  const selectionTraceable = useMemo(
+    () => pickSelection().length > 0,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- simVersion invalidates the mutable store
+    [pickSelection, simVersion],
   );
   /**
    * Signals to add to the trace on the next render (§96): "Show in waveform"
@@ -832,16 +862,17 @@ export default function App() {
     }
   }, [doc, sim, toast]);
 
-  // Poke a component pin to a live value (a register's typed value, §61): the
-  // engine's CompId is the sheet's document-order index.
+  // Poke a component pin to a live value (a register's typed value or an input
+  // pin's driven value, §61): the engine's CompId is the sheet's document-order
+  // index.
   const onPoke = useCallback(
     (compId: string, pin: string, hex: string) => {
       const idx = doc.circuit(sheet).components.findIndex((c) => c.id === compId);
       if (idx < 0) return;
-      // Show the poked value on the register immediately: the engine's readout
-      // is delay-gated (and absent when q is unwired), so the canvas would
-      // otherwise keep showing the old value until the next tick.
-      sim.rememberPokedRegister(compId, hex);
+      // Show the poked value on the part immediately: the engine's readout is
+      // delay-gated (and absent when the value pin is unwired), so the canvas
+      // would otherwise keep showing the old value until the next tick.
+      sim.rememberPoked(compId, hex);
       void (async () => {
         if (!(await sim.resync(doc))) return;
         await sim.poke(idx, pin, { v: hex, x: "", z: "" });
@@ -851,15 +882,18 @@ export default function App() {
   );
 
   /**
-   * Apply one inline-register edit step: parse `text` in the register's base and
-   * poke it immediately (no Enter). A value that would not fit is rejected with
-   * a toast, and the caller keeps the previous text.
+   * Apply one inline edit step: parse `text` in the part's base and poke it
+   * immediately (no Enter). A value that would not fit is rejected with a toast,
+   * and the caller keeps the previous text. Works for a register's stored value
+   * and for an INPUT pin's driven value alike (`inlineValuePin`).
    */
-  const applyRegInput = useCallback(
+  const applyInlineInput = useCallback(
     (comp: CsxComponent, text: string) => {
+      const pin = inlineValuePin(comp);
+      if (pin === null) return;
       const radix = typeof comp.attrs?.radix === "string" ? comp.attrs.radix : "hex";
       const parse = radix === "bin" ? "bin" : radix === "hex" ? "hex" : "dec";
-      const bits = compPins(comp, doc.circuits).find((p) => p.name === "q")?.bitsize ?? 1;
+      const bits = compPins(comp, doc.circuits).find((p) => p.name === pin)?.bitsize ?? 1;
       // Mask rather than reject overflow: extra digits are dropped at the
       // most-significant end (fixed-width shift), so you can keep typing.
       const hex = parseRadixValueMasked(text, parse, bits);
@@ -867,10 +901,10 @@ export default function App() {
         toast(`Enter a ${radix} number`);
         return;
       }
-      // Keep the edit buffer as the *resulting* value in the register's base, so
-      // the next keystroke appends to what is actually stored.
-      sim.setRegisterEdit(comp.id, formatRadixValue(hex, radix, bits));
-      onPoke(comp.id, "q", hex);
+      // Keep the edit buffer as the *resulting* value in the part's base, so the
+      // next keystroke appends to what is actually stored.
+      sim.setInlineEdit(comp.id, formatRadixValue(hex, radix, bits));
+      onPoke(comp.id, pin, hex);
     },
     [doc, onPoke, sim, toast],
   );
@@ -1985,13 +2019,13 @@ export default function App() {
       const target = e.target as HTMLElement | null;
       if (target !== null && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       const mod = e.ctrlKey || e.metaKey;
-      // Inline register value editing (#1/#2): with a register selected, typing
-      // edits its value in place on the canvas (no Inspector field). Enter
-      // pokes it, Esc cancels, Backspace deletes.
+      // Inline value editing (#1/#2): with a register or an INPUT pin selected,
+      // typing edits its value in place on the canvas (no Inspector field).
+      // Enter pokes it, Esc cancels, Backspace deletes.
       if (!mod && inspectorCompId !== null) {
         const sel = doc.circuit(sheet).components.find((c) => c.id === inspectorCompId);
-        if (sel?.type === "mem.register") {
-          const edit = sim.registerEdit();
+        if (sel !== undefined && inlineValuePin(sel) !== null) {
+          const edit = sim.inlineEdit();
           const editing = edit?.compId === sel.id ? edit.text : null;
           // A poke is only meaningful while the clock is paused: the play loop
           // steps whole cycles, so a pause lands on a cycle boundary and the
@@ -2006,7 +2040,7 @@ export default function App() {
                 e.preventDefault();
                 if (Date.now() - pokeHintRef.current > 2000) {
                   pokeHintRef.current = Date.now();
-                  toast("Pause the clock (Ctrl+K) to force a register value");
+                  toast("Pause the clock (Ctrl+K) to force a value");
                 }
                 return;
               }
@@ -2015,14 +2049,14 @@ export default function App() {
           }
           if ((e.key === "Escape" || e.key === "Enter") && editing !== null) {
             e.preventDefault();
-            sim.clearRegisterEdit();
+            sim.clearInlineEdit();
             return;
           }
           if (e.key === "Backspace" && editing !== null) {
             e.preventDefault();
             const next = editing.slice(0, -1);
-            if (next === "") sim.clearRegisterEdit();
-            else applyRegInput(sel, next);
+            if (next === "") sim.clearInlineEdit();
+            else applyInlineInput(sel, next);
             return;
           }
           if (e.key.length === 1) {
@@ -2033,7 +2067,7 @@ export default function App() {
               e.preventDefault();
               // Append at the least-significant digit and poke IMMEDIATELY —
               // no Enter needed (each keystroke is one new digit).
-              applyRegInput(sel, (editing ?? "") + e.key);
+              applyInlineInput(sel, (editing ?? "") + e.key);
               return;
             }
           }
@@ -2082,7 +2116,7 @@ export default function App() {
     inspectorCompId,
     doc,
     sheet,
-    applyRegInput,
+    applyInlineInput,
     sim,
     toast,
   ]);
@@ -2177,7 +2211,10 @@ export default function App() {
           ),
           ...doc.circuits
             .filter(
-              (c, i) => i !== sheet && `subcircuit ${c.name}`.toLowerCase().includes(paletteNeedle),
+              (c, i) =>
+                i !== sheet &&
+                i !== rootCircuit &&
+                `subcircuit ${c.name}`.toLowerCase().includes(paletteNeedle),
             )
             .map((c) => ({ kind: "sub" as const, circuit: c })),
         ];
@@ -2373,7 +2410,9 @@ export default function App() {
                         </button>
                       )}
                       {activePaletteGroup === "Subcircuits"
-                        ? doc.circuits.map((c, i) => i !== sheet && subcircuitTile(c))
+                        ? doc.circuits.map(
+                            (c, i) => i !== sheet && i !== rootCircuit && subcircuitTile(c),
+                          )
                         : (PALETTE.find((g) => g.group === activePaletteGroup)?.items ?? []).map(
                             (item) => paletteTile(item),
                           )}
@@ -2520,14 +2559,16 @@ export default function App() {
                 criticalPathNs={criticalPathNs}
                 selectionCount={selectedComps.length}
                 circuitIdx={sheet}
-                circuits={doc.circuits.filter((_, i) => i !== sheet).map((c) => c.name)}
+                circuits={doc.circuits
+                  .filter((_, i) => i !== sheet && i !== rootCircuit)
+                  .map((c) => c.name)}
                 sheetCircuits={doc.circuits}
                 wireIdx={inspectorWireIdx}
                 filePath={filePath}
                 onEdit={() => editorRef.current?.refresh()}
                 onOpenCircuit={onOpenSubcircuit}
                 onNotify={toast}
-                onShowInWaveform={() => void showInWaveform()}
+                onShowInWaveform={selectionTraceable ? () => void showInWaveform() : undefined}
                 focusField={inspectorFocus}
                 onFocusHandled={() => setInspectorFocus(null)}
               />

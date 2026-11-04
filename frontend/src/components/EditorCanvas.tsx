@@ -302,8 +302,8 @@ export default forwardRef<
             const net = namedValueNets.get(id);
             return net === undefined ? undefined : store.netValues.get(net);
           },
-          pokedRegister: (id) => sim?.pokedRegister(id),
-          editingValue: sim?.registerEdit() ?? null,
+          poked: (id) => sim?.poked(id),
+          editingValue: sim?.inlineEdit() ?? null,
           // Halt/path markers carry ROOT-sheet ids today; only show
           // them on the root, so an instance view is never mis-annotated.
           haltCompId:
@@ -402,6 +402,7 @@ export default forwardRef<
       else if (mod && e.key.toLowerCase() === "x") tool.cut();
       else if (mod && e.key.toLowerCase() === "v") tool.paste();
       else if (mod && e.key.toLowerCase() === "a") tool.selectAll();
+      else if (e.key === "Enter" && tool.isWiring) tool.finishFree();
       else if (e.key === "Escape") tool.cancel();
       else if (e.key === "Delete" || e.key === "Backspace") tool.deleteSelection();
       else if (e.key.toLowerCase() === "r" && !mod) tool.rotateSelection();

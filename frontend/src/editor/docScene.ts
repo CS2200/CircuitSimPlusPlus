@@ -1,6 +1,6 @@
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, CsxWire, Rotation } from "../model/csx";
-import { isPinEndpoint } from "../model/csx";
+import { isFreeEndpoint, isJoinEndpoint, isPinEndpoint } from "../model/csx";
 import { deriveNets, type NetDerivation, type NetInfo } from "../model/nets";
 import type { SelectionModel } from "../model/selection";
 import type { Camera, ViewSize } from "../render/camera";
@@ -23,7 +23,14 @@ import { radixText, type ValueCardMode } from "../lib/radix";
 import { breakpointCondition } from "../lib/breakpoint";
 import { hexWidthFor, maskFor, parseRleHex } from "../lib/rleHex";
 import { compLayout, type CompLayout } from "./layout";
-import { showsBodyCaption, compSize, compSpec, pinShown, type PinKind } from "./catalog";
+import {
+  showsBodyCaption,
+  compSize,
+  compSpec,
+  gateInputCount,
+  pinShown,
+  type PinKind,
+} from "./catalog";
 import {
   BUBBLE_R,
   chipPath,
@@ -61,9 +68,9 @@ export interface SimOverlay {
    * value pin has nothing wired to it (an open register `q`, say).
    */
   valueForNamed?: (compId: string) => WireValue | undefined;
-  /** A locally poked register value (hex), shown until the next command. */
-  pokedRegister?: (compId: string) => string | undefined;
-  /** Inline register value edit in progress (register id + the text typed). */
+  /** A locally poked value (hex), shown until the next command. */
+  poked?: (compId: string) => string | undefined;
+  /** Inline value edit in progress (component id + the text typed). */
   editingValue?: { compId: string; text: string } | null;
   /** Document component id to ring in the error color (halt marker). */
   haltCompId?: string | null;
@@ -223,12 +230,16 @@ function valueColor(theme: Theme, text: string, fill: string): string {
 }
 
 /**
- * A DULL version of a wire's identity color (UI_OVERHAUL §35): mixed halfway
- * toward the background, so an idle wire reads as a subdued tint that the true
- * color brightens out of when data flows.
+ * A DULL version of a wire's identity color (UI_OVERHAUL §35): mixed toward the
+ * background, so an idle wire reads as a subdued tint that the true color
+ * brightens out of when data flows.
+ *
+ * 0.5 left the idle tint at ~3.3:1 against the default dark background — the
+ * "wires vanish in dark mode" report. 0.65 keeps it clearly a tint while
+ * lifting it to ~5:1, so an unsimulated wire is never mistaken for the grid.
  */
 function dullColor(theme: Theme, color: string): string {
-  return mixHex(theme.bg, color, 0.5);
+  return mixHex(theme.bg, color, 0.65);
 }
 
 /** Mix `base` toward `other` by `t` (0..1); unchanged if either is not a hex. */
@@ -937,6 +948,8 @@ export class DocScene {
   private compsById = new Map<string, CsxComponent>();
   /** Junction dot positions per wire (at its own join endpoints). */
   private junctionDots: Vec2[] = [];
+  /** Free (dangling) wire ends to mark with an "X" — electrically open stops. */
+  private freeEnds: Vec2[] = [];
   private wireIndex = new UniformGrid(CELL);
   private wireBits: number[] = [];
   /** Declared-width disagreement per wire (UI_OVERHAUL §17). */
@@ -985,9 +998,13 @@ export class DocScene {
     const hops = this.crossingHops(c.wires);
     this.wirePaths = c.wires.map((w, i) => wirePath(w.points.map(p2v), WIRE_RADIUS, hops[i]));
     this.junctionDots = [];
+    this.freeEnds = [];
     for (const w of c.wires) {
-      if (!isPinEndpoint(w.b)) this.junctionDots.push(p2v(w.points[w.points.length - 1]));
-      if (!isPinEndpoint(w.a)) this.junctionDots.push(p2v(w.points[0]));
+      if (isJoinEndpoint(w.b)) this.junctionDots.push(p2v(w.points[w.points.length - 1]));
+      if (isJoinEndpoint(w.a)) this.junctionDots.push(p2v(w.points[0]));
+      // A free end is a hanging stop, not a junction: mark it distinctly (an X).
+      if (isFreeEndpoint(w.b)) this.freeEnds.push(p2v(w.points[w.points.length - 1]));
+      if (isFreeEndpoint(w.a)) this.freeEnds.push(p2v(w.points[0]));
     }
     this.nets = deriveNets(c);
     this.wireBits = c.wires.map((_, i) => {
@@ -1157,6 +1174,11 @@ export class DocScene {
 
   wiresInNet(netId: number): readonly number[] {
     return this.nets.nets[netId]?.wires ?? [];
+  }
+
+  /** The inferred bit width of one drawn wire (1 when unknown). */
+  wireBitsAt(wireIdx: number): number {
+    return Math.max(1, this.wireBits[wireIdx] ?? 1);
   }
 
   /**
@@ -1714,6 +1736,7 @@ export class DocScene {
         local.w,
         local.h,
         Array.isArray(comp.attrs?.negate) ? (comp.attrs.negate as number[]) : [],
+        gateInputCount(comp.attrs ?? {}),
       );
       if (shape !== null) {
         renderer.drawBody(rotatePath(shape.body, cx, cy, rot), look);
@@ -1915,23 +1938,23 @@ export class DocScene {
           }
         }
         // An in-progress inline edit (#2) shows the text typed so far — already
-        // in the register's configured base — with a caret, overriding both the
-        // net and the poked value.
-        if (showValues && comp.type === "mem.register") {
-          const ed = sim?.editingValue;
+        // in the part's configured base — with a caret, overriding both the net
+        // and the poked value. Registers and input pins are edited this way.
+        if (showValues && sim !== undefined) {
+          const ed = sim.editingValue;
           if (ed !== undefined && ed !== null && ed.compId === comp.id) {
             valueText = ed.text;
           }
         }
-        // A locally poked register value wins over the net (and the §61
-        // placeholder below), so the readout updates the instant you type: the
-        // engine's stored value is only visible through the delay-gated `q` net
-        // (and not at all when `q` is unwired). See SimController.pokedRegister.
-        if (showValues && comp.type === "mem.register" && sim !== undefined) {
-          const poked = sim.pokedRegister?.(comp.id);
+        // A locally poked value wins over the net (and the §61 placeholder
+        // below), so the readout updates the instant you type: the engine's
+        // value is delay-gated and absent when the value pin is unwired (an open
+        // register `q`, or an input pin's own terminal). See SimController.poked.
+        if (showValues && sim !== undefined) {
+          const poked = sim.poked?.(comp.id);
           if (poked !== undefined) {
-            const q = layout.pins.find((p) => p.name === "q");
-            const bits = q?.bitsize ?? 1;
+            const vp = VALUE_PIN[comp.type];
+            const bits = layout.pins.find((p) => p.name === vp)?.bitsize ?? 1;
             valueText = valueTextAtWidth(
               { v: poked, x: "", z: "" },
               readoutMode(bits, comp.attrs?.radix),
@@ -2159,14 +2182,37 @@ export class DocScene {
     // Junction dots.
     renderer.drawDots(this.junctionDots, PIN_R * 1.1, theme.wire.disconnected);
 
-    // Corner handles on selected wires (bend dragging).
+    // Free (dangling) wire ends: a small X marks an electrically open stop, so a
+    // hanging wire is never mistaken for a connected one.
+    if (this.freeEnds.length > 0) {
+      const r = PIN_R * 1.15;
+      const crosses: PathCmd[] = this.freeEnds.flatMap((p) => [
+        { t: "M", x: p.x - r, y: p.y - r },
+        { t: "L", x: p.x + r, y: p.y + r },
+        { t: "M", x: p.x - r, y: p.y + r },
+        { t: "L", x: p.x + r, y: p.y - r },
+      ]);
+      renderer.drawPath(crosses, { stroke: theme.wire.disconnected, lineWidth: 0.16 });
+    }
+
+    // Handles on selected wires: a dot on every interior bend (drag the corner)
+    // AND a smaller dot at each drawn segment's midpoint, because a segment can
+    // be slid perpendicular by its middle too, not only by a corner (§65).
     if (selection.wires.size > 0) {
       const corners: Vec2[] = [];
+      const mids: Vec2[] = [];
       for (const i of selection.wires) {
         const pts = this.wires[i]?.points;
         if (pts === undefined) continue;
         for (let k = 1; k + 1 < pts.length; k++) corners.push(p2v(pts[k]));
+        for (let s = 0; s + 1 < pts.length; s++) {
+          mids.push({
+            x: (pts[s][0] + pts[s + 1][0]) / 2,
+            y: (pts[s][1] + pts[s + 1][1]) / 2,
+          });
+        }
       }
+      if (mids.length > 0) renderer.drawDots(mids, PIN_R * 0.55, theme.accent);
       if (corners.length > 0) renderer.drawDots(corners, PIN_R * 0.8, theme.accent);
     }
 
@@ -2314,7 +2360,15 @@ export class DocScene {
       const rot = ghost.rot ?? "E";
       const gcx = layout.rect.x + layout.rect.w / 2;
       const gcy = layout.rect.y + layout.rect.h / 2;
-      const shape = gateShape(ghost.type, gcx - local.w / 2, gcy - local.h / 2, local.w, local.h);
+      const shape = gateShape(
+        ghost.type,
+        gcx - local.w / 2,
+        gcy - local.h / 2,
+        local.w,
+        local.h,
+        [],
+        gateInputCount(ghost.attrs ?? {}),
+      );
       const stroke = { stroke: theme.accent, lineWidth: 0.16 };
       if (shape !== null) {
         renderer.drawPath(rotatePath(shape.body, gcx, gcy, rot), {

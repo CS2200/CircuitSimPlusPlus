@@ -1,6 +1,8 @@
 import {
   CSX_FORMAT,
   CSX_VERSION,
+  isFreeEndpoint,
+  isJoinEndpoint,
   isPinEndpoint,
   type CsxCircuit,
   type CsxComponent,
@@ -47,6 +49,18 @@ class SnapshotCmd implements Command {
   mergeWith(next: Command): void {
     this.after = (next as SnapshotCmd).after;
   }
+}
+
+/**
+ * Which circuit the engine simulates, mirroring `csim_core::netlist::root_circuit`:
+ * the circuit named `main` when present, else the first. The root is the
+ * simulation's top level, so it can never be instantiated as a subcircuit — the
+ * palette, the Inspector's target picker and the validator all exclude it.
+ */
+export function simulationRoot(circuits: readonly { name: string }[]): number {
+  if (circuits.length === 0) return -1;
+  const named = circuits.findIndex((c) => c.name === "main");
+  return named >= 0 ? named : 0;
 }
 
 export interface ComponentInit {
@@ -374,8 +388,8 @@ export class CircuitDocument {
       // a no-op when the parent came along, a slide along the parent when it did
       // not. (A wire always has at least one pin end, so at most one end is a
       // join.)
-      const joinA = !isPinEndpoint(w.a);
-      const joinB = !isPinEndpoint(w.b);
+      const joinA = isJoinEndpoint(w.a);
+      const joinB = isJoinEndpoint(w.b);
       // The end segment's axis BEFORE the move: after translating the endpoint,
       // that segment may turn diagonal — repairEnd() slides the adjacent bend so
       // the wire keeps leaving the pin orthogonally ("routes stretch", never skew).
@@ -846,6 +860,7 @@ export class CircuitDocument {
       }
       c.wires.forEach((w, i) => {
         for (const e of [w.a, w.b]) {
+          if (isFreeEndpoint(e)) continue; // an open end has no reference to check
           if (isPinEndpoint(e)) {
             if (!c.components.some((x) => x.id === e.comp)) {
               errors.push(`${c.name}: wire ${i} references missing component "${e.comp}"`);
@@ -861,8 +876,12 @@ export class CircuitDocument {
             );
           }
         }
-        if (!isPinEndpoint(w.a) && !isPinEndpoint(w.b)) {
-          errors.push(`${c.name}: wire ${i} has no pin endpoint (join–join wires are invalid)`);
+        const anchored =
+          isPinEndpoint(w.a) || isPinEndpoint(w.b) || isFreeEndpoint(w.a) || isFreeEndpoint(w.b);
+        if (!anchored) {
+          errors.push(
+            `${c.name}: wire ${i} has no pin or free endpoint (join–join wires are invalid)`,
+          );
         }
       });
     }
@@ -901,12 +920,18 @@ export class CircuitDocument {
 
 /**
  * Load-time version migrations, mirroring the backend's `format::migrate`
- * (`crates/core/src/format/mod.rs`). Each step upgrades a document **one**
- * version and the steps run in order, so a file several versions behind is
- * walked forward — a v2 file also predates v3 and v5, so v2 → v3 → v5 is the
- * real path. v4 is skipped on purpose: it was the version that removed the
- * `rst` pin, and v5 has it back (§93), so nothing has to be dropped and a
- * v3/v4 file only gains the pin-visibility flags.
+ * (`crates/core/src/format/mod.rs`) **step for step**. Each step upgrades a
+ * document one version and the steps run in order, so a file several versions
+ * behind is walked forward — a v2 file also predates v3, v5, v6 and v7, so
+ * v2 → v3 → v5 → v6 → v7 is the real path. v4 is skipped on purpose: it was the
+ * version that removed the `rst` pin, and v5 has it back (§93), so nothing has
+ * to be dropped and a v3/v4 file only gains the pin-visibility flags.
+ *
+ * This chain MUST stay in lockstep with the Rust one: the editor holds its own
+ * copy of the document while the engine loads and migrates the same file, so a
+ * missed step makes the two disagree (and a version the chain does not walk
+ * forward throws below as "unsupported version", which is the opener crash this
+ * used to be).
  */
 function migrate(data: CsxDocument): void {
   let version = data.version as number;
@@ -916,7 +941,16 @@ function migrate(data: CsxDocument): void {
   }
   if (version >= 3 && version < 5) {
     revealWiredControlPins(data);
-    version = CSX_VERSION;
+    version = 5;
+  }
+  if (version === 5) {
+    materialiseUnwiredResets(data);
+    version = 6;
+  }
+  if (version === 6) {
+    // v7 adds the free (dangling) wire endpoint. Purely additive: a v6 file has
+    // no free ends, so only the version stamp changes.
+    version = 7;
   }
   if (version !== (data.version as number)) {
     data.version = version as typeof CSX_VERSION;
@@ -969,6 +1003,56 @@ function revealWiredControlPins(data: CsxDocument): void {
 }
 
 /**
+ * v5 → v6: **materialise a reset nobody wrote.** Through v5 a floating `rst` was
+ * read as deasserted; v6 reads it as `X` like any other floating input. A file
+ * written under the old rule therefore gains the driver the rule stood in for:
+ * one `wiring.constant` (value 0) per circuit, fanned out to every register/RAM
+ * whose `rst` pin no wire names. Mirrors the backend exactly (same `rstTie`
+ * naming, same offset position, same wire order) so the editor and engine agree.
+ */
+function materialiseUnwiredResets(data: CsxDocument): void {
+  for (const c of data.circuits ?? []) {
+    const wired = new Set<string>();
+    for (const w of c.wires ?? []) {
+      for (const e of [w.a, w.b]) {
+        if (isPinEndpoint(e) && e.pin === "rst") wired.add(e.comp);
+      }
+    }
+    const taken = new Set<string>();
+    const needing: { id: string; pos: [number, number] }[] = [];
+    for (const comp of c.components ?? []) {
+      taken.add(comp.id);
+      if ((comp.type !== "mem.register" && comp.type !== "mem.ram") || wired.has(comp.id)) {
+        continue;
+      }
+      const pos = Array.isArray(comp.pos) ? (comp.pos as [number, number]) : [0, 0];
+      needing.push({ id: comp.id, pos: [pos[0] ?? 0, pos[1] ?? 0] });
+    }
+    if (needing.length === 0) continue;
+    // A unique id, positioned just off the first part that needs it.
+    let src = "rstTie";
+    let n = 1;
+    while (taken.has(src)) {
+      n += 1;
+      src = `rstTie${n}`;
+    }
+    const pos: [number, number] = [
+      Math.max(0, needing[0].pos[0] - 2),
+      Math.max(0, needing[0].pos[1] - 2),
+    ];
+    c.components.push({
+      id: src,
+      type: "wiring.constant",
+      pos,
+      attrs: { bitsize: 1, value: "0" },
+    });
+    for (const { id } of needing) {
+      c.wires.push({ a: { comp: src, pin: "out" }, b: { comp: id, pin: "rst" }, points: [] });
+    }
+  }
+}
+
+/**
  * Backward compatibility: early frontend builds called the `wiring.pin`
  * terminal "port"; the backend registry has always named it "pin". Files
  * saved (browser download) during that window carry "port" endpoints that
@@ -1002,10 +1086,16 @@ export function allocComponentId(c: CsxCircuit): string {
 /** Wire op validation per DESIGN.md §5.2. Throws Error with a precise message. */
 export function validateWire(c: CsxCircuit, w: WireInit): void {
   if (w.points.length < 2) throw new Error("a wire needs at least 2 points");
-  if (!isPinEndpoint(w.a) && !isPinEndpoint(w.b)) {
-    throw new Error("a wire needs at least one pin endpoint (join–join wires are invalid)");
+  // At least one end must anchor to something real: a pin or a free (dangling)
+  // stop. Two junctions would be a wire connecting nothing.
+  if (!isPinEndpoint(w.a) && !isPinEndpoint(w.b) && !isFreeEndpoint(w.a) && !isFreeEndpoint(w.b)) {
+    throw new Error("a wire needs at least one pin or free endpoint (join–join wires are invalid)");
   }
   for (const e of [w.a, w.b]) {
+    if (isFreeEndpoint(e)) {
+      // A free end carries only its drawn coordinate — nothing to validate.
+      continue;
+    }
     if (isPinEndpoint(e)) {
       if (!c.components.some((x) => x.id === e.comp)) {
         throw new Error(`wire endpoint references missing component "${e.comp}"`);
@@ -1067,7 +1157,7 @@ export function removeWiresCascade(wires: CsxWire[], roots: ReadonlySet<number>)
     wires.forEach((w, i) => {
       if (removed.has(i)) return;
       for (const e of [w.a, w.b]) {
-        if (!isPinEndpoint(e) && removed.has(e.join.wire)) {
+        if (isJoinEndpoint(e) && removed.has(e.join.wire)) {
           removed.add(i);
           grew = true;
           break;
@@ -1089,7 +1179,7 @@ export function removeWiresCascade(wires: CsxWire[], roots: ReadonlySet<number>)
 }
 
 function remapJoin(e: CsxEndpoint, remap: ReadonlyMap<number, number>): CsxEndpoint {
-  if (isPinEndpoint(e)) return e;
+  if (!isJoinEndpoint(e)) return e; // a pin or a free end is unaffected by renumbering
   const wire = remap.get(e.join.wire);
   if (wire === undefined) {
     // Invariant violation — the closure should have removed this wire too.
@@ -1300,7 +1390,7 @@ export function reprojectJunctionDependents(
    *  a pin end, degenerate, or its parent is not there. */
   const seat = (w: CsxWire, end: "a" | "b"): CsxWire | null => {
     const ep = w[end];
-    if (isPinEndpoint(ep)) return null;
+    if (!isJoinEndpoint(ep)) return null; // a pin or free end has no parent to seat on
     const parent = out[ep.join.wire];
     if (parent === undefined || parent.points.length < 2 || w.points.length < 2) return null;
     const segment = Math.max(0, Math.min(ep.join.segment, parent.points.length - 2));
@@ -1328,7 +1418,7 @@ export function reprojectJunctionDependents(
     let next: CsxWire | null = null;
     for (const end of ["a", "b"] as const) {
       const ep = (next ?? w)[end];
-      if (isPinEndpoint(ep) || !moved.has(ep.join.wire)) continue;
+      if (!isJoinEndpoint(ep) || !moved.has(ep.join.wire)) continue;
       const seated = seat(next ?? w, end);
       if (seated !== null) next = seated;
     }

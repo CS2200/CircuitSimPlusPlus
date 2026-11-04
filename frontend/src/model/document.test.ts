@@ -124,6 +124,87 @@ describe("CircuitDocument.create/fromJson", () => {
     expect(byId("r2")?.attrs?.bitsize).toBe(8);
   });
 
+  it("migrates a v5 document by materialising an unwired reset (v5 → v6 → v7)", () => {
+    const v5 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 5,
+      name: "old",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [{ id: "r1", type: "mem.register", pos: [6, 4] }],
+          wires: [],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v5);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    const c = doc.circuit(0);
+    // One constant fanned out to the register whose rst nothing drove, at the
+    // backend's exact offset position.
+    const tie = c.components.find((x) => x.id === "rstTie");
+    expect(tie).toMatchObject({
+      type: "wiring.constant",
+      pos: [4, 2],
+      attrs: { bitsize: 1, value: "0" },
+    });
+    expect(c.wires).toHaveLength(1);
+    expect(c.wires[0]).toEqual({
+      a: { comp: "rstTie", pin: "out" },
+      b: { comp: "r1", pin: "rst" },
+      points: [],
+    });
+  });
+
+  it("accepts a v6 document and walks it to v7 (no reset materialised)", () => {
+    const v6 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 6,
+      name: "old",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [{ id: "r1", type: "mem.register", pos: [6, 4] }],
+          wires: [],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v6);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    // v6 already used the floating-reset-is-X rule, so nothing is added.
+    expect(doc.circuit(0).components).toHaveLength(1);
+    expect(doc.circuit(0).wires).toHaveLength(0);
+  });
+
+  it("parses a v7 wire with a free (dangling) endpoint", () => {
+    const v7 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: CSX_VERSION,
+      name: "d",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [{ id: "n0", type: "gate.not", pos: [0, 0] }],
+          wires: [
+            {
+              a: { comp: "n0", pin: "out" },
+              b: { free: [6, 2] },
+              points: [
+                [3, 1],
+                [6, 2],
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v7);
+    expect(doc.circuit(0).wires[0].b).toEqual({ free: [6, 2] });
+  });
+
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
     // Early frontend builds called the wiring.pin terminal "port"; files
     // from that window fail engine validation — rename on load.
@@ -497,7 +578,7 @@ describe("wire ops", () => {
           [1, 1],
         ],
       }),
-    ).toThrow("pin endpoint");
+    ).toThrow("pin or free endpoint");
     expect(() =>
       doc.addWire(0, {
         a: { comp: "nope", pin: "out" },

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { APP_VERSION, checkForUpdate, dismiss, type UpdateInfo } from "../update";
+import { APP_VERSION, checkForUpdate, dismiss, GITHUB_REPO, type UpdateInfo } from "../update";
 
 /**
  * Update nudge dialog + About card (DESIGN.md §9, FRONTEND.md U8).
@@ -67,8 +67,21 @@ export function AboutCard({ onClose }: { onClose: () => void }) {
           Version <strong>{APP_VERSION}</strong> — the CS 2200 circuit simulator.
         </p>
         <p>
-          This build is <strong>unsigned</strong>. Your OS may warn on first launch; that's
-          expected. macOS: right-click → Open. Windows: SmartScreen → More info → Run anyway.
+          This build is <strong>unsigned</strong>, so your operating system may warn the first time
+          you launch it. That warning is expected and safe to dismiss — since you are reading this,
+          you have already got past it.
+        </p>
+        <p>
+          If you ever need a fresh copy, download it from the{" "}
+          <a
+            className="update-link"
+            href={`https://github.com/${GITHUB_REPO}/releases`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            CircuitSim++ download page
+          </a>
+          .
         </p>
         <p className="help-dismiss">click anywhere or press Esc to dismiss</p>
       </div>

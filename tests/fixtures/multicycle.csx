@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 6,
+  "version": 7,
   "name": "multicycle",
   "settings": {
     "clockHz": 1,

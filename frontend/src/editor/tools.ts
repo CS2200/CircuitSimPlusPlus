@@ -1,6 +1,6 @@
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent, CsxEndpoint, CsxWire, Rotation } from "../model/csx";
-import { isPinEndpoint } from "../model/csx";
+import { isJoinEndpoint, isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
 import { compPins, compSize } from "./catalog";
@@ -73,9 +73,21 @@ type DragState =
       kind: "maybe-drag";
       start: Vec2;
       wireStart: { wireIdx: number; segment: number; point: Vec2 } | null;
+      /**
+       * Set when the press landed on an ALREADY-selected wire: a sweep then
+       * slides that whole drawn segment perpendicular (its middle, not only a
+       * corner handle). Null means the usual "drag off a wire to branch".
+       */
+      segmentStart: { wireIdx: number; segment: number } | null;
     }
   | { kind: "dragging"; start: Vec2; applied: Vec2 }
   | { kind: "wire-bend"; wireIdx: number; pointIdx: number; original: [number, number][] }
+  | {
+      kind: "wire-segment";
+      wireIdx: number;
+      segment: number;
+      original: [number, number][];
+    }
   | { kind: "boxing"; start: Vec2; current: Vec2; additive: boolean };
 
 interface WiringState {
@@ -445,17 +457,21 @@ export class ToolMachine {
         this.changed();
         return;
       }
-      if (!this.selection.hasWire(wire.wireIdx)) {
+      // Was the wire already selected BEFORE this press? A sweep then slides a
+      // segment (its middle is a handle too); a first press still branches off
+      // the wire into a new junction wire (the wiring gesture).
+      const wasSelected = this.selection.hasWire(wire.wireIdx);
+      if (!wasSelected) {
         this.selection.set([], [wire.wireIdx]); // first click: the whole wire
       } else {
         this.narrowSelection(world, wire); // second: just the piece (§65)
       }
       this.pressWireIdx = wire.wireIdx;
-      // a DRAG from a wire starts wiring with a junction at the press point
       this.drag = {
         kind: "maybe-drag",
         start: world,
         wireStart: { wireIdx: wire.wireIdx, segment: wire.segment, point: wire.point },
+        segmentStart: wasSelected ? { wireIdx: wire.wireIdx, segment: wire.segment } : null,
       };
       this.changed();
       return;
@@ -490,7 +506,7 @@ export class ToolMachine {
       } else if (!this.selection.hasComponent(comp.compId)) {
         this.selection.set([comp.compId], []);
       }
-      this.drag = { kind: "maybe-drag", start: world, wireStart: null };
+      this.drag = { kind: "maybe-drag", start: world, wireStart: null, segmentStart: null };
       this.changed();
       return;
     }
@@ -551,6 +567,19 @@ export class ToolMachine {
       case "maybe-drag": {
         const d = Math.hypot(world.x - this.drag.start.x, world.y - this.drag.start.y);
         if (d <= DRAG_THRESHOLD) break;
+        // An already-selected wire: the sweep slides the grabbed segment
+        // perpendicular, from anywhere along it (not only its corner).
+        if (this.drag.segmentStart !== null) {
+          const { wireIdx, segment } = this.drag.segmentStart;
+          const original = this.doc
+            .circuit(this.circuitIdx())
+            .wires[wireIdx]?.points.map((p) => [p[0], p[1]] as [number, number]);
+          if (original === undefined) break;
+          this.drag = { kind: "wire-segment", wireIdx, segment, original };
+          this.slideSegment(original, wireIdx, segment, world);
+          this.changed();
+          break;
+        }
         if (this.drag.wireStart !== null) {
           // drag off a wire → wire starting at a junction on it; the exit
           // direction is decided once, at gesture start (stable preview)
@@ -634,6 +663,10 @@ export class ToolMachine {
         this.changed();
         break;
       }
+      case "wire-segment":
+        this.slideSegment(this.drag.original, this.drag.wireIdx, this.drag.segment, world);
+        this.changed();
+        break;
       case "boxing":
         this.drag = { ...this.drag, current: world };
         this.changed();
@@ -641,6 +674,47 @@ export class ToolMachine {
       case "idle":
         break;
     }
+  }
+
+  /**
+   * Slide one drawn segment perpendicular (a horizontal segment moves up/down,
+   * a vertical one left/right) from the pointer. Both segment endpoints take the
+   * new coordinate; where a segment ends at a junction or a pin (an interior
+   * bend), a matching bend is inserted so the wire stays orthogonal and pinned
+   * ends never move. Recomputed from the drag's original snapshot each event, so
+   * the gesture is stable.
+   */
+  private slideSegment(
+    original: readonly [number, number][],
+    wireIdx: number,
+    segment: number,
+    world: Vec2,
+  ): void {
+    const n = original.length;
+    if (n < 2 || segment < 0 || segment + 1 >= n) return;
+    const a = original[segment];
+    const b = original[segment + 1];
+    const horizontal = Math.abs(a[1] - b[1]) < 1e-9;
+    const vertical = Math.abs(a[0] - b[0]) < 1e-9;
+    if (!horizontal && !vertical) return; // legacy diagonal: leave it alone
+    const c = snap(horizontal ? world.y : world.x, 1);
+    const out: Vec2[] = [];
+    for (let i = 0; i < n; i++) {
+      const moved: Vec2 = horizontal ? { x: original[i][0], y: c } : { x: c, y: original[i][1] };
+      if (i !== segment && i !== segment + 1) {
+        out.push({ x: original[i][0], y: original[i][1] });
+      } else if (i === 0) {
+        // A terminal (pin/junction) end stays put; a bend joins it to the slid
+        // segment.
+        out.push({ x: original[0][0], y: original[0][1] }, moved);
+      } else if (i === n - 1) {
+        out.push(moved, { x: original[n - 1][0], y: original[n - 1][1] });
+      } else {
+        out.push(moved);
+      }
+    }
+    const cleaned = cleanPolyline(out).map((p) => [p.x, p.y] as [number, number]);
+    this.doc.updateWirePoints(this.circuitIdx(), wireIdx, cleaned);
   }
 
   up(info: PointerInfo, world?: Vec2): void {
@@ -677,6 +751,15 @@ export class ToolMachine {
           this.drag = { kind: "idle" };
           return;
         }
+        // Released over empty space: hang the wire there with a FREE endpoint
+        // (electrically open until it is later attached). Dragging a wire out
+        // and letting go is how a dangling end is drawn; click-click wiring can
+        // also finish in space with Enter (`finishFree`).
+        const { points } = this.buildRoute(w, release);
+        const end = points.at(-1) ?? w.cursor;
+        this.commitWire(w, { free: [end.x, end.y] }, points);
+        this.drag = { kind: "idle" };
+        return;
       }
       this.drag = { kind: "idle" };
       // A junction-wire dragged off a wire and dropped without connecting
@@ -719,9 +802,12 @@ export class ToolMachine {
     if (this.wiring !== null) return "target";
     if (this.scene.pickPin(world) !== null) return "pin";
     if (this.scene.pickWireCorner(world) !== null) return "bend";
+    const wire = this.scene.pickWire(world);
+    // A SELECTED wire's segment is a move handle (slid by its middle); an
+    // unselected one is just the wire you might start a branch from.
+    if (wire !== null && this.selection.hasWire(wire.wireIdx)) return "bend";
     // A tunnel tag is a wire's handle (§91): the wire's own cursor.
-    if (this.scene.pickWire(world) !== null || this.scene.pickWireLabel(world) !== null)
-      return "wire";
+    if (wire !== null || this.scene.pickWireLabel(world) !== null) return "wire";
     return "none";
   }
 
@@ -842,7 +928,7 @@ export class ToolMachine {
       if (i === wire) continue;
       const w = wires[i];
       const anchored = [w.a, w.b].some(
-        (e) => !isPinEndpoint(e) && e.join.wire === wire && e.join.segment === segment,
+        (e) => isJoinEndpoint(e) && e.join.wire === wire && e.join.segment === segment,
       );
       if (anchored && distanceToPolyline(world, w.points) <= BRANCH_TOL) return i;
     }
@@ -948,6 +1034,19 @@ export class ToolMachine {
   }
 
   // ---- internals ----
+
+  /**
+   * Finish the in-progress wire at the cursor with a free (dangling) endpoint
+   * (Enter, or a drag released in space). The wire is committed; the freely
+   * hanging end is electrically open until it is attached to a pin or wire.
+   */
+  finishFree(): void {
+    const w = this.wiring;
+    if (w === null) return;
+    const { points } = this.buildRoute(w, w.cursor);
+    const end = points.at(-1) ?? w.cursor;
+    this.commitWire(w, { free: [end.x, end.y] }, points);
+  }
 
   /** X while routing: flip the corner preference of the leg being drawn. */
   flipRoute(): void {
@@ -1056,27 +1155,39 @@ export class ToolMachine {
    * A probe only observes, so a wire landing on one makes it adopt the width of
    * whatever it is attached to — instead of leaving the user to set `bitsize`
    * by hand and then flagging a width mismatch on a part that has no business
-   * having an opinion. A junction endpoint carries no width, so it is skipped.
+   * having an opinion. The other end may be a pin OR a junction onto a wire; both
+   * carry a width, so attaching to a wire behaves like attaching to a pin.
    *
    * A **breakpoint** is the same kind of part (UI_OVERHAUL §90): it watches
    * `in`, and watching a bus while declaring one bit would be a width mismatch
    * on the one pin whose whole job is to mirror its driver.
    */
   private matchProbeWidth(a: CsxEndpoint, b: CsxEndpoint): void {
-    if (!isPinEndpoint(a) || !isPinEndpoint(b)) return;
     const comps = this.doc.circuit(this.circuitIdx()).components;
+    /**
+     * The width of whatever the other end attaches to. A PIN declares it; a
+     * JUNCTION carries the width of the wire it joins (the same net the pin would
+     * be on), so attaching a watcher to a wire behaves exactly like attaching it
+     * to a pin — the architectural rule the two paths used to disagree on.
+     */
+    const widthOf = (ep: CsxEndpoint): number | undefined => {
+      if (isPinEndpoint(ep)) {
+        const driver = comps.find((c) => c.id === ep.comp);
+        if (driver === undefined) return undefined;
+        return compPins(driver, this.doc.circuits).find((p) => p.name === ep.pin)?.bitsize;
+      }
+      if (isJoinEndpoint(ep)) return this.scene.wireBitsAt(ep.join.wire);
+      return undefined; // a free end carries no width
+    };
     for (const [probeEnd, otherEnd] of [
       [a, b],
       [b, a],
     ] as const) {
-      if (probeEnd.pin !== "in") continue;
+      if (!isPinEndpoint(probeEnd) || probeEnd.pin !== "in") continue;
       const probe = comps.find((c) => c.id === probeEnd.comp);
-      const driver = comps.find((c) => c.id === otherEnd.comp);
       const watcher = probe?.type === "wiring.probe" || probe?.type === "debug.breakpoint";
-      if (!watcher || driver === undefined) continue;
-      const width = compPins(driver, this.doc.circuits).find(
-        (p) => p.name === otherEnd.pin,
-      )?.bitsize;
+      if (!watcher) continue;
+      const width = widthOf(otherEnd);
       if (width === undefined || width === (probe.attrs?.bitsize ?? 1)) continue;
       this.doc.updateComponent(this.circuitIdx(), probe.id, {
         attrs: { ...(probe.attrs ?? {}), bitsize: width },
@@ -1138,8 +1249,18 @@ export function copySelection(
     grew = false;
     c.wires.forEach((w, i) => {
       if (copiedOld.has(i)) return;
-      const okA = isPinEndpoint(w.a) ? compSet.has(w.a.comp) : copiedOld.has(w.a.join.wire);
-      const okB = isPinEndpoint(w.b) ? compSet.has(w.b.comp) : copiedOld.has(w.b.join.wire);
+      // A free end is "outside" the selection, so a wire hanging off one is not
+      // dragged into a copy (it would dangle from a component that moved).
+      const okA = isPinEndpoint(w.a)
+        ? compSet.has(w.a.comp)
+        : isJoinEndpoint(w.a)
+          ? copiedOld.has(w.a.join.wire)
+          : false;
+      const okB = isPinEndpoint(w.b)
+        ? compSet.has(w.b.comp)
+        : isJoinEndpoint(w.b)
+          ? copiedOld.has(w.b.join.wire)
+          : false;
       if (okA && okB) {
         copiedOld.add(i);
         grew = true;
@@ -1156,7 +1277,7 @@ export function copySelection(
     if (!copiedOld.has(i)) return;
     const clone = structuredClone(w);
     for (const e of [clone.a, clone.b]) {
-      if (!isPinEndpoint(e)) e.join.wire = remap.get(e.join.wire)!;
+      if (isJoinEndpoint(e)) e.join.wire = remap.get(e.join.wire)!;
     }
     wires.push(clone);
   });

@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 6,
+  "version": 7,
   "name": "pipeline5",
   "settings": {
     "clockHz": 1,

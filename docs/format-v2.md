@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 6.
+> **current** format, version 7.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,8 +11,8 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `5`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 6 and walks older files forward one version at a
+- Top-level `version` must be `7`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 7 and walks older files forward one version at a
   time (see below).
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
@@ -21,7 +21,7 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 5,
+  "version": 7,
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1, // UI clock speed at load time
@@ -106,14 +106,25 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
 }
 ```
 
+A wire end may also be **free** — a hanging stop with no electrical connection,
+drawn into empty space. The engine leaves it open (it neither drives nor consumes
+anything), so a partially drawn wire is harmless until it is later attached:
+
+```jsonc
+{ "a": { "comp": "c17", "pin": "out" }, "b": { "free": [30, 21] } }
+```
+
 - `color` (optional, UI_OVERHAUL §12): a `"#rrggbb"` string the UI may set
   per wire to override the renderer's state/bus colors. **Purely
   presentational** — the engine ignores it beyond round-tripping it — and it
   is **omitted when unset**, so uncolored files stay byte-identical (§6
   exception to "every field always emitted").
 
-- Every wire has exactly two endpoints; **at least one endpoint is a pin** (the other may be a
-  junction onto another wire's segment). A junction renders as a dot.
+- Every wire has exactly two endpoints; **at least one endpoint is a pin or a free end** (the
+  other may be a junction onto another wire's segment). A junction renders as a dot; a free end
+  renders as an X. Two junctions would be a wire connecting nothing, so that is rejected.
+- `free` is the hanging end's drawn `[x, y]` coordinate in grid units. It is the only endpoint
+  that carries no connectivity — the engine gives it no net.
 - `join.wire` is an index into the circuit's `wires` array. A wire may not join itself.
 - `join.segment` indexes the target wire's polyline segments: a wire with `k` points has
   `k − 1` segments (0-based); a wire with empty `points` has exactly one implied straight
@@ -220,7 +231,7 @@ Checks, in order:
    `bitsize`, `contents` parses as RLE-hex within the depth limit).
 4. Per wire: endpoint comp refs resolve; pin names resolve (including subcircuit pins against
    the target circuit's named pins); joins resolve (wire exists, not self, segment in range);
-   at least one pin endpoint.
+   at least one pin or free endpoint (join–join wires are rejected).
 5. Subcircuit hierarchy acyclic; nesting depth ≤ 64.
 
 Checked at netlist build (still a load-time error; implemented in BACKEND.md task B3 because
@@ -535,7 +546,7 @@ the schema constrains common shapes only.
   "required": ["format", "version", "name", "settings", "circuits"],
   "properties": {
     "format": { "const": "circuitsim-plus-plus" },
-    "version": { "const": 6 },
+    "version": { "const": 7 },
     "name": { "type": "string" },
     "settings": {
       "type": "object",
@@ -628,6 +639,19 @@ the schema constrains common shapes only.
                 "wire": { "type": "integer", "minimum": 0 },
                 "segment": { "type": "integer", "minimum": 0 }
               }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["free"],
+          "properties": {
+            "free": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "number" }
             }
           }
         }

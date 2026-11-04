@@ -35,11 +35,11 @@
   --text-dim: #9a9ab0;
 
   /* Wire states (per-bit) */
-  --wire-low: #3a6ea5;
+  --wire-low: #5a85b3;
   --wire-high: #40dc82;
   --wire-x: #e5534b;
   --wire-z: #8a8a8a;
-  --wire-disconnected: #6b6b80; /* default wire (no signal yet) */
+  --wire-disconnected: #808092; /* default wire (no signal yet) */
 
   /* Per-bus hues (multi-bit "rainbow buses", DLS-style) */
   --bus-a: #f0b43c;
@@ -97,7 +97,7 @@
   --wire-high: #2ee87a;
   --wire-x: #ff5c52;
   --wire-z: #7d7d88;
-  --wire-disconnected: #5c5c68; /* default wire (no signal yet) */
+  --wire-disconnected: #767680; /* default wire (no signal yet) */
 
   --bus-a: #ffc94d;
   --bus-b: #c58cff;
@@ -124,8 +124,8 @@
   --wire-low: #4f8fe0;
   --wire-high: #34d399;
   --wire-x: #f87171;
-  --wire-z: #64748b;
-  --wire-disconnected: #44547a; /* default wire (no signal yet) */
+  --wire-z: #707f94;
+  --wire-disconnected: #717d9a; /* default wire (no signal yet) */
 
   --bus-a: #fbbf24;
   --bus-b: #a78bfa;
@@ -206,11 +206,11 @@
   --text: #eceff4;
   --text-dim: #a7b1c2;
 
-  --wire-low: #5e81ac;
+  --wire-low: #859fc0;
   --wire-high: #a3be8c;
-  --wire-x: #bf616a;
-  --wire-z: #8f9bab;
-  --wire-disconnected: #6f7b8f;
+  --wire-x: #d08a91;
+  --wire-z: #919dad;
+  --wire-disconnected: #949dac;
 
   --bus-a: #ebcb8b;
   --bus-b: #b48ead;
@@ -234,11 +234,11 @@
   --text: #f8f8f2;
   --text-dim: #9ba0b8;
 
-  --wire-low: #6272a4;
+  --wire-low: #8591b8;
   --wire-high: #50fa7b;
   --wire-x: #ff5555;
-  --wire-z: #8b8fa8;
-  --wire-disconnected: #6d7192;
+  --wire-z: #8d91aa;
+  --wire-disconnected: #8d90aa;
 
   --bus-a: #f1fa8c;
   --bus-b: #bd93f9;
@@ -266,7 +266,7 @@
   --wire-high: #b8bb26;
   --wire-x: #fb4934;
   --wire-z: #928374;
-  --wire-disconnected: #7c6f64;
+  --wire-disconnected: #998f86;
 
   --bus-a: #fabd2f;
   --bus-b: #d3869b;
@@ -292,9 +292,9 @@
 
   --wire-low: #268bd2;
   --wire-high: #859900;
-  --wire-x: #dc322f;
+  --wire-x: #e56765;
   --wire-z: #839496;
-  --wire-disconnected: #557780;
+  --wire-disconnected: #779299;
 
   --bus-a: #b58900;
   --bus-b: #6c71c4;

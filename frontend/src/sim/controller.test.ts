@@ -181,13 +181,13 @@ describe("SimController", () => {
     expect(ctl.store.loaded).toBe(true);
   });
 
-  it("remembers a poked register value until the next command", async () => {
+  it("remembers a poked value until the next command", async () => {
     const ctl = makeController();
     await ctl.load(buildMockDemoDoc());
-    ctl.rememberPokedRegister("c1", "5");
-    expect(ctl.pokedRegister("c1")).toBe("5");
+    ctl.rememberPoked("c1", "5");
+    expect(ctl.poked("c1")).toBe("5");
     await ctl.stepTick(); // a command supersedes the optimistic value
-    expect(ctl.pokedRegister("c1")).toBeUndefined();
+    expect(ctl.poked("c1")).toBeUndefined();
   });
 
   it("watch values track the simulation (register q, probe in)", async () => {

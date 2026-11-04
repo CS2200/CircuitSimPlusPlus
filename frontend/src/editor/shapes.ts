@@ -325,6 +325,9 @@ export function gateShape(
   w: number,
   h: number,
   negate: readonly number[] = [],
+  /** The gate's input count (from `attrs.inputs`), so the input bubbles land on
+   * the same y rule the catalog gives the pins. */
+  inputs?: number,
 ): GateShape | null {
   switch (type) {
     case "gate.and":
@@ -358,12 +361,12 @@ export function gateShape(
       // body is one unit wider when any input is bubbled, so the bubble sits inside the
       // input edge with the pin still on it — CE's own geometry.
       // `gateSpec` sizes the body `h = max(3, inputs + 1)`, so the pin rule is
-      // `(i + 1) * h / (inputs + 1)` with `inputs = h - 1`; the bubble sits just inside
+      // `(i + 1) * h / (inputs + 1)`; the bubble sits just inside
       // the input edge, which CE widens by one unit for exactly this.
-      const inputs = Math.max(2, Math.round(h) - 1);
+      const n = Math.max(2, inputs ?? Math.round(h) - 1);
       const inBubbles: Vec2[] = negate.map((i) => ({
         x: x + BUBBLE_R,
-        y: y + ((i + 1) * h) / (inputs + 1),
+        y: y + ((i + 1) * h) / (n + 1),
       }));
       return {
         body,

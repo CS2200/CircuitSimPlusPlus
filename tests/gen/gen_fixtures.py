@@ -76,7 +76,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 6,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 7,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

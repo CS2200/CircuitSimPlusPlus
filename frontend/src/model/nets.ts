@@ -1,4 +1,4 @@
-import { isPinEndpoint, pinKey, type CsxCircuit } from "./csx";
+import { isFreeEndpoint, isPinEndpoint, pinKey, type CsxCircuit } from "./csx";
 
 /**
  * Client-side net derivation (FRONTEND.md U2): union-find over wire
@@ -80,9 +80,11 @@ export function deriveNets(circuit: CsxCircuit): NetDerivation {
       return;
     }
     // Each wire is one electrical node joining its two endpoints; a junction
-    // endpoint resolves to the parent wire's node, merging the two wires.
-    uf.union(wireNode(i), nodeA);
-    uf.union(wireNode(i), nodeB);
+    // endpoint resolves to the parent wire's node, merging the two wires. A FREE
+    // endpoint contributes no external node (it is electrically open), so the
+    // wire simply unions with itself there — the pin end still forms its net.
+    uf.union(wireNode(i), nodeA ?? wireNode(i));
+    uf.union(wireNode(i), nodeB ?? wireNode(i));
   });
 
   // Collect groups: every wire belongs to a net; pins ride along.
@@ -125,12 +127,14 @@ export function deriveNets(circuit: CsxCircuit): NetDerivation {
   return { nets, wireToNet, pinToNet, errors };
 }
 
+/** `undefined` means "valid but connects to nothing" (a free/dangling end). */
 function endpointNode(
   e: CsxCircuit["wires"][number]["a"],
   circuit: CsxCircuit,
   wireIdx: number,
   errors: string[],
-): string | null {
+): string | null | undefined {
+  if (isFreeEndpoint(e)) return undefined;
   if (isPinEndpoint(e)) {
     if (!circuit.components.some((c) => c.id === e.comp)) {
       errors.push(`wire ${wireIdx} references missing component "${e.comp}"`);

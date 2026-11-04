@@ -137,14 +137,23 @@ function uintAttr(
  * pointed OUTPUT cap stays a 2-input gate's size — only the flat input side
  * grows (UI_OVERHAUL §44, see `shapes.ts`'s `CAP_H`).
  */
+export function gateInputCount(attrs: Readonly<Record<string, unknown>>): number {
+  return Math.max(2, numAttr(attrs, "inputs", 2));
+}
+
 function gateSpec(caption: string, minInputs: number): CompSpec {
   // A bubbled input (`negate`) widens the body by one grid unit, exactly as
   // CircuitSim CE does, so the bubble sits inside the input edge and the pin
   // stays on the outline (format-v2 §4).
   const negatedInputs = (attrs: Readonly<Record<string, unknown>>): number[] =>
     Array.isArray(attrs.negate) ? (attrs.negate as number[]) : [];
+  // CircuitSim CE's 2-input gate is 4 blocks wide (`GatePeer`'s default
+  // `super(x, y, 4, 4, true)` and `AndGatePeer`/`OrGatePeer`'s 4×4 paint); the
+  // old 5 read as an over-long lozenge. CE widens to 5 when an input carries a
+  // bubble, which is exactly the rule here. The HEIGHT keeps our §44 growth
+  // (inputs never crowd), so only the unnecessary LENGTH changed.
   const bodyWidth = (attrs: Readonly<Record<string, unknown>>): number =>
-    negatedInputs(attrs).length > 0 ? 6 : 5;
+    negatedInputs(attrs).length > 0 ? 5 : 4;
   return {
     width: bodyWidth,
     height: (attrs) => Math.max(3, numAttr(attrs, "inputs", 2) + 1),

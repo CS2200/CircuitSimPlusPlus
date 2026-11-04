@@ -31,13 +31,13 @@ export const FALLBACK_THEME: Theme = {
   textDim: "#9a9ab0",
   accent: "#5b8def",
   wire: {
-    low: "#3a6ea5",
+    low: "#5a85b3",
     high: "#40dc82",
     x: "#e5534b",
     z: "#8a8a8a",
     // Neutral for junction dots and other off/undriven marks. Idle WIRES no
     // longer use it — they show a dull tint of their identity colour (§35).
-    disconnected: "#6b6b80",
+    disconnected: "#808092",
   },
   bus: ["#f0b43c", "#b478e6", "#4dd0e1", "#f368a0", "#b8e34d"],
   violation: "#ff9e3d",
