@@ -57,7 +57,9 @@ async function clickWorld(page: Page, wx: number, wy: number): Promise<void> {
 test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", async ({ page }) => {
   await page.goto("/");
 
-  // ---- place: AND centered at world (2.5,1.5) → body [0,0]; NOT likewise ----
+  // ---- place: AND centered at world (2.5,1.5) → body [1,0] (a 4-wide gate
+  // rounds the centered click up); NOT at (11.5,1) → [10,0]. The out pin still
+  // lands at (5,1.5) either way. ----
   await page.getByRole("button", { name: "AND", exact: true }).click();
   await clickWorld(page, 2.5, 1.5);
   await page.keyboard.press("Escape");
@@ -67,7 +69,7 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
 
   let d = await doc(page);
   expect(d.circuits[0].components).toHaveLength(2);
-  expect(d.circuits[0].components[0]).toMatchObject({ type: "gate.and", pos: [0, 0] });
+  expect(d.circuits[0].components[0]).toMatchObject({ type: "gate.and", pos: [1, 0] });
   expect(d.circuits[0].components[1]).toMatchObject({ type: "gate.not", pos: [10, 0] });
   const [and, not] = d.circuits[0].components.map((c) => c.id);
 
@@ -105,8 +107,8 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   expect(d.circuits[0].components[0]).not.toHaveProperty("namePos");
 
   // The Inspector reports the selected part's own cost from the published delay
-  // table (docs/delay-table.md) — an AND is 10 ns.
-  await expect(page.locator(".inspector-row", { hasText: "Delay" })).toContainText("prop 10 ns");
+  // table (docs/delay-table.md) — an AND is 2 ns under MIPS (v9).
+  await expect(page.locator(".inspector-row", { hasText: "Delay" })).toContainText("prop 2 ns");
 
   // ---- wire: AND.out (5,1.5) → NOT.in (10,1), routed with an escape
   // stub east + a Z jog, entering the input pin from the west ----
@@ -155,7 +157,7 @@ test("U3 acceptance: place, wire, junction, drag, delete-branch, undo-all", asyn
   }
   await page.mouse.up();
   d = await doc(page);
-  expect(d.circuits[0].components[0].pos).toEqual([3, 0]);
+  expect(d.circuits[0].components[0].pos).toEqual([4, 0]);
   expect(d.circuits[0].wires[0].points[0]).toEqual([8, 1.5]);
 
   // ---- delete-branch: selecting the parent wire + Del cascades to the junction wire ----

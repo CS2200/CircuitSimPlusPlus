@@ -802,12 +802,14 @@ export class ToolMachine {
     if (this.wiring !== null) return "target";
     if (this.scene.pickPin(world) !== null) return "pin";
     if (this.scene.pickWireCorner(world) !== null) return "bend";
+    // A tunnel TAG is a wire's handle (§91) and wins over both the wire and a
+    // selected wire's move handle, so a hidden route stays reachable.
+    if (this.scene.pickWireLabel(world) !== null) return "wire";
     const wire = this.scene.pickWire(world);
     // A SELECTED wire's segment is a move handle (slid by its middle); an
     // unselected one is just the wire you might start a branch from.
     if (wire !== null && this.selection.hasWire(wire.wireIdx)) return "bend";
-    // A tunnel tag is a wire's handle (§91): the wire's own cursor.
-    if (wire !== null || this.scene.pickWireLabel(world) !== null) return "wire";
+    if (wire !== null) return "wire";
     return "none";
   }
 
