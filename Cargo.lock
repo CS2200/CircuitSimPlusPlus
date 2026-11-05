@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "csim"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "clap",
  "csim-core",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "csim-app"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "csim-core",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "csim-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
