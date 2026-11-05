@@ -9,3 +9,5 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# Document `signature` digest (format v8). Pure Rust (RustCrypto), no C deps.
+sha2 = "0.10"

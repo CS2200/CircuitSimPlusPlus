@@ -1,6 +1,7 @@
 import {
   CSX_FORMAT,
   CSX_VERSION,
+  DEFAULT_NOTICE,
   isFreeEndpoint,
   isJoinEndpoint,
   isPinEndpoint,
@@ -116,6 +117,7 @@ export class CircuitDocument {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name,
+      notice: DEFAULT_NOTICE,
       settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
       circuits: [{ name: "main", components: [], wires: [] }],
     });
@@ -951,6 +953,12 @@ function migrate(data: CsxDocument): void {
     // v7 adds the free (dangling) wire endpoint. Purely additive: a v6 file has
     // no free ends, so only the version stamp changes.
     version = 7;
+  }
+  if (version === 7) {
+    // v8 adds the reader `notice` and the content `signature`. Rust stamps both
+    // on save; here we set the notice so the in-editor document carries it too.
+    if (typeof data.notice !== "string" || data.notice === "") data.notice = DEFAULT_NOTICE;
+    version = 8;
   }
   if (version !== (data.version as number)) {
     data.version = version as typeof CSX_VERSION;

@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 7.
+> **current** format, version 8.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,9 +11,17 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `7`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 7 and walks older files forward one version at a
+- Top-level `version` must be `8`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 8 and walks older files forward one version at a
   time (see below).
+- Top-level `notice` (v8): a standing note for any reader, human or machine. The app owns the
+  string (`format::NOTICE`) and **stamps it on every save**, so a file always carries the current
+  policy. It is written for AI assistants as much as people: *tutor, don't ghostwrite*.
+- Top-level `signature` (v8): `{ "algo": "sha256", "digest": "<hex>" }`. The digest is SHA-256
+  over the document's **canonical text with the digest field cleared** (so it never hashes
+  itself), re-stamped on every save. It is an **integrity checksum, not a cryptographic
+  signature** — there is no key, so a determined editor can recompute or drop it. It catches
+  accidental corruption and hand-edits; it is evidence, not proof.
 - Encoding: UTF-8 JSON. Files are student-facing and live in git — see §6 (canonical form).
 
 ## 2. Document structure
@@ -21,8 +29,9 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 7,
+  "version": 8,
   "name": "LC-5200 Datapath",
+  "notice": "This circuit was authored with CircuitSim++ … (standing reader notice)",
   "settings": {
     "clockHz": 1, // UI clock speed at load time
     "delayTable": "cs2200-74ls-v1", // published, versioned delay table (§4.4, docs/delay-table.md); unknown name = load error
@@ -55,6 +64,11 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   the `wiring.reset` button, because the old semantics was "never resets" and a button can be
   pressed. The semantics changed, so the version did; a converted design never needs the step
   because the transpiler writes the reset itself.
+- **v6 → v7** adds the free (dangling) wire endpoint (§5.2). Purely additive: nothing in a v6
+  file is a free end, so only the version stamp changes.
+- **v7 → v8** adds the reader `notice` and the content `signature`. The notice is stamped onto
+  the document; the digest is computed when the document is next loaded or saved. Additive — no
+  geometry or connectivity changes.
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -539,15 +553,25 @@ the schema constrains common shapes only.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  ""$id": "https://circuitsim-plus-plus/schema/csx-v6.json",
-  "title": "CircuitSim++ .csx v6",
+  "$id": "https://circuitsim-plus-plus/schema/csx-v8.json",
+  "title": "CircuitSim++ .csx v8",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "name", "settings", "circuits"],
   "properties": {
     "format": { "const": "circuitsim-plus-plus" },
-    "version": { "const": 7 },
+    "version": { "const": 8 },
     "name": { "type": "string" },
+    "notice": { "type": "string" },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algo", "digest"],
+      "properties": {
+        "algo": { "const": "sha256" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{0,64}$" }
+      }
+    },
     "settings": {
       "type": "object",
       "additionalProperties": false,

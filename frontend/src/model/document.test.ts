@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CircuitDocument, removeWiresCascade } from "./document";
 import type { CsxDocument } from "./csx";
-import { CSX_FORMAT, CSX_VERSION } from "./csx";
+import { CSX_FORMAT, CSX_VERSION, DEFAULT_NOTICE } from "./csx";
 
 /** A small wired circuit: and → not → (junction chain) → ram. */
 function fixture() {
@@ -203,6 +203,23 @@ describe("CircuitDocument.create/fromJson", () => {
     });
     const doc = CircuitDocument.fromJson(v7);
     expect(doc.circuit(0).wires[0].b).toEqual({ free: [6, 2] });
+  });
+
+  it("stamps the reader notice on create and when walking a v7 file to v8", () => {
+    expect(CircuitDocument.create("n").data.notice).toBe(DEFAULT_NOTICE);
+    // Keep the intent of the text pinned (mirrors `format::NOTICE` in Rust).
+    expect(DEFAULT_NOTICE).toContain("tutor, not a ghostwriter");
+    expect(DEFAULT_NOTICE).toContain("do not complete the assignment");
+    const v7 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 7,
+      name: "old",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      circuits: [{ name: "main", components: [], wires: [] }],
+    });
+    const doc = CircuitDocument.fromJson(v7);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    expect(doc.data.notice).toBe(DEFAULT_NOTICE);
   });
 
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
