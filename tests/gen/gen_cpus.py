@@ -42,7 +42,7 @@ def out_dir():
     raise SystemExit("usage: gen_cpus.py [--out DIR]")
 
 
-SETTINGS = {"clockHz": 1, "delayTable": "cs2200-74ls-v1"}
+SETTINGS = {"clockHz": 1, "delayTable": "mips-r2000-2um-v1"}
 
 PROGRAM = [
     # 0-2: sum = 0; n = 5; i = 1
@@ -132,7 +132,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 8,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 9,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

@@ -32,50 +32,16 @@ use thiserror::Error;
 use crate::behavior::Timing;
 use crate::components::KNOWN_TYPES;
 
-/// The embedded reference table (DRAFT 74LS typicals, DESIGN.md §4.4).
-/// The built-in table. **Wire propagation is disabled** (`"wire": { "num": 0 }`) for the
-/// first production run, by Head-TA decision: a conversion has to reproduce CircuitSim
-/// CE, which has no delay at all, and per-path wire delays brought *clock skew* with them
-/// — an edge reaching registers at different times, which CE's atomic edge never does (a
-/// converted CPU lost its first instruction to exactly that). Only component delays
-/// count for now; the per-path machinery is still built and simply contributes 0, so
-/// turning `num` back on restores it.///
-/// **And that has a second consequence, which matters: it removes *clock skew*.** A clock
-/// edge is delivered per sink like any other transition, so with wire delays a register
-/// further from the clock source clocks later than one nearer — and a design built for CE,
-/// whose edge is atomic (one oscillator toggling every clocked part at once), can latch a
-/// value a cycle early. That is not hypothetical: it cost a converted CPU its first
-/// instruction, because the PC (clocked early) advanced and only then did the IF/ID latch
-/// (clocked late) sample the *new* fetch. Real silicon **does** have skew — accounting for
-/// it is a legitimate thing to want — so this is a simplification, not a correction, and it
-/// is the reason the two must move together: whenever wire propagation comes back, the
-/// "one global clock domain" rule (DESIGN.md §4.3) has to come back with it, or that bug
-/// returns with it.
-const BUILTIN_74LS_V1: &str = include_str!("../data/cs2200-74ls-v1.json");
-
-/// The recalibrated table (`cs2200-74ls-v2`). Same 74LS board-level regime as v1, with two
-/// corrections that decide whether pipelining pays:
+/// The embedded reference table (DESIGN.md §4.4).
+/// **Wire propagation is disabled** (`"wire": { "num": 0 }`) for the first production run,
+/// by Head-TA decision: a conversion has to reproduce CircuitSim CE, which has no delay at
+/// all, and per-path wire delays brought *clock skew* with them — an edge reaching registers
+/// at different times, which CE's atomic edge never does. Only component delays count for
+/// now; the per-path machinery is still built and simply contributes 0, so turning `num`
+/// back on restores it (and the "one global clock domain" rule must come back with it).
 ///
-/// - **Memory was ~40% too fast.** v1 charged SRAM/ROM 50 ns; the real parts are a
-///   62256-70 (`tAA` 70 ns) and a 27C256-120 (`tACC` 120 ns). This is the term that
-///   makes the memory-dominated MIPS regime reproducible — see `docs/delay-table.md`.
-/// - **The adder was charged as a ripple chain — kept.** v1's `prop 15 + perBit 4` is
-///   139 ns for 32 bits; a real 74LS181 slice is 22 ns typ and inter-slice carry is
-///   ~25 ns, so a 32-bit ripple add is **208 ns**. v1 therefore paired its worst-case
-///   ALU with its best-case memory (50 ns), maximizing the ALU's share of the critical
-///   path — the opposite of the R2000, whose clock was set by its external SRAM
-///   (`R2000/12` 12.5 MHz @ 35 ns). v2 charges both honestly: memory 70/120 ns, ripple
-///   adder 208 ns. The adder is the term a *single-cycle* machine serializes twice
-///   (PC+4 and the ALU op) and a pipeline only once per stage, which is what makes
-///   pipelining pay (see `docs/delay-table.md` for the measurement). A lookahead
-///   variant (`74LS182`, 53 ns @ 32) flips that — kept as a documented staff option.
-///
-/// Every entry carries a `source` naming the part and parameter it came from, so the
-/// numbers are auditable rather than asserted.
-const BUILTIN_74LS_V2: &str = include_str!("../data/cs2200-74ls-v2.json");
-
-/// The current table (`mips-r2000-2um-v1`): the MIPS R2000's own technology, 2.0 µm
-/// CMOS, replacing the 74LS board-level idea entirely.
+/// The current — and only — graded table (`mips-r2000-2um-v1`): the MIPS R2000's own
+/// technology, 2.0 µm CMOS. It replaced the 74LS board-level tables entirely (v9).
 ///
 /// The 74LS tables modelled a machine whose critical path was one atomic 74LS181 ripple
 /// adder (208 ns) against a 70 ns SRAM — an ALU-bound machine, where pipelining converts a
@@ -239,8 +205,6 @@ impl TimingTable {
     /// Resolve a published table by name (`settings.delayTable`).
     pub fn builtin(name: &str) -> Result<TimingTable, TableError> {
         match name {
-            "cs2200-74ls-v1" => TimingTable::from_json(BUILTIN_74LS_V1),
-            "cs2200-74ls-v2" => TimingTable::from_json(BUILTIN_74LS_V2),
             "mips-r2000-2um-v1" => TimingTable::from_json(BUILTIN_R2000_2UM),
             "ce-zero-delay-v1" => TimingTable::from_json(BUILTIN_CE_ZERO),
             _ => Err(TableError::Unknown {
@@ -250,14 +214,10 @@ impl TimingTable {
         }
     }
 
-    /// The table names this build ships.
+    /// The table names this build ships. The 74LS tables are retired (v9): old files
+    /// naming one are retargeted to the MIPS table by the format migration.
     pub fn builtin_names() -> &'static [&'static str] {
-        &[
-            "mips-r2000-2um-v1",
-            "ce-zero-delay-v1",
-            "cs2200-74ls-v2",
-            "cs2200-74ls-v1",
-        ]
+        &["mips-r2000-2um-v1", "ce-zero-delay-v1"]
     }
 
     /// The table new designs should be created with.
@@ -334,7 +294,7 @@ impl TimingTable {
         })
     }
 
-    /// The table's own name (`cs2200-74ls-v1`).
+    /// The table's own name (`mips-r2000-2um-v1`).
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -393,35 +353,36 @@ mod tests {
     use super::*;
 
     fn table() -> TimingTable {
-        TimingTable::builtin("cs2200-74ls-v1").expect("embedded table is valid")
+        TimingTable::builtin("mips-r2000-2um-v1").expect("embedded table is valid")
     }
 
+    /// v9: only the MIPS table (graded) and `ce-zero-delay-v1` (the `compat`
+    /// diagnostic) ship. The 74LS names are retired — a file naming one is
+    /// retargeted by the format migration, not by this layer.
     #[test]
-    fn builtin_loads_with_reference_values() {
+    fn only_the_mips_and_diagnostic_tables_ship() {
+        assert_eq!(TimingTable::default_name(), "mips-r2000-2um-v1");
+        assert_eq!(
+            TimingTable::builtin_names(),
+            ["mips-r2000-2um-v1", "ce-zero-delay-v1"]
+        );
+        assert!(TimingTable::builtin("cs2200-74ls-v1").is_err());
+        assert!(TimingTable::builtin("cs2200-74ls-v2").is_err());
+    }
+
+    /// Wire propagation ships **disabled** (`wire.num = 0`); the per-path
+    /// machinery is still data, so a table that turns it on gets it back.
+    #[test]
+    fn wire_num_scales_wire_delay() {
         let t = table();
-        assert_eq!(t.name(), "cs2200-74ls-v1");
-        assert_eq!(t.status(), "DRAFT");
-        // DRAFT 74LS anchors (DESIGN.md §4.4).
-        assert_eq!(t.timing("gate.not", 1).prop, 9);
-        assert_eq!(t.timing("gate.and", 8).prop, 10);
-        assert_eq!(t.timing("gate.xor", 1).prop, 12);
-        assert_eq!(t.timing("plexers.mux", 1).prop, 12);
-        let reg = t.timing("mem.register", 32);
-        assert_eq!((reg.prop, reg.setup, reg.hold), (20, 15, 5));
-        let ram = t.timing("mem.ram", 32);
-        assert_eq!((ram.access, ram.setup, ram.hold), (50, 15, 5));
-        assert_eq!(t.timing("mem.rom", 32).access, 50);
-        // Wire propagation ships **disabled** (`wire.num = 0`): only component delays
-        // count for now (Head-TA decision for the first production run — see
-        // `BUILTIN_74LS_V1`). The constant is still data: a table that sets it gets it
-        // back, which `delay.rs`'s wire tests do to keep the per-path machinery covered.
         assert_eq!(t.wire_delay(200), 0);
         assert_eq!(t.wire_delay(9), 0);
-        let mut wired: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V1).unwrap();
-        wired["wire"]["num"] = serde_json::json!(1);
+        let mut wired: serde_json::Value = serde_json::from_str(BUILTIN_R2000_2UM).unwrap();
+        let den = wired["wire"]["den"].as_u64().unwrap();
+        wired["wire"]["num"] = serde_json::json!(den); // exactly 1 ns per grid unit
         let t = TimingTable::from_json(&wired.to_string()).unwrap();
-        assert_eq!(t.wire_delay(200), 20);
-        assert_eq!(t.wire_delay(9), 0);
+        assert_eq!(t.wire_delay(200), 200);
+        assert_eq!(t.wire_delay(9), 9);
     }
 
     #[test]
@@ -445,11 +406,13 @@ mod tests {
     #[test]
     fn adder_scales_per_bit_ripple() {
         let t = table();
-        assert_eq!(t.timing("arith.adder", 1).prop, 15);
-        assert_eq!(t.timing("arith.adder", 2).prop, 19);
-        assert_eq!(t.timing("arith.adder", 32).prop, 15 + 31 * 4);
+        // MIPS: 8 ns base + 1 ns per bit beyond the first (a partial-CLA 32-bit add
+        // is 39 ns).
+        assert_eq!(t.timing("arith.adder", 1).prop, 8);
+        assert_eq!(t.timing("arith.adder", 2).prop, 9);
+        assert_eq!(t.timing("arith.adder", 32).prop, 8 + 31);
         // Non-scaling kinds ignore bitsize.
-        assert_eq!(t.timing("arith.multiplier", 32).prop, 15);
+        assert_eq!(t.timing("arith.multiplier", 32).prop, 60);
     }
 
     #[test]
@@ -457,24 +420,8 @@ mod tests {
         let e = TimingTable::builtin("cs2200-74ls-v9").unwrap_err();
         let msg = e.to_string();
         assert!(msg.contains("cs2200-74ls-v9"), "{msg}");
-        assert!(msg.contains("cs2200-74ls-v1"), "{msg}");
-        assert!(msg.contains("cs2200-74ls-v2"), "{msg}");
-    }
-
-    #[test]
-    fn v2_loads_and_is_the_default() {
-        let t = TimingTable::builtin("cs2200-74ls-v2").expect("embedded v2 is valid");
-        assert_eq!(t.name(), "cs2200-74ls-v2");
-        assert_eq!(TimingTable::default_name(), "mips-r2000-2um-v1");
-        assert_eq!(
-            TimingTable::builtin_names(),
-            [
-                "mips-r2000-2um-v1",
-                "ce-zero-delay-v1",
-                "cs2200-74ls-v2",
-                "cs2200-74ls-v1"
-            ]
-        );
+        assert!(msg.contains("mips-r2000-2um-v1"), "{msg}");
+        assert!(msg.contains("ce-zero-delay-v1"), "{msg}");
     }
 
     /// `ce-zero-delay-v1` is CircuitSim's own model (no delay at all) and is a
@@ -528,40 +475,18 @@ mod tests {
         }
     }
 
-    /// The corrections that make the memory-dominated regime reproducible: 32Kx8 SRAM is
-    /// a 62256-70, EPROM is a 27C256-120, and a 32-bit add is a **ripple** 74LS181 chain
-    /// (208 ns) — the term a single-cycle machine serializes twice.
+    /// Read access scales with the address decoder, not just the part: a 16-word
+    /// control table and a 32K-word program store are different memories.
     #[test]
-    fn v2_anchors_are_datasheet_backed() {
-        let t = TimingTable::builtin("cs2200-74ls-v2").unwrap();
-        assert_eq!(t.timing("mem.ram", 32).access, 70);
-        assert_eq!(t.timing("mem.ram", 32).setup, 30);
-        // Read access scales with the address decoder, not just the part: a 16-word
-        // control table and a 32K-word program store are different memories.
+    fn addr_bits_follow_the_word_count() {
         assert_eq!(TimingTable::addr_bits(16), 4);
         assert_eq!(TimingTable::addr_bits(32768), 15);
-        assert_eq!(t.mem_access("mem.rom", 16), 43);
-        assert_eq!(t.mem_access("mem.rom", 32), 50); // 74S288/82S123 max
-        assert_eq!(t.mem_access("mem.rom", 64), 57);
-        assert_eq!(t.mem_access("mem.rom", 32768), 120); // 27C256-120
-                                                         // RAM stays flat: it is one part in every design here, the 62256.
-        assert_eq!(t.mem_access("mem.ram", 65536), 70);
-        assert_eq!(t.timing("arith.adder", 32).prop, 208);
-        let reg = t.timing("mem.register", 32);
-        assert_eq!((reg.prop, reg.setup, reg.hold), (15, 20, 5));
-        // A 32-bit add costs more than a memory access: that asymmetry is what makes a
-        // pipeline (one add per stage) beat a one-cycle machine (two adds per cycle).
-        assert!(t.timing("arith.adder", 32).prop > t.timing("mem.ram", 32).access);
-        // Every row names where its numbers came from.
-        for kind in REQUIRED_KINDS {
-            let src = t.source(kind).unwrap_or("");
-            assert!(!src.is_empty(), "v2 row '{kind}' has no source");
-        }
-        assert!(t.source("mem.ram").unwrap().contains("62256"));
-        assert!(t.source("mem.register").unwrap().contains("74LS374"));
-        // Provenance is documentation: an unknown field is still rejected, but
-        // `source` is a known field (this table is rejected for *missing
-        // required kinds*, which is a semantic error, not a parse error).
+    }
+
+    /// `source` is documentation: a known field, accepted. (The table is rejected
+    /// for *missing required kinds* — a semantic error, not a parse error.)
+    #[test]
+    fn source_is_a_known_field() {
         let with_source = r#"{
             "name": "t", "units": "ns", "wire": { "num": 1, "den": 10 },
             "components": { "mem.rom": { "access": 5, "source": "27C256-120" } }
@@ -576,7 +501,7 @@ mod tests {
 
     #[test]
     fn per_addr_bit_is_only_meaningful_for_memories() {
-        let mut v: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V2).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(BUILTIN_R2000_2UM).unwrap();
         v["components"]["gate.not"]["perAddrBit"] = serde_json::json!(3);
         let TableError::Invalid { issues, .. } =
             TimingTable::from_json(&v.to_string()).unwrap_err()
@@ -621,7 +546,7 @@ mod tests {
             TimingTable::from_json(unknown_field),
             Err(TableError::Json(_))
         ));
-        let mut perbit_abuse: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V1).unwrap();
+        let mut perbit_abuse: serde_json::Value = serde_json::from_str(BUILTIN_R2000_2UM).unwrap();
         perbit_abuse["components"]["gate.not"]["perBit"] = serde_json::json!(1);
         let TableError::Invalid { issues, .. } =
             TimingTable::from_json(&perbit_abuse.to_string()).unwrap_err()
@@ -641,7 +566,7 @@ mod tests {
 
     #[test]
     fn zero_wire_numerator_disables_wire_delay() {
-        let mut v: serde_json::Value = serde_json::from_str(BUILTIN_74LS_V1).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(BUILTIN_R2000_2UM).unwrap();
         v["wire"]["num"] = serde_json::json!(0);
         let t = TimingTable::from_json(&v.to_string()).unwrap();
         assert_eq!(t.wire_delay(10_000), 0);

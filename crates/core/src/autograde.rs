@@ -686,7 +686,7 @@ pub struct Report {
     /// Top-k observed critical paths (§4.4), grouped per circuit with
     /// document-order component indices (contract v1.1).
     pub top_paths: Vec<api::TimingPath>,
-    /// DRAFT-table provenance (`cs2200-74ls-v1 (DRAFT)`).
+    /// DRAFT-table provenance (`mips-r2000-2um-v1 (DRAFT)`).
     pub delay_table: String,
     /// Determinism hash of the event trace (§4.6); delay mode only.
     pub trace_hash: Option<u64>,
@@ -1267,7 +1267,7 @@ mod tests {
     use super::*;
     use crate::format::load_document;
 
-    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}"#;
 
     /// The counter, plus a `debug.breakpoint` watching `r1` reach 1 — which it does on
     /// the very first cycle, so the part fires immediately unless it is ignored.
@@ -1467,17 +1467,17 @@ mod tests {
         let r = &out.report;
         assert_eq!(r.cycles, 3);
         assert_eq!(r.halt_reason, "completed");
-        assert_eq!(r.t_obs, 54);
-        assert_eq!(r.est_time, 3 * 54);
-        assert_eq!(r.speedup_vs_baseline, Some(234.0 / (3.0 * 54.0)));
+        assert_eq!(r.t_obs, 13);
+        assert_eq!(r.est_time, 3 * 13);
+        assert_eq!(r.speedup_vs_baseline, Some(234.0 / (3.0 * 13.0)));
         assert!(r.assertions.iter().all(|a| a.passed));
         assert_eq!(r.assertions.len(), 5);
         assert!(!r.top_paths.is_empty());
-        assert_eq!(r.top_paths[0].delay_ns, 39);
+        assert_eq!(r.top_paths[0].delay_ns, 8);
         assert_eq!(r.top_paths[0].circuit, "main");
 
         assert!(r.top_paths[0].comps.contains(&CompId(5)));
-        assert_eq!(r.delay_table, "cs2200-74ls-v1 (DRAFT)");
+        assert_eq!(r.delay_table, "mips-r2000-2um-v1 (DRAFT)");
         assert!(r.trace_hash.is_some());
         assert_eq!(r.rubric_full_credit, Some(true));
         assert!(r.errors.is_empty());

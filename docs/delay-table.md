@@ -10,6 +10,8 @@ numbers behind every reported `t_obs` are named exactly. A `.csx` file
 selects a table by name via `settings.delayTable` (see
 `docs/format-v2.md`); an **unknown name is a load-time error** that lists
 the available tables — the engine never guesses or silently defaults.
+(One exception: the **v9 migration retargets the retired `cs2200-74ls-*`
+names** to `mips-r2000-2um-v1`, so an old file still opens. See §Status.)
 
 > ## ⚠ LANDMINE: a table change can move a VERDICT
 >
@@ -59,18 +61,19 @@ the available tables — the engine never guesses or silently defaults.
 
 ## Status
 
-**`mips-r2000-2um-v1` is the current table** (2026-10-25): the MIPS R2000's own
-technology, 2.0 µm CMOS, replacing the 74LS board-level idea (see below — the
-74LS model was ALU-bound and silently made a one-cycle datapath competitive).
-`cs2200-74ls-v1`/`-v2` remain published and unchanged, so designs and reports
-written against them keep grading identically. **The transpiler declares this
-table** (`csxtrans/csx.py`'s `DEFAULT_DELAY_TABLE`) for every converted
-document; it pinned the retired `cs2200-74ls-v1` until 2026-10-26, which
-overrode the engine's own default in every `.csx` and made one compat verdict
-depend on the table (see `circuitsim-transpiler:docs/04-verification.md`). Both are **DRAFT** — 74LS-family TTL datasheet *typical*
-propagation delays, period-authentic for the course (DESIGN.md §4.4), pending
-staff finalization (D13). Only ratios matter for scoring, but the units are ns
-so TAs can say "your clock would run at X MHz".
+**`mips-r2000-2um-v1` is the only graded table** (2026-10-25): the MIPS R2000's
+own technology, 2.0 µm CMOS. It is the engine's default (`TimingTable::default_name()`)
+and **the 74LS tables are retired** as of format **v9** — the data files are gone,
+and a `.csx` that names one is retargeted to MIPS by the v8 → v9 migration (so an
+old design still opens, now charged under the one graded table). A design is
+therefore never failed for naming a retired table; it is simply regraded.
+**The transpiler declares this table** (`csxtrans/csx.py`'s `DEFAULT_DELAY_TABLE`)
+for every converted document. It is **DRAFT** (staff finalization pending, D13);
+only ratios matter for scoring, but the units are ns so TAs can say "your clock
+would run at X MHz".
+
+The one other shipped table is **`ce-zero-delay-v1`** — a diagnostic for
+`--compat`, all-zero by construction, never the default.
 
 v2 exists because v1 paired its **worst-case ALU with its best-case memory**:
 a ripple adder (139 ns for 32 bits) against 50 ns SRAM/ROM. That inverts the
@@ -88,16 +91,16 @@ working unchanged.
 
 ```json
 {
-  "name": "cs2200-74ls-v1",
+  "name": "mips-r2000-2um-v1",
   "status": "DRAFT",
   "units": "ns",
-  "wire": { "num": 1, "den": 10 },
+  "wire": { "num": 0, "den": 10 },
   "components": {
-    "gate.not":     { "prop": 9 },
-    "arith.adder":  { "prop": 15, "perBit": 4 },
-    "mem.register": { "prop": 20, "setup": 15, "hold": 5 },
-    "mem.ram":      { "access": 50, "setup": 15, "hold": 5 },
-    "mem.rom":      { "access": 50 }
+    "gate.not":     { "prop": 2 },
+    "arith.adder":  { "prop": 8, "perBit": 1 },
+    "mem.register": { "prop": 4, "setup": 2, "hold": 1 },
+    "mem.ram":      { "access": 5, "perAddrBit": 2, "setup": 5, "hold": 2 },
+    "mem.rom":      { "access": 2, "perAddrBit": 1 }
   }
 }
 ```
@@ -230,7 +233,10 @@ A table is rejected (all issues reported at once) when:
    `arith.bit-extender`, and `mem.register`/`mem.ram`/`mem.rom`;
 4. `perBit` appears on a type other than `arith.adder`/`arith.subtractor`.
 
-## Reference values (`cs2200-74ls-v1`, DRAFT)
+## Retired: 74LS reference values (`cs2200-74ls-v1`, DRAFT)
+
+> **Retired in v9.** Kept as history only; the table is no longer shipped, and
+> the reference values below are not what any run uses.
 
 | Type                       | prop | perBit | setup | hold | access |
 |----------------------------|-----:|-------:|------:|-----:|-------:|
@@ -322,7 +328,9 @@ program store (37 ns, ≈ the R2000/12's 35 ns SRAM) are correctly different par
   but the *sample solution does not demonstrate it*; the best students do. That is a
   fact about the reference designs, not about the model.
 
-## v2: the recalibration (2026-10-25)
+## Retired: `cs2200-74ls-v2`, the recalibration (2026-10-25)
+
+> **Retired in v9** alongside v1. Kept as history; not shipped.
 
 
 `crates/core/data/cs2200-74ls-v2.json`. Same regime, real parts, and every row

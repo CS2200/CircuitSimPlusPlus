@@ -17,7 +17,10 @@
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
 /** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
-export const CSX_VERSION = 8;
+export const CSX_VERSION = 9;
+
+/** The one graded delay table (v9); mirrors `TimingTable::default_name()` in Rust. */
+export const DEFAULT_DELAY_TABLE = "mips-r2000-2um-v1";
 
 /**
  * The standing reader notice on every saved document (v8). Rust owns this
@@ -39,7 +42,7 @@ export interface CsxSignature {
 
 export interface CsxSettings {
   clockHz: number;
-  /** Published delay table id, e.g. "cs2200-74ls-v1" (DESIGN.md §4.4). */
+  /** Published delay table id, e.g. "mips-r2000-2um-v1" (DESIGN.md §4.4). */
   delayTable: string;
 }
 

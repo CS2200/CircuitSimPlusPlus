@@ -1,10 +1,10 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 8,
+  "version": 9,
   "name": "alu",
   "settings": {
     "clockHz": 1,
-    "delayTable": "cs2200-74ls-v1"
+    "delayTable": "mips-r2000-2um-v1"
   },
   "circuits": [
     {

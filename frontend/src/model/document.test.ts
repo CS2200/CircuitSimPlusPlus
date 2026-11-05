@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CircuitDocument, removeWiresCascade } from "./document";
 import type { CsxDocument } from "./csx";
-import { CSX_FORMAT, CSX_VERSION, DEFAULT_NOTICE } from "./csx";
+import { CSX_FORMAT, CSX_VERSION, DEFAULT_DELAY_TABLE, DEFAULT_NOTICE } from "./csx";
 
 /** A small wired circuit: and → not → (junction chain) → ram. */
 function fixture() {
@@ -42,7 +42,7 @@ describe("CircuitDocument.create/fromJson", () => {
     const doc = CircuitDocument.create("demo");
     expect(doc.data.format).toBe(CSX_FORMAT);
     expect(doc.data.version).toBe(CSX_VERSION);
-    expect(doc.data.settings).toEqual({ clockHz: 1, delayTable: "cs2200-74ls-v1" });
+    expect(doc.data.settings).toEqual({ clockHz: 1, delayTable: "mips-r2000-2um-v1" });
     expect(doc.circuits).toHaveLength(1);
     expect(doc.circuit(0)).toEqual({ name: "main", components: [], wires: [] });
     expect(doc.dirty).toBe(false);
@@ -65,7 +65,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: 2,
       name: "old",
-      settings: { delayModel: "zero", clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { delayModel: "zero", clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",
@@ -89,7 +89,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: 3,
       name: "old",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",
@@ -129,7 +129,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: 5,
       name: "old",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",
@@ -162,7 +162,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: 6,
       name: "old",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",
@@ -183,7 +183,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name: "d",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",
@@ -214,12 +214,25 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: 7,
       name: "old",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [{ name: "main", components: [], wires: [] }],
     });
     const doc = CircuitDocument.fromJson(v7);
     expect(doc.data.version).toBe(CSX_VERSION);
     expect(doc.data.notice).toBe(DEFAULT_NOTICE);
+  });
+
+  it("retargets a retired 74LS delay table to MIPS (v8 → v9)", () => {
+    const v8 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 8,
+      name: "old",
+      settings: { clockHz: 1, delayTable: "cs2200-74ls-v2" },
+      circuits: [{ name: "main", components: [], wires: [] }],
+    });
+    const doc = CircuitDocument.fromJson(v8);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    expect(doc.data.settings.delayTable).toBe(DEFAULT_DELAY_TABLE);
   });
 
   it("migrates the pre-release 'port' pin terminal name to 'pin'", () => {
@@ -229,7 +242,7 @@ describe("CircuitDocument.create/fromJson", () => {
       format: CSX_FORMAT,
       version: CSX_VERSION,
       name: "legacy",
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
       circuits: [
         {
           name: "main",

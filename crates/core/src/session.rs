@@ -960,7 +960,7 @@ mod tests {
         format!(
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings": {{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+            "settings": {{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"clk","type":"wiring.clock","pos":[0,0]}},
                 {{"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{{"value":"1"}}}},
@@ -1002,7 +1002,7 @@ mod tests {
     fn breakpoint_halt_is_surfaced_and_the_run_continues() {
         let doc = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings": {"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"clk","type":"wiring.clock","pos":[0,0]},
                 {"id":"one","type":"wiring.constant","pos":[0,0],"attrs":{"value":"1"}},
@@ -1231,7 +1231,7 @@ mod tests {
         // Floating input on a gate → halt with the contract prefix.
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings": {"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"c","type":"wiring.constant","pos":[0,0]},
                 {"id":"g","type":"gate.and","pos":[0,0]}

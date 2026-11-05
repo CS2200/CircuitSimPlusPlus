@@ -27,7 +27,7 @@ function doc(parts: Part[] = [], wires: Wire[] = [], sheets?: Record<string, unk
     format: CSX_FORMAT,
     version: CSX_VERSION,
     name: "untitled",
-    settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+    settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
     circuits: sheets ?? [circuitOf(parts, wires)],
   } as never);
 }

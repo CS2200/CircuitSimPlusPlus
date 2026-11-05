@@ -35,7 +35,7 @@ _Implemented:_ **P1 — free wire endpoints** (`{free: [x,y]}`, format v7): a wi
 - **File format v4** (`docs/format-v2.md` §1/§4): `mem.register` and `mem.ram` lost their `rst` pin (register `d, clk, en, q`; RAM `addr, din, dout, we, clk`). The pin existed because the old simulator had no memory autoload: a reset wire was how a circuit restarted. `sim_reset` (which re-applies autoload) replaced it, so the pin was dead weight — and a reset trace across a schematic hid what the clock was doing. A v3 → v4 migration drops wiring to the retired pins, so a file saved before this change still opens. (**They are back in v6** — the reset is level-sensitive and asynchronous now; see §7.1 and the v5→v6 migration.)
 - **One path to the theme, one bus colour:** the header's light/dark toggle was removed (Settings → Appearance is the only entry) and per-net rainbow hues narrowed to a single themeable bus colour — a wire's own `color` still wins (D8).
 - **UI robustness pass:** `misc.text` annotations gained an inert behavior (placing one used to make the whole document unloadable), readouts pad to their pin's declared width, a memory's `addr` pin is as wide as its address space, wired-up parts blink unconnected inputs, and the tester's transport/wiring fixes landed (typed cycle input, wiring hint in the status bar, 12-/24-hour timestamps, bottom zoom slider). Log: `docs/bugs.md`.
-- **File format v7/v8:** v7 added a **free (dangling) wire endpoint** (`{free:[x,y]}`; the engine treats it as open, the editor draws an X). v8 added two app-stamped top-level fields: a **`notice`** — a standing *tutor-not-ghostwriter* note for any reader, including AI assistants — and a **`signature`**, a SHA-256 content digest re-stamped on every save. The digest is **not** the dropped `revisionSignatures` (D9): it has no key, is trivially recomputable, and is offered as an integrity/evidence check, not a security control. Both fields are additive; v2 → … → v8 migrates automatically.
+- **File format v7/v8/v9:** v7 added a **free (dangling) wire endpoint** (`{free:[x,y]}`; the engine treats it as open, the editor draws an X). v8 added two app-stamped top-level fields: a **`notice`** — a standing *tutor-not-ghostwriter* note for any reader, including AI assistants — and a **`signature`**, a SHA-256 content digest re-stamped on every save. The digest is **not** the dropped `revisionSignatures` (D9): it has no key, is trivially recomputable, and is offered as an integrity/evidence check, not a security control. v9 **retired the 74LS delay tables** — MIPS is the one graded table, and a file naming a retired table is retargeted by the migration. All three are additive; v2 → … → v9 migrates automatically.
 
 **Audience:** CS 2200 TA team, implementers (human or agent).
 **Scope:** Clean-slate rewrite of CircuitSim (Java/JavaFX, `com.ra4king.circuitsim`, format `1.11.2-CE`) as a Rust simulation core with a Tauri + React desktop frontend, a headless autograder CLI, and a new graph-based file format.
@@ -212,7 +212,7 @@ Event-driven: components and wires have delays from the published delay table (�
 - **Performance reality check:** course programs are small — baseline cycle counts: POW 8,129 / FIB 32,312 / TwoSum 12,314. Even at ~10⁴ events/cycle that's ~10⁸–10⁹ events total: seconds in Rust on the target container. (The team's memoize/parallelize idea stays in the back pocket if future workloads grow; not needed at course scale.)
 - **A 2-stage pipeline now loses honestly:** its single long register-to-register path is exercised on essentially every cycle, so `t_obs` reflects it immediately.
 
-**Delay table (D13):** published, versioned (`settings.delayTable`, e.g. `"mips-r2000-2um-v1"`). Derive from **74LS-family TTL datasheet typical propagation delays** — period-authentic for the course's late-70s/80s/early-90s material. Two versions ship: `cs2200-74ls-v1` (the original draft anchors: NOT ≈ 9 ns; AND/NAND ≈ 10; XOR/XNOR ≈ 12; 2:1 MUX ≈ 12; adder per-bit *ripple*; register clk→Q ≈ 20/setup 15/hold 5; RAM/ROM access ≈ 50) and **`cs2200-74ls-v2`** (the 2026-10-25 recalibration against real parts: 62256‑70 SRAM 70 ns, 27C256‑120 EPROM 120 ns, 74LS181 *ripple* adder 208 ns @ 32 bits, 74LS374 register 15/20/5, 74LS157 mux 9). v1 paired a worst-case ALU with a best-case memory, which inverted the memory-dominated regime the course is about; v2 charges real parts and each row carries a `source` naming it. Wire delay stays **0** (Head-TA decision, see `docs/delay-table.md`). Calibrate against published machines, not invented scales: R2000/12 = 12.5 MHz @ 35 ns external SRAM; the Harvey Mudd MOSIS student MIPS = 7.25 MHz. Only ratios matter for scoring, but ns units let TAs say "your clock would run at X MHz".
+**Delay table (D13):** published, versioned (`settings.delayTable`). **One graded table ships** — `mips-r2000-2um-v1` (the MIPS R2000's own 2.0 µm CMOS; memory-dominated, so pipelining pays), plus `ce-zero-delay-v1` as a `--compat` diagnostic. The earlier 74LS tables (`cs2200-74ls-v1`/`-v2`) are **retired as of format v9**: their JSON is gone and a file naming one is retargeted to MIPS by the v8 → v9 migration. A table is **data, not code** (`crates/core/data/*.json`, embedded in the binary), so a future recalibration is a new table version, not a change to the engine. Wire delay stays **0** (Head-TA decision, see `docs/delay-table.md`). Calibrate against published machines, not invented scales: R2000/12 = 12.5 MHz @ 35 ns external SRAM; the Harvey Mudd MOSIS student MIPS = 7.25 MHz. Only ratios matter for scoring, but ns units let TAs say "your clock would run at X MHz".
 
 ### 4.5 Feedback, loops, and oscillation
 
@@ -251,7 +251,7 @@ Single global clock domain. A `clock` component places a clock source; multiple 
   "name": "LC-5200 Datapath",
   "settings": {
     "clockHz": 1,
-    "delayTable": "cs2200-74ls-v1", // published cost table (§4.4)
+    "delayTable": "mips-r2000-2um-v1", // the one graded cost table (§4.4)
   },
   "circuits": [
     {
@@ -545,7 +545,7 @@ MVP for limited student pilot = M0–M3. Performance-project readiness = + M5. M
 | D13 | Delay-table values          | 74LS typicals, **v2 recalibrated against named parts** with per-row `source`; further staff tuning is data (add v3), not code                                    | resolved                 |
 | D14 | Code signing                | **Unsigned + workaround docs — resolved (team)**                                                                                     | ✅ resolved               |
 
-**All decisions resolved.** D13's numbers are now anchored to named parts (`cs2200-74ls-v2`, `docs/delay-table.md`); any further tuning is a new table version, not a code change.
+**All decisions resolved.** D13's numbers are anchored to named parts in `mips-r2000-2um-v1` (the one graded table, `docs/delay-table.md`); any further tuning is a new table version, not a code change.
 
 ---
 

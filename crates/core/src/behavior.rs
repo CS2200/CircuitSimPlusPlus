@@ -2429,31 +2429,32 @@ mod tests {
 
     #[test]
     fn timing_params_and_override() {
-        let table = crate::timing_table::TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let table = crate::timing_table::TimingTable::builtin("mips-r2000-2um-v1").unwrap();
         let reg = mk("mem.register", json!({"bitsize": 32}));
         assert_eq!(
             reg.timing(&table),
             Timing {
-                prop: 20,
-                setup: 15,
-                hold: 5,
+                prop: 4,
+                setup: 2,
+                hold: 1,
                 access: 0
             }
         );
         let ram = mk("mem.ram", json!({}));
-        assert_eq!(ram.timing(&table).access, 50);
-        assert_eq!(ram.timing(&table).setup, 15);
+        // 256-word default → 8 address bits → 5 ns base + 2 ns/bit.
+        assert_eq!(ram.timing(&table).access, 21);
+        assert_eq!(ram.timing(&table).setup, 5);
         let gate = mk("gate.and", json!({}));
-        assert_eq!(gate.timing(&table).prop, 10);
+        assert_eq!(gate.timing(&table).prop, 2);
         let nand = mk("gate.nand", json!({}));
-        assert_eq!(nand.timing(&table).prop, 10);
+        assert_eq!(nand.timing(&table).prop, 2);
         let xor = mk("gate.xor", json!({}));
-        assert_eq!(xor.timing(&table).prop, 12);
-        // Adders scale per bit beyond the first (ripple, §4.4).
+        assert_eq!(xor.timing(&table).prop, 4);
+        // Adders scale per bit beyond the first (partial carry lookahead, §4.4).
         let add1 = mk("arith.adder", json!({}));
-        assert_eq!(add1.timing(&table).prop, 15);
+        assert_eq!(add1.timing(&table).prop, 8);
         let add32 = mk("arith.adder", json!({"bitsize": 32}));
-        assert_eq!(add32.timing(&table).prop, 15 + 31 * 4);
+        assert_eq!(add32.timing(&table).prop, 8 + 31);
         // Ideal parts have zero delay.
         let sp = mk("wiring.splitter", json!({"splits": {"a": [0]}}));
         assert_eq!(sp.timing(&table).prop, 0);

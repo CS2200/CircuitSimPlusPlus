@@ -1243,7 +1243,7 @@ mod tests {
     fn a_subcircuit_boundary_crosses_one_way() {
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [
               { "name": "main", "components": [
                 {"id":"r","type":"mem.register","pos":[0,0],"name":"R"},
@@ -1282,7 +1282,7 @@ mod tests {
         // directions independently is what flipped 27 designs to fail (Round 17).
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [
               { "name": "main", "components": [
                 {"id":"r","type":"mem.register","pos":[0,0],"name":"R"},
@@ -1321,7 +1321,7 @@ mod tests {
     fn labelled_wires_resolve_to_their_net() {
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"r1","type":"mem.register","pos":[0,0],"name":"Instr"},
                 {"id":"n1","type":"gate.not","pos":[0,0]},
@@ -1364,7 +1364,7 @@ mod tests {
         // distance, no drawn points) on the same net → 230.
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"m","type":"wiring.pin","pos":[10,0],"name":"b","attrs":{"isOutput":true}},
@@ -1381,7 +1381,7 @@ mod tests {
         // No drawn points and no resolvable geometry → 0.
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"p","type":"wiring.probe","pos":[0,0]}
@@ -1399,7 +1399,7 @@ mod tests {
         // quantized to 2 (transport delay is integer-ns approximate).
         let json = r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"src","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"p","type":"wiring.probe","pos":[10,0]}
@@ -1422,7 +1422,7 @@ mod tests {
     fn header(circuits: &str) -> String {
         format!(
             r#"{{"format":"circuitsim-plus-plus","version":3,"name":"t",
-                "settings":{{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+                "settings":{{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}},
                 "circuits":[{circuits}]}}"#
         )
     }

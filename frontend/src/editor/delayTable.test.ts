@@ -8,10 +8,10 @@ import { componentDelayText, wireDelayPerUnit, wireDelayText } from "./delayTabl
  */
 describe("delay table readout", () => {
   it("summarises a plain gate, a wide adder and a register", () => {
-    expect(componentDelayText("gate.and")).toBe("prop 10 ns");
-    expect(componentDelayText("arith.adder")).toBe("prop 15 ns + 4/bit");
-    expect(componentDelayText("mem.register")).toBe("prop 20 ns · setup 15 ns · hold 5 ns");
-    expect(componentDelayText("mem.ram")).toBe("access 50 ns · setup 15 ns · hold 5 ns");
+    expect(componentDelayText("gate.and")).toBe("prop 2 ns");
+    expect(componentDelayText("arith.adder")).toBe("prop 8 ns + 1/bit");
+    expect(componentDelayText("mem.register")).toBe("prop 4 ns · setup 2 ns · hold 1 ns");
+    expect(componentDelayText("mem.ram")).toBe("access 5 ns · setup 5 ns · hold 2 ns");
   });
 
   it("says nothing about parts with no published cost", () => {

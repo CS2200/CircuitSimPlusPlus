@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 8;
+pub const FORMAT_VERSION: u32 = 9;
 
 /// The standing notice every saved file carries (v8). It is written for any
 /// reader, human or machine: see `docs/format-v2.md` §1. The app owns this
@@ -130,7 +130,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 pub struct Settings {
     /// Interactive clock rate in Hz (`clockHz`).
     pub clock_hz: u64,
-    /// Delay table id (`delayTable`), e.g. `cs2200-74ls-v1` (task B7).
+    /// Delay table id (`delayTable`), e.g. `mips-r2000-2um-v1` (task B7).
     pub delay_table: String,
 }
 
@@ -448,6 +448,13 @@ fn migrate(v: &mut Json) {
         stamp_notice(v);
         version = 8;
     }
+    if version == 8 {
+        // v9 retires the 74LS delay tables: MIPS is the one graded table now, so a
+        // design naming a retired table is charged under the MIPS numbers rather
+        // than failing to load.
+        retarget_retired_delay_table(v);
+        version = 9;
+    }
     if version != start {
         v["version"] = Json::from(version);
     }
@@ -457,6 +464,23 @@ fn migrate(v: &mut Json) {
 fn stamp_notice(v: &mut Json) {
     if let Some(obj) = v.as_object_mut() {
         obj.insert("notice".to_string(), Json::from(NOTICE));
+    }
+}
+
+/// The v8 → v9 step: point any retired 74LS `delayTable` at the MIPS default.
+fn retarget_retired_delay_table(v: &mut Json) {
+    let Some(settings) = v.get_mut("settings").and_then(Json::as_object_mut) else {
+        return;
+    };
+    let retired = settings
+        .get("delayTable")
+        .and_then(Json::as_str)
+        .is_some_and(|t| t.starts_with("cs2200-74ls"));
+    if retired {
+        settings.insert(
+            "delayTable".to_string(),
+            Json::from(crate::timing_table::TimingTable::default_name()),
+        );
     }
 }
 
@@ -811,7 +835,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 3,
             "name": "round-trip",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [
                 {
                     "name": "and2",
@@ -893,7 +917,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 7,
             "name": "old",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{ "name": "main", "components": [
                 { "id": "c0", "type": "gate.not", "pos": [0, 0] }
             ], "wires": [] }]
@@ -979,7 +1003,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 2,
             "name": "old",
-            "settings": { "delayModel": "zero", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "delayModel": "zero", "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{ "name": "main", "components": [
                 { "id": "c0", "type": "gate.not", "pos": [0, 0], "attrs": { "delay": 3 } }
             ], "wires": [] }]
@@ -1004,7 +1028,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 3,
             "name": "old",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{ "name": "main", "components": [
                 { "id": "n0", "type": "gate.not", "pos": [0, 0] },
                 { "id": "n1", "type": "gate.not", "pos": [2, 0] },
@@ -1054,7 +1078,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 2,
             "name": "old",
-            "settings": { "delayModel": "zero", "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "delayModel": "zero", "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{ "name": "main", "components": [
                 { "id": "n0", "type": "gate.not", "pos": [0, 0], "attrs": { "delay": 3 } },
                 { "id": "r1", "type": "mem.register", "pos": [4, 0] }
@@ -1081,7 +1105,7 @@ mod tests {
     fn v1_document_is_rejected() {
         let v1 = r#"{
             "format": "circuitsim-plus-plus", "version": 1, "name": "x",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": []
         }"#;
         assert!(load_document(v1.as_bytes()).is_err());
@@ -1200,7 +1224,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 3,
             "name": "frac",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{
                 "name": "main",
                 "components": [
@@ -1234,7 +1258,7 @@ mod tests {
             "format": "circuitsim-plus-plus",
             "version": 3,
             "name": "bad",
-            "settings": { "clockHz": 1, "delayTable": "cs2200-74ls-v1" },
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
             "circuits": [{
                 "name": "main",
                 "components": [

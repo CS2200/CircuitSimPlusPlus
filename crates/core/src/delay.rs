@@ -3772,7 +3772,7 @@ mod tests {
         let doc = crate::format::load_document(text.as_bytes()).expect("probe doc parses");
         let nl = crate::netlist::build(&doc).expect("probe netlist");
         let table_name =
-            std::env::var("PROBE_TABLE").unwrap_or_else(|_| "cs2200-74ls-v1".to_string());
+            std::env::var("PROBE_TABLE").unwrap_or_else(|_| "mips-r2000-2um-v1".to_string());
         let table = TimingTable::builtin(&table_name).expect("probe table");
         // `PROBE_COMPAT` builds the engine with CE's floating-read reading applied from
         // construction (the boot settle included), so a trace can be diffed against CE in
@@ -3902,7 +3902,7 @@ mod tests {
     pub(super) fn engine(json: &str, clock_start: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let table = TimingTable::builtin("mips-r2000-2um-v1").unwrap();
         DelayEngine::new_traced(nl, clock_start, &table).expect("test engine builds")
     }
 
@@ -3910,7 +3910,7 @@ mod tests {
     pub(super) fn compat_engine(json: &str, clock_start: u64) -> DelayEngine {
         let doc = load_document(json.as_bytes()).expect("test doc parses");
         let nl = netlist::build(&doc).expect("test doc netlists");
-        let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let table = TimingTable::builtin("mips-r2000-2um-v1").unwrap();
         DelayEngine::build(nl, clock_start, &table, true, false).expect("test engine builds")
     }
 
@@ -3921,7 +3921,7 @@ mod tests {
     /// pulses — build their own copy with the wires back on. Nothing else should use this.
     pub(super) fn wired_table() -> TimingTable {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../data/mips-r2000-2um-v1.json")).unwrap();
         v["wire"]["num"] = serde_json::json!(1);
         TimingTable::from_json(&v.to_string()).unwrap()
     }
@@ -3937,7 +3937,8 @@ mod tests {
         Value::from_u64(width, v)
     }
 
-    pub(super) const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    pub(super) const SETTINGS: &str =
+        r#""settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}"#;
 
     /// Two-stage pipeline: r1.q → not → and → r2.d; r1 toggles
     /// (r1.d ← not(r1.q)). Table delays: clk→Q 20, not 9, and 10 →
@@ -3977,7 +3978,7 @@ mod tests {
         let mut eng = engine(&pipeline_json(), 500);
         let rep = eng.run(3).unwrap();
         assert_eq!(rep.cycles, 3);
-        assert_eq!(rep.t_obs, 54, "clk→Q 20 + not 9 + and 10 + setup 15");
+        assert_eq!(rep.t_obs, 10, "clk→Q 4 + not 2 + and 2 + setup 2");
         // r1 toggled every cycle; r2 follows one cycle behind (d=1,0,1 at
         // the three edges → q=1).
         assert_eq!(eng.named_value("r1"), Some(k(1, 1))); // 3 toggles: 0→1→0→1
@@ -3985,7 +3986,7 @@ mod tests {
         // The observed critical path names the chain r2.d ← and ← n2 ← r1
         // (ending at the launching register).
         let (settle, path) = &rep.top_paths[0];
-        assert_eq!(*settle, 39);
+        assert_eq!(*settle, 8);
         let names: Vec<&str> = path
             .iter()
             .map(|c| eng.netlist().comps[c.idx()].def_id.as_str())
@@ -4054,14 +4055,14 @@ mod tests {
         // tests (the shipped table disables wire delay).
         let mut eng = wired_engine(&json, 5000);
         assert!(eng.poke_at("src", k(1, 1), 100));
-        assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns pulse < t_pd 9
+        assert!(eng.poke_at("src", k(1, 0), 101)); // 1 ns pulse < t_pd 2
         eng.run_until_time(200).unwrap();
         assert_eq!(eng.named_value("out"), Some(k(1, 1))); // never fell
                                                            // A held input propagates after t_pd.
         assert!(eng.poke_at("src", k(1, 1), 300));
-        eng.run_until_time(309).unwrap();
+        eng.run_until_time(302).unwrap();
         assert_eq!(eng.named_value("out"), Some(k(1, 1)));
-        eng.run_until_time(310).unwrap();
+        eng.run_until_time(303).unwrap();
         assert_eq!(eng.named_value("out"), Some(k(1, 0)));
     }
 
@@ -4115,7 +4116,7 @@ mod tests {
         let doc = load_document(json.as_bytes()).unwrap();
         let nl = netlist::build(&doc).unwrap();
         let mut custom: serde_json::Value =
-            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../data/mips-r2000-2um-v1.json")).unwrap();
         // `num` too: the shipped table ships it 0 (wire delay disabled), and this test's
         // whole subject is that the constant is data.
         custom["wire"]["num"] = serde_json::json!(1);
@@ -4378,11 +4379,12 @@ mod tests {
         );
         let mut eng = engine(&json, 5000);
         assert!(eng.poke_at("addr", k(2, 1), 100));
-        // Boot: the addr pin drives 0 at T=0 → word 0 read commits at T=50.
-        eng.run_until_time(149).unwrap();
+        // Boot: the addr pin drives 0 at T=0 → word 0 read commits at T=4
+        // (ROM base 2 ns + 1 ns/address bit × 2 address bits).
+        eng.run_until_time(103).unwrap();
         assert_eq!(eng.named_value("out"), Some(k(8, 0xaa)));
-        eng.run_until_time(151).unwrap();
-        assert_eq!(eng.named_value("out"), Some(k(8, 0x55))); // t_access 50
+        eng.run_until_time(105).unwrap();
+        assert_eq!(eng.named_value("out"), Some(k(8, 0x55))); // t_access 4
     }
 
     #[test]
@@ -4731,7 +4733,7 @@ mod tests {
     /// else touched. B3's whole point is that the two runs differ by exactly that.
     fn table_with_extra_setup(extra: u64) -> TimingTable {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../data/mips-r2000-2um-v1.json")).unwrap();
         let base = v["components"]["mem.register"]["setup"]
             .as_u64()
             .expect("the register has a setup time");
@@ -4849,7 +4851,7 @@ mod tests {
         // period: with a large floor the nominal schedule masks the setup term entirely.
         // (B1's existing test does the same thing for the same reason.)
         let json = pipeline_json();
-        let base = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+        let base = TimingTable::builtin("mips-r2000-2um-v1").unwrap();
         let slow = table_with_extra_setup(EXTRA);
         let now = |e: &DelayEngine| -> u64 {
             let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
@@ -5036,13 +5038,13 @@ mod tests {
         // Wires on: the transported half of the divergence needs the physics.
         let mut eng = wired_engine(&json, 5000);
         assert!(eng.poke_at("src", k(1, 1), 100));
-        assert!(eng.poke_at("src", k(1, 0), 105)); // 5 ns < the gate's 9 ns t_pd
-                                                   // The wire: passed, arriving 20 ns later and lasting the same 5 ns.
+        assert!(eng.poke_at("src", k(1, 0), 101)); // 1 ns < the gate's 2 ns t_pd
+                                                   // The wire: passed, arriving 20 ns later and lasting the same 1 ns.
         assert_eq!(eng.named_value("wire"), Some(k(1, 0)));
         eng.run_until_time(121).unwrap();
         assert_eq!(eng.named_value("wire"), Some(k(1, 1)), "leading edge @120");
-        eng.run_until_time(126).unwrap();
-        assert_eq!(eng.named_value("wire"), Some(k(1, 0)), "trailing edge @125");
+        eng.run_until_time(122).unwrap();
+        assert_eq!(eng.named_value("wire"), Some(k(1, 0)), "trailing edge @121");
         // The gate: swallowed. `gated` was 1 and never moved.
         eng.run_until_time(140).unwrap();
         assert_eq!(
@@ -5052,9 +5054,9 @@ mod tests {
         );
         // And holding the input long enough does reach the gate.
         assert!(eng.poke_at("src", k(1, 1), 300));
-        eng.run_until_time(309).unwrap();
+        eng.run_until_time(302).unwrap();
         assert_eq!(eng.named_value("gated"), Some(k(1, 1)));
-        eng.run_until_time(310).unwrap();
+        eng.run_until_time(303).unwrap();
         assert_eq!(eng.named_value("gated"), Some(k(1, 0)));
     }
 
@@ -5062,7 +5064,7 @@ mod tests {
     /// glitch-dependent design is **table-dependent** — the mechanism behind H1.
     fn table_with_not_prop(prop: u64) -> TimingTable {
         let mut v: serde_json::Value =
-            serde_json::from_str(include_str!("../data/cs2200-74ls-v1.json")).unwrap();
+            serde_json::from_str(include_str!("../data/mips-r2000-2um-v1.json")).unwrap();
         v["components"]["gate.not"]["prop"] = serde_json::json!(prop);
         TimingTable::from_json(&v.to_string()).unwrap()
     }
@@ -5119,19 +5121,18 @@ mod tests {
     /// **`t_obs` is the derived period** (`docs/derived-clock.md` §3): the maximum rise-to-rise
     /// interval, i.e. `depth + setup`.
     ///
-    /// Measured on the pipeline: 54 = 39 (`clk→Q 20 + not 9 + and 10`) + 15 (`t_setup`), the
+    /// Measured on the pipeline: 10 = 8 (`clk→Q 4 + not 2 + and 2`) + 2 (`t_setup`), the
     /// same in every cycle. This replaces a test that pinned the *old* semantics — `t_obs` as
-    /// the settle (39), with the period a separate number the field did not report, and the
-    /// 15 ns setup gap measured by nobody. Both numbers still exist: the settle is what a
-    /// critical path's `delay_ns` carries.
+    /// the settle (8), with the period a separate number the field did not report. Both
+    /// numbers still exist: the settle is what a critical path's `delay_ns` carries.
     #[test]
     fn t_obs_is_the_derived_period() {
         let mut eng = engine(&pipeline_json(), 500);
         let rep = eng.run(4).expect("cycles");
-        assert_eq!(rep.t_obs, 54, "depth 39 + setup 15");
+        assert_eq!(rep.t_obs, 10, "depth 8 + setup 2");
         assert_eq!(
             rep.top_paths.iter().map(|(settle, _)| *settle).max(),
-            Some(39),
+            Some(8),
             "the critical path keeps the settle: a path's delay is propagation, not a cycle"
         );
     }
@@ -5139,17 +5140,17 @@ mod tests {
     /// **The period is derived, whatever the nominal is.**
     ///
     /// The nominal is the timeline's *origin* now — it decides when the clock starts and
-    /// nothing else. Measured on the pipeline, the period is 54 whether the origin is at 500,
-    /// 50, 5 or 1, and `t_obs` (which *is* that period) is 54 in all of them.
+    /// nothing else. Measured on the pipeline, the period is 10 whether the origin is at 500,
+    /// 50, 5 or 1, and `t_obs` (which *is* that period) is 10 in all of them.
     ///
     /// This test used to pin the **opposite**, and that is why it is written down: before every
     /// edge was placed by the drain, the nominal bound the period the moment it exceeded the
-    /// design's requirement — 1000 ns at an origin of 500, for a design that needs 54. If the
+    /// design's requirement — 1000 ns at an origin of 500, for a design that needs 10. If the
     /// nominal ever decides a period again, this fails.
     #[test]
     fn the_period_is_derived_whatever_the_nominal_is() {
-        const DEPTH: u64 = 39;
-        const SETUP: u64 = 15;
+        const DEPTH: u64 = 8;
+        const SETUP: u64 = 2;
         let json = pipeline_json();
         let now = |e: &DelayEngine| -> u64 {
             let v: serde_json::Value = serde_json::from_str(&e.snapshot()).expect("snapshot");
@@ -5294,7 +5295,7 @@ mod tests {
         // edge, so every later cycle has *no depth* — but it still pays its sampling edge's
         // setup, which is now part of the period (`docs/derived-clock.md` §3: `depth + setup`).
         // The old `t_obs == 0` was reachable only while the metric was the settle.
-        assert_eq!(rep.t_obs, 35, "measured: clk→Q 20 + setup 15");
+        assert_eq!(rep.t_obs, 6, "measured: clk→Q 4 + setup 2");
     }
 
     /// **A4 (`docs/derived-clock.md` section 10).** The complement of A1: not only does the
@@ -5310,10 +5311,10 @@ mod tests {
         eng.run(1).expect("a cycle");
         let v: serde_json::Value = serde_json::from_str(&eng.snapshot()).expect("snapshot");
         let now = v["now"].as_u64().expect("now");
-        // 250 inverters from the T=740 poke spill well past the nominal first edge; the
-        // edge can therefore only be at the far end of the spill or later.
+        // 250 inverters (2 ns each) from the T=740 poke spill 500 ns, well past the
+        // nominal first edge; the edge can only be at the far end of the spill or later.
         assert!(
-            now >= 2990,
+            now >= 1240,
             "the edge must land after the cascade, not at {now}"
         );
         assert_eq!(eng.named_value("r2"), Some(k(1, 1)));
@@ -5593,7 +5594,7 @@ mod tests {
     /// recovery is not a rising edge: the clock never went low, so there is nothing to rise
     /// *from*. Before `clk_armed` this read as a second edge and the register latched twice
     /// inside one cycle — which is how `submission_374625393` ran off the rails under
-    /// `cs2200-74ls-v1` while passing under `mips-r2000-2um-v1`.
+    /// `mips-r2000-2um-v1` while passing under `mips-r2000-2um-v1`.
     ///
     /// `poke_at` drives the clock pin directly, so the fixture is the rule itself rather than
     /// a particular converter's tri-state bus.

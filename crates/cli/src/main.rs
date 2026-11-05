@@ -809,7 +809,7 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"}"#;
+    const SETTINGS: &str = r#""settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}"#;
 
     /// The B9 counter fixture as a file, plus a program image.
     /// `tag` makes the dir unique per test (they run in parallel).
@@ -902,9 +902,9 @@ mod tests {
         let report: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
         assert_eq!(report["cycles"], 3);
-        assert_eq!(report["t_obs"], 54);
-        assert_eq!(report["est_time"], 162);
-        assert_eq!(report["speedup_vs_baseline"], 234.0 / 162.0);
+        assert_eq!(report["t_obs"], 10);
+        assert_eq!(report["est_time"], 30);
+        assert_eq!(report["speedup_vs_baseline"], 234.0 / 30.0);
         assert_eq!(report["halt_reason"], "completed");
         assert!(report["assertions"]
             .as_array()
@@ -983,7 +983,7 @@ mod tests {
         let v: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(v["dta"]["cycles"], 3);
-        assert_eq!(v["dta"]["t_obs"], 54);
+        assert_eq!(v["dta"]["t_obs"], 10);
         for key in ["t_sta", "sta_note", "sta_paths"] {
             assert!(v.get(key).is_none(), "the report must not carry {key}");
         }
@@ -1063,7 +1063,7 @@ mod tests {
             &f,
             r##"{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-            "settings": {"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+            "settings": {"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
             "circuits": [{ "name": "main", "components": [
                 {"id":"a","type":"wiring.pin","pos":[0,0],"name":"a"},
                 {"id":"b","type":"wiring.pin","pos":[0,0],"name":"b","attrs":{"bitsize":32}}
@@ -1155,7 +1155,7 @@ mod tests {
         std::fs::write(
             &valid,
             r#"{"format":"circuitsim-plus-plus","version":3,"name":"t",
-                "settings":{"clockHz":1,"delayTable":"cs2200-74ls-v1"},
+                "settings":{"clockHz":1,"delayTable":"mips-r2000-2um-v1"},
                 "circuits":[{"name":"main","components":[
                     {"id":"c0","type":"wiring.clock","pos":[0,0]}
                 ]}]}"#,

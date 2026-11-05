@@ -1,6 +1,6 @@
 /**
  * The published delay table, read at BUILD time — the normative data is
- * `crates/core/data/cs2200-74ls-v1.json` (docs/delay-table.md), so the editor
+ * `crates/core/data/mips-r2000-2um-v1.json` (docs/delay-table.md), so the editor
  * shows exactly the numbers the engine uses instead of a second copy that could
  * drift.
  *
@@ -9,7 +9,7 @@
  * actually observed (DTA). They are deliberately different numbers: one explains
  * the design, the other grades it.
  */
-import table from "../../../crates/core/data/cs2200-74ls-v1.json";
+import table from "../../../crates/core/data/mips-r2000-2um-v1.json";
 
 /** One component kind's entries in the table, all optional per kind. */
 interface KindDelay {

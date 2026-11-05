@@ -1,6 +1,7 @@
 import {
   CSX_FORMAT,
   CSX_VERSION,
+  DEFAULT_DELAY_TABLE,
   DEFAULT_NOTICE,
   isFreeEndpoint,
   isJoinEndpoint,
@@ -118,7 +119,7 @@ export class CircuitDocument {
       version: CSX_VERSION,
       name,
       notice: DEFAULT_NOTICE,
-      settings: { clockHz: 1, delayTable: "cs2200-74ls-v1" },
+      settings: { clockHz: 1, delayTable: DEFAULT_DELAY_TABLE },
       circuits: [{ name: "main", components: [], wires: [] }],
     });
   }
@@ -959,6 +960,15 @@ function migrate(data: CsxDocument): void {
     // on save; here we set the notice so the in-editor document carries it too.
     if (typeof data.notice !== "string" || data.notice === "") data.notice = DEFAULT_NOTICE;
     version = 8;
+  }
+  if (version === 8) {
+    // v9 retires the 74LS delay tables: point any retired name at the MIPS table
+    // so an old design is charged under the one graded table (mirrors Rust).
+    const table = (data.settings as { delayTable?: unknown } | undefined)?.delayTable;
+    if (typeof table === "string" && table.startsWith("cs2200-74ls")) {
+      data.settings.delayTable = DEFAULT_DELAY_TABLE;
+    }
+    version = 9;
   }
   if (version !== (data.version as number)) {
     data.version = version as typeof CSX_VERSION;

@@ -419,7 +419,7 @@ mod tests {
     fn header(circuits: &str) -> String {
         format!(
             r#"{{"format":"circuitsim-plus-plus","version":{FORMAT_VERSION},"name":"t",
-                "settings":{{"clockHz":1,"delayTable":"cs2200-74ls-v1"}},
+                "settings":{{"clockHz":1,"delayTable":"mips-r2000-2um-v1"}},
                 "circuits":[{circuits}]}}"#
         )
     }
@@ -451,11 +451,14 @@ mod tests {
 
     #[test]
     fn unknown_delay_table_name_is_a_clean_error() {
-        let json = header(AND2).replace("cs2200-74ls-v1", "cs2200-ecl-v9");
+        let json = header(AND2).replace("mips-r2000-2um-v1", "cs2200-ecl-v9");
         let errors = check(&json);
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].message.contains("cs2200-ecl-v9"), "{errors:?}");
-        assert!(errors[0].message.contains("cs2200-74ls-v1"), "{errors:?}");
+        assert!(
+            errors[0].message.contains("mips-r2000-2um-v1"),
+            "{errors:?}"
+        );
     }
 
     #[test]

@@ -49,6 +49,13 @@
 //! same fingerprint computed one 64-bit word per step (`Value::fold_words`). `t_obs` did
 //! not move (54/55/0/220/220) and the architectural checks pass — the drift is the digest,
 //! not a result.
+//!
+//! Re-blessed again by the **MIPS delay table** (format v9): the 74LS tables are retired and
+//! every fixture now runs under `mips-r2000-2um-v1`, so every event time (and therefore every
+//! hash) and every `t_obs` move — the numbers are ~10× smaller and the two CPU fixtures drop
+//! from 220 to 61. The architectural checks (`cpu_fixtures_compute_the_program`,
+//! `fixture_fsm_alternates`, `fixture_alu_computes`) still pass: the designs compute the same
+//! values, only faster.
 
 use csim_core::autograde;
 use csim_core::delay::DelayEngine;
@@ -74,16 +81,16 @@ const SCENARIOS: &[Scenario] = &[
         clock_start: 1000,
         cycles: 3,
         pokes: &[],
-        t_obs: 54,
-        trace_hash: 0xf30c_622f_b495_199d,
+        t_obs: 10,
+        trace_hash: 0x2f4d_da16_2476_d9a2,
     },
     Scenario {
         fixture: "fsm.csx",
         clock_start: 1000,
         cycles: 4,
         pokes: &[("car", 1, 0)],
-        t_obs: 55,
-        trace_hash: 0x16fc_3f40_2c31_9589,
+        t_obs: 10,
+        trace_hash: 0x62a2_33ef_20d8_60ac,
     },
     Scenario {
         fixture: "alu.csx",
@@ -91,23 +98,23 @@ const SCENARIOS: &[Scenario] = &[
         cycles: 1,
         pokes: &[("a", 7, 0), ("b", 3, 0), ("op", 0, 0)],
         t_obs: 0,
-        trace_hash: 0xe58e_ceb0_48f1_a7f4,
+        trace_hash: 0x0f25_0f6f_1f3d_95f9,
     },
     Scenario {
         fixture: "multicycle.csx",
         clock_start: 500,
         cycles: 100,
         pokes: &[],
-        t_obs: 220,
-        trace_hash: 0xffc3_1118_ea41_127c,
+        t_obs: 61,
+        trace_hash: 0xf2fb_0855_c1c2_4e70,
     },
     Scenario {
         fixture: "pipeline5.csx",
         clock_start: 500,
         cycles: 100,
         pokes: &[],
-        t_obs: 220,
-        trace_hash: 0x013e_254b_4091_dea3,
+        t_obs: 61,
+        trace_hash: 0x856f_9bb9_1467_90f7,
     },
 ];
 /// The CPU fixtures run the same program to the same architectural state
@@ -146,7 +153,7 @@ fn cpu_fixtures_compute_the_program() {
 fn delay_power_on_static_splitter_cone() {
     let json = r##"{
         "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-        "settings": {"clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "settings": {"clockHz": 1, "delayTable": "mips-r2000-2um-v1"},
         "circuits": [{ "name": "main", "components": [
             {"id": "clk", "type": "wiring.clock", "pos": [0, 0]},
             {"id": "z", "type": "wiring.constant", "pos": [0, 0]},
@@ -176,7 +183,7 @@ fn delay_power_on_static_splitter_cone() {
     }"##;
     let doc = load_document(json.as_bytes()).unwrap();
     let nl = csim_core::netlist::build(&doc).unwrap();
-    let table = TimingTable::builtin("cs2200-74ls-v1").unwrap();
+    let table = TimingTable::builtin("mips-r2000-2um-v1").unwrap();
     let mut eng = DelayEngine::new(nl, 1000, &table).unwrap();
     eng.run(1).unwrap();
     assert_eq!(eng.named_value("p"), Some(Value::from_u64(1, 1)));
@@ -188,7 +195,7 @@ fn delay_power_on_static_splitter_cone() {
 fn chained_splitters_carry_values() {
     let json = r##"{
         "format": "circuitsim-plus-plus", "version": 3, "name": "t",
-        "settings": {"clockHz": 1, "delayTable": "cs2200-74ls-v1"},
+        "settings": {"clockHz": 1, "delayTable": "mips-r2000-2um-v1"},
         "circuits": [{ "name": "main", "components": [
             {"id": "src", "type": "wiring.constant", "pos": [0, 0], "attrs": {"value": "d", "bitsize": 4}},
             {"id": "s1", "type": "wiring.splitter", "pos": [0, 0],

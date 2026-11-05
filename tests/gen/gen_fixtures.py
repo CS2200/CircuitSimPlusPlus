@@ -32,7 +32,7 @@ def out_dir():
 
 SETTINGS = {
     "clockHz": 1,
-    "delayTable": "cs2200-74ls-v1",
+    "delayTable": "mips-r2000-2um-v1",
 }
 
 
@@ -76,7 +76,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 8,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 9,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

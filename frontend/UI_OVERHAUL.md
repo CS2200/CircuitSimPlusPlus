@@ -1755,7 +1755,7 @@ handshake with the animation loop, not a screenshot.
 ## 67. Follow-up batch BF (2026-10-19): the Inspector shows a part's table delay
 
 The Inspector now reports the selected part's own cost, straight from the
-published table (`crates/core/data/cs2200-74ls-v1.json`) read at **build time** —
+published table (`crates/core/data/mips-r2000-2um-v1.json`) read at **build time** —
 a bundler import, not a second copy of the numbers, so the editor can never
 disagree with the engine. A register reads `prop 20 ns · setup 15 ns · hold 5 ns`,
 an adder `prop 15 ns + 4/bit`, an AND `prop 10 ns`; parts with no published cost
