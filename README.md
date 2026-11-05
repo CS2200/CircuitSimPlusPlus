@@ -26,6 +26,13 @@ No Rust or Node needed — grab the latest build from the
 [releases page](https://github.com/CS2200/CircuitSimPlusPlus/releases/latest)
 (`<version>` below is the tag, e.g. `0.2.1`):
 
+> **Install only from the public mirror.** The installers are published on
+> `github.com/CS2200/CircuitSimPlusPlus` (linked above). GT's private
+> `github.gatech.edu/CS2200TAs` mirror carries the source and the version tags
+> but **not** the release binaries, so don't download installers from it. The
+> repository itself is not an installer either — cloning it gives you the source
+> to build (see [Prerequisites](#prerequisites)), not a runnable app.
+
 | Platform | Asset | How |
 |---|---|---|
 | macOS (Apple Silicon + Intel) | `CircuitSim++_<version>_universal.dmg` | open the `.dmg`, drag **CircuitSim++** to Applications |
@@ -235,10 +242,9 @@ on free hosted runners; GT's GHES stays the private source of truth. A `v*` tag
 builds macOS + Windows + Linux and publishes one public GitHub Release, which the
 in-app update nudge reads.
 
-**Prebuilt installers** live on the [releases
-page](https://github.com/CS2200/CircuitSimPlusPlus/releases): macOS universal
-`.dmg`, Windows `.exe`, Linux `.deb`/`.rpm`/`.AppImage`, and the static `csim`
-autograder CLI. All unsigned (decision D14).
+**Prebuilt installers** live on the public [releases
+page](https://github.com/CS2200/CircuitSimPlusPlus/releases) — see
+[Install](#install-prebuilt-binaries) above. All unsigned (decision D14).
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
 
