@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyStep,
   buildHarness,
+  check,
   errors,
   fuzzHistory,
   lcg,
@@ -327,6 +328,57 @@ describe("gesture zoo — confused & mistaken", () => {
     const c = center(h, not);
     clean(h, [down(`${and}.out`), move({ x: c.x + 0.3, y: c.y }), up({ x: c.x + 0.3, y: c.y })]);
     expect(h.wires()[0].b).toMatchObject({ comp: not });
+  });
+
+  it("out → in → elsewhere commits the wire and leaves the tool idle", () => {
+    // The reported bug: a click-click connection followed by a third click as
+    // if starting another wire left the tool routing forever.
+    const h = zoo();
+    const [and, not] = h.ids;
+    clean(h, [click(`${and}.out`), click(`${not}.in`), click({ x: 44, y: 44 })]);
+    expect(h.tool.isWiring).toBe(false);
+    expect(h.wires()).toHaveLength(1);
+  });
+
+  it("a click that drifts a little still starts the wire (jitter is not a drag)", () => {
+    // A real mouse does not hold perfectly still: this press sweeps past
+    // DRAG_THRESHOLD (0.3) but stays under CLICK_SLOP (1) and releases back on
+    // the source pin. It must count as a click (keep wiring) — treating it as a
+    // drag cancelled the wire the instant it was started.
+    const h = zoo();
+    const [and, not] = h.ids;
+    const p = h.pin(`${and}.out`);
+    runScript(h, [down(`${and}.out`), move({ x: p.x + 0.6, y: p.y }), up(`${and}.out`)]);
+    expect(h.tool.isWiring).toBe(true);
+    clean(h, [click(`${not}.in`)]);
+    expect(h.wires()).toHaveLength(1);
+    expect(h.wires()[0].b).toMatchObject({ comp: not, pin: "in" });
+  });
+
+  it("clicking a part's body while wiring connects to its nearest pin", () => {
+    // Big parts are mostly body. Click-click must behave like drag-release
+    // (§13) instead of planting a waypoint inside the part (which kept the tool
+    // routing and drew a wire straight through the shape).
+    const h = zoo();
+    const [and, not] = h.ids;
+    const c = center(h, not);
+    clean(h, [click(`${and}.out`), click({ x: c.x - 0.5, y: c.y })]);
+    expect(h.tool.isWiring).toBe(false);
+    expect(h.wires()).toHaveLength(1);
+    expect(h.wires()[0].b).toMatchObject({ comp: not, pin: "in" });
+    expect(check(h).filter((v) => v.kind === "body-crossing")).toEqual([]);
+  });
+
+  it("a planted waypoint then Enter ends the wire there (no loop to the start)", () => {
+    // `down` never moves the live cursor, so without the plant updating it a
+    // bare Enter built the last leg back to the stale start pin, closing the
+    // wire into a loop around everything it crossed.
+    const h = zoo();
+    const [and] = h.ids;
+    runScript(h, [click(`${and}.out`), click({ x: 16, y: 5 }), { kind: "finishFree" }]);
+    expect(h.tool.isWiring).toBe(false);
+    expect(h.wires()).toHaveLength(1);
+    expect(h.wires()[0].points.at(-1)).toEqual([16, 5]);
   });
 
   it("places overlapping parts and wires across them", () => {

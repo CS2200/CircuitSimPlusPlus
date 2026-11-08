@@ -171,6 +171,14 @@ function sameVec(a: Vec2, b: Vec2): boolean {
 }
 
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
+/**
+ * How far the pointer may wander from where it went down and still count as a
+ * CLICK rather than a drag. A real mouse rarely holds perfectly still, and
+ * `DRAG_THRESHOLD` (0.3) is small enough that an ordinary click can "sweep" —
+ * which used to turn a click on a pin into a drag that then cancelled itself on
+ * release, so the wire never started. Anything past this is an intended drag.
+ */
+const CLICK_SLOP = 1; // grid units
 const PASTE_OFFSET = 1;
 /**
  * Pin grab radius used when a DRAG-release finishes a wire (UI_OVERHAUL §13):
@@ -254,6 +262,13 @@ export class ToolMachine {
    */
   private pressStart: Vec2 | null = null;
   private pressSwept = false;
+  /**
+   * The furthest the pointer travelled from `pressStart` during this press —
+   * monotonic, unlike `pressSwept` (which only records that the drag threshold
+   * was crossed at all). `up` uses it to tell a jittery CLICK (`≤ CLICK_SLOP`)
+   * from a deliberate drag that happens to end back near where it began.
+   */
+  private pressMaxDist = 0;
   private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
   /** Fired when a component is double-clicked (opens the right-dock Inspector). */
   onEditComponent?: (compId: string, focusField?: string) => void;
@@ -307,6 +322,7 @@ export class ToolMachine {
     this.wireInfo = null;
     this.pressStart = null;
     this.pressSwept = false;
+    this.pressMaxDist = 0;
     this.pressWireIdx = null;
     if (this.pressButton !== null) {
       this.onButton?.(this.pressButton, false);
@@ -393,6 +409,7 @@ export class ToolMachine {
     // Track this press: a press that sweeps (before releasing) is a drag.
     this.pressStart = world;
     this.pressSwept = false;
+    this.pressMaxDist = 0;
     this.pressWireIdx = null;
 
     if (this.placing !== null) {
@@ -598,10 +615,10 @@ export class ToolMachine {
     this.hover(world);
     // Drag-vs-click: remember whether this press has travelled far enough to
     // count as a drag (drives drag-wiring on release).
-    if (this.pressStart !== null && !this.pressSwept) {
-      if (Math.hypot(world.x - this.pressStart.x, world.y - this.pressStart.y) > DRAG_THRESHOLD) {
-        this.pressSwept = true;
-      }
+    if (this.pressStart !== null) {
+      const travel = Math.hypot(world.x - this.pressStart.x, world.y - this.pressStart.y);
+      if (travel > this.pressMaxDist) this.pressMaxDist = travel;
+      if (travel > DRAG_THRESHOLD) this.pressSwept = true;
     }
     if (this.wiring !== null) {
       this.wiring.cursor = world;
@@ -809,14 +826,19 @@ export class ToolMachine {
       this.pressButton = null;
       this.pressStart = null;
       this.pressSwept = false;
+      this.pressMaxDist = 0;
       this.pressWireIdx = null;
       this.changed();
       return;
     }
     const swept = this.pressSwept;
     const fromWire = this.pressWireIdx;
+    // How far the pointer actually travelled: a jittery click and an abandoned
+    // drag both cross `DRAG_THRESHOLD`, so `swept` alone cannot tell them apart.
+    const dragged = this.pressMaxDist > CLICK_SLOP;
     this.pressStart = null;
     this.pressSwept = false;
+    this.pressMaxDist = 0;
     this.pressWireIdx = null;
     // Wiring (UI_OVERHAUL §13) supports both gestures:
     //  - click-click: a press WITHOUT movement commits nothing — the next
@@ -827,46 +849,51 @@ export class ToolMachine {
     //    made wiring feel broken.
     if (this.wiring !== null) {
       const w = this.wiring;
+      const release = world ?? w.cursor;
+      // A release over a real target finishes the wire (the drag gesture), no
+      // matter how briefly the pointer was down.
       if (swept) {
-        const release = world ?? w.cursor;
         const routed = this.releaseRoute(w, release);
         if (routed !== null) {
           this.commitWire(w, routed.b, routed.points);
           this.drag = { kind: "idle" };
           return;
         }
-        // Released back on the wire's own source part (or the start pin): treat
-        // it as "never mind" rather than hanging a stub beside the pin.
-        if (isPinEndpoint(w.from)) {
-          const hitPin = this.scene.pickPin(release);
-          const hitComp = this.scene.pickComponent(release);
-          if (
-            (hitPin !== null && hitPin.compId === w.from.comp) ||
-            (hitComp !== null && hitComp.compId === w.from.comp)
-          ) {
-            this.wiring = null;
-            this.drag = { kind: "idle" };
-            this.changed();
-            return;
-          }
-        }
-        // Released over empty space: hang the wire there with a FREE endpoint
-        // (electrically open until it is later attached). Dragging a wire out
-        // and letting go is how a dangling end is drawn; click-click wiring can
-        // also finish in space with Enter (`finishFree`).
-        const { points } = this.buildRoute(w, release);
-        const end = points.at(-1) ?? w.cursor;
-        this.commitWire(w, { free: [end.x, end.y] }, points);
+      }
+      // No target under the release, and the press barely moved: it was a CLICK.
+      // Leave the wire in progress so the next click plants a waypoint or
+      // finishes it. A real mouse drifts during a click, and treating that as an
+      // abandoned drag used to cancel the wire the instant it was started — so
+      // "click output, click input, click elsewhere" silently became "nothing,
+      // input starts a wire, elsewhere extends it" (still routing forever).
+      if (!dragged) {
         this.drag = { kind: "idle" };
+        this.changed();
         return;
       }
-      this.drag = { kind: "idle" };
-      // A junction-wire dragged off a wire and dropped without connecting
-      // leaves the source wire unselected (UI_OVERHAUL §55).
-      if (swept && fromWire !== null) {
-        this.deselectWires();
-        this.changed();
+      // Released back on the wire's own source part (or the start pin): treat it
+      // as "never mind" rather than hanging a stub beside the pin.
+      if (isPinEndpoint(w.from)) {
+        const hitPin = this.scene.pickPin(release);
+        const hitComp = this.scene.pickComponent(release);
+        if (
+          (hitPin !== null && hitPin.compId === w.from.comp) ||
+          (hitComp !== null && hitComp.compId === w.from.comp)
+        ) {
+          this.wiring = null;
+          this.drag = { kind: "idle" };
+          this.changed();
+          return;
+        }
       }
+      // Released over empty space: hang the wire there with a FREE endpoint
+      // (electrically open until it is later attached). Dragging a wire out
+      // and letting go is how a dangling end is drawn; click-click wiring can
+      // also finish in space with Enter (`finishFree`).
+      const { points } = this.buildRoute(w, release);
+      const end = points.at(-1) ?? w.cursor;
+      this.commitWire(w, { free: [end.x, end.y] }, points);
+      this.drag = { kind: "idle" };
       return;
     }
     if (this.drag.kind === "boxing") {
@@ -885,7 +912,7 @@ export class ToolMachine {
     this.drag = { kind: "idle" };
     // A wire grabbed and dragged (a bend moved) must not stay highlighted once
     // released — press the handle again to keep editing it (UI_OVERHAUL §55).
-    if (swept && fromWire !== null) this.deselectWires();
+    if (dragged && fromWire !== null) this.deselectWires();
     this.changed();
   }
 
@@ -1248,6 +1275,26 @@ export class ToolMachine {
         },
       };
     }
+    // A click/release on a part's BODY (rather than exactly on a terminal) means
+    // "connect to this part" — the same rule a drag-release already follows
+    // (UI_OVERHAUL §13). Big parts are mostly body, and without this a near-miss
+    // planted a waypoint INSIDE the part, kept the tool routing forever, and drew
+    // a wire straight through the shape (with no obstacle on that leg).
+    const body = this.scene.pickComponent(world);
+    if (body !== null && !(isPinEndpoint(w.from) && w.from.comp === body.compId)) {
+      const pin = this.scene.nearestPinOf(body.compId, world);
+      if (pin !== null) {
+        const bEnd: LegEnd = {
+          dir: this.scene.pinFacing(body.compId, pin.pin),
+          body: this.scene.rectOf(body.compId),
+        };
+        const leg = routeLeg(last, aEnd, pin.pos, bEnd, { flip: w.flip, incoming });
+        return {
+          points: cleanPolyline([...w.anchors, ...leg.slice(1)]),
+          finish: { b: { comp: body.compId, pin: pin.pin }, endPos: pin.pos },
+        };
+      }
+    }
     const cursor = snapPoint(world, 0.5);
     const leg = routeLeg(last, aEnd, cursor, { dir: null, body: null }, { flip: w.flip, incoming });
     return { points: cleanPolyline([...w.anchors, ...leg.slice(1)]), finish: null };
@@ -1296,6 +1343,11 @@ export class ToolMachine {
     // The clicked point is a user-chosen waypoint: remember it so the wire's
     // midpoints survive re-routing when a part is later moved/rotated.
     w.midpoints.push(planted);
+    // Move the live cursor onto the planted point. `down` never updates it (only
+    // `move` does), so without this a bare Enter after a waypoint click would
+    // build the last leg back to the stale cursor — the start pin — closing the
+    // wire into a loop around whatever it crossed.
+    w.cursor = planted;
     this.changed();
   }
 
@@ -1380,21 +1432,15 @@ export class ToolMachine {
   /**
    * Where a drag-released wire lands (UI_OVERHAUL §13): a pin/wire under the
    * pointer, or — when the drop is on a part's BODY rather than exactly on a
-   * terminal — that part's nearest pin (big parts are mostly body, and
-   * missing the terminal used to leave the gesture stuck in routing mode).
+   * terminal — that part's nearest pin (big parts are mostly body, and missing
+   * the terminal used to leave the gesture stuck in routing mode). `buildRoute`
+   * owns the body rule so the live preview and the click-wiring path agree with
+   * this drag path; `RELEASE_PIN_TOL` just widens the near-miss radius on drop.
    * Null when there is nothing to attach to.
    */
   private releaseRoute(w: WiringState, release: Vec2): { b: CsxEndpoint; points: Vec2[] } | null {
     const near = this.buildRoute(w, release, RELEASE_PIN_TOL);
-    if (near.finish !== null) return { b: near.finish.b, points: near.points };
-    const comp = this.scene.pickComponent(release);
-    if (comp === null) return null;
-    // Dropping back on the wire's own source part is not a connection.
-    if (isPinEndpoint(w.from) && w.from.comp === comp.compId) return null;
-    const pin = this.scene.nearestPinOf(comp.compId, release);
-    if (pin === null) return null;
-    const snapped = this.buildRoute(w, pin.pos, 0.6);
-    return snapped.finish === null ? null : { b: snapped.finish.b, points: snapped.points };
+    return near.finish === null ? null : { b: near.finish.b, points: near.points };
   }
 
   private changed(): void {
