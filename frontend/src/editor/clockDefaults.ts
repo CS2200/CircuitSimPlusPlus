@@ -153,16 +153,30 @@ export function applyClockDefaults(
       circuits,
     );
     if (a === null || b === null) continue;
+    // Manhattan L between the two pins. When they already share an axis the L's
+    // corner coincides with an endpoint, so emit the straight two-point run —
+    // otherwise the wire carries a zero-length segment (the clock sits directly
+    // above/below the part, so this is the common case).
+    const alignedX = Math.abs(a.x - b.x) < 1e-9;
+    const alignedY = Math.abs(a.y - b.y) < 1e-9;
+    if (alignedX && alignedY) continue; // coincident pins: nothing to draw
+    const points: [number, number][] =
+      alignedX || alignedY
+        ? [
+            [a.x, a.y],
+            [b.x, b.y],
+          ]
+        : [
+            [a.x, a.y],
+            [a.x, b.y],
+            [b.x, b.y],
+          ];
     doc.addWire(
       circuitIdx,
       {
         a: from,
         b: to,
-        points: [
-          [a.x, a.y],
-          [a.x, b.y],
-          [b.x, b.y],
-        ],
+        points,
         name: def.label,
       },
       coalesceKey,

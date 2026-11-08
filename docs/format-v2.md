@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 9.
+> **current** format, version 11.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,8 +11,8 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `9`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 9 and walks older files forward one version at a
+- Top-level `version` must be `11`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 11 and walks older files forward one version at a
   time (see below).
 - Top-level `notice` (v8): a standing note for any reader, human or machine. The app owns the
   string (`format::NOTICE`) and **stamps it on every save**, so a file always carries the current
@@ -29,7 +29,7 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 9,
+  "version": 11,
   "name": "LC-5200 Datapath",
   "notice": "This circuit was authored with CircuitSim++ … (standing reader notice)",
   "settings": {
@@ -72,6 +72,12 @@ Circuit names are unique within a document. One circuit is conventionally `"main
 - **v8 → v9** retires the 74LS delay tables. Any `settings.delayTable` naming a
   `cs2200-74ls-*` table is rewritten to `mips-r2000-2um-v1` (the one graded table); every other
   name is left for validation to accept or reject. No geometry changes.
+- **v9 → v10** adds a wire's optional `midpoints` (§2). Purely additive: it records the
+  interior points a person planted while drawing the wire, so the editor can re-route on a
+  move/rotate without discarding the user's deliberate bends. An older wire simply has none,
+  so only the version stamp changes.
+- **v10 → v11** adds a wire's optional `flip` (§2): the X "turn early" corner preference. Purely
+  additive — an older wire simply keeps the default — so only the version stamp changes.
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -120,6 +126,8 @@ keys are rejected per-type (a typo'd attr is an error, never silently ignored).
     [30, 21],
   ], // drawn polyline, a → b
   "color": "#ff0000", // optional cosmetic stroke (§6)
+  "midpoints": [[30, 11]], // optional user-chosen bends (v10)
+  "flip": true, // optional corner preference: X "turn early" (v11)
 }
 ```
 
@@ -136,6 +144,21 @@ anything), so a partially drawn wire is harmless until it is later attached:
   presentational** — the engine ignores it beyond round-tripping it — and it
   is **omitted when unset**, so uncolored files stay byte-identical (§6
   exception to "every field always emitted").
+
+- `midpoints` (optional, v10): the interior points a person planted while
+  drawing the wire — absolute grid coordinates, ordered `a` → `b`. They are
+  **provenance, not connectivity**: the engine ignores them beyond
+  round-tripping, and the editor uses them so a move/rotate re-routes the wire
+  *through* these points instead of discarding the user's deliberate bends.
+  Omitted when empty (like `color`), so wires with no user bends stay
+  byte-identical. Each should be a vertex of `points`; the editor drops any that
+  a later edit removes.
+
+- `flip` (optional, v11): `true` when the wire was drawn with the X "turn early"
+  corner preference rather than the default "turn late". **Provenance, not
+  connectivity** — the engine ignores it — and the editor re-applies it when it
+  re-routes the wire on a move/rotate, so the bend returns on the side the user
+  chose. Omitted when `false`, so ordinary wires stay byte-identical.
 
 - Every wire has exactly two endpoints; **at least one endpoint is a pin or a free end** (the
   other may be a junction onto another wire's segment). A junction renders as a dot; a free end
@@ -633,7 +656,18 @@ the schema constrains common shapes only.
                     "minItems": 2,
                     "maxItems": 2
                   }
-                }
+                },
+                "midpoints": {
+                  "type": "array",
+                  "default": [],
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [{ "type": "number" }, { "type": "number" }],
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                },
+                "flip": { "type": "boolean", "default": false }
               }
             }
           }

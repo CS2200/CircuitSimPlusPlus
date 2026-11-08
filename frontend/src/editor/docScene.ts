@@ -1222,6 +1222,12 @@ export class DocScene {
     return layout?.pins.find((p) => p.name === pin)?.facing ?? null;
   }
 
+  /** Current world position of a pin; null if the component or pin is gone. */
+  pinPosition(compId: string, pin: string): Vec2 | null {
+    const p = this.layouts.get(compId)?.pins.find((x) => x.name === pin);
+    return p === undefined ? null : { x: p.x, y: p.y };
+  }
+
   /** Component body rect in world units; null if the component is gone. */
   rectOf(compId: string): Rect | null {
     return this.layouts.get(compId)?.rect ?? null;

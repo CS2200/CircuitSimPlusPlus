@@ -66,6 +66,7 @@ import {
   type PaletteItem,
 } from "./editor/catalog";
 import { compLayout } from "./editor/layout";
+import { rerouteWire } from "./editor/reroute";
 import { buildDemoDoc } from "./editor/demoCircuit";
 import { buildMockDemoDoc } from "./editor/mockDemoCircuit";
 import { getCore } from "./ipc";
@@ -168,10 +169,13 @@ function initDoc(d: CircuitDocument): CircuitDocument {
   d.pinResolver = (comp) => compPins(comp, d.circuits).map((p) => p.name);
   // Pin geometry (position + facing): lets rotation re-anchor glued wire
   // ends and re-stub them along the new facing (wire-routing pass).
-  d.pinGeometry = (comp, pin) => {
-    const p = compLayout(comp, d.circuits).pins.find((x) => x.name === pin);
+  d.pinGeometry = (comp, pin, circuits) => {
+    const p = compLayout(comp, circuits ?? d.circuits).pins.find((x) => x.name === pin);
     return p === undefined ? null : { pos: [p.x, p.y], facing: p.facing };
   };
+  // Whole-wire re-router: rotating a part re-routes its glued wires from the new
+  // pin geometry (editor/reroute.ts) instead of accumulating a bend per step.
+  d.rerouteWire = rerouteWire;
   // A wire end that names a pin IS at that pin. A file can name a pin whose
   // symbol has since been sized differently (hand-authored, converted, or
   // written before a constant learned to grow to its value, §56), so resolve
@@ -424,6 +428,7 @@ export default function App() {
     else if (action === "delete") ed.deleteSelection();
     else if (action === "rotate-cw") ed.rotate(false);
     else if (action === "rotate-ccw") ed.rotate(true);
+    else if (action === "clear-midpoints") ed.clearMidpoints();
     else if (action === "waveform") void showInWaveformRef.current();
     else ed.selectAll();
   }, []);

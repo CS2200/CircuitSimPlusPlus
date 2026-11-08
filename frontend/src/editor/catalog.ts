@@ -132,6 +132,18 @@ function uintAttr(
 }
 
 /**
+ * Snap a pin offset onto the **connection lattice** (0.5 grid units). Pins are
+ * the connection points, so every one must land on the shared half-grid that a
+ * wire edit snaps to — otherwise a pin sits at a third/fifth between grid lines
+ * and a user can never click to reach it (format-v2 §4; UI: no phantom jogs).
+ * A body-relative spread is rounded to the nearest half; spacing is ≥ 1 unit,
+ * so rounded pins never collide.
+ */
+function half(v: number): number {
+  return Math.round(v * 2) / 2;
+}
+
+/**
  * Standard n-input gate: inputs on the left, out on the right. The body grows
  * TALLER with the input count so the pins keep their spacing, but the rounded /
  * pointed OUTPUT cap stays a 2-input gate's size — only the flat input side
@@ -286,7 +298,7 @@ function plexerSpec(
           pins.push({
             name: `out${i}`,
             dx: 4,
-            dy: ((i + 1) * height) / (count + 1),
+            dy: half(((i + 1) * height) / (count + 1)),
             kind: "out",
             bitsize,
           });
@@ -297,7 +309,7 @@ function plexerSpec(
           pins.push({
             name: `in${i}`,
             dx: 0,
-            dy: ((i + 1) * height) / (count + 1),
+            dy: half(((i + 1) * height) / (count + 1)),
             kind: "in",
             bitsize: width,
           });
@@ -347,13 +359,13 @@ function priorityDecoderSpec(): CompSpec {
         pins.push({
           name: `in${i}`,
           dx: 0,
-          dy: ((i + 1) * h) / (count + 1),
+          dy: half(((i + 1) * h) / (count + 1)),
           kind: "in",
           bitsize: 1,
         });
       }
-      pins.push({ name: "out", dx: 4, dy: h / 3, kind: "out", bitsize: outBits });
-      pins.push({ name: "valid", dx: 4, dy: (2 * h) / 3, kind: "out", bitsize: 1 });
+      pins.push({ name: "out", dx: 4, dy: half(h / 3), kind: "out", bitsize: outBits });
+      pins.push({ name: "valid", dx: 4, dy: half((2 * h) / 3), kind: "out", bitsize: 1 });
       // The cascade: `en_in` enters at the bottom, `en_out` leaves at the top, so
       // stacking stages routes the chain upward (CircuitSim CE's layout).
       pins.push({ name: "en_in", dx: 2, dy: h, kind: "in", bitsize: 1 });
@@ -546,7 +558,7 @@ export function subcircuitPins(
     pins.push({
       name: p.name ?? "",
       dx: 0,
-      dy: ((i + 1) * h) / (inputs.length + 1),
+      dy: half(((i + 1) * h) / (inputs.length + 1)),
       kind: "in",
       bitsize: bitsOf(p.attrs ?? {}),
     });
@@ -555,7 +567,7 @@ export function subcircuitPins(
     pins.push({
       name: p.name ?? "",
       dx: w,
-      dy: ((i + 1) * h) / (outputs.length + 1),
+      dy: half(((i + 1) * h) / (outputs.length + 1)),
       kind: "out",
       bitsize: bitsOf(p.attrs ?? {}),
     });

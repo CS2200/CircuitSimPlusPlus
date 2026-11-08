@@ -80,6 +80,10 @@ export interface WireInit {
   /** A tunnel label (UI_OVERHAUL §86). A name is a *label*, not a joining rule — the
    * connection is the wire (docs/format-v2.md §9). */
   name?: string;
+  /** User-chosen midpoints (format v10); see [`CsxWire.midpoints`]. */
+  midpoints?: [number, number][];
+  /** Corner-flip preference (format v11); see [`CsxWire.flip`]. */
+  flip?: boolean;
 }
 
 export class CircuitDocument {
@@ -111,7 +115,21 @@ export class CircuitDocument {
   pinGeometry?: (
     comp: CsxComponent,
     pin: string,
+    /** Layout to resolve against; defaults to the document's current circuits. */
+    circuits?: readonly CsxCircuit[],
   ) => { pos: [number, number]; facing: Rotation } | null;
+
+  /**
+   * Editor-injected whole-wire re-router: regenerate a wire's polyline from its
+   * endpoints (editor/reroute.ts). Rotation uses it so bends do not accumulate;
+   * a null result falls back to the geometry-repair pass. Without it, rotation
+   * only repairs the existing route.
+   */
+  rerouteWire?: (
+    wire: CsxWire,
+    circuit: CsxCircuit,
+    circuits: readonly CsxCircuit[],
+  ) => [number, number][] | null;
 
   static create(name = "untitled"): CircuitDocument {
     return new CircuitDocument({
@@ -380,10 +398,13 @@ export class CircuitDocument {
       // else, so it translates WHOLE — interior bends included. Moving only the
       // endpoints turned a Z-route into a skew (UI_OVERHAUL §81).
       if (glueA && glueB) {
-        return {
+        return filterMidpoints({
           ...w,
           points: w.points.map((p) => [p[0] + delta.x, p[1] + delta.y] as [number, number]),
-        };
+          ...(w.midpoints !== undefined && {
+            midpoints: w.midpoints.map((m) => [m[0] + delta.x, m[1] + delta.y] as [number, number]),
+          }),
+        });
       }
       // Otherwise a JOINED end travels with the drag exactly as a pin end does: a
       // junction belongs to the cluster, so it must not stay behind. The
@@ -412,6 +433,9 @@ export class CircuitDocument {
     // Moved parents stretch their junction children's targets with them.
     let wires = wiresMoved;
     for (const i of movedWires) wires = reprojectJunctionDependents(wires, i);
+    // A partial move can slide an interior bend; drop any midpoint no longer on
+    // the resulting path (whole-wire translations keep theirs, offset above).
+    wires = wires.map(filterMidpoints);
     const key = `move:${circuitIdx}:${[...ids].sort().join(",")}`;
     const label = ids.size === 1 ? `move ${[...ids][0]}` : `move ${ids.size} components`;
     this.exec(label, key, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
@@ -448,11 +472,21 @@ export class CircuitDocument {
     const c = this.circuit(circuitIdx);
     const components = c.components.map((x) => (ids.has(x.id) ? rotatedComponent(x, map) : x));
     // Pins rotate about the body center: wires glued to a rotated component
-    // must follow (re-anchored + re-stubbed along the new facing).
+    // must follow. Prefer a WHOLE-WIRE re-route (regenerate from the new pin
+    // geometry) so bends do not accumulate; fall back to the repair pass when no
+    // re-router is injected or an endpoint can't be resolved.
     const byId = new Map(components.map((x) => [x.id, x]));
-    const wires = this.followGeometry(c.wires, ids, byId);
+    const updated: CsxCircuit = { ...c, components };
+    const updatedCircuits = this.data.circuits.map((cc, i) => (i === circuitIdx ? updated : cc));
+    const wires = this.followWithReroute(c.wires, ids, byId, updated, updatedCircuits);
     const label = ids.size === 1 ? `${verb} ${[...ids][0]}` : `${verb} ${ids.size} components`;
-    this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
+    let circuits = this.replaceCircuit(circuitIdx, { ...c, components, wires });
+    // Rotating a PORT flips its direction (rot ↔ isOutput), moving the pin to the
+    // opposite edge of every instance — so re-anchor the parent sheets too.
+    if (components.some((x) => ids.has(x.id) && x.type === "wiring.pin")) {
+      circuits = this.refreshInstances(circuits, c.name);
+    }
+    this.exec(label, undefined, circuits);
   }
 
   /**
@@ -469,12 +503,53 @@ export class CircuitDocument {
     wires: CsxWire[],
     ids: ReadonlySet<string>,
     byId: ReadonlyMap<string, CsxComponent>,
+    circuits?: readonly CsxCircuit[],
   ): CsxWire[] {
     const geom = this.pinGeometry;
     if (geom === undefined) return wires;
+    // A definition edit re-anchors parent instances against the NEW circuits;
+    // the injected geometry otherwise resolves against the (still-old) document.
+    const resolve = (comp: CsxComponent, pin: string) => geom(comp, pin, circuits);
     const moved: number[] = [];
     let next = wires.map((w, i) => {
-      const followed = followWire(w, ids, byId, geom);
+      const followed = followWire(w, ids, byId, resolve);
+      if (!samePoints(followed.points, w.points)) moved.push(i);
+      return followed;
+    });
+    for (const i of moved) next = reprojectJunctionDependents(next, i);
+    return next;
+  }
+
+  /**
+   * Like [`followGeometry`], but for a wire glued to a rotated part it first
+   * tries the injected whole-wire re-router (`rerouteWire`) — regenerating the
+   * route from the new pin geometry so bends do not pile up over repeated
+   * rotations. Any wire the re-router can't handle (or when none is injected)
+   * falls back to the repair pass.
+   */
+  private followWithReroute(
+    wires: CsxWire[],
+    ids: ReadonlySet<string>,
+    byId: ReadonlyMap<string, CsxComponent>,
+    circuit: CsxCircuit,
+    circuits: readonly CsxCircuit[],
+  ): CsxWire[] {
+    const geom = this.pinGeometry;
+    const reroute = this.rerouteWire;
+    if (geom === undefined) return wires;
+    const resolve = (comp: CsxComponent, pin: string) => geom(comp, pin, circuits);
+    const moved: number[] = [];
+    let next = wires.map((w, i) => {
+      const glued =
+        (isPinEndpoint(w.a) && ids.has(w.a.comp)) || (isPinEndpoint(w.b) && ids.has(w.b.comp));
+      if (glued && reroute !== undefined) {
+        const routed = reroute(w, circuit, circuits);
+        if (routed !== null && routed.length >= 2) {
+          if (!samePoints(routed, w.points)) moved.push(i);
+          return { ...w, points: routed.map((p) => [p[0], p[1]] as [number, number]) };
+        }
+      }
+      const followed = followWire(w, ids, byId, resolve);
       if (!samePoints(followed.points, w.points)) moved.push(i);
       return followed;
     });
@@ -523,15 +598,20 @@ export class CircuitDocument {
     });
     const wires = removeWiresCascade(c.wires, roots);
     const n = compIds.size + wireIdxs.size;
-    this.exec(
-      `delete ${n} item${n === 1 ? "" : "s"}`,
-      undefined,
-      this.replaceCircuit(circuitIdx, {
-        ...c,
-        components,
-        wires,
-      }),
-    );
+    let circuits = this.replaceCircuit(circuitIdx, {
+      ...c,
+      components,
+      wires,
+    });
+    // Deleting a PORT removes it from this circuit's interface, so parent wires
+    // that reached it through an instance must be dropped too — otherwise they
+    // dangle (the engine rejects a wire onto a port that no longer exists).
+    for (const comp of c.components) {
+      const portName = comp.name ?? "";
+      if (!compIds.has(comp.id) || comp.type !== "wiring.pin" || portName === "") continue;
+      circuits = this.retargetInstancePorts(circuits, c.name, portName, "");
+    }
+    this.exec(`delete ${n} item${n === 1 ? "" : "s"}`, undefined, circuits);
   }
 
   /**
@@ -549,26 +629,51 @@ export class CircuitDocument {
     const c = this.circuit(circuitIdx);
     const idMap = new Map<string, string>();
     const newComps: CsxComponent[] = [];
+    // Component names must stay unique in a circuit (validateStructure; the
+    // backend's IDs depend on it). A clone carries the original name, so a
+    // copied pin ("in0") or a named register ("pc") would collide — re-allocate
+    // a fresh name exactly as placement does.
+    const takenNames = new Set(c.components.map((x) => (x.name ?? "").toLowerCase()));
     let scratch = { ...c, components: [...c.components] };
     for (const comp of components) {
       const id = allocComponentId(scratch);
-      scratch = { ...scratch, components: [...scratch.components, { ...comp, id }] };
+      let name = comp.name;
+      if (name !== undefined && name !== "") {
+        if (comp.type === "wiring.pin") {
+          name = freePinName(scratch, comp.attrs?.isOutput === true);
+        } else if (takenNames.has(name.toLowerCase())) {
+          name = uniqueName(name, takenNames);
+        }
+        takenNames.add(name.toLowerCase());
+      }
+      const placed: CsxComponent =
+        name !== undefined && name !== "" ? { ...comp, id, name } : { ...comp, id };
+      scratch = { ...scratch, components: [...scratch.components, placed] };
       idMap.set(comp.id, id);
-      newComps.push({ ...comp, id });
+      newComps.push(placed);
     }
     const moved: CsxComponent[] = newComps.map((x) => ({
       ...x,
       pos: [x.pos[0] + offset.x, x.pos[1] + offset.y] as [number, number],
     }));
     const newWires: CsxWire[] = [];
+    // Junction targets were remapped by copySelection to CLIPBOARD-LOCAL wire
+    // indices; the pasted wires land after the existing ones, so shift them by
+    // the base index. Without this a copied branch junctions onto whatever wire
+    // happens to sit at the old index in the destination circuit.
+    const wireBase = c.wires.length;
     for (const w of wires) {
-      const a = remapPasteEndpoint(w.a, idMap);
-      const b = remapPasteEndpoint(w.b, idMap);
+      const a = remapPasteEndpoint(w.a, idMap, wireBase);
+      const b = remapPasteEndpoint(w.b, idMap, wireBase);
       if (a === null || b === null) continue; // endpoint outside the paste → drop
       newWires.push({
         a,
         b,
         points: w.points.map((p) => [p[0] + offset.x, p[1] + offset.y] as [number, number]),
+        ...(w.midpoints !== undefined && {
+          midpoints: w.midpoints.map((m) => [m[0] + offset.x, m[1] + offset.y] as [number, number]),
+        }),
+        ...(w.flip === true && { flip: true }),
       });
     }
     this.exec(
@@ -649,6 +754,10 @@ export class CircuitDocument {
     if (comp.type === "wiring.pin" && oldPin !== "" && oldPin !== newPin) {
       next = this.retargetInstancePorts(next, c.name, oldPin, newPin);
     }
+    // A port's geometry can move without its name changing — flipping an input
+    // to an output springs the pin to the opposite edge — so re-anchor every
+    // instance's parent wires against the new interface too.
+    if (comp.type === "wiring.pin") next = this.refreshInstances(next, c.name);
     this.exec(`edit ${id}`, coalesceKey, next);
   }
 
@@ -690,6 +799,25 @@ export class CircuitDocument {
         return { ...w, a, b };
       });
       return touched ? { ...circ, wires } : circ;
+    });
+  }
+
+  /**
+   * Re-anchor wires in every sheet that places an instance of `target`, against
+   * the instance's CURRENT interface geometry. A definition edit can move a port
+   * (flipping a port's direction springs it to the opposite edge), and a wire
+   * glued to the instance's port pin must follow — exactly as a same-sheet
+   * component's pins do via [`followGeometry`].
+   */
+  private refreshInstances(circuits: CsxCircuit[], target: string): CsxCircuit[] {
+    return circuits.map((circ) => {
+      const insts = circ.components.filter(
+        (x) => x.type === "subcircuit" && x.attrs?.circuit === target,
+      );
+      if (insts.length === 0) return circ;
+      const byId = new Map(insts.map((x) => [x.id, x]));
+      const wires = this.followGeometry(circ.wires, new Set(byId.keys()), byId, circuits);
+      return sameWireList(wires, circ.wires) ? circ : { ...circ, wires };
     });
   }
 
@@ -739,14 +867,32 @@ export class CircuitDocument {
     label = "edit wire route",
     // `null` = its own undo step (the default key merges drag sequences).
     coalesceKey: string | null = `points:${circuitIdx}:${wireIdx}`,
+    /** Replacement midpoints (a caller that moved a user bend); else kept+filtered. */
+    midpoints?: readonly [number, number][],
   ): void {
     const c = this.circuit(circuitIdx);
     const w = c.wires[wireIdx];
     if (w === undefined) throw new RangeError(`no wire at index ${wireIdx}`);
     if (points.length < 2) throw new Error("a wire needs at least 2 points");
-    let wires = c.wires.map((x, i) =>
-      i === wireIdx ? { ...x, points: points.map((p) => [p[0], p[1]] as [number, number]) } : x,
-    );
+    let wires = c.wires.map((x, i) => {
+      if (i !== wireIdx) return x;
+      const next: CsxWire = {
+        ...x,
+        points: points.map((p) => [p[0], p[1]] as [number, number]),
+      };
+      // A direct point edit keeps only the midpoints still present as vertices;
+      // a caller that MOVED a bend passes the translated set explicitly.
+      const source = midpoints ?? x.midpoints;
+      if (source !== undefined) {
+        const last = next.points.length - 1;
+        const kept = source.filter((m) =>
+          next.points.some((p, i) => i > 0 && i < last && nearPoint(p, m)),
+        );
+        if (kept.length > 0) next.midpoints = kept.map((m) => [m[0], m[1]]);
+        else delete next.midpoints;
+      }
+      return next;
+    });
     wires = reprojectJunctionDependents(wires, wireIdx);
     this.exec(
       label,
@@ -756,6 +902,32 @@ export class CircuitDocument {
         wires,
       }),
     );
+  }
+
+  /**
+   * Drop the user-chosen MIDPOINTS (format v10) of one wire (or several) and,
+   * when a re-router is injected, regenerate a clean route — "tidy these wires"
+   * for a user who no longer wants their hand-planted bends. One undo step for
+   * the whole selection; a no-op when nothing being cleared has midpoints.
+   */
+  clearWireMidpoints(circuitIdx: number, wireIdxs: number | readonly number[]): void {
+    const c = this.circuit(circuitIdx);
+    const idxs = (typeof wireIdxs === "number" ? [wireIdxs] : wireIdxs).filter(
+      (i) => c.wires[i]?.midpoints !== undefined,
+    );
+    if (idxs.length === 0) return; // nothing to clear
+    const clearOne = (w: CsxWire): CsxWire => {
+      const cleared: CsxWire = { ...w };
+      delete cleared.midpoints;
+      const rerouted = this.rerouteWire?.(cleared, c, this.data.circuits);
+      return rerouted !== null && rerouted !== undefined && rerouted.length >= 2
+        ? { ...cleared, points: rerouted.map((p) => [p[0], p[1]] as [number, number]) }
+        : cleared;
+    };
+    const set = new Set(idxs);
+    let wires = c.wires.map((x, i) => (set.has(i) ? clearOne(x) : x));
+    for (const i of set) wires = reprojectJunctionDependents(wires, i);
+    this.exec("clear wire midpoints", undefined, this.replaceCircuit(circuitIdx, { ...c, wires }));
   }
 
   /**
@@ -969,6 +1141,16 @@ function migrate(data: CsxDocument): void {
       data.settings.delayTable = DEFAULT_DELAY_TABLE;
     }
     version = 9;
+  }
+  if (version === 9) {
+    // v10 adds per-wire user MIDPOINTS (provenance for re-routing). Purely
+    // additive — an older wire simply has none — so only the stamp changes.
+    version = 10;
+  }
+  if (version === 10) {
+    // v11 adds a wire's optional `flip` corner preference. Purely additive — an
+    // older wire keeps the default — so only the stamp changes.
+    version = 11;
   }
   if (version !== (data.version as number)) {
     data.version = version as typeof CSX_VERSION;
@@ -1210,12 +1392,18 @@ function remapJoin(e: CsxEndpoint, remap: ReadonlyMap<number, number>): CsxEndpo
 function remapPasteEndpoint(
   e: CsxEndpoint,
   idMap: ReadonlyMap<string, string>,
+  wireBase: number,
 ): CsxEndpoint | null {
   if (isPinEndpoint(e)) {
     const comp = idMap.get(e.comp);
     return comp === undefined ? null : { comp, pin: e.pin };
   }
-  return e; // junction targets were already remapped by copySelection
+  if (isJoinEndpoint(e)) {
+    // copySelection left the join at a clipboard-local index; move it past the
+    // wires already in the destination circuit.
+    return { join: { wire: e.join.wire + wireBase, segment: e.join.segment } };
+  }
+  return e; // a free end is unaffected by the paste
 }
 
 /** Rotation cycle E→S→W→N (mirrors editor/layout.nextRotation; kept local to stay schema-only). */
@@ -1269,6 +1457,31 @@ function samePoints(a: readonly [number, number][], b: readonly [number, number]
   return a.length === b.length && a.every((p, i) => p[0] === b[i][0] && p[1] === b[i][1]);
 }
 
+/** Whether two authored coordinates name the same point (float-tolerant). */
+function nearPoint(a: [number, number], b: [number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < REPAIR_EPS && Math.abs(a[1] - b[1]) < REPAIR_EPS;
+}
+
+/**
+ * Drop midpoints no longer present as vertices of `w.points` (the wire was
+ * reshaped and a user midpoint was edited away), clearing the field when none
+ * remain. Returns `w` unchanged when nothing was dropped.
+ */
+function filterMidpoints(w: CsxWire): CsxWire {
+  if (w.midpoints === undefined) return w;
+  const last = w.points.length - 1;
+  const kept = w.midpoints.filter((m) =>
+    w.points.some((p, i) => i > 0 && i < last && nearPoint(p, m)),
+  );
+  if (kept.length === w.midpoints.length) return w;
+  if (kept.length === 0) {
+    const next = { ...w };
+    delete next.midpoints;
+    return next;
+  }
+  return { ...w, midpoints: kept };
+}
+
 function sameWireList(a: readonly CsxWire[], b: readonly CsxWire[]): boolean {
   return a.length === b.length && a.every((w, i) => w === b[i]);
 }
@@ -1320,7 +1533,7 @@ export function followWire(
     }
     points = repairEnd(points, end, facingAxis(g.facing));
   }
-  return samePoints(points, w.points) ? w : { ...w, points };
+  return filterMidpoints(samePoints(points, w.points) ? w : { ...w, points });
 }
 
 /** Axis of an axis-aligned segment; null when diagonal or zero-length. */
@@ -1329,6 +1542,26 @@ function segmentAxis(a: [number, number], b: [number, number]): "h" | "v" | null
   if (Math.abs(a[1] - b[1]) < REPAIR_EPS) return "h";
   if (Math.abs(a[0] - b[0]) < REPAIR_EPS) return "v";
   return null;
+}
+
+/**
+ * Drop consecutive duplicate points — a zero-length segment is never valid.
+ * Falls back to a plain copy when deduping would leave fewer than two points
+ * (a caller needs a valid polyline, and such a collapse is a deeper defect).
+ */
+function dedupePoints(pts: readonly [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const p of pts) {
+    const last = out[out.length - 1];
+    if (
+      last === undefined ||
+      Math.abs(last[0] - p[0]) >= REPAIR_EPS ||
+      Math.abs(last[1] - p[1]) >= REPAIR_EPS
+    ) {
+      out.push([p[0], p[1]]);
+    }
+  }
+  return out.length >= 2 ? out : pts.map((p) => [p[0], p[1]]);
 }
 
 /**
@@ -1345,7 +1578,7 @@ export function repairEnd(
   axis: "h" | "v" | null,
 ): [number, number][] {
   const pts = points.map((p) => [p[0], p[1]] as [number, number]);
-  if (axis === null || pts.length < 2) return pts;
+  if (axis === null || pts.length < 2) return dedupePoints(pts);
   const forward = end === "a";
   const at = (i: number) => (forward ? i : pts.length - 1 - i);
   let want: "h" | "v" = axis;
@@ -1359,7 +1592,7 @@ export function repairEnd(
         // The far end is the other wire endpoint — splice in a corner.
         const corner: [number, number] = want === "h" ? [q[0], p[1]] : [p[0], q[1]];
         pts.splice(forward ? at(i + 1) : at(i), 0, corner);
-        return pts;
+        return dedupePoints(pts);
       }
       if (want === "h") q[1] = p[1];
       else q[0] = p[0];
@@ -1371,7 +1604,7 @@ export function repairEnd(
     want = want === "h" ? "v" : "h";
     i++;
   }
-  return pts;
+  return dedupePoints(pts);
 }
 
 /** Closest point on segment ab (clamped projection). */
@@ -1417,11 +1650,11 @@ export function reprojectJunctionDependents(
     const adjIdx = end === "a" ? 1 : pts.length - 2;
     const axis = segmentAxis(pts[idx], pts[adjIdx]);
     pts[idx] = nearestOnSegment(pts[idx], parent.points[segment], parent.points[segment + 1]);
-    return {
+    return filterMidpoints({
       ...w,
       [end]: { join: { wire: ep.join.wire, segment } },
       points: repairEnd(pts, end, axis),
-    };
+    });
   };
 
   // The wire's OWN joins first (UI_OVERHAUL §81): a branch dragged away from a
@@ -1462,4 +1695,15 @@ export function freePinName(
   let n = 0;
   while (taken.has(`${prefix}${n}`)) n++;
   return `${prefix}${n}`;
+}
+
+/**
+ * The first free `<base>2`, `<base>3`, … name (compared case-insensitively),
+ * used when a copy/paste clones a part whose name already exists in the target
+ * circuit. Interface pins go through [`freePinName`] instead.
+ */
+export function uniqueName(base: string, taken: ReadonlySet<string>): string {
+  let n = 2;
+  while (taken.has(`${base}${n}`.toLowerCase())) n++;
+  return `${base}${n}`;
 }

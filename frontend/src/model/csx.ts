@@ -17,7 +17,7 @@
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
 /** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
-export const CSX_VERSION = 9;
+export const CSX_VERSION = 11;
 
 /** The one graded delay table (v9); mirrors `TimingTable::default_name()` in Rust. */
 export const DEFAULT_DELAY_TABLE = "mips-r2000-2um-v1";
@@ -107,6 +107,23 @@ export interface CsxWire {
    * is a label, not a merging rule (docs/format-v2.md §9).
    */
   name?: string;
+  /**
+   * Optional user-chosen MIDPOINTS (format v10): the interior points a person
+   * planted while drawing the wire, as absolute grid coordinates in drawing
+   * order `a` → `b`. They are **provenance for re-routing** — when a part moves
+   * or rotates, the editor regenerates the route *through* these points instead
+   * of discarding the user's deliberate bends. The engine ignores them beyond
+   * round-tripping. Omitted when the wire has none.
+   */
+  midpoints?: [number, number][];
+  /**
+   * Optional corner-flip preference (format v11): true when the wire was drawn
+   * with the X "turn early" preference rather than the default "turn late". The
+   * engine ignores it; the editor re-applies it when re-routing on a
+   * move/rotate so the bend returns on the side the user chose. Omitted when
+   * false.
+   */
+  flip?: boolean;
 }
 
 export interface CsxCircuit {

@@ -70,6 +70,8 @@ export interface EditorHandle {
   cut(): void;
   paste(): void;
   selectAll(): void;
+  /** Drop the selected wire's user midpoints and straighten it (format v10). */
+  clearMidpoints(): void;
   /** Select exactly these parts (the load-error banner's Fix, §100). */
   select(components: readonly string[]): void;
 }
@@ -480,6 +482,10 @@ export default forwardRef<
       },
       selectAll: () => {
         tool.selectAll();
+        bump();
+      },
+      clearMidpoints: () => {
+        tool.clearMidpoints();
         bump();
       },
       select: (components) => {

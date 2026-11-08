@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 11;
 
 /// The standing notice every saved file carries (v8). It is written for any
 /// reader, human or machine: see `docs/format-v2.md` §1. The app owns this
@@ -228,6 +228,27 @@ pub struct Wire {
     /// so unnamed wires stay byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Optional user-chosen MIDPOINTS: the interior points a person planted while
+    /// drawing the wire (each an absolute grid coordinate, in drawing order
+    /// `a` → `b`). They are **provenance, not connectivity** — the engine ignores
+    /// them beyond round-tripping — and the editor uses them to re-route the wire
+    /// when a part moves/rotates *without* losing the user's deliberate bends.
+    /// Omitted when empty, so wires with no user midpoints stay byte-identical.
+    #[serde(default, with = "wire_points", skip_serializing_if = "Vec::is_empty")]
+    pub midpoints: Vec<[f64; 2]>,
+    /// Optional corner-flip preference (v11): true when the wire was drawn with
+    /// the X "turn early" preference rather than the default "turn late". It is
+    /// **provenance, not connectivity** — the engine ignores it — and the editor
+    /// re-applies it when it re-routes the wire on a move/rotate, so the bend
+    /// comes back on the side the user chose. Omitted (false) by default, so
+    /// ordinary wires stay byte-identical.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip: bool,
+}
+
+/// serde `skip_serializing_if` for a default-`false` bool flag.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Serde wire-points codec: parses any finite JSON numbers, serializes
@@ -454,6 +475,19 @@ fn migrate(v: &mut Json) {
         // than failing to load.
         retarget_retired_delay_table(v);
         version = 9;
+    }
+    if version == 9 {
+        // v10 adds per-wire user MIDPOINTS (§2): the interior points a person
+        // planted while drawing, kept so re-routing on a move/rotate does not
+        // discard the user's deliberate bends. Purely additive — an older wire
+        // simply has none — so only the version stamp changes.
+        version = 10;
+    }
+    if version == 10 {
+        // v11 adds a wire's optional `flip` corner preference (§2): whether it
+        // was drawn with the X "turn early" preference. Purely additive — an
+        // older wire simply keeps the default — so only the version stamp changes.
+        version = 11;
     }
     if version != start {
         v["version"] = Json::from(version);
@@ -1210,6 +1244,8 @@ mod tests {
             }),
             points: vec![[0.0, 0.0]; n],
             color: None,
+            midpoints: vec![],
+            flip: false,
         };
         assert_eq!(w(0).segment_count(), 1);
         assert_eq!(w(2).segment_count(), 1);
@@ -1248,6 +1284,110 @@ mod tests {
         assert_eq!(pts[1][1].as_f64(), Some(0.5));
         let back = load_document(text.as_bytes()).expect("canonical output must reload");
         assert_eq!(doc, back);
+    }
+
+    #[test]
+    fn wire_midpoints_roundtrip_and_empty_is_omitted() {
+        // A wire carrying user midpoints round-trips them; a wire with none
+        // omits the field entirely, so it stays byte-identical to a pre-v10 file.
+        let json = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 10,
+            "name": "mid",
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[0, 0], [2, 0], [2, 5], [4, 5], [4, 1]],
+                      "midpoints": [[2, 0], [2, 5]] }
+                ]
+            }]
+        }"#;
+        let doc = load_document(json.as_bytes()).expect("midpoints must load");
+        assert_eq!(doc.circuits[0].wires[0].midpoints, vec![[2.0, 0.0], [2.0, 5.0]]);
+        let text = to_canonical_json(&doc);
+        assert!(text.contains("\"midpoints\""));
+        let back = load_document(text.as_bytes()).expect("canonical output must reload");
+        assert_eq!(doc, back);
+
+        // No midpoints → the field is absent (a v9 file loads and re-saves with
+        // no such key, so existing files are untouched).
+        let plain = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 9,
+            "name": "plain",
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[0, 0], [4, 1]] }
+                ]
+            }]
+        }"#;
+        let d2 = load_document(plain.as_bytes()).expect("v9 must load and migrate");
+        assert_eq!(d2.version, FORMAT_VERSION);
+        assert!(d2.circuits[0].wires[0].midpoints.is_empty());
+        assert!(!to_canonical_json(&d2).contains("midpoints"));
+    }
+
+    #[test]
+    fn wire_flip_roundtrips_and_default_is_omitted() {
+        // `flip: true` round-trips; `false` is omitted so v10 wires stay
+        // byte-identical.
+        let with = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 11,
+            "name": "flip",
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[0, 0], [1, 0], [1, 1], [4, 1]], "flip": true }
+                ]
+            }]
+        }"#;
+        let doc = load_document(with.as_bytes()).expect("flip must load");
+        assert!(doc.circuits[0].wires[0].flip);
+        let text = to_canonical_json(&doc);
+        assert!(text.contains("\"flip\""));
+        assert_eq!(doc, load_document(text.as_bytes()).expect("canonical must reload"));
+
+        let without = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 10,
+            "name": "plain",
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "c0", "type": "wiring.pin", "pos": [0, 0], "name": "a" },
+                    { "id": "c1", "type": "gate.not", "pos": [4, 0] }
+                ],
+                "wires": [
+                    { "a": { "comp": "c0", "pin": "pin" }, "b": { "comp": "c1", "pin": "in" },
+                      "points": [[0, 0], [4, 1]] }
+                ]
+            }]
+        }"#;
+        let d2 = load_document(without.as_bytes()).expect("v10 must load and migrate");
+        assert_eq!(d2.version, FORMAT_VERSION);
+        assert!(!d2.circuits[0].wires[0].flip);
+        assert!(!to_canonical_json(&d2).contains("flip"));
     }
 
     #[test]

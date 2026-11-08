@@ -34,6 +34,24 @@ function distanceToPolyline(p: Vec2, points: readonly [number, number][]): numbe
 }
 
 /**
+ * Force a polyline orthogonal by splicing a corner into any diagonal segment
+ * (horizontal run, then vertical). The router only ever emits orthogonal routes,
+ * so this guards the interactive EDITS — a segment slide on a wire that already
+ * crosses itself can otherwise leave a skew.
+ */
+function orthogonalize(points: readonly Vec2[]): Vec2[] {
+  const out: Vec2[] = [];
+  for (const p of points) {
+    const prev = out[out.length - 1];
+    if (prev !== undefined && Math.abs(prev.x - p.x) > 1e-9 && Math.abs(prev.y - p.y) > 1e-9) {
+      out.push({ x: p.x, y: prev.y });
+    }
+    out.push({ x: p.x, y: p.y });
+  }
+  return cleanPolyline(out);
+}
+
+/**
  * ToolMachine (FRONTEND.md U3): the editor interaction state machine,
  * DOM-free and unit-testable. Pointer/key events go in (world coords),
  * document ops + selection + overlay state come out. The React host
@@ -81,22 +99,35 @@ type DragState =
       segmentStart: { wireIdx: number; segment: number } | null;
     }
   | { kind: "dragging"; start: Vec2; applied: Vec2 }
-  | { kind: "wire-bend"; wireIdx: number; pointIdx: number; original: [number, number][] }
+  | {
+      kind: "wire-bend";
+      wireIdx: number;
+      pointIdx: number;
+      original: [number, number][];
+      /** The wire's user midpoints at press time (so a dragged bend keeps its status). */
+      midpoints?: [number, number][];
+    }
   | {
       kind: "wire-segment";
       wireIdx: number;
       segment: number;
       original: [number, number][];
+      /** The wire's user midpoints at press time (so a slid bend keeps its status). */
+      midpoints?: [number, number][];
     }
   | { kind: "boxing"; start: Vec2; current: Vec2; additive: boolean };
 
 interface WiringState {
   from: CsxEndpoint;
+  /** The sheet this wire started in — a switch abandons it (ids repeat per sheet). */
+  circuit: number;
   /** Start-end routing context: pin facing + body, or junction exit dir. */
   startDir: Rotation | null;
   startBody: Rect | null;
   /** Planted anchor points (first = the from-endpoint coordinate). */
   anchors: Vec2[];
+  /** User-chosen interior waypoints (the clicks that became wire midpoints). */
+  midpoints: Vec2[];
   cursor: Vec2;
   /** X key while routing: prefer turning early (corner flip). */
   flip: boolean;
@@ -132,6 +163,11 @@ function dot2(a: Vec2, b: Vec2): number {
 
 function p2v(p: [number, number]): Vec2 {
   return { x: p[0], y: p[1] };
+}
+
+/** Exact point equality (both coordinates come from the same grid math). */
+function sameVec(a: Vec2, b: Vec2): boolean {
+  return Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
 }
 
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
@@ -178,6 +214,8 @@ export interface CanvasMenuState {
   segment: boolean;
   /** A paste is possible (the clipboard holds components). */
   clipboard: boolean;
+  /** A wire under the pointer / in the selection carries user midpoints (v10). */
+  midpoints: boolean;
 }
 
 export class ToolMachine {
@@ -317,6 +355,9 @@ export class ToolMachine {
       wires: this.selection.wires.size,
       segment: this.selection.segment !== null,
       clipboard: this.clipboard !== null && this.clipboard.components.length > 0,
+      midpoints: [...this.selection.wires].some(
+        (i) => this.doc.circuit(this.circuitIdx()).wires[i]?.midpoints !== undefined,
+      ),
     });
     this.changed();
   }
@@ -418,9 +459,11 @@ export class ToolMachine {
     if (pin !== null) {
       this.wiring = {
         from: { comp: pin.compId, pin: pin.pin },
+        circuit: this.circuitIdx(),
         startDir: this.scene.pinFacing(pin.compId, pin.pin),
         startBody: this.scene.rectOf(pin.compId),
         anchors: [pin.pos],
+        midpoints: [],
         cursor: pin.pos,
         flip: false,
       };
@@ -436,13 +479,15 @@ export class ToolMachine {
         this.selection.set([], [corner.wireIdx]);
       }
       this.pressWireIdx = corner.wireIdx;
+      const bendWire = this.doc.circuit(this.circuitIdx()).wires[corner.wireIdx];
       this.drag = {
         kind: "wire-bend",
         wireIdx: corner.wireIdx,
         pointIdx: corner.pointIdx,
-        original: this.doc
-          .circuit(this.circuitIdx())
-          .wires[corner.wireIdx].points.map((p) => [p[0], p[1]] as [number, number]),
+        original: bendWire.points.map((p) => [p[0], p[1]] as [number, number]),
+        ...(bendWire.midpoints !== undefined && {
+          midpoints: bendWire.midpoints.map((m) => [m[0], m[1]] as [number, number]),
+        }),
       };
       this.changed();
       return;
@@ -571,12 +616,18 @@ export class ToolMachine {
         // perpendicular, from anywhere along it (not only its corner).
         if (this.drag.segmentStart !== null) {
           const { wireIdx, segment } = this.drag.segmentStart;
-          const original = this.doc
-            .circuit(this.circuitIdx())
-            .wires[wireIdx]?.points.map((p) => [p[0], p[1]] as [number, number]);
+          const segWire = this.doc.circuit(this.circuitIdx()).wires[wireIdx];
+          const original = segWire?.points.map((p) => [p[0], p[1]] as [number, number]);
           if (original === undefined) break;
-          this.drag = { kind: "wire-segment", wireIdx, segment, original };
-          this.slideSegment(original, wireIdx, segment, world);
+          const midpoints = segWire.midpoints?.map((m) => [m[0], m[1]] as [number, number]);
+          this.drag = {
+            kind: "wire-segment",
+            wireIdx,
+            segment,
+            original,
+            ...(midpoints !== undefined && { midpoints }),
+          };
+          this.slideSegment(original, wireIdx, segment, world, midpoints);
           this.changed();
           break;
         }
@@ -595,9 +646,11 @@ export class ToolMachine {
                 );
           this.wiring = {
             from: { join: { wire: ws.wireIdx, segment: ws.segment } },
+            circuit: this.circuitIdx(),
             startDir,
             startBody: null,
             anchors: [ws.point],
+            midpoints: [],
             cursor: world,
             flip: false,
           };
@@ -633,7 +686,7 @@ export class ToolMachine {
         const circuit = this.doc.circuit(this.circuitIdx());
         const w = circuit.wires[d.wireIdx];
         if (w === undefined || d.pointIdx <= 0 || d.pointIdx + 1 >= d.original.length) break;
-        const p = snapPoint(world, 1);
+        const p = snapPoint(world, 0.5);
         const prev = d.original[d.pointIdx - 1];
         const next = d.original[d.pointIdx + 1];
         const cur = d.original[d.pointIdx];
@@ -659,12 +712,32 @@ export class ToolMachine {
           ...leg2.slice(1),
           ...d.original.slice(d.pointIdx + 1).map(p2v),
         ]).map((q) => [q.x, q.y]);
-        this.doc.updateWirePoints(this.circuitIdx(), d.wireIdx, points);
+        // If the dragged bend was a user midpoint, it stays one, moved to `p`.
+        const mapped: [number, number][] | undefined =
+          d.midpoints === undefined
+            ? undefined
+            : d.midpoints.map((m): [number, number] =>
+                m[0] === cur[0] && m[1] === cur[1] ? [p.x, p.y] : m,
+              );
+        this.doc.updateWirePoints(
+          this.circuitIdx(),
+          d.wireIdx,
+          points,
+          undefined,
+          undefined,
+          mapped,
+        );
         this.changed();
         break;
       }
       case "wire-segment":
-        this.slideSegment(this.drag.original, this.drag.wireIdx, this.drag.segment, world);
+        this.slideSegment(
+          this.drag.original,
+          this.drag.wireIdx,
+          this.drag.segment,
+          world,
+          this.drag.midpoints,
+        );
         this.changed();
         break;
       case "boxing":
@@ -689,6 +762,7 @@ export class ToolMachine {
     wireIdx: number,
     segment: number,
     world: Vec2,
+    midpoints?: readonly [number, number][],
   ): void {
     const n = original.length;
     if (n < 2 || segment < 0 || segment + 1 >= n) return;
@@ -713,8 +787,18 @@ export class ToolMachine {
         out.push(moved);
       }
     }
-    const cleaned = cleanPolyline(out).map((p) => [p.x, p.y] as [number, number]);
-    this.doc.updateWirePoints(this.circuitIdx(), wireIdx, cleaned);
+    const cleaned = orthogonalize(out).map((p) => [p.x, p.y] as [number, number]);
+    // A user midpoint sitting on one of the slid endpoints rides along.
+    const mapped: [number, number][] | undefined =
+      midpoints === undefined
+        ? undefined
+        : midpoints.map((m): [number, number] => {
+            const onA = m[0] === a[0] && m[1] === a[1];
+            const onB = m[0] === b[0] && m[1] === b[1];
+            if (onA || onB) return horizontal ? [m[0], c] : [c, m[1]];
+            return m;
+          });
+    this.doc.updateWirePoints(this.circuitIdx(), wireIdx, cleaned, undefined, undefined, mapped);
   }
 
   up(info: PointerInfo, world?: Vec2): void {
@@ -750,6 +834,21 @@ export class ToolMachine {
           this.commitWire(w, routed.b, routed.points);
           this.drag = { kind: "idle" };
           return;
+        }
+        // Released back on the wire's own source part (or the start pin): treat
+        // it as "never mind" rather than hanging a stub beside the pin.
+        if (isPinEndpoint(w.from)) {
+          const hitPin = this.scene.pickPin(release);
+          const hitComp = this.scene.pickComponent(release);
+          if (
+            (hitPin !== null && hitPin.compId === w.from.comp) ||
+            (hitComp !== null && hitComp.compId === w.from.comp)
+          ) {
+            this.wiring = null;
+            this.drag = { kind: "idle" };
+            this.changed();
+            return;
+          }
         }
         // Released over empty space: hang the wire there with a FREE endpoint
         // (electrically open until it is later attached). Dragging a wire out
@@ -880,6 +979,9 @@ export class ToolMachine {
       return;
     }
     if (this.selection.components.size > 0) {
+      // A structural edit invalidates any in-progress wire: its start anchor was
+      // captured at press time, so the start pin may have moved/rotated away.
+      this.wiring = null;
       this.doc.rotateComponents(this.circuitIdx(), this.selection.components, ccw);
       this.changed();
     }
@@ -899,6 +1001,7 @@ export class ToolMachine {
       return;
     }
     if (this.selection.components.size > 0) {
+      this.wiring = null; // a facing change moves the start pin too (see rotateSelection)
       this.doc.setRotation(this.circuitIdx(), this.selection.components, rot);
       this.changed();
     }
@@ -937,8 +1040,23 @@ export class ToolMachine {
     return null;
   }
 
+  /**
+   * Drop the user-chosen midpoints (format v10) of the selected wire(s),
+   * re-routing each to a clean route — "straighten this wire". No-op when
+   * nothing (or nothing with midpoints) is selected.
+   */
+  clearMidpoints(): void {
+    this.wiring = null;
+    const wires =
+      this.selection.segment !== null ? [this.selection.segment.wire] : [...this.selection.wires];
+    if (wires.length === 0) return;
+    this.doc.clearWireMidpoints(this.circuitIdx(), wires);
+    this.changed();
+  }
+
   deleteSelection(): void {
     if (this.selection.isEmpty) return;
+    this.wiring = null; // deleting/re-routing under an in-progress wire invalidates it
     const piece = this.selection.segment;
     if (piece !== null) {
       this.doc.removeSegment(this.circuitIdx(), piece.wire, piece.seg);
@@ -970,6 +1088,7 @@ export class ToolMachine {
 
   paste(): void {
     if (this.clipboard === null || this.clipboard.components.length === 0) return;
+    this.wiring = null; // fresh geometry under an in-progress wire invalidates it
     const { components, wires } = this.clipboard;
     const pasted = this.doc.paste(this.circuitIdx(), components, wires, {
       x: PASTE_OFFSET,
@@ -1074,6 +1193,26 @@ export class ToolMachine {
   ): { points: Vec2[]; finish: { b: CsxEndpoint; endPos: Vec2 } | null } {
     const last = w.anchors.at(-1)!;
     const firstLeg = w.anchors.length === 1;
+    // A sheet switch under an in-progress wire abandons it: the anchors name the
+    // OLD circuit's components, and ids repeat per sheet (c1, c2, …), so
+    // committing here could silently attach the wire to a different part.
+    if (w.circuit !== this.circuitIdx()) {
+      this.wiring = null;
+      return { points: [], finish: null };
+    }
+    // The start part can move under an in-progress wire through a path the
+    // ToolMachine never sees — an Inspector edit (rotate/attrs), undo/redo, or a
+    // load. Re-read the pin's geometry so the committed start lands on it
+    // instead of the position captured at press time. (Only the FIRST leg: a
+    // planted bend is frozen, and re-anchoring the start would skew it.)
+    if (firstLeg && isPinEndpoint(w.from)) {
+      const pos = this.scene.pinPosition(w.from.comp, w.from.pin);
+      if (pos !== null) {
+        w.anchors[0] = pos;
+        w.startDir = this.scene.pinFacing(w.from.comp, w.from.pin);
+        w.startBody = this.scene.rectOf(w.from.comp);
+      }
+    }
     const aEnd: LegEnd = firstLeg
       ? { dir: w.startDir, body: w.startBody }
       : { dir: null, body: null };
@@ -1109,7 +1248,7 @@ export class ToolMachine {
         },
       };
     }
-    const cursor = snapPoint(world, 1);
+    const cursor = snapPoint(world, 0.5);
     const leg = routeLeg(last, aEnd, cursor, { dir: null, body: null }, { flip: w.flip, incoming });
     return { points: cleanPolyline([...w.anchors, ...leg.slice(1)]), finish: null };
   }
@@ -1122,23 +1261,64 @@ export class ToolMachine {
   /**
    * Finish the wire when `world` is on a valid target (a pin that isn't the
    * start pin, or a wire → junction); otherwise plant a waypoint.
+   *
+   * `buildRoute` returns the FULL accumulated route (anchors + the new leg), so
+   * the anchors are *replaced* by it — appending its tail would fold the whole
+   * route back onto itself and every additional waypoint would double the list
+   * (diagonals, reversals, self-overlaps).
    */
   private finishOrBend(world: Vec2): void {
     const w = this.wiring!;
+    // Clicking the START pin again means "never mind" — cancel, rather than
+    // plant a degenerate bend beside it (a confused double-click).
+    if (isPinEndpoint(w.from)) {
+      const hit = this.scene.pickPin(world);
+      if (hit !== null && hit.compId === w.from.comp && hit.pin === w.from.pin) {
+        this.wiring = null;
+        this.changed();
+        return;
+      }
+    }
+    const last = w.anchors.at(-1);
     const { points, finish } = this.buildRoute(w, world);
     if (finish !== null) {
       this.commitWire(w, finish.b, points);
       return;
     }
-    w.anchors.push(...points.slice(1));
+    const planted = points.at(-1);
+    // A click that resolved back onto the current anchor extends nothing (a
+    // double-click on the same spot) — do not record a duplicate midpoint.
+    if (planted === undefined || (last !== undefined && sameVec(last, planted))) {
+      this.changed();
+      return;
+    }
+    w.anchors = points;
+    // The clicked point is a user-chosen waypoint: remember it so the wire's
+    // midpoints survive re-routing when a part is later moved/rotated.
+    w.midpoints.push(planted);
     this.changed();
   }
 
   private commitWire(w: WiringState, b: CsxEndpoint, points: readonly Vec2[]): void {
     const pts: [number, number][] = points.map((p) => [p.x, p.y]);
     if (pts.length >= 2) {
+      // Keep only the clicked waypoints that survived as STRICT-INTERIOR
+      // vertices — a collinear click leaves no corner, and the endpoints are not
+      // midpoints, so neither is recorded.
+      const midpoints: [number, number][] = w.midpoints
+        .map((p) => [p.x, p.y] as [number, number])
+        .filter((m) => {
+          const at = pts.findIndex((p) => p[0] === m[0] && p[1] === m[1]);
+          return at > 0 && at < pts.length - 1;
+        });
       try {
-        this.doc.addWire(this.circuitIdx(), { a: w.from, b, points: pts });
+        this.doc.addWire(this.circuitIdx(), {
+          a: w.from,
+          b,
+          points: pts,
+          ...(midpoints.length > 0 && { midpoints }),
+          ...(w.flip && { flip: true }),
+        });
         this.matchProbeWidth(w.from, b);
       } catch {
         // invalid wire (e.g. onto itself): abort quietly
