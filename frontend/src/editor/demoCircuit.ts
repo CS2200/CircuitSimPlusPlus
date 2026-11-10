@@ -22,7 +22,7 @@ export function buildDemoDoc(): CircuitDocument {
     doc.addComponent(c, {
       type,
       pos: [4 + (i % 4) * 10, 4 + Math.floor(i / 4) * 8],
-      ...(type === "gate.nand" ? { attrs: { negateInputs: ["in1"] } } : {}),
+      ...(type === "gate.nand" ? { attrs: { negate: [1] } } : {}),
     });
   });
   doc.addComponent(c, {

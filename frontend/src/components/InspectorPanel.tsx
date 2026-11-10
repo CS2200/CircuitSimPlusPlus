@@ -4,6 +4,8 @@ import type { CsxCircuit, CsxComponent, Rotation } from "../model/csx";
 import {
   editableAttrs,
   compPins,
+  negateList,
+  parseNegateList,
   subcircuitSizeLimits,
   typeDisplayName,
   type AttrField,
@@ -976,6 +978,37 @@ function FieldRow({
   if (field.kind === "splits") {
     return (
       <SplitsField value={value} label={field.label} onCommit={(v) => onCommitAttr(field.key, v)} />
+    );
+  }
+
+  if (field.kind === "negate") {
+    // A gate's input bubbles (`negate`) as a comma/space-separated list of input
+    // indices — a field, not one checkbox per input (format-v2 §4). Parsed and
+    // canonicalized on blur/Enter; empty clears the attr.
+    const inputs = Math.max(2, typeof comp.attrs?.inputs === "number" ? comp.attrs.inputs : 2);
+    const stored = negateList(value);
+    const text = draft?.key === key ? draft.text : stored.join(", ");
+    return (
+      <label className="inspector-row">
+        <span>{field.label}</span>
+        <input
+          value={text}
+          placeholder={field.placeholder}
+          spellCheck={false}
+          aria-label={field.label}
+          onChange={(e) => onDraft({ key, text: e.target.value })}
+          onBlur={() => {
+            if (draft?.key !== key) return;
+            const next = parseNegateList(draft.text, inputs);
+            const same = next.length === stored.length && next.every((v, i) => v === stored[i]);
+            if (!same) onCommitAttr(field.key, next.length > 0 ? next : null);
+            onDraft(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </label>
     );
   }
 

@@ -1187,6 +1187,19 @@ export type AttrField =
       placeholder?: string;
       group?: string;
       hint?: string;
+    }
+  /**
+   * A comma/space-separated list of input indices to invert — a gate's
+   * `negate` (format-v2 §4). A field, not one checkbox per input: most inputs
+   * are not negated, so a checkbox array is mostly empty noise.
+   */
+  | {
+      key: string;
+      label: string;
+      kind: "negate";
+      placeholder?: string;
+      group?: string;
+      hint?: string;
     };
 
 const BITSIZE_FIELD: AttrField = {
@@ -1240,6 +1253,43 @@ const MEMORY_WIDTH_FIELDS: AttrField[] = [
   { ...BITSIZE_FIELD, label: "Data Bits" },
 ];
 
+// ---- gate input negation (`negate`, format-v2 §4) ----
+
+/**
+ * A gate's `negate` list as sorted, unique, non-negative input indices — the
+ * canonical form the engine writes (it sorts and dedups on load). Junk entries
+ * are dropped; an absent/blank attr is `[]`.
+ */
+export function negateList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  for (const item of value) {
+    if (typeof item === "number" && Number.isInteger(item) && item >= 0) seen.add(item);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+/** The `negate` field's text for a stored list (`"0, 2"`; `""` when none). */
+export function formatNegateList(value: unknown): string {
+  return negateList(value).join(", ");
+}
+
+/**
+ * Parse the `negate` field's text into indices within `0..inputs`. Commas,
+ * spaces and stray separators are all accepted; out-of-range and non-integer
+ * tokens are dropped, and the result is sorted and deduped so what gets
+ * committed is exactly the engine's canonical form.
+ */
+export function parseNegateList(text: string, inputs: number): number[] {
+  const seen = new Set<number>();
+  for (const part of text.split(/[\s,]+/)) {
+    if (part === "") continue;
+    const n = Number(part);
+    if (Number.isInteger(n) && n >= 0 && n < inputs) seen.add(n);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
 export function editableAttrs(type: string): AttrField[] {
   return baseFields(type);
 }
@@ -1257,10 +1307,27 @@ function baseFields(type: string): AttrField[] {
         min: 2,
         max: 32,
         group: "Width",
+        // Shrinking a gate drops any bubble on an input that no longer exists:
+        // the engine rejects a `negate` index >= `inputs` (format-v2 §4), so a
+        // stale index left behind would stop the file from loading.
+        attrsFor: (value, attrs) => {
+          const kept = negateList(attrs.negate).filter((i) => i < value);
+          return { inputs: value, negate: kept.length > 0 ? kept : null };
+        },
       });
       // Gate inputs are not plain any more: `negate` lists the inputs that carry an
       // inversion bubble (format-v2 §4), restored after §24 removed it — a dropped
       // bubble is different logic, and every pipelined course design uses them.
+      // Edited as a list of input indices, not one checkbox per input: most inputs
+      // are not negated, so a checkbox array is mostly empty noise.
+      fields.push({
+        key: "negate",
+        label: "Negate inputs",
+        kind: "negate",
+        placeholder: "0, 2",
+        group: "Options",
+        hint: "Input indices drawn with an inversion bubble (in0 = 0).",
+      });
     }
     return fields;
   }

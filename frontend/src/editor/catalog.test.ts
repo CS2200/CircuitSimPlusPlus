@@ -7,8 +7,11 @@ import {
   compSpec,
   defaultAttrs,
   editableAttrs,
+  formatNegateList,
   knownTypes,
   memAddrBits,
+  negateList,
+  parseNegateList,
   typeDisplayName,
   type AttrField,
 } from "./catalog";
@@ -101,7 +104,7 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     // A breakpoint's value is edited in the chosen radix, exactly like a
     // constant's (§55), and `radix` is display-only on both (§90).
     expect(keys("debug.breakpoint")).toEqual(["bitsize", "value", "radix"]);
-    expect(keys("gate.and")).toEqual(["bitsize", "inputs"]);
+    expect(keys("gate.and")).toEqual(["bitsize", "inputs", "negate"]);
     expect(keys("gate.not")).toEqual(["bitsize"]);
     // A memory's clock and reset pins are always drawn, so there is no visibility
     // flag to edit any more: the editor wires them at placement instead
@@ -205,6 +208,45 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     const pins = compPins({ type: "wiring.splitter", attrs: defaultAttrs("wiring.splitter") });
     expect(pins.find((p) => p.name === "bus")?.bitsize).toBe(4);
     expect(pins.map((p) => p.name)).toEqual(["bus", "b0", "b1", "b2", "b3"]);
+  });
+
+  it("edits a gate's input bubbles as an index list, not a checkbox grid", () => {
+    // The field is a text list of input indices (`negate`), not one checkbox per
+    // input — most inputs are not negated.
+    const negate = editableAttrs("gate.and").find((f) => f.key === "negate");
+    expect(negate?.kind).toBe("negate");
+    // A single-input part (NOT) has no `negate`: there is nothing to invert.
+    expect(editableAttrs("gate.not").some((f) => f.key === "negate")).toBe(false);
+
+    // Parsing accepts commas/spaces, drops out-of-range and junk, sorts, dedups.
+    expect(parseNegateList("2, 0 1", 3)).toEqual([0, 1, 2]);
+    expect(parseNegateList("1,1,0", 2)).toEqual([0, 1]);
+    expect(parseNegateList("5", 2)).toEqual([]); // out of range for a 2-input gate
+    expect(parseNegateList("  ", 2)).toEqual([]);
+    expect(parseNegateList("x, 1", 2)).toEqual([1]);
+
+    // Stored lists read back canonically.
+    expect(formatNegateList([2, 0, 0])).toBe("0, 2");
+    expect(formatNegateList(undefined)).toBe("");
+    expect(negateList([1, -1, 2.5, 3])).toEqual([1, 3]);
+  });
+
+  it("shrinking a gate's inputs drops bubbles on inputs that no longer exist", () => {
+    const inputs = editableAttrs("gate.and").find((f) => f.key === "inputs");
+    if (inputs?.kind !== "picker") throw new Error("expected an Inputs picker");
+    // A 4-input gate with bubbles on in1 and in3, shrunk to 2 inputs: in3's
+    // bubble goes (the engine rejects a `negate` index >= `inputs`); in1 stays.
+    expect(inputs.attrsFor?.(2, { inputs: 4, negate: [1, 3] })).toEqual({
+      inputs: 2,
+      negate: [1],
+    });
+    // Every bubble pruned → the attr is cleared, not left as an empty array.
+    expect(inputs.attrsFor?.(2, { inputs: 4, negate: [3] })).toEqual({
+      inputs: 2,
+      negate: null,
+    });
+    // A gate with no bubbles writes nothing extra.
+    expect(inputs.attrsFor?.(3, { inputs: 2 })).toEqual({ inputs: 3, negate: null });
   });
 
   it("the bit extender reads inBits/outBits, not bitsize", () => {

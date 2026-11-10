@@ -2892,3 +2892,23 @@ circuit's **name** and a port's **name**.
 `circuits.spec.ts` (close-and-reopen via the tree, delete-asks, an instance tree, and a sheet
 rename that stays wired). The renames are unit-tested in `model/document.test.ts`; the tree
 derivation in `lib/subcircuit.test.ts`.
+
+## 102. Per-input negation comes back, as a list (2026-11-10)
+
+- **A gate can invert individual inputs again** — as `negate` (format-v2 §4),
+  the engine's canonical spelling, _not_ the retired `negateInputs` (§24). The
+  Inspector offers it as a **"Negate inputs" text field**: a comma/space list of
+  the input indices that carry an inversion bubble (`0, 2`), parsed and
+  canonicalized on blur/Enter and cleared when empty. A field, not one checkbox
+  per input — most inputs are not negated, so a checkbox grid was mostly empty
+  noise (professor's call).
+- **Shrinking a gate prunes its bubbles.** The Inputs picker's commit now drops
+  any `negate` index that is no longer `< inputs` (the engine rejects a stale
+  index, which would stop the file from loading) and clears the attr when none
+  remain.
+- **Planned follow-up:** clicking a drawn input bubble toggles that input — a
+  canvas affordance on top of the field, shipped separately.
+- The demo circuit's `negateInputs` (a §24 leftover that no longer rendered) is
+  now `negate: [1]`.
+
+**Acceptance:** frontend lint / 578 unit / build green.
