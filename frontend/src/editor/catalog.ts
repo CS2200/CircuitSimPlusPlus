@@ -810,7 +810,7 @@ const REGISTRY: Record<string, CompSpec> = {
     label: "SHIFT",
     markSize: 1.7,
   },
-  // Bit extender: inBits → outBits with zero/sign extension (format-v2 §4).
+  // Bit extender: inBits → outBits with zero/one/sign extension (format-v2 §4).
   "arith.bit-extender": {
     width: () => 4,
     height: () => 2,
@@ -1315,6 +1315,10 @@ function baseFields(type: string): AttrField[] {
             group: "Options",
             options: [
               { value: "zero", label: "Zero extend" },
+              // CE's `ExtensionType.ONE`: fill the new upper bits with 1,
+              // ignoring the input's top bit (format-v2 §4) — the mode a
+              // converted "Sign Extend" sheet muxes against `zero`.
+              { value: "one", label: "One extend" },
               { value: "sign", label: "Sign extend" },
             ],
           },

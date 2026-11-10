@@ -604,7 +604,7 @@ one `--update-snapshots` run on Linux.
   | mux/demux `selBits`                                                       | `selectBits` (1..8)                                                    |
   | decoder `selBits`                                                         | `inputBits` (default 2)                                                |
   | probe `display`                                                           | `radix`                                                                |
-  | extender `bitsize`                                                        | `inBits` (8) + `outBits` (16) + `mode` (zero/sign)                     |
+  | extender `bitsize`                                                        | `inBits` (8) + `outBits` (16) + `mode` (zero/one/sign)                 |
   | splitter: none                                                            | `splits` (required) — default mapping seeded on placement,             |
   | edited as `pin: bit,bit` lines; the bus width now follows the mapping     |
   | constant `value` (number)                                                 | hex string (default `"0"`)                                             |
