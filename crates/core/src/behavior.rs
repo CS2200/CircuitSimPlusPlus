@@ -381,7 +381,7 @@ impl Behavior {
                 autoload: autoload.clone(),
             },
             CompKind::Button => BehaviorKind::Button { pressed: false },
-            CompKind::Led { .. } => BehaviorKind::Led,
+            CompKind::Led => BehaviorKind::Led,
             CompKind::HexDisplay { .. } => BehaviorKind::HexDisplay,
             // A text annotation has no pins and no behavior — but every
             // flattened component needs a behavior, so it gets an inert one
@@ -2412,8 +2412,13 @@ mod tests {
 
         // Probe/LED/hex display: observe only — a floating net shown on a
         // probe is legal (§4.1: idle buses display Z) and must not halt.
-        for t in ["wiring.probe", "io.led", "io.hexdisplay"] {
-            let p = mk(t, json!({"bitsize": 8}));
+        // (The LED is a fixed 1-bit indicator, so it takes no `bitsize`.)
+        for (t, attrs) in [
+            ("wiring.probe", json!({"bitsize": 8})),
+            ("io.led", json!({})),
+            ("io.hexdisplay", json!({"bitsize": 8})),
+        ] {
+            let p = mk(t, attrs);
             let z = Value::z(8);
             assert_eq!(p.eval(&[&z]).unwrap(), vec![] as Vec<Value>);
         }

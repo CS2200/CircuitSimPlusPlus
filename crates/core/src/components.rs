@@ -373,11 +373,10 @@ pub enum CompKind {
     },
     /// Button (`io.button`); single 1-bit output.
     Button,
-    /// LED (`io.led`).
-    Led {
-        /// Width in bits.
-        bitsize: u32,
-    },
+    /// LED (`io.led`); a single 1-bit indicator. It carries no width — the
+    /// pin is fixed at 1 bit and `bitsize` is not a legal attr (a multi-bit
+    /// "LED" has no defined look, and the engine reads one bit).
+    Led,
     /// Hex display (`io.hexdisplay`).
     HexDisplay {
         /// Input width in bits (default 4).
@@ -1245,8 +1244,10 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         "io.led" => {
             // UI_OVERHAUL §49: the LED carries its own look — `color` (#rrggbb,
             // "" = theme accent) and `intensity` (0..100, the glow strength).
-            let mut c = AttrCheck::new(attrs, &["bitsize", "color", "intensity"]);
-            let b = c.bitsize(1);
+            // It is a **single 1-bit indicator**, so it takes no `bitsize` (a
+            // stray one is an unknown-attr error, exactly like `io.button`): a
+            // multi-bit "LED" has no defined look, and the engine reads one bit.
+            let mut c = AttrCheck::new(attrs, &["color", "intensity"]);
             let color = c.string("color", "");
             if !color.is_empty() && !is_hex_color(&color) {
                 c_issue(
@@ -1256,7 +1257,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             }
             let _ = c.uint("intensity", 80, 0, 100);
             c.finish();
-            (vec![PinSig::i("in", b)], c, CompKind::Led { bitsize: b })
+            (vec![PinSig::i("in", 1)], c, CompKind::Led)
         }
         "io.hexdisplay" => {
             let mut c = AttrCheck::new(attrs, GATE_ATTRS);
@@ -1400,6 +1401,30 @@ mod tests {
         let (p, e) = pins("gate.xor", json!({}));
         assert_eq!(p.unwrap(), vec!["in0", "in1", "out"]);
         assert!(e.is_empty());
+    }
+
+    #[test]
+    fn led_is_a_fixed_one_bit_indicator() {
+        // The LED takes no `bitsize` (UI_OVERHAUL §55): it is a 1-bit
+        // indicator, so a stray width is an unknown attr, exactly like
+        // `io.button`.
+        let (p, e) = pins("io.led", json!({}));
+        assert_eq!(p.unwrap(), vec!["in"]);
+        assert!(e.is_empty(), "{e:?}");
+
+        // Its real config is the look: `color` + `intensity`.
+        let (_, e) = pins("io.led", json!({"color": "#ff0000", "intensity": 50}));
+        assert!(e.is_empty(), "{e:?}");
+
+        let (_, e) = pins("io.led", json!({"bitsize": 4}));
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("unknown attr 'bitsize'"), "{e:?}");
+
+        // And `in` really is 1 bit however the attrs read.
+        assert_eq!(
+            names_widths("io.led", json!({})),
+            vec![("in".to_string(), 1)]
+        );
     }
 
     /// `(name, width)` per pin.

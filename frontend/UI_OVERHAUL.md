@@ -1500,7 +1500,10 @@ line-count edit (`editor.spec`).
 ## 55. Follow-up batch AT (2026-10-16): LED, slider, wire drag, previews, constants
 
 - **The LED has no bit size.** `io.led`'s Inspector drops its `bitsize` picker
-  (it is a 1-bit indicator); new LEDs no longer seed one.
+  (it is a 1-bit indicator); new LEDs no longer seed one. The engine now
+  enforces this too: `io.led` accepts no `bitsize` (a stray one is an
+  unknown-attr load error, exactly like `io.button`), and its `in` pin is
+  fixed at 1 bit.
 - **The brightness slider reaches the end.** The shared `.inspector-row input`
   rule gave the range input 8 px padding + a border, insetting the track so the
   fill stopped short of the end. The slider now resets padding/border and draws
