@@ -342,7 +342,7 @@ Validation on load (collect **all** errors; never panic; never partially load): 
 | `width` / `height` in grid units — unset derives the box from its pin count, and the pins |
 | are never crowded)                                                                        |
 | I/O (UI-only)                                                                             | button, LED, hex display, text annotation (`misc.text`) — inert headless                                                                                                                                                                                             |
-| Debugging                                                                                 | `breakpoint` — watches `in` for a `value` while `en` is armed; hitting one **pauses** the run and the next step continues (the one halt that is not a fault). The old tool's `BreakpointPeer`, kept instead of substituted with a probe                                                                                              |
+| Debugging                                                                                 | `breakpoint` — watches `in` for a `value` while `en` is a driven `1` (an unconnected `en` disarms it); hitting one **pauses** the run and the next step continues (the one halt that is not a fault). The old tool's `BreakpointPeer`, kept instead of substituted with a probe                                                                                              |
 
 Deliberately **excluded**: tunnels, named wires, `counter` (register + adder is the lesson), any "black-box convenience" parts that hide the underlying logic from students.
 

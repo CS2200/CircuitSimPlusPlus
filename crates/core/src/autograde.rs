@@ -1275,7 +1275,7 @@ mod tests {
         let base = counter_json();
         let bp = r#"{"id":"bp","type":"debug.breakpoint","pos":[0,0],
              "attrs":{"bitsize":1,"value":"1"}}"#;
-        let wire = r#"{"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}}"#;
+        let wire = r#"{"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}},{"a":{"comp":"one","pin":"out"},"b":{"comp":"bp","pin":"en"}}"#;
         base.replace(
             r#"{"id":"dmem","type":"mem.ram","pos":[0,0],"name":"dmem","#,
             &format!(

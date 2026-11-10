@@ -3456,13 +3456,15 @@ impl DelayEngine {
             },
             Class::Source => {}
             Class::Sink => {
-                // A breakpoint fires on the arrival of its **data** value:
-                // this delivery *is* the change CircuitSim CE's
-                // `Breakpoint.valueChanged` reacts to, and the enable is
-                // sampled at that same instant, exactly as CE reads it. CE's
-                // enable rule is kept to the letter — anything but a driven
-                // 0 enables, so an **unconnected** `en` still watches and an
-                // `X` is conservative.
+                // A breakpoint fires on the arrival of its **data** value,
+                // while its enable is a driven **1** — the enable is sampled
+                // at that same instant. Anything else disarms the watch: a
+                // driven 0, a floating `Z` (which includes an **unconnected**
+                // `en`), or an `X`. This is deliberately stricter than
+                // CircuitSim CE, whose `Breakpoint.valueChanged` treats
+                // "anything but 0" as armed: here a breakpoint left with `en`
+                // unwired never fires, so placing one is inert until it is
+                // explicitly enabled.
                 //
                 // The power-on settle (`in_boot`) is not part of the run, so
                 // it never fires: every net comes up somewhere, and stopping
@@ -3476,7 +3478,7 @@ impl DelayEngine {
                         // value and the enable reads as of this instant.
                         let (data_slot, _) = self.cdata[c].in_pins[0];
                         let (en_slot, _) = self.cdata[c].in_pins[1];
-                        let enabled = self.views[c][en_slot].bit(0) != Bit::Zero;
+                        let enabled = self.views[c][en_slot].bit(0) == Bit::One;
                         if slot == data_slot
                             && enabled
                             && self.views[c][data_slot].as_ref() == target
@@ -6294,7 +6296,7 @@ mod tests {
     /// other halt is sticky because the design it reports is broken.
     #[test]
     fn breakpoint_pauses_the_run_without_poisoning_the_engine() {
-        let mut eng = engine(&breakpoint_register_json("1", None), 500);
+        let mut eng = engine(&breakpoint_register_json("1", Some("one")), 500);
         let h = eng.run(3).expect_err("the breakpoint must stop the run");
         assert_eq!(h.reason, HaltReason::Breakpoint);
         assert_eq!(h.cycle, 1, "stopped within the cycle whose edge raised q");
@@ -6317,29 +6319,30 @@ mod tests {
         assert_eq!(h2.cycle, 3);
     }
 
-    /// The enable and the value comparison keep CircuitSim CE's rule to the
-    /// letter (`Breakpoint.valueChanged`): the watch is armed when `en` is
-    /// anything but a driven `0`, and it fires when the data value *equals*
-    /// the watched value.
+    /// The watch is armed only while `en` is a driven **1**, and it fires when
+    /// the data value *equals* the watched value. `en` must be explicitly
+    /// enabled: a driven 0, or a floating/unconnected `en`, disarms it.
     #[test]
-    fn breakpoint_enable_rule_is_circuit_sim_ce() {
+    fn breakpoint_enable_rule_requires_a_driven_one() {
+        // en ← 1: armed, and it fires.
+        let mut eng = engine(&breakpoint_register_json("1", Some("one")), 500);
+        assert_eq!(eng.run(4).unwrap_err().reason, HaltReason::Breakpoint);
+
         // en ← 0: disarmed, so the register passes through 1 twice quietly.
         let mut eng = engine(&breakpoint_register_json("1", Some("zero")), 500);
         eng.run(4).expect("a disarmed breakpoint never fires");
         assert!(eng.halted().is_none());
 
-        // en ← 1: armed, and it fires.
-        let mut eng = engine(&breakpoint_register_json("1", Some("one")), 500);
-        assert_eq!(eng.run(4).unwrap_err().reason, HaltReason::Breakpoint);
-
-        // Unwired `en` reads Z, and CE's rule ("anything but 0") calls that
-        // armed — the plain "break on this signal" case needs no wiring.
+        // An unwired `en` reads Z — not a driven 1 — so it is disarmed: a
+        // placed breakpoint does nothing until it is explicitly enabled.
         let mut eng = engine(&breakpoint_register_json("1", None), 500);
-        assert_eq!(eng.run(4).unwrap_err().reason, HaltReason::Breakpoint);
+        eng.run(4).expect("an unconnected breakpoint never fires");
+        assert!(eng.halted().is_none());
 
-        // Watching 0 on the same line stops on the *fall* (cycle 2), not on the
-        // rise — the value has to arrive, and 0 was already there at power-on.
-        let mut eng = engine(&breakpoint_register_json("0", None), 500);
+        // Watching 0 on the same line (enabled) stops on the *fall* (cycle 2),
+        // not on the rise — the value must arrive, and 0 was already there at
+        // power-on.
+        let mut eng = engine(&breakpoint_register_json("0", Some("one")), 500);
         let h = eng.run(4).expect_err("q fell to the watched value");
         assert_eq!(h.cycle, 2);
     }
@@ -6356,9 +6359,11 @@ mod tests {
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"p","type":"wiring.pin","pos":[0,0],"name":"p"}},
+                {{"id":"one","type":"wiring.power","pos":[0,0]}},
                 {{"id":"bp","type":"debug.breakpoint","pos":[0,0],"attrs":{{"value":"1"}}}}
             ], "wires": [
-                {{"a":{{"comp":"p","pin":"pin"}},"b":{{"comp":"bp","pin":"in"}}}}
+                {{"a":{{"comp":"p","pin":"pin"}},"b":{{"comp":"bp","pin":"in"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"bp","pin":"en"}}}}
             ]}}]
         }}"##
         );
@@ -6399,10 +6404,12 @@ mod tests {
             "circuits": [{{ "name": "main", "components": [
                 {{"id":"k","type":"wiring.constant","pos":[0,0],
                   "attrs":{{"bitsize":4,"value":"9"}}}},
+                {{"id":"one","type":"wiring.power","pos":[0,0]}},
                 {{"id":"bp","type":"debug.breakpoint","pos":[0,0],
                   "attrs":{{"bitsize":4,"value":"9"}}}}
             ], "wires": [
-                {{"a":{{"comp":"k","pin":"out"}},"b":{{"comp":"bp","pin":"in"}}}}
+                {{"a":{{"comp":"k","pin":"out"}},"b":{{"comp":"bp","pin":"in"}}}},
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"bp","pin":"en"}}}}
             ]}}]
         }}"##
         );
@@ -6421,9 +6428,12 @@ mod tests {
             r##"{{
             "format": "circuitsim-plus-plus", "version": 3, "name": "t", {SETTINGS},
             "circuits": [{{ "name": "main", "components": [
+                {{"id":"one","type":"wiring.power","pos":[0,0]}},
                 {{"id":"bp","type":"debug.breakpoint","pos":[0,0],
                   "attrs":{{"value":"1"}}}}
-            ], "wires": []}}]
+            ], "wires": [
+                {{"a":{{"comp":"one","pin":"out"}},"b":{{"comp":"bp","pin":"en"}}}}
+            ]}}]
         }}"##
         );
         let mut eng = engine(&json, 500);

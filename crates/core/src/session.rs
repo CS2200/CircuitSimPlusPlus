@@ -1014,7 +1014,8 @@ mod tests {
                 {"a":{"comp":"one","pin":"out"},"b":{"comp":"r1","pin":"en"}},
                 {"a":{"comp":"n1","pin":"out"},"b":{"comp":"r1","pin":"d"}},
                 {"a":{"comp":"r1","pin":"q"},"b":{"comp":"n1","pin":"in"}},
-                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}}
+                {"a":{"comp":"r1","pin":"q"},"b":{"comp":"bp","pin":"in"}},
+                {"a":{"comp":"one","pin":"out"},"b":{"comp":"bp","pin":"en"}}
             ]}]
         }"##;
         let (mut s, rec) = session(doc);
