@@ -1256,6 +1256,15 @@ const MEMORY_WIDTH_FIELDS: AttrField[] = [
 // ---- gate input negation (`negate`, format-v2 §4) ----
 
 /**
+ * True for the gate types that take `inputs` and per-input `negate` bubbles —
+ * the six multi-input gates (`gate.and/or/xor/nand/nor/xnor`), not the
+ * single-input `gate.not`/`gate.buffer`.
+ */
+export function isMultiInputGate(type: string): boolean {
+  return type.startsWith("gate.") && type !== "gate.not" && type !== "gate.buffer";
+}
+
+/**
  * A gate's `negate` list as sorted, unique, non-negative input indices — the
  * canonical form the engine writes (it sorts and dedups on load). Junk entries
  * are dropped; an absent/blank attr is `[]`.
@@ -1298,7 +1307,7 @@ export function editableAttrs(type: string): AttrField[] {
 function baseFields(type: string): AttrField[] {
   if (type.startsWith("gate.")) {
     const fields: AttrField[] = [BITSIZE_FIELD];
-    if (type !== "gate.not" && type !== "gate.buffer") {
+    if (isMultiInputGate(type)) {
       fields.push({
         key: "inputs",
         label: "Inputs",

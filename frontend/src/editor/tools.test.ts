@@ -917,3 +917,40 @@ describe("momentary buttons", () => {
     }
   });
 });
+
+describe("input bubbles (negate, §102)", () => {
+  it("a click on a gate input's bubble toggles that input", () => {
+    const { doc, tool, and, sync } = setup();
+    const negateOf = (): unknown =>
+      doc.circuit(0).components.find((c) => c.id === and)?.attrs?.negate;
+    // The bubble zone sits just inside the input edge (BUBBLE_R = 0.38 in from
+    // the pin at (10, 11)); a click there toggles rather than starting a wire.
+    tool.down({ x: 10.38, y: 11 }, PI());
+    tool.up(PI());
+    expect(negateOf()).toEqual([0]);
+    sync();
+    // A second click on the same bubble removes it (and clears the attr).
+    tool.down({ x: 10.38, y: 11 }, PI());
+    tool.up(PI());
+    expect(negateOf()).toBeUndefined();
+  });
+
+  it("a click on the PIN still starts a wire, not a toggle", () => {
+    const { doc, tool, and } = setup();
+    tool.down({ x: 10, y: 11 }, PI()); // exactly on in0
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.attrs?.negate).toBeUndefined();
+    expect(tool.isWiring).toBe(true);
+  });
+
+  it("the body widens to hold a bubble and the bubble stays at the edge", () => {
+    const { doc, scene, tool, and, sync } = setup();
+    tool.down({ x: 10.38, y: 12 }, PI()); // in1
+    tool.up(PI());
+    expect(doc.circuit(0).components.find((c) => c.id === and)?.attrs?.negate).toEqual([1]);
+    sync();
+    // A bubbled input widens the body 4→5 (catalog), but the left edge — and so
+    // the bubble the user clicks — does not move.
+    expect(scene.rectOf(and)?.w).toBe(5);
+    expect(scene.inputBubbleZones(and)[1].pos).toEqual({ x: 10.38, y: 12 });
+  });
+});

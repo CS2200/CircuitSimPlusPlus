@@ -28,6 +28,7 @@ import {
   compSize,
   compSpec,
   gateInputCount,
+  isMultiInputGate,
   pinShown,
   type PinKind,
 } from "./catalog";
@@ -1142,6 +1143,47 @@ export class DocScene {
   /** Pins-first picking (what the pointer means at this spot). */
   pick(world: Vec2): Hit | null {
     return this.pickPin(world) ?? this.pickWire(world) ?? this.pickComponent(world);
+  }
+
+  /**
+   * A gate's input bubble zones in world coords — one per input, whether or not
+   * that input is currently negated (UI_OVERHAUL §102). Used by click-to-toggle
+   * (`tools.ts`): a plain click on an input's bubble flips that input's
+   * `negate`. The geometry mirrors the draw pass exactly (the same
+   * `gateShape` input rule and `BUBBLE_R`), so the zone lands on the bubble the
+   * user sees — and on the empty spot where one would appear.
+   */
+  inputBubbleZones(compId: string): { input: number; pos: Vec2 }[] {
+    const comp = this.compsById.get(compId);
+    const layout = this.layouts.get(compId);
+    if (comp === undefined || layout === undefined || !isMultiInputGate(comp.type)) return [];
+    const local = compSize(comp, this.circuits);
+    const rot = comp.rot ?? "E";
+    const cx = layout.rect.x + layout.rect.w / 2;
+    const cy = layout.rect.y + layout.rect.h / 2;
+    const x = cx - local.w / 2;
+    const y = cy - local.h / 2;
+    const n = gateInputCount(comp.attrs ?? {});
+    const zones: { input: number; pos: Vec2 }[] = [];
+    for (let i = 0; i < n; i++) {
+      const p = rotPt(x + BUBBLE_R, y + ((i + 1) * local.h) / (n + 1), cx, cy, rot);
+      zones.push({ input: i, pos: p });
+    }
+    return zones;
+  }
+
+  /** Nearest gate input bubble zone within tolerance (click-to-toggle, §102). */
+  pickInputBubble(world: Vec2, tol = PIN_TOL): { compId: string; input: number; pos: Vec2 } | null {
+    let best: { d: number; compId: string; input: number; pos: Vec2 } | null = null;
+    for (const comp of this.components) {
+      for (const z of this.inputBubbleZones(comp.id)) {
+        const d = Math.hypot(world.x - z.pos.x, world.y - z.pos.y);
+        if (d <= tol && (best === null || d < best.d)) {
+          best = { d, compId: comp.id, input: z.input, pos: z.pos };
+        }
+      }
+    }
+    return best === null ? null : { compId: best.compId, input: best.input, pos: best.pos };
   }
 
   /** Everything intersecting a world rect (box select). */

@@ -2906,9 +2906,26 @@ derivation in `lib/subcircuit.test.ts`.
   any `negate` index that is no longer `< inputs` (the engine rejects a stale
   index, which would stop the file from loading) and clears the attr when none
   remain.
-- **Planned follow-up:** clicking a drawn input bubble toggles that input — a
-  canvas affordance on top of the field, shipped separately.
+- **Click a bubble to toggle it too** — see §103.
 - The demo circuit's `negateInputs` (a §24 leftover that no longer rendered) is
   now `negate: [1]`.
 
-**Acceptance:** frontend lint / 578 unit / build green.
+**Acceptance:** frontend lint / 581 unit / build green.
+
+## 103. Click a gate input's bubble to toggle it (2026-11-10)
+
+- **A plain click on a gate input's bubble zone flips that input's `negate`** —
+  the canvas affordance on top of §102's field. The zone is the bubble's spot
+  whether or not one is currently drawn, so a click also _adds_ a bubble (and a
+  second click removes it), in one undo step. The zone mirrors the draw pass
+  exactly (`DocScene.inputBubbleZones`), so it lands on the bubble the user
+  sees.
+- **The input PIN still starts a wire.** A bubble sits just inside the body edge
+  (`BUBBLE_R`), so the pin and the bubble are both in reach of a click; the
+  **nearer** one wins (`ToolMachine`). A click on the edge (where a wire
+  attaches) wires; a click on the bubble just inside it toggles. The cursor
+  reads `pointer` over a bubble so the toggle is discoverable.
+- Only the six multi-input gates have zones (`isMultiInputGate`); the output
+  bubble of a NAND/NOR/XNOR/NOT is the gate _type_, not a toggle.
+
+**Acceptance:** frontend lint / 581 unit / build green.

@@ -3,7 +3,7 @@ import type { CsxCircuit, CsxComponent, CsxEndpoint, CsxWire, Rotation } from ".
 import { isJoinEndpoint, isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
-import { compPins, compSize } from "./catalog";
+import { compPins, compSize, gateInputCount, negateList } from "./catalog";
 import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
@@ -83,7 +83,7 @@ function orthogonalize(points: readonly Vec2[]): Vec2[] {
  */
 
 /** What the pointer is over, for the canvas cursor hint (UI_OVERHAUL §55). */
-type HoverCursor = "none" | "pin" | "bend" | "wire" | "target";
+type HoverCursor = "none" | "pin" | "bubble" | "bend" | "wire" | "target";
 
 type DragState =
   | { kind: "idle" }
@@ -168,6 +168,11 @@ function p2v(p: [number, number]): Vec2 {
 /** Exact point equality (both coordinates come from the same grid math). */
 function sameVec(a: Vec2, b: Vec2): boolean {
   return Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
+}
+
+/** True when `a` is at least as close to `p` as `b` is (hit-test tie-break). */
+function nearer(a: Vec2, b: Vec2, p: Vec2): boolean {
+  return Math.hypot(p.x - a.x, p.y - a.y) <= Math.hypot(p.x - b.x, p.y - b.y);
 }
 
 const DRAG_THRESHOLD = 0.3; // grid units before a press becomes a drag
@@ -473,6 +478,15 @@ export class ToolMachine {
     }
 
     const pin = this.scene.pickPin(world);
+    const bubble = this.scene.pickInputBubble(world);
+    // A gate input's bubble zone (drawn or not) toggles that input's negation
+    // (UI_OVERHAUL §102); the pin at the body edge still starts a wire. When
+    // both are in range the nearer one wins, so a click on the edge wires and a
+    // click on the bubble just inside it toggles.
+    if (bubble !== null && (pin === null || nearer(bubble.pos, pin.pos, world))) {
+      this.toggleInputNegation(bubble.compId, bubble.input);
+      return;
+    }
     if (pin !== null) {
       this.wiring = {
         from: { comp: pin.compId, pin: pin.pin },
@@ -594,6 +608,27 @@ export class ToolMachine {
     const mode = previous === undefined ? VALUE_CARD_MODES[0] : nextValueCardMode(previous);
     this.wireInfoModes.set(wireIdx, mode);
     this.wireInfo = { wireIdx, pos: world, mode };
+  }
+
+  /**
+   * Flip one gate input's inversion bubble (`negate`, format-v2 §4) — the
+   * click-on-the-port gesture of UI_OVERHAUL §102. One undo step; an emptied
+   * list clears the attr so the file stays canonical. The bubble is a real
+   * logic change, so this is a document edit like any other (undoable).
+   */
+  private toggleInputNegation(compId: string, input: number): void {
+    const comp = this.doc.circuit(this.circuitIdx()).components.find((c) => c.id === compId);
+    if (comp === undefined) return;
+    if (input < 0 || input >= gateInputCount(comp.attrs ?? {})) return;
+    const cur = negateList(comp.attrs?.negate);
+    const next = cur.includes(input)
+      ? cur.filter((i) => i !== input)
+      : [...cur, input].sort((a, b) => a - b);
+    const attrs: Record<string, unknown> = { ...(comp.attrs ?? {}) };
+    if (next.length > 0) attrs.negate = next;
+    else delete attrs.negate;
+    this.doc.updateComponent(this.circuitIdx(), compId, { attrs }, `negate:${compId}:${input}`);
+    this.changed();
   }
 
   /**
@@ -926,7 +961,12 @@ export class ToolMachine {
   /** Classify what is under the pointer for the cursor hint (UI_OVERHAUL §55). */
   private hoverCursorAt(world: Vec2): HoverCursor {
     if (this.wiring !== null) return "target";
-    if (this.scene.pickPin(world) !== null) return "pin";
+    const pin = this.scene.pickPin(world);
+    const bubble = this.scene.pickInputBubble(world);
+    // A bubble beats the pin it sits just inside (same nearest-wins rule as the
+    // press), so the cursor says "toggle" where a click would toggle.
+    if (bubble !== null && (pin === null || nearer(bubble.pos, pin.pos, world))) return "bubble";
+    if (pin !== null) return "pin";
     if (this.scene.pickWireCorner(world) !== null) return "bend";
     // A tunnel TAG is a wire's handle (§91) and wins over both the wire and a
     // selected wire's move handle, so a hidden route stays reachable.
@@ -1164,6 +1204,9 @@ export class ToolMachine {
     switch (this.hoverCursor) {
       case "pin":
         return "crosshair";
+      case "bubble":
+        // A gate input bubble is a toggle (UI_OVERHAUL §102): a clickable cue.
+        return "pointer";
       case "bend":
         return "move";
       case "wire":
