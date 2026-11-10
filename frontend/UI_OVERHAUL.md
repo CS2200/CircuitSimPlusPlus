@@ -2920,11 +2920,15 @@ derivation in `lib/subcircuit.test.ts`.
   second click removes it), in one undo step. The zone mirrors the draw pass
   exactly (`DocScene.inputBubbleZones`), so it lands on the bubble the user
   sees.
-- **The input PIN still starts a wire.** A bubble sits just inside the body edge
-  (`BUBBLE_R`), so the pin and the bubble are both in reach of a click; the
-  **nearer** one wins (`ToolMachine`). A click on the edge (where a wire
-  attaches) wires; a click on the bubble just inside it toggles. The cursor
+- **The input port still starts a wire.** The bubble sits in the expansion block
+  just outside the body — the body shifts right one grid unit to make room for
+  it, exactly as CircuitSim CE's `GatePeer` does — so the port and the bubble are
+  both in reach of a click and the **nearer** one wins (`ToolMachine`). A click
+  on the port wires; a click on the bubble just outside it toggles. The cursor
   reads `pointer` over a bubble so the toggle is discoverable.
+- **Non-negated inputs get a stub.** Once a gate is expanded (any input
+  bubbled), every plain input draws a short line from its port to the shifted
+  body, so no port "floats" (CE's fake wires).
 - Only the six multi-input gates have zones (`isMultiInputGate`); the output
   bubble of a NAND/NOR/XNOR/NOT is the gate _type_, not a toggle.
 

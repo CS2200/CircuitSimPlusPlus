@@ -248,6 +248,8 @@ export class ToolMachine {
   private hoverHit: Hit | null = null;
   /** What the pointer is over — drives the canvas cursor hint (§55). */
   private hoverCursor: HoverCursor = "none";
+  /** The gate input bubble zone under the pointer, for the hover ring (§103). */
+  private hoverBubble: Vec2 | null = null;
   /** The wire a press started on (a bend drag or a junction wire), if any. */
   private pressWireIdx: number | null = null;
   /** The momentary io.button currently held, if any. */
@@ -329,6 +331,7 @@ export class ToolMachine {
     this.pressSwept = false;
     this.pressMaxDist = 0;
     this.pressWireIdx = null;
+    this.hoverBubble = null;
     if (this.pressButton !== null) {
       this.onButton?.(this.pressButton, false);
       this.pressButton = null;
@@ -480,9 +483,9 @@ export class ToolMachine {
     const pin = this.scene.pickPin(world);
     const bubble = this.scene.pickInputBubble(world);
     // A gate input's bubble zone (drawn or not) toggles that input's negation
-    // (UI_OVERHAUL §102); the pin at the body edge still starts a wire. When
-    // both are in range the nearer one wins, so a click on the edge wires and a
-    // click on the bubble just inside it toggles.
+    // (UI_OVERHAUL §102); the port still starts a wire. When both are in range
+    // the nearer one wins, so a click on the port wires and a click on the
+    // bubble just outside it toggles.
     if (bubble !== null && (pin === null || nearer(bubble.pos, pin.pos, world))) {
       this.toggleInputNegation(bubble.compId, bubble.input);
       return;
@@ -960,12 +963,19 @@ export class ToolMachine {
 
   /** Classify what is under the pointer for the cursor hint (UI_OVERHAUL §55). */
   private hoverCursorAt(world: Vec2): HoverCursor {
-    if (this.wiring !== null) return "target";
+    if (this.wiring !== null) {
+      this.hoverBubble = null;
+      return "target";
+    }
     const pin = this.scene.pickPin(world);
     const bubble = this.scene.pickInputBubble(world);
-    // A bubble beats the pin it sits just inside (same nearest-wins rule as the
+    // A bubble beats the pin it sits just outside (same nearest-wins rule as the
     // press), so the cursor says "toggle" where a click would toggle.
-    if (bubble !== null && (pin === null || nearer(bubble.pos, pin.pos, world))) return "bubble";
+    if (bubble !== null && (pin === null || nearer(bubble.pos, pin.pos, world))) {
+      this.hoverBubble = bubble.pos;
+      return "bubble";
+    }
+    this.hoverBubble = null;
     if (pin !== null) return "pin";
     if (this.scene.pickWireCorner(world) !== null) return "bend";
     // A tunnel TAG is a wire's handle (§91) and wins over both the wire and a
@@ -987,8 +997,12 @@ export class ToolMachine {
     }
     // Cursor hint (UI_OVERHAUL §55): signal what a press here would grab or
     // start, so wiring/dragging is discoverable.
+    const prevBubble = this.hoverBubble;
     const cursor = this.hoverCursorAt(world);
-    if (cursor !== this.hoverCursor) {
+    const bubbleMoved =
+      (prevBubble === null) !== (this.hoverBubble === null) ||
+      (prevBubble !== null && this.hoverBubble !== null && !sameVec(prevBubble, this.hoverBubble));
+    if (cursor !== this.hoverCursor || bubbleMoved) {
       this.hoverCursor = cursor;
       this.changed();
     }
@@ -1179,6 +1193,7 @@ export class ToolMachine {
   overlay(): SceneOverlay {
     return {
       hoverHit: this.hoverHit,
+      bubbleHover: this.hoverBubble,
       wireInProgress: this.wiring !== null ? this.routePreview() : null,
       // The ghost carries the RESOLVED body position, so what you see while
       // hovering is exactly where the click will drop it (centered).

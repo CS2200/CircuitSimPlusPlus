@@ -343,31 +343,47 @@ export function gateShape(
       const capY = y + (h - capH) / 2;
       const negated = type === "gate.nand" || type === "gate.nor" || type === "gate.xnor";
       const back = type === "gate.xor" || type === "gate.xnor";
-      const bw = w - (negated ? 2 * BUBBLE_R : 0);
+      const n = Math.max(2, inputs ?? Math.round(h) - 1);
+      // Input bubbles (`negate`) occupy the extra grid unit the catalog adds
+      // (4→5): the SYMBOL shifts right by one unit and the bubbles sit between
+      // the input ports and the body — CircuitSim CE's own geometry
+      // (`GatePeer.paint` translates the body by `BLOCK_SIZE` before
+      // `paintGate`). Without the shift the bubble lands *inside* the body,
+      // which reads as a bubble offset into the gate rather than an inverter on
+      // the input.
+      const expanded = negate.length > 0;
+      const bodyX = x + (expanded ? 1 : 0);
+      const bw = w - (expanded ? 1 : 0) - (negated ? 2 * BUBBLE_R : 0);
       const body =
         type === "gate.and" || type === "gate.nand"
-          ? andPath(x, capY, bw, capH)
-          : orPath(x, capY, bw, capH);
+          ? andPath(bodyX, capY, bw, capH)
+          : orPath(bodyX, capY, bw, capH);
       const extra: PathCmd[][] = [];
-      if (back) extra.push(xorBackPath(x, capY, bw, capH));
+      if (back) extra.push(xorBackPath(bodyX, capY, bw, capH));
       if (h > capH) {
         // The input edge: one straight line that every input pin attaches to.
         extra.push([
-          { t: "M", x, y },
-          { t: "L", x, y: y + h },
+          { t: "M", x: bodyX, y },
+          { t: "L", x: bodyX, y: y + h },
         ]);
       }
-      // Input bubbles (`negate`): the same y rule the catalog uses for `in{i}`, and the
-      // body is one unit wider when any input is bubbled, so the bubble sits inside the
-      // input edge with the pin still on it — CE's own geometry.
-      // `gateSpec` sizes the body `h = max(3, inputs + 1)`, so the pin rule is
-      // `(i + 1) * h / (inputs + 1)`; the bubble sits just inside
-      // the input edge, which CE widens by one unit for exactly this.
-      const n = Math.max(2, inputs ?? Math.round(h) - 1);
-      const inBubbles: Vec2[] = negate.map((i) => ({
-        x: x + BUBBLE_R,
-        y: y + ((i + 1) * h) / (n + 1),
-      }));
+      // The pin rule the catalog uses for `in{i}`.
+      const pinY = (i: number): number => y + ((i + 1) * h) / (n + 1);
+      const inBubbles: Vec2[] = [];
+      for (let i = 0; i < n; i++) {
+        if (negate.includes(i)) {
+          // The bubble fills the extra unit, tangent to the port (CE draws a full
+          // block; BUBBLE_R keeps it consistent with the output bubble).
+          inBubbles.push({ x: x + BUBBLE_R, y: pinY(i) });
+        } else if (expanded) {
+          // A plain input on an expanded gate: a stub from the port to the
+          // shifted body, so the port never "floats" (CE's fake wire).
+          extra.push([
+            { t: "M", x, y: pinY(i) },
+            { t: "L", x: bodyX, y: pinY(i) },
+          ]);
+        }
+      }
       return {
         body,
         extra,

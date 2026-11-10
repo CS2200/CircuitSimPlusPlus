@@ -677,6 +677,11 @@ export interface SceneOverlay {
   /** Shift-click wire info card: which wire, where to anchor, and which base it reads in. */
   wireInfo: { wireIdx: number; pos: Vec2; mode: ValueCardMode } | null;
   /**
+   * A gate input bubble zone under the pointer (UI_OVERHAUL §103): ringed so
+   * the click-to-toggle target is visible even before a bubble exists.
+   */
+  bubbleHover?: Vec2 | null;
+  /**
    * Part ids to outline as added or changed by the document being previewed
    * (version history, UI_OVERHAUL §76). Deliberately NOT the selection: a
    * selection also draws the rotate handle and wire corner dots, which a
@@ -2300,6 +2305,17 @@ export class DocScene {
         });
         renderer.flush();
       }
+    }
+
+    // Gate input bubble hint (UI_OVERHAUL §103): ring the zone a click would
+    // toggle, so the target is visible even before a bubble exists.
+    if (overlay.bubbleHover != null) {
+      const b = overlay.bubbleHover;
+      renderer.drawPath(circlePath(b.x, b.y, BUBBLE_R + 0.12), {
+        stroke: theme.accent,
+        lineWidth: 0.1,
+      });
+      renderer.flush();
     }
 
     // Propagation pulses (U7): a dot traveling each changed wire.

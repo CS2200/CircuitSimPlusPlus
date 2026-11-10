@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TAG_H, TAG_TIP, gateShape, tunnelTagBox, tunnelTagTextAt } from "./shapes";
+import { BUBBLE_R, TAG_H, TAG_TIP, gateShape, tunnelTagBox, tunnelTagTextAt } from "./shapes";
 
 /**
  * Power / ground glyphs (UI_OVERHAUL §72): a rake and a bar, drawn inside the
@@ -104,5 +104,33 @@ describe("transistor glyph (UI_OVERHAUL §78)", () => {
   it("is no longer a box family", () => {
     expect(gateShape("wiring.transistor", 0, 0, 3, 2)).not.toBeNull();
     expect(gateShape("mem.register", 0, 0, 3, 2)).toBeNull();
+  });
+});
+
+describe("gate input bubbles (negate, §102/§103)", () => {
+  it("shifts the symbol right so the bubble sits outside the body", () => {
+    const plain = gateShape("gate.and", 0, 0, 4, 3, [], 2)!;
+    const bubbled = gateShape("gate.and", 0, 0, 5, 3, [0], 2)!;
+    // The catalog widens the gate 4→5; the SYMBOL shifts right one unit, so the
+    // freed block holds the bubble (CircuitSim CE's `translate(BLOCK_SIZE, 0)`).
+    // Without the shift the bubble lands *inside* the body.
+    expect(plain.body[0]).toMatchObject({ t: "M", x: 0 });
+    expect(bubbled.body[0]).toMatchObject({ t: "M", x: 1 });
+    // The bubble is in that freed block — left of the body, right of the port.
+    expect(bubbled.inBubbles).toEqual([{ x: BUBBLE_R, y: 1 }]);
+    expect(bubbled.inBubbles![0].x).toBeLessThan(1);
+  });
+
+  it("stubs every non-negated input to the shifted body", () => {
+    const bubbled = gateShape("gate.and", 0, 0, 5, 3, [0], 2)!;
+    // in1 (not negated) gets a port→body stub; in0 (negated) gets the bubble.
+    expect(bubbled.extra).toEqual([
+      [
+        { t: "M", x: 0, y: 2 },
+        { t: "L", x: 1, y: 2 },
+      ],
+    ]);
+    // A plain gate draws no stubs.
+    expect(gateShape("gate.and", 0, 0, 4, 3, [], 2)!.extra).toEqual([]);
   });
 });

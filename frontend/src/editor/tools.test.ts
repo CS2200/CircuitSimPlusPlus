@@ -923,8 +923,8 @@ describe("input bubbles (negate, §102)", () => {
     const { doc, tool, and, sync } = setup();
     const negateOf = (): unknown =>
       doc.circuit(0).components.find((c) => c.id === and)?.attrs?.negate;
-    // The bubble zone sits just inside the input edge (BUBBLE_R = 0.38 in from
-    // the pin at (10, 11)); a click there toggles rather than starting a wire.
+    // The bubble zone sits in the expansion block, just outside the body and
+    // BUBBLE_R (0.38) from the pin at (10, 11); a click there toggles, not wires.
     tool.down({ x: 10.38, y: 11 }, PI());
     tool.up(PI());
     expect(negateOf()).toEqual([0]);

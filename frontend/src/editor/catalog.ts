@@ -154,9 +154,11 @@ export function gateInputCount(attrs: Readonly<Record<string, unknown>>): number
 }
 
 function gateSpec(caption: string, minInputs: number): CompSpec {
-  // A bubbled input (`negate`) widens the body by one grid unit, exactly as
-  // CircuitSim CE does, so the bubble sits inside the input edge and the pin
-  // stays on the outline (format-v2 §4).
+  // A bubbled input (`negate`) widens the part by one grid unit, exactly as
+  // CircuitSim CE does: the extra unit holds the bubble between the input port
+  // and the body, which the shape shifts right to make room (`shapes.ts`), so
+  // the port stays on the outline and the bubble reads as an input inverter
+  // (format-v2 §4).
   const negatedInputs = (attrs: Readonly<Record<string, unknown>>): number[] =>
     Array.isArray(attrs.negate) ? (attrs.negate as number[]) : [];
   // CircuitSim CE's 2-input gate is 4 blocks wide (`GatePeer`'s default
