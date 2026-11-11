@@ -8,7 +8,7 @@ import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
-import type { DocScene, Hit, SceneOverlay, WireHit } from "./docScene";
+import type { DocScene, Hit, SceneOverlay, SceneWarning, WireHit } from "./docScene";
 import { cleanPolyline, dirVector, perpendicularDirs, routeLeg, type LegEnd } from "./route";
 import { nextValueCardMode, VALUE_CARD_MODES, type ValueCardMode } from "../lib/radix";
 
@@ -246,6 +246,8 @@ export class ToolMachine {
     name?: string;
   } | null = null;
   private hoverHit: Hit | null = null;
+  /** The warning under the pointer, so hover can explain a flash (4.2). */
+  private hoverWarning: SceneWarning | null = null;
   /** What the pointer is over — drives the canvas cursor hint (§55). */
   private hoverCursor: HoverCursor = "none";
   /** The gate input bubble zone under the pointer, for the hover ring (§103). */
@@ -992,6 +994,7 @@ export class ToolMachine {
   hover(world: Vec2): void {
     if (this.placing !== null) {
       this.placing = { ...this.placing, pos: world };
+      this.hoverWarning = null;
       this.changed();
       return;
     }
@@ -1020,6 +1023,15 @@ export class ToolMachine {
           null);
     if (JSON.stringify(hit ?? null) !== JSON.stringify(this.hoverHit ?? null)) {
       this.hoverHit = hit;
+      this.changed();
+    }
+    // Diagnostic hover (4.2): a blinking mismatch or a dangling pin explains
+    // itself under the pointer, independently of what `pick` returned — a
+    // mismatch wire may sit over a part body, and a dangling pin already is a
+    // pin hit. Wiring hides it (targets are live then).
+    const warning = this.wiring === null ? this.scene.warningAt(world) : null;
+    if (JSON.stringify(warning ?? null) !== JSON.stringify(this.hoverWarning ?? null)) {
+      this.hoverWarning = warning;
       this.changed();
     }
   }
@@ -1203,6 +1215,7 @@ export class ToolMachine {
           : { ...this.placing, pos: placementBodyPos(this.placing, this.doc.circuits) },
       boxRect: this.drag.kind === "boxing" ? normRect(this.drag.start, this.drag.current) : null,
       wireInfo: this.wireInfo,
+      warning: this.hoverWarning,
     };
   }
 

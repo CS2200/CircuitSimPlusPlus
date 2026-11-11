@@ -696,6 +696,40 @@ describe("selection + drag", () => {
   });
 });
 
+describe("canvas warning hover (4.2)", () => {
+  function mismatchTool() {
+    const doc = CircuitDocument.create("t");
+    const scene = new DocScene();
+    const tool = new ToolMachine(
+      doc,
+      scene,
+      new SelectionModel(),
+      () => 0,
+      () => {},
+    );
+    const not = doc.addComponent(0, { type: "gate.not", pos: [0, 0], attrs: { bitsize: 1 } });
+    const reg = doc.addComponent(0, { type: "mem.register", pos: [8, 0], attrs: { bitsize: 8 } });
+    doc.addWire(0, {
+      a: { comp: not, pin: "out" },
+      b: { comp: reg, pin: "d" },
+      points: [
+        [3, 1],
+        [8, 1],
+      ],
+    });
+    scene.sync(doc, 0);
+    return { tool };
+  }
+
+  it("reports the mismatch under the pointer and clears it off the wire", () => {
+    const { tool } = mismatchTool();
+    tool.hover({ x: 5.5, y: 1 });
+    expect(tool.overlay().warning).toMatchObject({ kind: "width-mismatch", wireIdx: 0 });
+    tool.hover({ x: 5.5, y: 20 });
+    expect(tool.overlay().warning).toBeNull();
+  });
+});
+
 describe("delete / copy / paste / rotate", () => {
   it("delete removes selection with junction cascade, one undo step", () => {
     const { doc, sel, tool } = setup();

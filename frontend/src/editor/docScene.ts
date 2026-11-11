@@ -639,7 +639,7 @@ export interface WarningPin {
  * click find the same warning from the wire/pin under the pointer.
  */
 export interface SceneWarning {
-  kind: "width-mismatch" | "dangling-pin";
+  kind: "width-mismatch" | "dangling-pin" | "open-wire";
   /** A complete sentence, suitable for a hover card or the Inspector. */
   message: string;
   /** Where to draw the marker / anchor a hover card. */
@@ -656,6 +656,34 @@ export interface SceneWarning {
   pins?: WarningPin[];
   /** Dangling pin: the part's display name (e.g. "Register"). */
   partName?: string;
+}
+
+/**
+ * Break a diagnostic sentence into card lines (the `drawCard` box is sized from
+ * the longest line). Word wrap at spaces; a single overlong token is hard-cut.
+ */
+export function wrapCardText(text: string, maxChars = 44): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/).filter((w) => w !== "")) {
+    let rest = word;
+    while (rest.length > maxChars) {
+      if (line !== "") {
+        lines.push(line);
+        line = "";
+      }
+      lines.push(rest.slice(0, maxChars));
+      rest = rest.slice(maxChars);
+    }
+    if (line === "") line = rest;
+    else if (line.length + 1 + rest.length <= maxChars) line = `${line} ${rest}`;
+    else {
+      lines.push(line);
+      line = rest;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines;
 }
 
 /** The human sentence for a net whose pins declare different widths. */
@@ -724,6 +752,8 @@ export interface SceneOverlay {
   boxRect: Rect | null;
   /** Shift-click wire info card: which wire, where to anchor, and which base it reads in. */
   wireInfo: { wireIdx: number; pos: Vec2; mode: ValueCardMode } | null;
+  /** The diagnostic under the pointer (4.2); the hover pass explains it. */
+  warning?: SceneWarning | null;
   /**
    * A gate input bubble zone under the pointer (UI_OVERHAUL §103): ringed so
    * the click-to-toggle target is visible even before a bubble exists.
@@ -1131,6 +1161,15 @@ export class DocScene {
         });
       }
     }
+    // A hanging wire end is already marked with an X; the diagnostic is what
+    // hover explains (it is not an animation — `hasWarning` excludes it).
+    for (const at of this.freeEnds) {
+      warnings.push({
+        kind: "open-wire",
+        message: "Open wire end — connect it to a pin, or delete the wire.",
+        at: { x: at.x, y: at.y },
+      });
+    }
     this.warnings = warnings;
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
@@ -1301,12 +1340,61 @@ export class DocScene {
    * left dangling — without this the blink would freeze on one frame.
    */
   hasWarning(): boolean {
-    return this.warnings.length > 0;
+    // An open wire end is a diagnostic but not an animation: the X already
+    // marks it, while a mismatch or a dangling pin keeps the canvas animating.
+    return this.warnings.some((w) => w.kind !== "open-wire");
   }
 
   /** Every diagnostic on this sheet, for badges, hover, and the status bar. */
   warningsOnSheet(): readonly SceneWarning[] {
     return this.warnings;
+  }
+
+  /** The width-mismatch diagnostic for a wire's net, if there is one. */
+  warningForWire(wireIdx: number): SceneWarning | null {
+    const netId = this.nets.wireToNet.get(wireIdx);
+    if (netId === undefined) return null;
+    return this.warnings.find((w) => w.kind === "width-mismatch" && w.netId === netId) ?? null;
+  }
+
+  /** Every diagnostic that belongs to a component (dangling pins today). */
+  warningsForComponent(compId: string): readonly SceneWarning[] {
+    return this.warnings.filter((w) => w.compId === compId && w.kind !== "open-wire");
+  }
+
+  /**
+   * The diagnostic under the pointer (4.2): a dangling pin wins, then a
+   * mismatched wire, then a hanging wire end. `null` when the pointer is over
+   * ordinary copper — the hover pass keeps its old behavior there.
+   */
+  warningAt(world: Vec2): SceneWarning | null {
+    let bestPin: SceneWarning | null = null;
+    let bestPinD = Number.POSITIVE_INFINITY;
+    for (const w of this.warnings) {
+      if (w.kind !== "dangling-pin") continue;
+      const d = Math.hypot(world.x - w.at.x, world.y - w.at.y);
+      if (d <= PIN_TOL && d < bestPinD) {
+        bestPinD = d;
+        bestPin = w;
+      }
+    }
+    if (bestPin !== null) return bestPin;
+    const wire = this.pickWire(world);
+    if (wire !== null) {
+      const warning = this.warningForWire(wire.wireIdx);
+      if (warning !== null) return warning;
+    }
+    let bestFree: SceneWarning | null = null;
+    let bestFreeD = Number.POSITIVE_INFINITY;
+    for (const w of this.warnings) {
+      if (w.kind !== "open-wire") continue;
+      const d = Math.hypot(world.x - w.at.x, world.y - w.at.y);
+      if (d <= PICK_TOL && d < bestFreeD) {
+        bestFreeD = d;
+        bestFree = w;
+      }
+    }
+    return bestFree;
   }
 
   netOfPin(compId: string, pin: string): number | undefined {
@@ -2621,29 +2709,58 @@ export class DocScene {
       renderer.flush();
     }
 
-    // Hover feedback (pins only — idle wire hover does nothing):
+    // Hover feedback: ordinary pins/components as before, plus the diagnostic
+    // under the pointer (4.2) — a width mismatch, a dangling input, or a hanging
+    // wire end explains itself instead of only blinking.
     const hit = overlay.hoverHit;
+    const warning = overlay.warning ?? null;
+    const pinWarning =
+      hit?.kind === "pin" &&
+      warning !== null &&
+      warning.kind === "dangling-pin" &&
+      warning.compId === hit.compId &&
+      warning.pin === hit.pin
+        ? warning
+        : null;
     if (hit?.kind === "pin") {
       // Accent ring + one concise line: the pin's friendly name (the
       // comparator's lt/eq/gt read as words, §33), plus its width only when it
-      // is wider than a single bit (§29).
+      // is wider than a single bit (§29). A dangling pin appends the reason.
       renderer.drawDots([hit.pos], PIN_R * 1.5, theme.accent);
       const spec = this.layouts.get(hit.compId)?.pins.find((p) => p.name === hit.pin);
       const bits = spec !== undefined && spec.bitsize > 1 ? ` · ${spec.bitsize}b` : "";
-      drawCard(renderer, theme, { x: hit.pos.x + 0.6, y: hit.pos.y - 1.0 }, [
-        `${pinDisplayName(hit.pin)}${bits}`,
-      ]);
+      const lines = [`${pinDisplayName(hit.pin)}${bits}`];
+      if (pinWarning !== null) lines.push(...wrapCardText(`⚠ ${pinWarning.message}`));
+      drawCard(renderer, theme, { x: hit.pos.x + 0.6, y: hit.pos.y - 1.0 }, lines);
     } else if (hit?.kind === "wire" && overlay.wireInProgress !== null) {
       // junction-on-drop preview (only while routing a wire)
       renderer.drawDots([hit.point], PIN_R * 1.3, theme.accent);
     } else if (hit?.kind === "component") {
       // A readout that had to be shortened on the body shows its full value
-      // above the part on hover (UI_OVERHAUL §56).
+      // above the part on hover (UI_OVERHAUL §56), plus any dangling-input
+      // count so the part itself explains its warning.
       const full = this.truncated.get(hit.compId);
       const layout = this.layouts.get(hit.compId);
-      if (full !== undefined && layout !== undefined) {
-        drawCard(renderer, theme, { x: layout.rect.x, y: layout.rect.y - 1.5 }, [full]);
+      const lines: string[] = full !== undefined ? [full] : [];
+      const compWarnings = this.warningsForComponent(hit.compId).filter(
+        (w) => w.kind === "dangling-pin",
+      );
+      if (compWarnings.length > 0) {
+        const names = compWarnings.map((w) => pinDisplayName(w.pin ?? "")).join(", ");
+        const noun = compWarnings.length === 1 ? "input" : "inputs";
+        lines.push(`⚠ ${compWarnings.length} unconnected ${noun}: ${names}`);
       }
+      if (lines.length > 0 && layout !== undefined) {
+        drawCard(renderer, theme, { x: layout.rect.x, y: layout.rect.y - 1.5 }, lines);
+      }
+    }
+    if (warning !== null && pinWarning === null) {
+      drawCard(
+        renderer,
+        theme,
+        { x: warning.at.x + 0.7, y: warning.at.y - 1.6 },
+        wrapCardText(warning.message),
+      );
     }
 
     // Wire info card (shift+click): the value on the wire, read to the NET's own

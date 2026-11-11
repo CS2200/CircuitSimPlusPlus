@@ -15,6 +15,7 @@ import {
   valueCardLines,
   valueTextAtWidth,
   widthMismatchMessage,
+  wrapCardText,
 } from "./docScene";
 
 /**
@@ -174,6 +175,64 @@ describe("canvas diagnostics", () => {
   it("formats any number of widths as a sentence", () => {
     expect(widthMismatchMessage([1, 8])).toContain("1-bit and 8-bit");
     expect(widthMismatchMessage([1, 2, 8])).toContain("1-bit, 2-bit and 8-bit");
+  });
+
+  it("finds the diagnostic under the pointer (4.2)", () => {
+    const d = CircuitDocument.create();
+    const not = d.addComponent(0, { type: "gate.not", pos: [0, 0], attrs: { bitsize: 1 } });
+    const reg = d.addComponent(0, { type: "mem.register", pos: [8, 0], attrs: { bitsize: 8 } });
+    d.addWire(0, {
+      a: { comp: not, pin: "out" },
+      b: { comp: reg, pin: "d" },
+      points: [
+        [3, 1],
+        [8, 1],
+      ],
+    });
+    const scene = new DocScene();
+    scene.sync(d, 0);
+    // On the wire: the mismatch explains itself.
+    expect(scene.warningAt({ x: 5.5, y: 1 })).toMatchObject({
+      kind: "width-mismatch",
+      wireIdx: 0,
+    });
+    // On a dangling pin: the pin wins over the nearby wire.
+    const regPin = scene.warningAt({ x: 10, y: 4 });
+    expect(regPin?.kind).toBe("dangling-pin");
+    // Ordinary copper / empty space: nothing.
+    expect(scene.warningAt({ x: 5.5, y: 9 })).toBeNull();
+  });
+
+  it("explains a hanging wire end but does not animate for it", () => {
+    const d = CircuitDocument.create();
+    const k = d.addComponent(0, { type: "wiring.constant", pos: [0, 0] });
+    d.addWire(0, {
+      a: { comp: k, pin: "out" },
+      b: { free: [7, 1] },
+      points: [
+        [3, 1],
+        [7, 1],
+      ],
+    });
+    const scene = new DocScene();
+    scene.sync(d, 0);
+    expect(scene.warningAt({ x: 7, y: 1 })).toMatchObject({ kind: "open-wire" });
+    expect(scene.hasWarning()).toBe(false); // the X marks it; no blink
+  });
+
+  it("wraps a long diagnostic sentence for the hover card", () => {
+    const lines = wrapCardText("Width mismatch: this net joins 1-bit and 8-bit pins.");
+    expect(lines.join(" ")).toBe("Width mismatch: this net joins 1-bit and 8-bit pins.");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((l) => l.length <= 44)).toBe(true);
+    // A single overlong token is hard-cut rather than allowed to overflow.
+    expect(wrapCardText("x".repeat(50), 10)).toEqual([
+      "x".repeat(10),
+      "x".repeat(10),
+      "x".repeat(10),
+      "x".repeat(10),
+      "x".repeat(10),
+    ]);
   });
 });
 
