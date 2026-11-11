@@ -30,6 +30,7 @@ import {
   gateInputCount,
   isMultiInputGate,
   pinShown,
+  typeDisplayName,
   type PinKind,
 } from "./catalog";
 import {
@@ -625,6 +626,53 @@ function pinDisplayName(name: string): string {
   return PIN_DISPLAY[name] ?? name;
 }
 
+/** One pin's declared width on a conflicting net (for a diagnostic's details). */
+export interface WarningPin {
+  compId: string;
+  pin: string;
+  bits: number;
+}
+
+/**
+ * A canvas diagnostic the user should be told about, not just shown as an
+ * animation. `at` is the marker/anchor point; the optional ids let hover and
+ * click find the same warning from the wire/pin under the pointer.
+ */
+export interface SceneWarning {
+  kind: "width-mismatch" | "dangling-pin";
+  /** A complete sentence, suitable for a hover card or the Inspector. */
+  message: string;
+  /** Where to draw the marker / anchor a hover card. */
+  at: Vec2;
+  /** The wire this warning belongs to (width mismatch: one representative wire). */
+  wireIdx?: number;
+  /** The derived net this warning belongs to. */
+  netId?: number;
+  compId?: string;
+  pin?: string;
+  /** Width mismatch: the distinct declared widths, ascending. */
+  widths?: number[];
+  /** Width mismatch: every pin on the net, with its declared width. */
+  pins?: WarningPin[];
+  /** Dangling pin: the part's display name (e.g. "Register"). */
+  partName?: string;
+}
+
+/** The human sentence for a net whose pins declare different widths. */
+export function widthMismatchMessage(widths: readonly number[]): string {
+  const list =
+    widths.length <= 2
+      ? widths.map((w) => `${w}-bit`).join(" and ")
+      : `${widths
+          .slice(0, -1)
+          .map((w) => `${w}-bit`)
+          .join(", ")} and ${widths[widths.length - 1]}-bit`;
+  return (
+    `Width mismatch: this net joins ${list} pins. ` +
+    "A wire's width comes from the parts it connects; resize them so their widths agree."
+  );
+}
+
 /** Point at arc-length fraction t ∈ [0,1] along a polyline. */
 function pointAlong(points: [number, number][], t: number): Vec2 {
   const first = points[0];
@@ -962,6 +1010,8 @@ export class DocScene {
   private wireMismatch: boolean[] = [];
   /** Pin positions left dangling on a wired-up part (computed in `sync`). */
   private danglingPins: Vec2[] = [];
+  /** Diagnostics the canvas draws and hover explains (computed in `sync`). */
+  private warnings: SceneWarning[] = [];
   /** Last level a clock drove, and when it flipped (UI_OVERHAUL §47). */
   private clockLevel = new Map<string, boolean>();
   private clockChangedAt = new Map<string, number>();
@@ -1024,7 +1074,9 @@ export class DocScene {
       return Math.max(1, inf.bits ?? 1);
     });
     // Bitsize mismatch (UI_OVERHAUL §17): a net whose pins declare different
-    // widths is flagged per wire (amber halo) and once per net (⚠ badge).
+    // widths is flagged per wire (a blinking halo) and once per net (a steady
+    // badge). The badge is what makes the flash an ERROR rather than merely an
+    // animation.
     this.wireMismatch = c.wires.map((_, i) => {
       const netId = this.nets.wireToNet.get(i);
       const net = netId !== undefined ? this.nets.nets[netId] : undefined;
@@ -1035,14 +1087,51 @@ export class DocScene {
     // host to keep animating — computing it during the draw left the blink
     // frozen on one frame.
     this.danglingPins = [];
+    const warnings: SceneWarning[] = [];
+    const warnedNets = new Set<number>();
+    for (let i = 0; i < c.wires.length; i++) {
+      if (!this.wireMismatch[i]) continue;
+      const netId = this.nets.wireToNet.get(i);
+      const net = netId !== undefined ? this.nets.nets[netId] : undefined;
+      if (netId === undefined || net === undefined || warnedNets.has(netId)) continue;
+      warnedNets.add(netId);
+      const inf = inferNetBits(net, this.layouts);
+      const widths = inf.conflict.length > 0 ? inf.conflict : [];
+      const pins = netPinWidths(net, this.layouts);
+      // One badge per net, on its first wire's midpoint: a bus net can be many
+      // wires long, and one marker per wire would be confetti.
+      const firstWire = this.wires[net.wires[0]];
+      const at = firstWire === undefined ? { x: 0, y: 0 } : pointAlong(firstWire.points, 0.5);
+      warnings.push({
+        kind: "width-mismatch",
+        message: widthMismatchMessage(widths),
+        at,
+        wireIdx: net.wires[0],
+        netId,
+        widths,
+        pins,
+      });
+    }
     for (const comp of this.components) {
       const layout = this.layouts.get(comp.id);
       if (layout === undefined) continue;
       const visible = layout.pins.filter((p) => pinShown(comp, p.name));
       for (const p of danglingPins(visible, (pin) => this.nets.pinToNet.has(`${comp.id}:${pin}`))) {
-        this.danglingPins.push({ x: p.x, y: p.y });
+        const at = { x: p.x, y: p.y };
+        this.danglingPins.push(at);
+        warnings.push({
+          kind: "dangling-pin",
+          message:
+            `Unconnected input '${pinDisplayName(p.name)}' on ` +
+            `${typeDisplayName(comp.type)}. Wire it, or remove the part if it is unused.`,
+          at,
+          compId: comp.id,
+          pin: p.name,
+          partName: typeDisplayName(comp.type),
+        });
       }
     }
+    this.warnings = warnings;
     this.bounds = computeBounds(
       c.components.map((x) => this.layouts.get(x.id)!.rect),
       c.wires,
@@ -1212,7 +1301,12 @@ export class DocScene {
    * left dangling — without this the blink would freeze on one frame.
    */
   hasWarning(): boolean {
-    return this.wireMismatch.some(Boolean) || this.danglingPins.length > 0;
+    return this.warnings.length > 0;
+  }
+
+  /** Every diagnostic on this sheet, for badges, hover, and the status bar. */
+  warningsOnSheet(): readonly SceneWarning[] {
+    return this.warnings;
   }
 
   netOfPin(compId: string, pin: string): number | undefined {
@@ -2493,6 +2587,40 @@ export class DocScene {
       renderer.flush();
     }
 
+    // A width mismatch is an ERROR, not just a blink (UI_OVERHAUL §17). A steady
+    // badge above the offending net names it while the wire itself flashes; the
+    // hover card (and the Inspector) carry the sentence. Drawing the badge
+    // regardless of `overlay.now` keeps it visible when animation is off.
+    const mismatchWarnings = this.warnings.filter((w) => w.kind === "width-mismatch");
+    if (mismatchWarnings.length > 0) {
+      const badgeR = 0.5;
+      const badges: PathCmd[] = [];
+      for (const w of mismatchWarnings) {
+        const bx = w.at.x;
+        const by = w.at.y - 1.05;
+        // A short stem ties the badge to the wire, so it cannot read as a part.
+        renderer.drawPath(
+          polylinePath([
+            { x: bx, y: w.at.y },
+            { x: bx, y: by + badgeR },
+          ]),
+          { stroke: theme.wire.x, lineWidth: 0.12 },
+        );
+        badges.push(...circlePath(bx, by, badgeR));
+      }
+      renderer.drawPath(badges, { fill: theme.wire.x, stroke: theme.panel, lineWidth: 0.08 });
+      renderer.flush();
+      for (const w of mismatchWarnings) {
+        renderer.drawText(w.at.x, w.at.y - 1.05, "!", {
+          color: theme.bg,
+          size: 0.9,
+          align: "center",
+          weight: 700,
+        });
+      }
+      renderer.flush();
+    }
+
     // Hover feedback (pins only — idle wire hover does nothing):
     const hit = overlay.hoverHit;
     if (hit?.kind === "pin") {
@@ -2554,6 +2682,17 @@ function drawCard(renderer: Renderer, theme: Theme, pos: Vec2, lines: string[]):
     });
   });
   renderer.flush();
+}
+
+/** Every pin on a net, with its declared width (for a diagnostic's details). */
+function netPinWidths(net: NetInfo, layouts: ReadonlyMap<string, CompLayout>): WarningPin[] {
+  const out: WarningPin[] = [];
+  for (const key of net.pins) {
+    const [compId, pin] = key.split(":");
+    const bits = layouts.get(compId)?.pins.find((p) => p.name === pin)?.bitsize;
+    if (bits !== undefined) out.push({ compId, pin, bits });
+  }
+  return out.sort((a, b) => a.bits - b.bits || a.pin.localeCompare(b.pin));
 }
 
 /** Infer a net's bit width from the pin metadata of its member components. */

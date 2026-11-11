@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CsxWire } from "../model/csx";
+import { CircuitDocument } from "../model/document";
 import type { WireValue } from "../ipc/types";
 import {
   clockLevelOf,
   danglingPins,
+  DocScene,
   ellipsize,
   fitValueLine,
   memPreviewWord,
@@ -12,6 +14,7 @@ import {
   tunnelTagSites,
   valueCardLines,
   valueTextAtWidth,
+  widthMismatchMessage,
 } from "./docScene";
 
 /**
@@ -91,6 +94,86 @@ describe("danglingPins", () => {
       { name: "dout", kind: "out" as const },
     ];
     expect(danglingPins(ram, (p) => p === "addr").map((p) => p.name)).toEqual(["din"]);
+  });
+});
+
+describe("canvas diagnostics", () => {
+  it("turns a width mismatch into one named warning with a badge anchor", () => {
+    const d = CircuitDocument.create();
+    const not = d.addComponent(0, { type: "gate.not", pos: [0, 0], attrs: { bitsize: 1 } });
+    const reg = d.addComponent(0, { type: "mem.register", pos: [8, 0], attrs: { bitsize: 8 } });
+    d.addWire(0, {
+      a: { comp: not, pin: "out" },
+      b: { comp: reg, pin: "d" },
+      points: [
+        [3, 1],
+        [8, 1],
+      ],
+    });
+    const scene = new DocScene();
+    scene.sync(d, 0);
+    const warnings = scene.warningsOnSheet().filter((w) => w.kind === "width-mismatch");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ kind: "width-mismatch", widths: [1, 8], wireIdx: 0 });
+    expect(warnings[0].message).toContain("1-bit and 8-bit");
+    expect(warnings[0].message).toContain("resize");
+    expect(warnings[0].at).toEqual({ x: 5.5, y: 1 });
+    expect(warnings[0].pins?.map((p) => `${p.pin}:${p.bits}`)).toEqual(["out:1", "d:8"]);
+    expect(scene.hasWarning()).toBe(true);
+  });
+
+  it("keeps one width warning per net, not one per wire in the net", () => {
+    const d = CircuitDocument.create();
+    const not = d.addComponent(0, { type: "gate.not", pos: [0, 0], attrs: { bitsize: 1 } });
+    const reg = d.addComponent(0, { type: "mem.register", pos: [12, 0], attrs: { bitsize: 8 } });
+    const mid = d.addComponent(0, { type: "wiring.probe", pos: [8, 5], attrs: { bitsize: 8 } });
+    d.addWire(0, {
+      a: { comp: not, pin: "out" },
+      b: { comp: reg, pin: "d" },
+      points: [
+        [3, 1],
+        [5, 1],
+      ],
+    });
+    // A second wire on the SAME net, joined onto the first.
+    d.addWire(0, {
+      a: { join: { wire: 0, segment: 0 } },
+      b: { comp: mid, pin: "in" },
+      points: [
+        [4, 1],
+        [4, 5],
+        [8, 5],
+      ],
+    });
+    const scene = new DocScene();
+    scene.sync(d, 0);
+    expect(scene.warningsOnSheet().filter((w) => w.kind === "width-mismatch")).toHaveLength(1);
+  });
+
+  it("reports a dangling input by part and pin name", () => {
+    const d = CircuitDocument.create();
+    const and = d.addComponent(0, { type: "gate.and", pos: [0, 0] });
+    const not = d.addComponent(0, { type: "gate.not", pos: [8, 0] });
+    d.addWire(0, {
+      a: { comp: and, pin: "out" },
+      b: { comp: not, pin: "in" },
+      points: [
+        [5, 1],
+        [8, 1],
+      ],
+    });
+    const scene = new DocScene();
+    scene.sync(d, 0);
+    const warnings = scene.warningsOnSheet().filter((w) => w.kind === "dangling-pin");
+    expect(warnings.map((w) => w.pin)).toEqual(["in0", "in1"]);
+    expect(warnings[0].message).toContain("Unconnected input 'in0'");
+    expect(warnings[0].partName).toBe("AND Gate");
+    expect(scene.hasWarning()).toBe(true);
+  });
+
+  it("formats any number of widths as a sentence", () => {
+    expect(widthMismatchMessage([1, 8])).toContain("1-bit and 8-bit");
+    expect(widthMismatchMessage([1, 2, 8])).toContain("1-bit, 2-bit and 8-bit");
   });
 });
 
