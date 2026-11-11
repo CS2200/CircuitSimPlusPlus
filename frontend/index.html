@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="oled">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,13 +8,37 @@
       // Apply the persisted theme before first paint (UI_OVERHAUL §2) —
       // no white/dark flash on startup. App.tsx owns the live preference;
       // this only mirrors it onto <html> for the initial frame.
+      //
+      // OLED was the old default but its true-black canvas can hide wire
+      // strokes on some displays, so an existing OLED choice is migrated to
+      // Dark once (the marker keeps a later, deliberate OLED pick).
       try {
-        var t = localStorage.getItem("csx.theme");
-        if (t === "oled" || t === "dark" || t === "light") {
-          document.documentElement.dataset.theme = t;
+        var key = "csx.theme";
+        var migration = "csx.theme.oled-migrated";
+        var t = localStorage.getItem(key);
+        if (localStorage.getItem(migration) === null) {
+          localStorage.setItem(migration, "1");
+          if (t === "oled") {
+            t = "dark";
+            localStorage.setItem(key, t);
+          }
         }
+        var themes = [
+          "oled",
+          "dark",
+          "midnight",
+          "nord",
+          "dracula",
+          "gruvbox",
+          "solarized",
+          "contrast",
+          "light",
+          "paper",
+          "solarized-light",
+        ];
+        if (themes.indexOf(t) !== -1) document.documentElement.dataset.theme = t;
       } catch (e) {
-        /* storage unavailable — keep the OLED default */
+        /* storage unavailable — keep the Dark default */
       }
     </script>
   </head>

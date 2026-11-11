@@ -108,7 +108,12 @@ export const THEMES: readonly ThemeMeta[] = [
   },
 ];
 
-export const DEFAULT_THEME: ThemeId = "oled";
+/**
+ * Dark, not OLED. OLED's true-black canvas exposes a wire-rendering bug on
+ * some displays/GPUs (see `docs/bugs.md`), so it is no longer the shipped
+ * default. Existing `oled` choices are migrated in `loadThemePref`.
+ */
+export const DEFAULT_THEME: ThemeId = "dark";
 
 /** True for light themes. */
 export function isLightTheme(id: ThemeId): boolean {
@@ -192,6 +197,13 @@ export function saveAccentPref(id: AccentId): void {
 
 const STORAGE_KEY = "csx.theme";
 
+/**
+ * One-time marker for the OLED → Dark migration. Without it, a deliberate
+ * OLED choice made *after* the migration would be converted again on every
+ * load; with it, the migration runs exactly once per machine.
+ */
+const OLED_MIGRATION_KEY = "csx.theme.oled-migrated";
+
 export function isThemeId(value: unknown): value is ThemeId {
   return THEMES.some((t) => t.id === value);
 }
@@ -200,6 +212,15 @@ export function isThemeId(value: unknown): value is ThemeId {
 export function loadThemePref(): ThemeId {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
+    // Move the old default (OLED) to Dark once. OLED is still selectable, so
+    // the marker makes a later deliberate choice stick.
+    if (localStorage.getItem(OLED_MIGRATION_KEY) === null) {
+      localStorage.setItem(OLED_MIGRATION_KEY, "1");
+      if (stored === "oled") {
+        localStorage.setItem(STORAGE_KEY, DEFAULT_THEME);
+        return DEFAULT_THEME;
+      }
+    }
     return isThemeId(stored) ? stored : DEFAULT_THEME;
   } catch {
     return DEFAULT_THEME; // no localStorage (headless/test) — stay silent

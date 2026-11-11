@@ -24,14 +24,14 @@ async function openSection(page: Page, name: string): Promise<void> {
 
 test("Settings: theme picker applies, persists, and survives reload", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // fresh default
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "dark"); // fresh default
 
   await openSettings(page);
   const dialog = page.getByRole("dialog", { name: "Settings" });
   await expect(dialog).toBeVisible();
 
   // The active card is marked; pick Light.
-  await expect(page.locator('[data-theme-option="oled"]')).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator('[data-theme-option="dark"]')).toHaveAttribute("aria-checked", "true");
   await page.locator('[data-theme-option="light"]').click();
   await expect(page.locator('[data-theme-option="light"]')).toHaveAttribute("aria-checked", "true");
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "light");
@@ -69,14 +69,14 @@ test("Settings: theme picker applies, persists, and survives reload", async ({ p
 
   // Reset to defaults restores the shipped appearance.
   await page.getByRole("button", { name: "Reset to defaults" }).click();
-  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled");
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "dark");
   await expect(page.locator(".app")).toHaveAttribute("data-accent", "auto");
   await expect(page.getByLabel("Animate signal pulses")).toBeChecked();
 });
 
 test("theme: the Settings picker switches themes (the header toggle is gone)", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".app")).toHaveAttribute("data-theme", "oled"); // dark-family default
+  await expect(page.locator(".app")).toHaveAttribute("data-theme", "dark"); // dark-family default
 
   // There is ONE way to change the theme — Settings — so the header no longer
   // carries a standalone sun/moon button.

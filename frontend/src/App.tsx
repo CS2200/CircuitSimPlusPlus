@@ -265,8 +265,9 @@ const HELP_SECTIONS: readonly { title: string; rows: readonly [string, string][]
 ];
 
 export default function App() {
-  // Theme is a persisted per-machine preference (UI_OVERHAUL §2); OLED is
-  // the default for fresh installs.
+  // Theme is a persisted per-machine preference (UI_OVERHAUL §2); Dark is the
+  // default for fresh installs (OLED's true-black canvas hides wire strokes on
+  // some displays — see docs/bugs.md).
   const [theme, setTheme] = useState<ThemeId>(loadThemePref);
   // Appearance/behavior preferences (Settings): accent color, canvas pulse
   // animation, startup update check — per machine, all persisted.

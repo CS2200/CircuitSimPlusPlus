@@ -63,9 +63,9 @@ describe("theme catalog", () => {
 });
 
 describe("theme preference", () => {
-  it("defaults to OLED when nothing is stored", () => {
-    expect(loadThemePref()).toBe("oled");
-    expect(DEFAULT_THEME).toBe("oled");
+  it("defaults to Dark when nothing is stored", () => {
+    expect(loadThemePref()).toBe("dark");
+    expect(DEFAULT_THEME).toBe("dark");
   });
 
   it("round-trips a stored choice", () => {
@@ -75,11 +75,21 @@ describe("theme preference", () => {
     expect(loadThemePref()).toBe("dark");
   });
 
+  it("migrates an existing OLED choice to Dark exactly once", () => {
+    g.localStorage!.setItem("csx.theme", "oled");
+    expect(loadThemePref()).toBe("dark");
+    // The stored value is rewritten, so later reads are Dark without the marker.
+    expect(g.localStorage!.getItem("csx.theme")).toBe("dark");
+    // A deliberate OLED pick AFTER the migration still sticks.
+    saveThemePref("oled");
+    expect(loadThemePref()).toBe("oled");
+  });
+
   it("falls back to the default on unknown or corrupt values", () => {
     g.localStorage!.setItem("csx.theme", "tomato");
-    expect(loadThemePref()).toBe("oled");
+    expect(loadThemePref()).toBe("dark");
     g.localStorage!.setItem("csx.theme", " ");
-    expect(loadThemePref()).toBe("oled");
+    expect(loadThemePref()).toBe("dark");
   });
 
   it("stays silent when storage throws (private mode)", () => {
@@ -91,13 +101,13 @@ describe("theme preference", () => {
         throw new Error("denied");
       },
     } as unknown as FakeStorage;
-    expect(loadThemePref()).toBe("oled");
+    expect(loadThemePref()).toBe("dark");
     expect(() => saveThemePref("dark" as ThemeId)).not.toThrow();
   });
 
   it("stays silent when localStorage is absent", () => {
     delete g.localStorage;
-    expect(loadThemePref()).toBe("oled");
+    expect(loadThemePref()).toBe("dark");
     expect(() => saveThemePref("dark")).not.toThrow();
   });
 });
