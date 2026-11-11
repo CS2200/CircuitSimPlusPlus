@@ -118,7 +118,7 @@ musl`); the raw invocations below are what it and CI execute.
 ```bash
 # Build + test the workspace default members (core + cli; not the Tauri shell)
 cargo build
-cargo test -p csim-core -p csim          # 240 unit + 9 golden + 14 CLI tests
+cargo test -p csim-core -p csim          # 254 unit + 9 golden + 14 CLI tests
 cargo clippy -p csim-core -p csim --all-targets -- -D warnings
 cargo fmt --all -- --check
 
@@ -168,7 +168,7 @@ npm run dev            # Vite dev server on :1420 — runs against the in-app
                        # MOCK core (frontend/.env.development sets VITE_MOCK_CORE=1),
                        # so UI work needs no Rust
 
-npm run test           # unit tests (vitest, 462)
+npm run test           # unit tests (vitest, 583)
 npm run test:e2e       # Playwright (needs browsers, see prerequisites)
 npm run lint           # eslint + prettier --check
 npm run build          # tsc --noEmit && vite build → frontend/dist

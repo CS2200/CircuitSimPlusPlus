@@ -83,7 +83,7 @@ Execute in order. U9 (mock core) comes before anything that needs a running simu
 
 **Spec:** DESIGN.md §6 (visual language), §7.1, Appendix B.1. **Depends on:** U3
 
-- Gate shapes: distinctive per family, bubbled inputs render as bubbles (config from `attrs.negateInputs`).
+- Gate shapes: distinctive per family, bubbled inputs render as bubbles (config from `attrs.negate`).
 - Wires: quadratic-Bézier rounded corners (~0.12 grid-unit radius), per-state colors (low/high/`X`/`Z`/disconnected), per-bus hues (rainbow buses), thickness ∝ bitsize option; hover = brighten + **net-extent highlight**.
 - Theme system: CSS custom properties; dark + light themes ship; palette is data (accessibility drop-in later, D8).
 

@@ -14,7 +14,7 @@ which has no time at all. `docs/bugs.md`'s archive has the history; the current 
 
 ## 2. Documentation gaps (not lies — omissions)
 
-- `docs/format-v2.md` does not mention `mem.rom`'s attribute set, the wire `name` field, or
-  `wiring.reset`.
-- `docs/autograder.md` does not list the `csim nets` subcommand, `--stop`, `--pause-on-unknown`
-  or `--compat`, nor the spec fields `pause_on_breakpoints` / `pause_on_unknown`.
+- `docs/autograder.md` §1 does not list the `csim nets` subcommand (a conversion-debugging
+  aid), and §5 does not document the test-spec fields `pause_on_unknown` /
+  `pause_on_breakpoints` — their CLI flags *are* listed, and `pause_on_breakpoints` also
+  appears in §3's `halt_reason` note.

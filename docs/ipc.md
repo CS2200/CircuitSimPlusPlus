@@ -54,7 +54,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `mem_read` | `{ name: string, addr: number, len: number }` | `WireValue[]` |
 | `mem_write` | `{ name: string, addr: number, values: WireValue[] }` | — |
 | `snapshot` | `{ path: string }` | — |
-| `sim_set_pause_on_unknown` | `{ on: bool }` | ask (or do not ask) when the sim reads a net nothing drives |
+| `sim_set_pause_on_unknown` | `{ pause: bool }` | ask (or do not ask) when the sim reads a net nothing drives |
 | `resume` | `{ path: string }` | — |
 
 `LoadResult` = `{ ok, errors: LoadError[], net_map: NetMapEntry[], named: NamedComponent[] }`.

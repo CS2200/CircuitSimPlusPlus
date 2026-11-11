@@ -46,7 +46,7 @@ The only real coupling is: **Frontend needs Core's API; Core doesn't exist yet.*
 
 ## 3. IPC contract (summary — `docs/ipc.md` is normative)
 
-Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). `crates/app` (Frontend-owned) is a thin adapter over `csim_core::api` (Backend-owned). The tables below are the 2026-10-06 snapshot, updated to **v1.2**; where they and `docs/ipc.md` disagree, `docs/ipc.md` wins.
+Transport: Tauri commands (frontend→Rust) and Tauri events (Rust→frontend). `crates/app` (Frontend-owned) is a thin adapter over `csim_core::api` (Backend-owned). The tables below are the 2026-10-06 snapshot, updated to **v1.2** (later additions — e.g. `sim_set_pause_on_unknown` — live only in `docs/ipc.md`); where they and `docs/ipc.md` disagree, `docs/ipc.md` wins.
 
 **Value encoding (4-state, packed as hex masks):** a bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — bit set in `v` = 1; bit set in `x` = X (contention); bit set in `z` = Z (floating). `x` and `z` never both set for the same bit.
 
