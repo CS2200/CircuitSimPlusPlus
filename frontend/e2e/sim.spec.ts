@@ -337,8 +337,16 @@ test("U5: 'Run until…' stops on a watch and reports a stop (contract v1.6)", a
   const dialog = page.getByRole("dialog", { name: "Run until" });
   await expect(dialog).toBeVisible();
 
+  // The "?" beside the condition type opens the explainer table; a click on the
+  // type picker dismisses it and opens the list.
+  await dialog.getByLabel("Condition 1 help").click();
+  const help = page.locator(".run-until-help-pop");
+  await expect(help).toBeVisible();
+  await expect(help).toContainText("already true counts");
+
   // The default row watches `pc`; change it to "reaches 3".
   await dialog.getByLabel("Condition 1 type").click();
+  await expect(help).toHaveCount(0);
   await page.getByRole("option", { name: "reaches", exact: true }).click();
   await dialog.getByLabel("Condition 1 value").fill("3");
   await dialog.getByRole("button", { name: "Run", exact: true }).click();

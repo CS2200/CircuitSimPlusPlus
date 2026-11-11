@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import type { NamedComponent, Watch } from "../ipc/types";
 import Select from "./Select";
 
@@ -26,6 +26,17 @@ const WHEN_OPTIONS: readonly { value: When; label: string }[] = [
   { value: "reaches", label: "reaches" },
   { value: "is", label: "is" },
 ];
+
+/** One-line description of each condition, shown under its row. */
+const WHEN_HINT: Record<When, string> = {
+  stable:
+    "Stops when the value has not changed for that many cycle boundaries — a hang / no-progress check.",
+  changes:
+    "Stops after the value has changed that many times — a runaway bound (e.g. an instruction count).",
+  reaches:
+    "Stops the moment the value becomes this one (a transition); already holding it does not count.",
+  is: "Stops whenever the value equals this one at a boundary (a level); already true counts.",
+};
 
 /** The arg text for a stored watch. */
 function argOf(w: Watch): string {
@@ -65,6 +76,8 @@ export default function RunUntilDialog({
       : [defaultRow(watchable[0]?.name ?? "")],
   );
   const [error, setError] = useState<string | null>(null);
+  /** Viewport position of the condition help popover (null = hidden). */
+  const [help, setHelp] = useState<{ left: number; top: number } | null>(null);
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -79,6 +92,23 @@ export default function RunUntilDialog({
 
   const setRow = (i: number, patch: Partial<Row>): void =>
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  /** Toggle the condition-help popover, anchored under the "?" that opened it. */
+  const toggleHelp = (e: MouseEvent<HTMLButtonElement>): void => {
+    e.stopPropagation();
+    if (help !== null) {
+      setHelp(null);
+      return;
+    }
+    // Read the rect now: `e.currentTarget` is null by the time a state updater
+    // runs, so it must not be captured lazily.
+    const r = e.currentTarget.getBoundingClientRect();
+    const width = 380;
+    setHelp({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+      top: r.bottom + 6,
+    });
+  };
 
   const run = (): void => {
     const out: Watch[] = [];
@@ -121,7 +151,13 @@ export default function RunUntilDialog({
       aria-label="Run until"
       onClick={onClose}
     >
-      <div className="help-card run-until" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="help-card run-until"
+        onClick={(e) => {
+          e.stopPropagation();
+          setHelp(null);
+        }}
+      >
         <h2>Run until…</h2>
         {watchable.length === 0 ? (
           <p className="settings-hint">
@@ -136,43 +172,56 @@ export default function RunUntilDialog({
             </p>
             <div className="watch-rows">
               {rows.map((r, i) => (
-                <div className="watch-row" key={i}>
-                  <Select
-                    label={`Condition ${i + 1} component`}
-                    value={r.name}
-                    options={nameOptions}
-                    onChange={(name) => setRow(i, { name })}
-                  />
-                  <Select
-                    label={`Condition ${i + 1} type`}
-                    value={r.when}
-                    options={WHEN_OPTIONS}
-                    onChange={(when) =>
-                      setRow(i, {
-                        when,
-                        // Value literals and counts read differently; reset the
-                        // arg to a sensible default when the type changes.
-                        arg: when === "stable" ? "100" : when === "changes" ? "10000" : "0",
-                      })
-                    }
-                  />
-                  <input
-                    className="watch-arg"
-                    value={r.arg}
-                    spellCheck={false}
-                    aria-label={`Condition ${i + 1} ${argLabel(r.when)}`}
-                    placeholder={argLabel(r.when)}
-                    onChange={(e) => setRow(i, { arg: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="secondary watch-remove"
-                    aria-label={`Remove condition ${i + 1}`}
-                    disabled={rows.length <= 1}
-                    onClick={() => setRows(rows.filter((_, j) => j !== i))}
-                  >
-                    ×
-                  </button>
+                <div className="watch-row-block" key={i}>
+                  <div className="watch-row">
+                    <Select
+                      label={`Condition ${i + 1} component`}
+                      value={r.name}
+                      options={nameOptions}
+                      onChange={(name) => setRow(i, { name })}
+                    />
+                    <Select
+                      label={`Condition ${i + 1} type`}
+                      value={r.when}
+                      options={WHEN_OPTIONS}
+                      onChange={(when) =>
+                        setRow(i, {
+                          when,
+                          // Value literals and counts read differently; reset the
+                          // arg to a sensible default when the type changes.
+                          arg: when === "stable" ? "100" : when === "changes" ? "10000" : "0",
+                        })
+                      }
+                    />
+                    <input
+                      className="watch-arg"
+                      value={r.arg}
+                      spellCheck={false}
+                      aria-label={`Condition ${i + 1} ${argLabel(r.when)}`}
+                      placeholder={argLabel(r.when)}
+                      onChange={(e) => setRow(i, { arg: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="secondary watch-help"
+                      aria-label={`Condition ${i + 1} help`}
+                      aria-expanded={help !== null}
+                      title="What do these conditions mean?"
+                      onClick={toggleHelp}
+                    >
+                      ?
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary watch-remove"
+                      aria-label={`Remove condition ${i + 1}`}
+                      disabled={rows.length <= 1}
+                      onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <p className="watch-hint">{WHEN_HINT[r.when]}</p>
                 </div>
               ))}
             </div>
@@ -198,6 +247,63 @@ export default function RunUntilDialog({
           </button>
         </div>
       </div>
+      {help !== null && (
+        <div
+          className="run-until-help-pop"
+          role="note"
+          style={{ left: help.left, top: help.top }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="run-until-help-title">Stop conditions</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Condition</th>
+                <th>Stops when…</th>
+                <th>First boundary?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <code>is stable for N</code>
+                </td>
+                <td>the value is identical for N boundaries</td>
+                <td>no — the first only observes</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>changes N</code>
+                </td>
+                <td>the value has changed at N boundaries</td>
+                <td>no — a settled start counts 0</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>reaches V</code>
+                </td>
+                <td>
+                  the value <em>becomes</em> V (a transition)
+                </td>
+                <td>no — already V isn&apos;t a transition</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>is V</code>
+                </td>
+                <td>
+                  the value <em>equals</em> V (a level)
+                </td>
+                <td>yes — already true counts</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="run-until-help-note">
+            Evaluated at every rising clock edge. <em>Any</em> condition stops the run; the one that
+            fired is spent, and the run continues from there like a breakpoint.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

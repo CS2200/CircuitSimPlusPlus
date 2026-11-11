@@ -2957,6 +2957,11 @@ derivation in `lib/subcircuit.test.ts`.
   `changes N` (N transitions), `reaches V` (becomes the value) or `is V` (equals
   it). `stable`/`changes` are the two halves of CS 2200's CPU rule (PC unchanged
   for 100 / PC changed 10 000 times).
+- **The conditions are explained in place.** Each row shows a one-line hint for
+  the chosen condition, and a **"?"** beside the type picker opens a small table
+  of all four — what each fires on, and whether the very first boundary counts
+  (`reaches` is a _transition_, so an already-held value never trips it; `is` is
+  a _level_, so it can fire immediately).
 - **It runs to the condition, not a cycle count.** On Run the editor re-syncs,
   installs the watches (`sim_set_watch`), and plays; the engine stops with
   `sim_halted.reason: "stop"` when one holds and the banner says which. A stop is

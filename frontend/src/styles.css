@@ -2938,13 +2938,19 @@ input[type="number"] {
 .watch-rows {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   margin: 12px 0;
+}
+
+.watch-row-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .watch-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) auto auto;
   gap: 6px;
   align-items: center;
 }
@@ -2966,11 +2972,78 @@ input[type="number"] {
   border: 1px solid var(--border-soft);
 }
 
+.watch-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.watch-help,
 .watch-remove {
   width: 26px;
   height: 26px;
   padding: 0;
+}
+
+.watch-help {
+  border-radius: 50%;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.watch-remove {
   font-size: var(--fs-md);
+}
+
+/* Condition-help popover (UI_OVERHAUL §105): the "?" beside a condition type. */
+.run-until-help-pop {
+  position: fixed;
+  z-index: 130;
+  width: 380px;
+  padding: 12px 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+}
+
+.run-until-help-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.run-until-help-pop table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.run-until-help-pop th,
+.run-until-help-pop td {
+  padding: 4px 8px 4px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.run-until-help-pop th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.run-until-help-pop code {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.run-until-help-note {
+  margin: 8px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  line-height: 1.4;
 }
 
 .bitsize-grid {
