@@ -467,7 +467,13 @@ fn resume(state: State<SimState>, path: String) -> Result<(), String> {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    // A desktop shell launched from a terminal is otherwise silent — no sign it
+    // came up, and a startup failure is just a bare panic. One line on each side
+    // (starting / ready) is enough to tell success from a startup crash; the
+    // running app stays quiet.
+    eprintln!("CircuitSim++ {} starting…", env!("CARGO_PKG_VERSION"));
+
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Opens external links (the update nudge's "Download" and the About
@@ -506,6 +512,19 @@ pub fn run() {
             snapshot,
             resume,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running CircuitSim++");
+        .build(tauri::generate_context!());
+
+    let app = match app {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("CircuitSim++ failed to start: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    app.run(|_app, event| {
+        if let tauri::RunEvent::Ready = event {
+            eprintln!("CircuitSim++ ready.");
+        }
+    });
 }
