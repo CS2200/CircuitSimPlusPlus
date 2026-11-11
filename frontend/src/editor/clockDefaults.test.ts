@@ -3,6 +3,8 @@ import { CircuitDocument } from "../model/document";
 import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
 import { isPinEndpoint } from "../model/csx";
 import { pinShown } from "./catalog";
+import { compLayout } from "./layout";
+import { rectIntersects } from "../render/geom";
 
 function doc(): CircuitDocument {
   return CircuitDocument.create();
@@ -37,6 +39,47 @@ describe("placing a clocked part wires its clock and reset", () => {
     expect(wired("rst")[0].name).toBe("RST");
   });
 
+  it("puts the clock and reset in separate free slots, off the part", () => {
+    const d = doc();
+    const r = place(d, "mem.register");
+    const c = d.circuits[0];
+    const compById = (id: string) => c.components.find((x) => x.id === id)!;
+    const clamp = c.components.find((x) => x.type === "wiring.clock")!;
+    const reset = c.components.find((x) => x.type === "wiring.reset")!;
+    const regRect = compLayout(compById(r), d.circuits).rect;
+    const clockRect = compLayout(compById(clamp.id), d.circuits).rect;
+    const resetRect = compLayout(compById(reset.id), d.circuits).rect;
+    expect(rectIntersects(clockRect, resetRect)).toBe(false);
+    expect(rectIntersects(clockRect, regRect)).toBe(false);
+    expect(rectIntersects(resetRect, regRect)).toBe(false);
+    // Both sources are distinct components, not aliases of one another.
+    expect(clamp.id).not.toBe(reset.id);
+  });
+
+  it("keeps the default wire off the register body", () => {
+    const d = doc();
+    const r = place(d, "mem.register");
+    const c = d.circuits[0];
+    const reg = c.components.find((x) => x.id === r)!;
+    const regRect = compLayout(reg, d.circuits).rect;
+    // Every interior sample of every default wire stays outside the register's
+    // body: the source is placed on the control-pin side.
+    for (const w of c.wires) {
+      for (let s = 0; s + 1 < w.points.length; s++) {
+        for (let t = 0; t <= 1; t += 0.1) {
+          const x = w.points[s][0] + (w.points[s + 1][0] - w.points[s][0]) * t;
+          const y = w.points[s][1] + (w.points[s + 1][1] - w.points[s][1]) * t;
+          const inside =
+            x > regRect.x &&
+            x < regRect.x + regRect.w &&
+            y > regRect.y &&
+            y < regRect.y + regRect.h;
+          expect(inside).toBe(false);
+        }
+      }
+    }
+  });
+
   it("reuses one source for every part, and one undo step for a placement", () => {
     const d = doc();
     const a = place(d, "mem.register", [10, 10]);
@@ -55,6 +98,24 @@ describe("placing a clocked part wires its clock and reset", () => {
     expect(d.circuits[0].components.some((x) => x.id === b)).toBe(false);
     expect(d.circuits[0].wires.length).toBeLessThan(wires);
     expect(d.circuits[0].wires.filter((w) => touches(w.a, a) || touches(w.b, a))).toHaveLength(2);
+  });
+
+  it("keeps a subcircuit's CLK/RST ports in separate free slots", () => {
+    const d = doc();
+    const sub = d.addCircuit("sub");
+    const key = `place:${nextPlaceSeq()}`;
+    const r = d.addComponent(sub, { type: "mem.register", pos: [10, 10] }, key);
+    applyClockDefaults(d, sub, r, "mem.register", key);
+    const c = d.circuit(sub);
+    const ports = c.components.filter((x) => x.type === "wiring.pin");
+    expect(ports.map((p) => p.name).sort()).toEqual(["CLK", "RST"]);
+    const rects = ports.map((p) => compLayout(p, d.circuits).rect);
+    expect(rectIntersects(rects[0], rects[1])).toBe(false);
+    const regRect = compLayout(
+      c.components.find((x) => x.id === r)!,
+      d.circuits,
+    ).rect;
+    expect(rects.some((x) => rectIntersects(x, regRect))).toBe(false);
   });
 
   it("accepts CLOCK/RESET in any capitalisation when finding an existing source", () => {

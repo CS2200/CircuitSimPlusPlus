@@ -23,8 +23,10 @@
  * One undo step: the caller passes the placement's coalesce key, so the part and the wiring
  * it caused undo together.
  */
-import { compSpec } from "./catalog";
-import { pinPosition } from "./layout";
+import { compSize, compSpec } from "./catalog";
+import { compLayout, pinPosition } from "./layout";
+import { inflateRect, rectIntersects, type Rect, type Vec2 } from "../render/geom";
+import { routeLeg, type LegEnd } from "./route";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
 
@@ -81,6 +83,101 @@ function pinOf(comp: CsxComponent, preferred?: string): string {
   return (out ?? pins[0]).name;
 }
 
+/** Does an axis-aligned segment (possibly diagonal) touch `r`? Slab clip. */
+function segmentHitsRect(a: Vec2, b: Vec2, r: Rect): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const p = [-dx, dx, -dy, dy];
+  const q = [a.x - r.x, r.x + r.w - a.x, a.y - r.y, r.y + r.h - a.y];
+  for (let i = 0; i < 4; i++) {
+    if (p[i] === 0) {
+      if (q[i] < 0) return false;
+    } else {
+      const t = q[i] / p[i];
+      if (p[i] < 0) t0 = Math.max(t0, t);
+      else t1 = Math.min(t1, t);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
+}
+
+/** True when a body rect is clear of every component body and wire segment. */
+function freeRect(doc: CircuitDocument, circuitIdx: number, rect: Rect, margin: number): boolean {
+  const circuits = doc.circuits;
+  const inflated = inflateRect(rect, margin);
+  for (const comp of circuits[circuitIdx].components) {
+    if (rectIntersects(inflated, compLayout(comp, circuits).rect)) return false;
+  }
+  for (const w of circuits[circuitIdx].wires) {
+    for (let s = 0; s + 1 < w.points.length; s++) {
+      const a = { x: w.points[s][0], y: w.points[s][1] };
+      const b = { x: w.points[s + 1][0], y: w.points[s + 1][1] };
+      if (segmentHitsRect(a, b, inflated)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * A free spot for a default clock/reset source. Clocked parts put their control
+ * pins on the bottom edge, so "below the part" is tried first: the default wire
+ * then leaves down and never crosses the body. Later rings step farther out
+ * when the near slots are occupied; each caller creates its source immediately,
+ * so the clock and reset cannot land on top of each other.
+ */
+export function freeSourcePosition(
+  doc: CircuitDocument,
+  circuitIdx: number,
+  placed: CsxComponent,
+  sourceType: string,
+): [number, number] {
+  const circuits = doc.circuits;
+  const pr = compLayout(placed, circuits).rect;
+  const attrs = sourceType === "wiring.pin" ? { bitsize: 1 } : {};
+  const { w, h } = compSize({ type: sourceType, attrs }, circuits);
+  const gap = 2;
+  for (let ring = 0; ring < 8; ring++) {
+    const d = gap + ring * 4;
+    const candidates: [number, number][] = [
+      [pr.x, pr.y + pr.h + d], // below-left
+      [pr.x + pr.w + d, pr.y + pr.h + d], // below-right
+      [pr.x + pr.w + d, pr.y], // right
+      [pr.x - w - d, pr.y], // left
+      [pr.x, pr.y - h - d], // above-left
+      [pr.x + pr.w + d, pr.y - h - d], // above-right
+      [pr.x - w - d, pr.y + pr.h - h], // left-below
+      [pr.x - w - d, pr.y - h - d], // left-above
+    ];
+    for (const [x, y] of candidates) {
+      if (freeRect(doc, circuitIdx, { x, y, w, h }, 1)) return [x, y];
+    }
+  }
+  return [pr.x, pr.y + pr.h + gap];
+}
+
+/** The pin's route end: its outward facing and the body it must clear. */
+function legEnd(comp: CsxComponent, pin: string, circuits: readonly CsxCircuit[]): LegEnd {
+  const layout = compLayout(comp, circuits);
+  const p = layout.pins.find((x) => x.name === pin);
+  return { dir: p?.facing ?? null, body: layout.rect };
+}
+
+/** Orthogonal default wire, clearance-aware; falls back to a plain L. */
+function routeDefault(a: Vec2, aEnd: LegEnd, b: Vec2, bEnd: LegEnd): [number, number][] {
+  const raw = routeLeg(a, aEnd, b, bEnd);
+  const pts = raw.filter(
+    (p, i) => i === 0 || Math.abs(p.x - raw[i - 1].x) > 1e-9 || Math.abs(p.y - raw[i - 1].y) > 1e-9,
+  );
+  if (pts.length >= 2) return pts.map((p) => [p.x, p.y] as [number, number]);
+  return [
+    [a.x, a.y],
+    [b.x, b.y],
+  ];
+}
+
 /**
  * Wire `compId`'s default pins (see the module doc). Called right after a placement, with
  * that placement's coalesce key.
@@ -111,7 +208,7 @@ export function applyClockDefaults(
         if (source === undefined) {
           const id = doc.addComponent(
             circuitIdx,
-            { type: want, pos: [placed.pos[0], placed.pos[1] - 6] },
+            { type: want, pos: freeSourcePosition(doc, circuitIdx, placed, want) },
             coalesceKey,
           );
           circuit = doc.circuits[circuitIdx];
@@ -125,7 +222,7 @@ export function applyClockDefaults(
         circuitIdx,
         {
           type: "wiring.pin",
-          pos: [placed.pos[0] - 8, placed.pos[1]],
+          pos: freeSourcePosition(doc, circuitIdx, placed, "wiring.pin"),
           name: def.label,
           attrs: { bitsize: 1 },
         },
@@ -136,41 +233,26 @@ export function applyClockDefaults(
     }
     if (source === undefined) continue;
 
-    // The model wants a real polyline (a wire needs ≥ 2 points); a Manhattan L between
-    // the two pins is what the old tool's routing produced, and re-routing is one drag.
+    // The model wants a real polyline (a wire needs ≥ 2 points). The router
+    // leaves each pin along its facing and clears both bodies, so a source
+    // below the part gives a wire that does not cross the part's own copper.
     const from = { comp: compId, pin: pin.name };
     const to = { comp: source.id, pin: pinOf(source, "out") };
     const circuits = doc.circuits;
     const here = circuits[circuitIdx].components;
-    const a = pinPosition(
-      here.find((x) => x.id === from.comp)!,
-      from.pin,
-      circuits,
-    );
-    const b = pinPosition(
-      here.find((x) => x.id === to.comp)!,
-      to.pin,
-      circuits,
-    );
+    const fromComp = here.find((x) => x.id === from.comp);
+    const toComp = here.find((x) => x.id === to.comp);
+    if (fromComp === undefined || toComp === undefined) continue;
+    const a = pinPosition(fromComp, from.pin, circuits);
+    const b = pinPosition(toComp, to.pin, circuits);
     if (a === null || b === null) continue;
-    // Manhattan L between the two pins. When they already share an axis the L's
-    // corner coincides with an endpoint, so emit the straight two-point run —
-    // otherwise the wire carries a zero-length segment (the clock sits directly
-    // above/below the part, so this is the common case).
-    const alignedX = Math.abs(a.x - b.x) < 1e-9;
-    const alignedY = Math.abs(a.y - b.y) < 1e-9;
-    if (alignedX && alignedY) continue; // coincident pins: nothing to draw
-    const points: [number, number][] =
-      alignedX || alignedY
-        ? [
-            [a.x, a.y],
-            [b.x, b.y],
-          ]
-        : [
-            [a.x, a.y],
-            [a.x, b.y],
-            [b.x, b.y],
-          ];
+    if (Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9) continue; // coincident
+    const points = routeDefault(
+      a,
+      legEnd(fromComp, from.pin, circuits),
+      b,
+      legEnd(toComp, to.pin, circuits),
+    );
     doc.addWire(
       circuitIdx,
       {
