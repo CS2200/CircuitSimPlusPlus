@@ -13,7 +13,7 @@ import {
   type HarnessStep,
 } from "./routeHarness";
 
-// AND at (10,10): out pin (14,11.5) facing E. NOT at (20,10): in pin (20,11)
+// AND at (10,10): out pin (15,11.5) facing E. NOT at (20,10): in pin (20,11)
 // facing W. The exact geometry of the classic "wire skims the gate edge" case.
 function andNot(): Harness {
   return buildHarness({
@@ -44,7 +44,7 @@ describe("routeHarness — gesture replay", () => {
     expect(wires[0].a).toEqual({ comp: and, pin: "out" });
     expect(wires[0].b).toEqual({ comp: not, pin: "in" });
     expect(wires[0].points).toEqual([
-      [14, 11.5],
+      [15, 11.5],
       [19, 11.5],
       [19, 11],
       [20, 11],
@@ -62,7 +62,7 @@ describe("routeHarness — gesture replay", () => {
       { kind: "click", at: `${not}.in` },
     ]);
     expect(h.wires()[0].points).toEqual([
-      [14, 11.5],
+      [15, 11.5],
       [17, 11.5],
       [17, 8],
       [19, 8],
@@ -102,9 +102,9 @@ describe("routeHarness — gesture replay", () => {
       { kind: "click", at: `${not}.in` },
     ]);
     expect(h.wires()[0].points).toEqual([
-      [14, 11.5],
       [15, 11.5],
-      [15, 11],
+      [16, 11.5],
+      [16, 11],
       [20, 11],
     ]);
   });
@@ -119,7 +119,7 @@ describe("routeHarness — gesture replay", () => {
     ]);
     expect(h.wires()).toHaveLength(1);
     expect(h.wires()[0].points).toEqual([
-      [14, 11.5],
+      [15, 11.5],
       [19, 11.5],
       [19, 11],
       [20, 11],

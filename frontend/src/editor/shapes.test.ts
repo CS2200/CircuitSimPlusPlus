@@ -108,29 +108,39 @@ describe("transistor glyph (UI_OVERHAUL §78)", () => {
 });
 
 describe("gate input bubbles (negate, §102/§103)", () => {
-  it("shifts the symbol right so the bubble sits outside the body", () => {
-    const plain = gateShape("gate.and", 0, 0, 4, 3, [], 2)!;
+  it("always extends the gate, so the lead block is constant", () => {
+    const plain = gateShape("gate.and", 0, 0, 5, 3, [], 2)!;
     const bubbled = gateShape("gate.and", 0, 0, 5, 3, [0], 2)!;
-    // The catalog widens the gate 4→5; the SYMBOL shifts right one unit, so the
-    // freed block holds the bubble (CircuitSim CE's `translate(BLOCK_SIZE, 0)`).
-    // Without the shift the bubble lands *inside* the body.
-    expect(plain.body[0]).toMatchObject({ t: "M", x: 0 });
+    // The symbol is shifted right one unit in BOTH: the lead block is always
+    // there (the catalog sizes every gate 5 wide), so negating an input never
+    // resizes the gate.
+    expect(plain.body[0]).toMatchObject({ t: "M", x: 1 });
     expect(bubbled.body[0]).toMatchObject({ t: "M", x: 1 });
-    // The bubble is in that freed block — left of the body, right of the port.
+    // A negated input's bubble sits in the lead block, left of the body.
     expect(bubbled.inBubbles).toEqual([{ x: BUBBLE_R, y: 1 }]);
-    expect(bubbled.inBubbles![0].x).toBeLessThan(1);
+    expect(plain.inBubbles).toEqual([]);
   });
 
-  it("stubs every non-negated input to the shifted body", () => {
+  it("stubs every plain input from its port to the body", () => {
+    // Both inputs stubbed (no bubbles).
+    const plain = gateShape("gate.and", 0, 0, 5, 3, [], 2)!;
+    expect(plain.extra).toEqual([
+      [
+        { t: "M", x: 0, y: 1 },
+        { t: "L", x: 1, y: 1 },
+      ],
+      [
+        { t: "M", x: 0, y: 2 },
+        { t: "L", x: 1, y: 2 },
+      ],
+    ]);
+    // Negating in0 swaps its stub for a bubble; in1 keeps its stub.
     const bubbled = gateShape("gate.and", 0, 0, 5, 3, [0], 2)!;
-    // in1 (not negated) gets a port→body stub; in0 (negated) gets the bubble.
     expect(bubbled.extra).toEqual([
       [
         { t: "M", x: 0, y: 2 },
         { t: "L", x: 1, y: 2 },
       ],
     ]);
-    // A plain gate draws no stubs.
-    expect(gateShape("gate.and", 0, 0, 4, 3, [], 2)!.extra).toEqual([]);
   });
 });

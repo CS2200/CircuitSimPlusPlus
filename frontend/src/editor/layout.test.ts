@@ -23,12 +23,12 @@ describe("catalog", () => {
     const four = compPins({ type: "gate.and", attrs: { inputs: 4 } });
     expect(four.filter((p) => p.kind === "in")).toHaveLength(4);
     // Extra inputs grow the body TALLER (the pins keep their spacing) while the
-    // output cap stays a 2-input gate's size (UI_OVERHAUL §44). CircuitSim CE's
-    // 2-input gate is 4 blocks wide and 4 tall (`GatePeer`'s default), so ours
-    // matches that instead of the old elongated 5×3.
+    // output cap stays a 2-input gate's size (UI_OVERHAUL §44). Gates are always
+    // 5 blocks wide (UI_OVERHAUL §104): the first block is the input lead area,
+    // so negating an input never resizes the gate.
     expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).h).toBe(5);
-    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).w).toBe(4);
-    expect(compSize({ type: "gate.and" })).toMatchObject({ w: 4, h: 3 });
+    expect(compSize({ type: "gate.and", attrs: { inputs: 4 } }).w).toBe(5);
+    expect(compSize({ type: "gate.and" })).toMatchObject({ w: 5, h: 3 });
   });
 
   it("plexer pin sets scale with the select width (format-v2 §4 attrs)", () => {
@@ -104,39 +104,39 @@ describe("catalog", () => {
 describe("compLayout", () => {
   it("places pins in world coordinates (EAST default)", () => {
     const layout = compLayout(and2);
-    // CE-length 2-input gate: 4 wide (was 5), same 3-tall grown-by-inputs body.
-    expect(layout.rect).toEqual({ x: 10, y: 10, w: 4, h: 3 });
+    // Always-extended 2-input gate: 5 wide (one block is the input lead area).
+    expect(layout.rect).toEqual({ x: 10, y: 10, w: 5, h: 3 });
     const out = layout.pins.find((p) => p.name === "out");
-    expect(out).toMatchObject({ x: 14, y: 11.5, kind: "out" });
+    expect(out).toMatchObject({ x: 15, y: 11.5, kind: "out" });
     const ins = layout.pins.filter((p) => p.kind === "in");
     expect(ins.map((p) => p.x)).toEqual([10, 10]);
   });
 
   it("SOUTH rotates 90° clockwise about the body center", () => {
     const s = compLayout({ ...and2, rot: "S" });
-    expect(s.rect).toEqual({ x: 10, y: 10, w: 3, h: 4 }); // 90° swaps w/h
-    // out pin EAST offset (+2, 0) → SOUTH (0, +2) about the swapped rect's center
+    expect(s.rect).toEqual({ x: 10, y: 10, w: 3, h: 5 }); // 90° swaps w/h
+    // out pin EAST offset (+2.5, 0) → SOUTH (0, +2.5) about the swapped rect's center
     const out = s.pins.find((p) => p.name === "out");
-    expect(out).toMatchObject({ x: 11.5, y: 14 });
+    expect(out).toMatchObject({ x: 11.5, y: 15 });
   });
 
   it("WEST mirrors to the left edge (180°)", () => {
     const w = compLayout({ ...and2, rot: "W" });
-    expect(w.rect).toEqual({ x: 10, y: 10, w: 4, h: 3 }); // 180° keeps w/h
+    expect(w.rect).toEqual({ x: 10, y: 10, w: 5, h: 3 }); // 180° keeps w/h
     const out = w.pins.find((p) => p.name === "out");
     expect(out).toMatchObject({ x: 10, y: 11.5 });
   });
 
   it("NORTH/SOUTH swap width and height", () => {
     const n = compLayout({ ...and2, rot: "N" });
-    expect(n.rect).toEqual({ x: 10, y: 10, w: 3, h: 4 });
-    // EAST out pin (offset +2, 0 from the swapped rect's center) rotates NORTH
+    expect(n.rect).toEqual({ x: 10, y: 10, w: 3, h: 5 });
+    // EAST out pin (offset +2.5, 0 from the swapped rect's center) rotates NORTH
     const out = n.pins.find((p) => p.name === "out");
     expect(out).toMatchObject({ x: 11.5, y: 10 });
   });
 
   it("pinPosition returns the absolute point or null", () => {
-    expect(pinPosition(and2, "out")).toEqual({ x: 14, y: 11.5 });
+    expect(pinPosition(and2, "out")).toEqual({ x: 15, y: 11.5 });
     expect(pinPosition(and2, "nope")).toBeNull();
   });
 

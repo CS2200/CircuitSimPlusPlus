@@ -2920,16 +2920,31 @@ derivation in `lib/subcircuit.test.ts`.
   second click removes it), in one undo step. The zone mirrors the draw pass
   exactly (`DocScene.inputBubbleZones`), so it lands on the bubble the user
   sees.
-- **The input port still starts a wire.** The bubble sits in the expansion block
-  just outside the body — the body shifts right one grid unit to make room for
-  it, exactly as CircuitSim CE's `GatePeer` does — so the port and the bubble are
-  both in reach of a click and the **nearer** one wins (`ToolMachine`). A click
-  on the port wires; a click on the bubble just outside it toggles. The cursor
-  reads `pointer` over a bubble so the toggle is discoverable.
-- **Non-negated inputs get a stub.** Once a gate is expanded (any input
-  bubbled), every plain input draws a short line from its port to the shifted
-  body, so no port "floats" (CE's fake wires).
+- **The input port still starts a wire.** The bubble sits in the gate's input
+  lead block, just outside the body, so the port and the bubble are both in reach
+  of a click and the **nearer** one wins (`ToolMachine`). A click on the port
+  wires; a click on the bubble just outside it toggles. The cursor reads
+  `pointer` over a bubble so the toggle is discoverable.
+- **Every input gets a stub.** A plain input draws a short line from its port to
+  the body; negating it swaps the stub for a bubble, so nothing else moves (see
+  §104).
 - Only the six multi-input gates have zones (`isMultiInputGate`); the output
   bubble of a NAND/NOR/XNOR/NOT is the gate _type_, not a toggle.
 
-**Acceptance:** frontend lint / 581 unit / build green.
+**Acceptance:** frontend lint / 583 unit / build green.
+
+## 104. Gates are always extended (2026-11-10)
+
+- **Every gate is one grid unit wider than its symbol, always.** The extra block
+  is the input **lead area**: each input draws a stub from its port to the body,
+  and a negated input's bubble sits in that lead block in place of the stub. So
+  the symbol is always shifted right one unit (`shapes.ts`) and the gate's
+  footprint is a constant 5 wide — negating an input swaps a stub for a bubble
+  and nothing resizes. (CircuitSim CE widens only when an input is negated, so
+  its gates jump 4↔5; widening always keeps the layout — and the student's
+  mental model — stable, and makes the bubble's home visible before it exists.)
+- **Wire ends heal on load.** A file written against the old 4-wide gate names a
+  pin whose symbol has since grown; `normalizePinEnds` resolves every pin end to
+  the current layout once per load, so an old file's wires still meet their pins.
+
+**Acceptance:** frontend lint / 583 unit / build green.

@@ -328,7 +328,7 @@ describe("wire flip (X) — preserved across re-route", () => {
     const flipped = JSON.stringify(h.wires()[0].points);
     expect(h.wires()[0].flip).toBe(true);
     // Sanity: the flip really changed the shape (corner near the source).
-    expect(flipped).toContain("[15,11.5]");
+    expect(flipped).toContain("[16,11.5]");
     const r = compLayout(
       h.circuit().components.find((x) => x.id === not)!,
       h.doc.circuits,

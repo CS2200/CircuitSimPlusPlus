@@ -344,16 +344,15 @@ export function gateShape(
       const negated = type === "gate.nand" || type === "gate.nor" || type === "gate.xnor";
       const back = type === "gate.xor" || type === "gate.xnor";
       const n = Math.max(2, inputs ?? Math.round(h) - 1);
-      // Input bubbles (`negate`) occupy the extra grid unit the catalog adds
-      // (4→5): the SYMBOL shifts right by one unit and the bubbles sit between
-      // the input ports and the body — CircuitSim CE's own geometry
-      // (`GatePeer.paint` translates the body by `BLOCK_SIZE` before
-      // `paintGate`). Without the shift the bubble lands *inside* the body,
-      // which reads as a bubble offset into the gate rather than an inverter on
-      // the input.
-      const expanded = negate.length > 0;
-      const bodyX = x + (expanded ? 1 : 0);
-      const bw = w - (expanded ? 1 : 0) - (negated ? 2 * BUBBLE_R : 0);
+      // Gates are ALWAYS extended by one grid unit (the catalog sizes them 5
+      // wide): the first block is the input lead area — every input draws a stub
+      // from its port to the body, and a negated input's bubble (`negate`)
+      // replaces that stub. So the SYMBOL always shifts right one unit (the
+      // bubble sits between the port and the body — CircuitSim CE's
+      // `translate(BLOCK_SIZE, 0)`), and negating an input never resizes the
+      // gate: the bubble's home is always visible.
+      const bodyX = x + 1;
+      const bw = w - 1 - (negated ? 2 * BUBBLE_R : 0);
       const body =
         type === "gate.and" || type === "gate.nand"
           ? andPath(bodyX, capY, bw, capH)
@@ -372,12 +371,13 @@ export function gateShape(
       const inBubbles: Vec2[] = [];
       for (let i = 0; i < n; i++) {
         if (negate.includes(i)) {
-          // The bubble fills the extra unit, tangent to the port (CE draws a full
+          // The bubble fills the lead unit, tangent to the port (CE draws a full
           // block; BUBBLE_R keeps it consistent with the output bubble).
           inBubbles.push({ x: x + BUBBLE_R, y: pinY(i) });
-        } else if (expanded) {
-          // A plain input on an expanded gate: a stub from the port to the
-          // shifted body, so the port never "floats" (CE's fake wire).
+        } else {
+          // A plain input: a stub from the port to the body, so the port never
+          // "floats" (CE's fake wire). Negating the input swaps this for a
+          // bubble — nothing else moves.
           extra.push([
             { t: "M", x, y: pinY(i) },
             { t: "L", x: bodyX, y: pinY(i) },

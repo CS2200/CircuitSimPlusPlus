@@ -154,22 +154,17 @@ export function gateInputCount(attrs: Readonly<Record<string, unknown>>): number
 }
 
 function gateSpec(caption: string, minInputs: number): CompSpec {
-  // A bubbled input (`negate`) widens the part by one grid unit, exactly as
-  // CircuitSim CE does: the extra unit holds the bubble between the input port
-  // and the body, which the shape shifts right to make room (`shapes.ts`), so
-  // the port stays on the outline and the bubble reads as an input inverter
-  // (format-v2 §4).
+  // Gates are **always extended by one grid unit** (5 blocks wide): the first
+  // block is the input lead area — every input draws a stub from its port to
+  // the body, and a negated input's bubble (`negate`, format-v2 §4) replaces
+  // that stub. So negating an input never resizes the gate, and the input
+  // styling is uniform. (CircuitSim CE widens only when an input is negated;
+  // widening always keeps the layout stable and the bubble's home visible.)
   const negatedInputs = (attrs: Readonly<Record<string, unknown>>): number[] =>
     Array.isArray(attrs.negate) ? (attrs.negate as number[]) : [];
-  // CircuitSim CE's 2-input gate is 4 blocks wide (`GatePeer`'s default
-  // `super(x, y, 4, 4, true)` and `AndGatePeer`/`OrGatePeer`'s 4×4 paint); the
-  // old 5 read as an over-long lozenge. CE widens to 5 when an input carries a
-  // bubble, which is exactly the rule here. The HEIGHT keeps our §44 growth
-  // (inputs never crowd), so only the unnecessary LENGTH changed.
-  const bodyWidth = (attrs: Readonly<Record<string, unknown>>): number =>
-    negatedInputs(attrs).length > 0 ? 5 : 4;
+  const bodyWidth = 5;
   return {
-    width: bodyWidth,
+    width: () => bodyWidth,
     height: (attrs) => Math.max(3, numAttr(attrs, "inputs", 2) + 1),
     pins: (attrs) => {
       const n = Math.max(minInputs, numAttr(attrs, "inputs", 2));
@@ -189,7 +184,7 @@ function gateSpec(caption: string, minInputs: number): CompSpec {
       }
       pins.push({
         name: "out",
-        dx: bodyWidth(attrs),
+        dx: bodyWidth,
         dy: h / 2,
         kind: "out",
         bitsize: width,
