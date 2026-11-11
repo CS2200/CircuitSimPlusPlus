@@ -17,7 +17,7 @@ mod recovery;
 
 use csim_core::api::{
     CompId, EventSink, LoadResult, NetDiffs, SaveResult, Sim, SimHalted, SimStatus, TimingUpdate,
-    WireValue,
+    Watch, WireValue,
 };
 use csim_core::session::Session;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -149,6 +149,17 @@ fn sim_pause(state: State<SimState>) -> Result<(), String> {
 fn sim_set_pause_on_unknown(state: State<SimState>, pause: bool) -> Result<(), String> {
     let mut guard = lock(&state)?;
     session(&mut guard)?.set_pause_on_unknown(pause);
+    Ok(())
+}
+
+/// Install the caller's stop conditions (contract v1.6): `step*`/`run_until` stop early when one
+/// holds and report `reason: stop` — a *stop*, not a fault, so the next call carries on. An empty
+/// array clears them; a bad name/literal is reported as an `error` halt (the engine keeps its
+/// previous watches).
+#[tauri::command]
+fn sim_set_watch(state: State<SimState>, watch: Vec<Watch>) -> Result<(), String> {
+    let mut guard = lock(&state)?;
+    session(&mut guard)?.set_watch(&watch);
     Ok(())
 }
 
@@ -467,6 +478,7 @@ pub fn run() {
             sim_play,
             sim_pause,
             sim_set_pause_on_unknown,
+            sim_set_watch,
             sim_step_tick,
             sim_step_cycles,
             sim_run_until,

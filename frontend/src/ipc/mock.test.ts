@@ -227,6 +227,57 @@ describe("mock core (U9)", () => {
     });
   });
 
+  describe("setWatch (contract v1.6)", () => {
+    it("stops with reason 'stop' when a watch holds, and carries on after", async () => {
+      await mock.api.setWatch([{ when: "reaches", name: "pc", value: "3" }]);
+      await mock.api.stepCycles(10);
+      expect(halts).toHaveLength(1);
+      expect(halts[0].reason).toBe("stop");
+      expect(halts[0].details).toContain("pc");
+      // pc becomes 3 at the cycle-2 posedge, so the run stops there.
+      expect(halts[0].cycle).toBe(2);
+      // A stop is not a fault: the next run continues (and the watch is spent).
+      await mock.api.stepCycles(1);
+      expect(halts).toHaveLength(1);
+    });
+
+    it("'changes' counts transitions; 'is' fires on a level", async () => {
+      await mock.api.setWatch([{ when: "changes", name: "pc", count: 3 }]);
+      await mock.api.stepCycles(10);
+      expect(halts[0]?.reason).toBe("stop");
+      expect(halts[0]?.cycle).toBe(3); // the 3rd transition
+
+      halts.length = 0;
+      await mock.api.setWatch([{ when: "is", name: "pc", value: "5" }]);
+      await mock.api.stepCycles(10);
+      expect(halts[0]?.reason).toBe("stop");
+      expect(halts[0]?.cycle).toBe(4); // pc becomes 5 at the cycle-4 posedge
+    });
+
+    it("a fired watch is spent — it does not fire again", async () => {
+      await mock.api.setWatch([{ when: "reaches", name: "pc", value: "2" }]);
+      await mock.api.stepCycles(4);
+      expect(halts).toHaveLength(1);
+      halts.length = 0;
+      await mock.api.stepCycles(6);
+      expect(halts).toHaveLength(0);
+    });
+
+    it("an unknown watch name is an error halt (the engine's setWatch error)", async () => {
+      await mock.api.setWatch([{ when: "is", name: "nope", value: "0" }]);
+      expect(halts).toHaveLength(1);
+      expect(halts[0].reason).toBe("error");
+      expect(halts[0].details).toContain("nope");
+    });
+
+    it("an empty array clears the watches", async () => {
+      await mock.api.setWatch([{ when: "reaches", name: "pc", value: "2" }]);
+      await mock.api.setWatch([]);
+      await mock.api.stepCycles(5);
+      expect(halts).toHaveLength(0);
+    });
+  });
+
   describe("memory commands", () => {
     it("memWrite then memRead round-trips", async () => {
       const values: WireValue[] = [

@@ -2930,6 +2930,49 @@ input[type="number"] {
   font-size: var(--fs-md);
 }
 
+/* "Run until…" dialog (UI_OVERHAUL §105): one row per stop condition. */
+.run-until {
+  max-width: 560px;
+}
+
+.watch-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.watch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.9fr) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.watch-row .select,
+.watch-row .select-btn {
+  width: 100%;
+}
+
+.watch-arg {
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--field-bg);
+  border: 1px solid var(--border-soft);
+}
+
+.watch-remove {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: var(--fs-md);
+}
+
 .bitsize-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);

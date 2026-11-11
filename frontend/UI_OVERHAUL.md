@@ -2948,3 +2948,22 @@ derivation in `lib/subcircuit.test.ts`.
   the current layout once per load, so an old file's wires still meet their pins.
 
 **Acceptance:** frontend lint / 583 unit / build green.
+
+## 105. "Run until…" — caller-defined stop conditions (2026-11-11)
+
+- **The transport bar's "Run until…" opens a dialog** that defines one or more
+  stop conditions and runs (contract v1.6). Each condition watches a **named
+  register or probe**: `is stable for N` (unchanged for N cycle boundaries),
+  `changes N` (N transitions), `reaches V` (becomes the value) or `is V` (equals
+  it). `stable`/`changes` are the two halves of CS 2200's CPU rule (PC unchanged
+  for 100 / PC changed 10 000 times).
+- **It runs to the condition, not a cycle count.** On Run the editor re-syncs,
+  installs the watches (`sim_set_watch`), and plays; the engine stops with
+  `sim_halted.reason: "stop"` when one holds and the banner says which. A stop is
+  a **pause** (like a breakpoint): the next play/step continues from there, so the
+  transport stays armed.
+- **A fired watch is spent**, and a bad name/literal is reported as an `error`
+  halt — both matching the engine (`delay.rs`). The mock core implements the same
+  semantics over its demo circuit, so the dialog works in the browser dev flow.
+
+**Acceptance:** frontend lint / 588 unit / build green.

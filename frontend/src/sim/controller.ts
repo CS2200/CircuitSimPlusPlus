@@ -15,6 +15,7 @@ import type {
   NamedComponent,
   NetId,
   SaveResult,
+  Watch,
   WireIdx,
   WireValue,
 } from "../ipc/types";
@@ -355,6 +356,15 @@ export class SimController {
   runUntil(cycle: number): Promise<void> {
     this.clearPoked();
     return this.core.api.runUntil(cycle);
+  }
+
+  /**
+   * Install the caller's stop conditions (contract v1.6). Set just before a
+   * "run until…" so the run stops when one holds (`reason: "stop"`); an empty
+   * array clears them.
+   */
+  setWatch(watch: Watch[]): Promise<void> {
+    return this.core.api.setWatch(watch);
   }
 
   poke(compId: CompId, pin: string, value: WireValue): Promise<void> {

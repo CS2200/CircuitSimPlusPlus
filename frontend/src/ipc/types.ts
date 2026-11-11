@@ -135,7 +135,20 @@ export interface SimStatus {
 }
 
 export type HaltReason =
-  "breakpoint" | "floating-read" | "contention" | "oscillation" | "cycle-limit" | "error";
+  "breakpoint" | "floating-read" | "contention" | "oscillation" | "cycle-limit" | "stop" | "error";
+
+/**
+ * A caller-defined stop condition (contract v1.6): run until one holds instead
+ * of for a fixed cycle count. `name` is a watch-addressable register/probe (the
+ * same registry `probe('…')` reads); the engine validates the name and the value
+ * literal at `setWatch` time. `stable`/`changes` are the two halves of CS 2200's
+ * CPU rule (PC unchanged for N boundaries / PC changed N times).
+ */
+export type Watch =
+  | { when: "stable"; name: string; cycles: number }
+  | { when: "reaches"; name: string; value: string }
+  | { when: "is"; name: string; value: string }
+  | { when: "changes"; name: string; count: number };
 
 export interface SimHalted {
   cycle: number;
@@ -204,6 +217,13 @@ export interface CoreApi {
    * `play`/`step` continues (frontend/src/editor/../prefs.ts `csx.pauseOnUnknown`).
    */
   setPauseOnUnknown(pause: boolean): Promise<void>;
+  /**
+   * Install the caller's stop conditions (contract v1.6). `stepTick`/`stepCycles`/
+   * `runUntil`/`play` then stop early when one holds and report `reason: "stop"`
+   * — a *stop*, not a fault, so like a breakpoint the next call carries on. An
+   * empty array clears them. A bad name/literal is reported as an `error` halt.
+   */
+  setWatch(watch: Watch[]): Promise<void>;
   runUntil(cycle: number): Promise<void>;
 
   /**

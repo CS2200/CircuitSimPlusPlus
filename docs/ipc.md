@@ -5,6 +5,16 @@ Normative. Mirrors `docs/tasks/README.md` §3; implemented in Rust by `crates/co
 and in TypeScript by `frontend/src/ipc/types.ts`. Changes require human sign-off and a
 DESIGN.md note.
 
+**Changelog v1.5 → v1.6 (proposed 2026-11-11, needs sign-off):** `sim_set_watch` installs
+caller-defined **stop conditions**; `step_tick`/`step_cycles`/`run_until`/`play` then stop early
+when one holds and report `sim_halted` with `reason: "stop"` — a *pause*, not a fault, so the next
+command carries on from exactly there (like `breakpoint`). A `Watch` is
+`{ when: "stable", name, cycles }` | `{ when: "changes", name, count }` |
+`{ when: "reaches", name, value }` | `{ when: "is", name, value }`; `name` is a
+watch-addressable register/probe (the `probe('…')` registry) and `value` a §4 literal. An empty
+array clears them; a bad name/literal is reported as an `error` halt. Mirrors `Sim::set_watch`
+(`api.rs`).
+
 **Changelog v1.4 → v1.5 (proposed 2026-10-26, needs sign-off):** `load_circuit` with **both**
 `path` and `bytes` loads the bytes as the document that lives at `path`: autoload paths resolve
 (and stay sandboxed) next to `path`, and the file itself is not read. Additive — `path` alone and
@@ -55,6 +65,7 @@ A bus value is `{ "v": "1fa3", "x": "0000", "z": "0000" }` — hex masks, MSB-fi
 | `mem_write` | `{ name: string, addr: number, values: WireValue[] }` | — |
 | `snapshot` | `{ path: string }` | — |
 | `sim_set_pause_on_unknown` | `{ pause: bool }` | ask (or do not ask) when the sim reads a net nothing drives |
+| `sim_set_watch` | `{ watch: Watch[] }` | install stop conditions (**v1.6**); an empty array clears them |
 | `resume` | `{ path: string }` | — |
 
 `LoadResult` = `{ ok, errors: LoadError[], net_map: NetMapEntry[], named: NamedComponent[] }`.
@@ -78,7 +89,7 @@ the engine never panics and never partially loads (DESIGN.md §5.2).
 |---|---|---|
 | `net_diffs` | `{ cycle, full, changes: [{ net, val, at?, contended? }] }` | Only changed nets, never full state (DESIGN.md §7.2) — **one exception (v1.1):** the single initial batch after load/resume has `full: true` and contains ALL nets (the UI's initial paint); every later batch is changed-nets-only with `full: false`. `at` = ns since run start. **v1.2:** `contended` is present and `true` when that net's `X` is a genuine short circuit (two enabled drivers disagreeing — DESIGN.md §4.1); absent for an `X` that merely flowed in. The UI applies ≤ 1 batch per animation frame and may drop intermediates — never queue a backlog. **Consumers that need history tap the batches before that merge** (`DiffPump`'s `onRaw`): the waveform viewer (UI_OVERHAUL §89) records from there, so the ≤ 1-batch-per-frame rule stays a *painting* rule and costs the trace nothing. No new event, command or field. |
 | `sim_status` | `{ running, cycle, eff_hz }` | On play/pause and ~1 Hz while running. |
-| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| error`; `details` names the component/pin for highlighting (shape pinned in §5). **`breakpoint` is the one reason that is not sticky:** every other halt means the design is broken (or out of budget) and the engine refuses to run until a load/reset, while a breakpoint is a *pause* — the next `sim_step_*`/`sim_run_until` continues from exactly there (Contract v1.2, `docs/format-v2.md` §9). The UI can therefore leave the transport armed instead of showing a fatal error. |
+| `sim_halted` | `{ cycle, reason, details }` | `reason ∈ breakpoint \| floating-read \| contention \| oscillation \| cycle-limit \| stop \| error`; `details` names the component/pin for highlighting (shape pinned in §5). **`breakpoint`, `floating-read`, and `stop` are the reasons that are not sticky:** every other halt means the design is broken (or out of budget) and the engine refuses to run until a load/reset, while these are *pauses* — the next `sim_step_*`/`sim_run_until` continues from exactly there (`docs/format-v2.md` §9; contract v1.2/v1.4/v1.6). The UI can therefore leave the transport armed instead of showing a fatal error. |
 | `timing_update` | `{ t_obs, est_time, top_paths }` | DTA results (DESIGN.md §4.4), after `sim_run_until` / pause. `top_paths: TimingPath[]` = `{ circuit, comps: [comp_id], delay_ns }`. |
 
 ## 4. Net identifiers

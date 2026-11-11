@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { SimController } from "../sim/controller";
 import type { CircuitDocument } from "../model/document";
-import type { LoadError } from "../ipc/types";
+import type { HaltReason, LoadError, Watch } from "../ipc/types";
+import RunUntilDialog from "./RunUntilDialog";
 import {
   CircuitIcon,
   CloseIcon,
@@ -63,12 +64,18 @@ export default function SimBar({
   const s = ctl.store;
   const [runTo, setRunTo] = useState("");
   const [cmdError, setCmdError] = useState<string | null>(null);
+  const [watchOpen, setWatchOpen] = useState(false);
+  /** Last-used "run until…" conditions, so reopening the dialog shows them. */
+  const [watches, setWatches] = useState<Watch[]>([]);
   const hz = Math.round(10 ** (hzExp / 10));
   const running = s.status?.running ?? false;
   /** Paused at a breakpoint — a stop, but not a failure (docs/ipc.md §3). */
-  // A breakpoint and a floating read are both *pauses* (contract v1.4): the run carries on
-  // when play is pressed again, so the bar offers that rather than looking stuck.
-  const paused = s.halted?.reason === "breakpoint" || s.halted?.reason === "floating-read";
+  // A breakpoint, a floating read, and a caller watch are all *pauses* (contract v1.4/v1.6):
+  // the run carries on when play is pressed again, so the bar offers that rather than looking stuck.
+  const paused =
+    s.halted?.reason === "breakpoint" ||
+    s.halted?.reason === "floating-read" ||
+    s.halted?.reason === "stop";
 
   const guard = (p: Promise<void>) => p.catch((e: unknown) => setCmdError(String(e)));
 
@@ -79,6 +86,20 @@ export default function SimBar({
     const ok = await ctl.resync(doc);
     if (!ok) return;
     await guard(cmd());
+  };
+
+  /**
+   * "Run until…" (contract v1.6): install the conditions, then run. `resync`
+   * first — a watch name is validated against the loaded design — and a bad
+   * name/literal surfaces as an `error` halt in the banner, not a throw.
+   */
+  const runUntil = (watch: Watch[]) => {
+    setWatches(watch);
+    setWatchOpen(false);
+    void withLoadedDoc(async () => {
+      await ctl.setWatch(watch);
+      await ctl.play(hz);
+    });
   };
 
   /**
@@ -108,7 +129,9 @@ export default function SimBar({
         void onReset();
       } else if (key === "k") {
         e.preventDefault();
-        if (ctl.store.status?.running ?? false) void guard(ctl.pause());
+        if (e.shiftKey)
+          setWatchOpen(true); // Ctrl+Shift+K → "Run until…"
+        else if (ctl.store.status?.running ?? false) void guard(ctl.pause());
         else void withLoadedDoc(() => ctl.play(hz));
       }
     };
@@ -192,6 +215,13 @@ export default function SimBar({
             onClick={() => withLoadedDoc(() => ctl.runUntil(Number(runTo)))}
           >
             Run to
+          </button>
+          <button
+            className="sim-btn"
+            title="Run until a condition on a named register or probe holds (Ctrl+Shift+K)"
+            onClick={() => setWatchOpen(true)}
+          >
+            Run until…
           </button>
         </div>
         <label className="sim-group sim-speed" title={`Clock speed: ${hz.toLocaleString()} Hz`}>
@@ -285,12 +315,12 @@ export default function SimBar({
           </button>
           {s.halted !== null &&
             (paused ? (
-              // A breakpoint is not a failure (docs/ipc.md §3): the run stopped
-              // where it was asked to and the transport stays armed, so the
-              // banner says what to do next rather than what went wrong.
+              // A breakpoint, a floating read, and a caller watch are not failures
+              // (docs/ipc.md §3): the run stopped where it was asked to and the transport
+              // stays armed, so the banner says what to do next rather than what went wrong.
               <span className="sim-breakpoint">
-                ⏸ Breakpoint at cycle {s.halted.cycle} — {haltMessage(s.halted.details)}. Step or
-                run to continue.
+                ⏸ {pauseLabel(s.halted.reason)} at cycle {s.halted.cycle} —{" "}
+                {haltMessage(s.halted.details)}. Step or run to continue.
               </span>
             ) : (
               <span>
@@ -337,6 +367,14 @@ export default function SimBar({
           )}
         </div>
       )}
+      {watchOpen && (
+        <RunUntilDialog
+          named={s.named}
+          initial={watches}
+          onRun={runUntil}
+          onClose={() => setWatchOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -353,4 +391,18 @@ function locatable(e: LoadError): boolean {
  */
 function haltMessage(details: string): string {
   return details.replace(/^comp \d+ pin "[^"]*":\s*/, "");
+}
+
+/** A short noun for a non-fatal pause, by reason (docs/ipc.md §3). */
+function pauseLabel(reason: HaltReason): string {
+  switch (reason) {
+    case "breakpoint":
+      return "Breakpoint";
+    case "floating-read":
+      return "Paused on an unknown value";
+    case "stop":
+      return "Stop condition met";
+    default:
+      return "Paused";
+  }
 }

@@ -44,6 +44,7 @@ import type {
   NamedComponent,
   NamedKind,
   SaveResult,
+  Watch,
   WireValue,
 } from "./types";
 import { isPinEndpoint, pinKey, type CsxDocument } from "../model/csx";
@@ -170,6 +171,31 @@ function valueToU32(val: WireValue): number {
   return Number(BigInt(`0x${val.v || "0"}`)) >>> 0;
 }
 
+/** Parse a watch/assertion value literal (`0x…`, `0b…`, or decimal) to a u32. */
+function parseLiteral(text: string): number | null {
+  const t = text.trim();
+  try {
+    if (/^0x[0-9a-f]+$/i.test(t)) return Number(BigInt(t)) >>> 0;
+    if (/^0b[01]+$/i.test(t)) return Number(BigInt(t)) >>> 0;
+    if (/^[0-9]+$/.test(t)) return Number(BigInt(t)) >>> 0;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * One installed stop condition (contract v1.6) plus the state the engine keeps
+ * per watch. Mirrors `delay.rs`'s evaluation: `last` is the previous boundary's
+ * value, `stableFor`/`changed` are the counters, and a fired watch is spent.
+ */
+interface MockWatchState {
+  watch: Watch;
+  last: number | null;
+  stableFor: number;
+  changed: number;
+}
+
 export class MockCore implements CoreApi {
   /** The editor's "stop when a part reads an unknown value" (§4.1), mock-side. */
   private pauseOnUnknown = false;
@@ -206,6 +232,10 @@ export class MockCore implements CoreApi {
   private effHz = 0;
   /** Test hook: last document passed to saveCircuit. */
   lastSave: { path: string; document: unknown } | null = null;
+  /** Named components of the current load, for watch-name resolution. */
+  private named: NamedComponent[] = [];
+  /** The caller's stop conditions (contract v1.6), each with its counters. */
+  private watches: MockWatchState[] = [];
 
   private get cycle(): number {
     return this.tick >> 1;
@@ -222,6 +252,7 @@ export class MockCore implements CoreApi {
     this.pc = 0;
     this.clk = false;
     this.busForced = null;
+    this.watches = [];
     this.imem.fill(0);
     this.imemUndef = new Set<number>(Array.from({ length: IMEM_WORDS }, (_, i) => i));
     this.mems.clear();
@@ -260,6 +291,7 @@ export class MockCore implements CoreApi {
         wires: n.wires,
       }));
       const named = namedComponents(doc, derivation);
+      this.named = named;
       for (const comp of circuit.components) {
         if ((comp.type === "mem.ram" || comp.type === "mem.rom") && comp.name !== undefined) {
           const depth = Math.min(4096, numAttr(comp.attrs, "depth", IMEM_WORDS));
@@ -286,6 +318,23 @@ export class MockCore implements CoreApi {
     this.circuitName = "main";
     this.layout = STANDALONE_LAYOUT;
     this.allZNets = null;
+    this.named = [
+      {
+        name: "pc",
+        kind: "register",
+        comp_id: MOCK_COMP.pc,
+        circuit: "main",
+        value_net: MOCK_NET.pcQ,
+      },
+      {
+        name: "next_pc",
+        kind: "probe",
+        comp_id: MOCK_COMP.nextPcProbe,
+        circuit: "main",
+        value_net: MOCK_NET.nextPc,
+      },
+      { name: "imem", kind: "ram", comp_id: MOCK_COMP.imem, circuit: "main" },
+    ];
     this.emitFullState();
 
     return {
@@ -333,7 +382,9 @@ export class MockCore implements CoreApi {
     this.intervalCount = 0;
     this.effHz = (this.ticksPerInterval * (1000 / periodMs)) / 2;
     this.timer = setInterval(() => {
-      for (let i = 0; i < this.ticksPerInterval; i++) this.advanceTick();
+      for (let i = 0; i < this.ticksPerInterval; i++) {
+        if (!this.advanceTick()) break;
+      }
       // ~1 Hz status while running, per contract.
       if (++this.intervalCount % this.statusEvery === 0) this.emitStatus();
     }, periodMs);
@@ -351,18 +402,39 @@ export class MockCore implements CoreApi {
   }
 
   async stepCycles(n: number): Promise<void> {
-    for (let i = 0; i < n * 2; i++) this.advanceTick();
+    for (let i = 0; i < n * 2; i++) {
+      if (!this.advanceTick()) break;
+    }
   }
 
   async setPauseOnUnknown(pause: boolean): Promise<void> {
     this.pauseOnUnknown = pause;
   }
 
+  /**
+   * Install the caller's stop conditions (contract v1.6). A name that is not a
+   * watch-addressable component is a caller error: the mock keeps its previous
+   * watches and reports an `error` halt, exactly as the engine does.
+   */
+  async setWatch(watch: Watch[]): Promise<void> {
+    const bad = watch.find((w) => !this.named.some((n) => n.name === w.name));
+    if (bad !== undefined) {
+      this.events.emit(IpcEvents.SimHalted, {
+        cycle: this.cycle,
+        reason: "error",
+        details: `unknown watch name '${bad.name}'`,
+      });
+      this.emitStatus();
+      return;
+    }
+    this.watches = watch.map((w) => ({ watch: w, last: null, stableFor: 0, changed: 0 }));
+  }
+
   async runUntil(cycle: number): Promise<void> {
     if (cycle - this.cycle > MAX_RUN_UNTIL_CYCLES) {
       throw new Error(`mock run_until: target cycle ${cycle} exceeds safety cap`);
     }
-    while (this.cycle < cycle) this.advanceTick();
+    while (this.cycle < cycle && this.advanceTick());
     this.emitTimingUpdate();
   }
 
@@ -479,6 +551,7 @@ export class MockCore implements CoreApi {
     this.pc = 0;
     this.clk = false;
     this.busForced = null;
+    this.watches = [];
     this.imem.fill(0);
     this.imemUndef = new Set<number>(Array.from({ length: IMEM_WORDS }, (_, i) => i));
     for (const [name, seeded] of this.autoloads) {
@@ -556,7 +629,7 @@ export class MockCore implements CoreApi {
     }
   }
 
-  private advanceTick(): void {
+  private advanceTick(): boolean {
     this.tick++;
     if (this.tick % 2 === 1) {
       // posedge: clk rises, pc latches the adder's output (pc + 1)
@@ -566,6 +639,81 @@ export class MockCore implements CoreApi {
       this.clk = false;
     }
     this.emitNetDiffs();
+    // A cycle boundary is the posedge: the caller's stop conditions are checked
+    // there (contract v1.6), where the engine evaluates them. False = a watch fired.
+    if (this.tick % 2 === 1 && this.checkWatches()) return false;
+    return true;
+  }
+
+  /** Evaluate the caller's watches at this boundary; true when one fired. */
+  private checkWatches(): boolean {
+    if (this.watches.length === 0) return false;
+    const nets = this.currentNets();
+    const keep: MockWatchState[] = [];
+    let fired: { name: string; when: string; cycle: number; value: number } | null = null;
+    for (const st of this.watches) {
+      const cur = this.resolveWatchValue(st.watch.name, nets);
+      if (cur === null) {
+        keep.push(st); // unknown value this boundary: no observation
+        continue;
+      }
+      const held = this.watchHeld(st, cur);
+      if (held) {
+        if (fired === null) {
+          fired = { name: st.watch.name, when: st.watch.when, cycle: this.cycle, value: cur };
+        }
+        continue; // spent: a fired watch is dropped, like the engine
+      }
+      st.last = cur;
+      keep.push(st);
+    }
+    this.watches = keep;
+    if (fired === null) return false;
+    this.stopTimer();
+    this.events.emit(IpcEvents.SimHalted, {
+      cycle: fired.cycle,
+      reason: "stop",
+      details: `watch '${fired.name}' ${fired.when} held at cycle ${fired.cycle} (value 0x${fired.value.toString(16)})`,
+    });
+    this.emitStatus();
+    return true;
+  }
+
+  /** `delay.rs`'s per-watch predicate: does this watch hold at value `cur`? */
+  private watchHeld(st: MockWatchState, cur: number): boolean {
+    const w = st.watch;
+    switch (w.when) {
+      case "stable":
+        if (st.last !== null && st.last === cur) st.stableFor += 1;
+        else st.stableFor = 0;
+        return w.cycles > 0 && st.stableFor >= w.cycles;
+      case "changes":
+        if (st.last !== null && st.last !== cur) st.changed += 1;
+        return w.count > 0 && st.changed >= w.count;
+      case "reaches": {
+        const want = parseLiteral(w.value);
+        return st.last !== null && st.last !== cur && want !== null && want === cur;
+      }
+      case "is": {
+        const want = parseLiteral(w.value);
+        return want !== null && want === cur;
+      }
+    }
+  }
+
+  /** A watched name's current value, or null when unknown/absent (skip boundary). */
+  private resolveWatchValue(name: string, nets: Map<number, WireValue>): number | null {
+    const n = this.named.find((x) => x.name === name);
+    if (n === undefined || n.value_net === undefined) return null;
+    const val = nets.get(n.value_net);
+    if (val === undefined) return null;
+    if (
+      (val.x !== "" && BigInt(`0x${val.x}`) !== 0n) ||
+      (val.z !== "" && BigInt(`0x${val.z}`) !== 0n)
+    ) {
+      return null; // an unknown (X/Z) value at this boundary is not observed
+    }
+    return Number(BigInt(`0x${val.v || "0"}`)) >>> 0;
   }
 
   private emitStatus(): void {

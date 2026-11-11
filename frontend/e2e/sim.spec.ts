@@ -327,3 +327,25 @@ test("waveform: one click from the transport, the View menu or a right-click (§
   // The named parts and the clock, plus the adder's output.
   await expect.poll(rows, { message: "the adder joined the trace" }).toBeGreaterThanOrEqual(4);
 });
+
+test("U5: 'Run until…' stops on a watch and reports a stop (contract v1.6)", async ({ page }) => {
+  // The dialog lists the *loaded* design's named parts, so load first.
+  await page.getByRole("button", { name: "tick", exact: true }).click();
+  await expect.poll(() => simState(page)).toMatchObject({ loaded: true });
+
+  await page.getByRole("button", { name: /^Run until/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Run until" });
+  await expect(dialog).toBeVisible();
+
+  // The default row watches `pc`; change it to "reaches 3".
+  await dialog.getByLabel("Condition 1 type").click();
+  await page.getByRole("option", { name: "reaches", exact: true }).click();
+  await dialog.getByLabel("Condition 1 value").fill("3");
+  await dialog.getByRole("button", { name: "Run", exact: true }).click();
+
+  // The run stops when `pc` becomes 3, and the banner says which condition held.
+  await expect
+    .poll(() => simState(page), { message: "stopped on the watch" })
+    .toMatchObject({ halted: "stop" });
+  await expect(page.locator(".sim-banner")).toContainText("Stop condition met");
+});

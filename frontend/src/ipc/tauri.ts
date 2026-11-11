@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { CoreApi } from "./types";
 import type { CoreEvents, CoreEventHandler, CoreEventName, Unlisten } from "./events";
-import type { CompId, LoadResult, SaveResult, WireValue } from "./types";
+import type { CompId, LoadResult, SaveResult, Watch, WireValue } from "./types";
 
 class TauriEvents implements CoreEvents {
   on<E extends CoreEventName>(event: E, handler: CoreEventHandler<E>): Unlisten {
@@ -88,6 +88,15 @@ class TauriCore implements CoreApi {
   setPauseOnUnknown(pause: boolean): Promise<void> {
     pauseOnUnknown = pause;
     return invoke("sim_set_pause_on_unknown", { pause });
+  }
+
+  /**
+   * The caller's stop conditions (contract v1.6). Set explicitly by the "Run
+   * until…" action just before it runs; a load/reset rebuilds the engine and
+   * clears them, so the action re-sets them every time.
+   */
+  setWatch(watch: Watch[]): Promise<void> {
+    return invoke("sim_set_watch", { watch });
   }
 
   reset(): Promise<void> {
