@@ -229,7 +229,7 @@ test("an unnamed wiring.pin warns that the file will not load", async ({ page })
   await expect(note).toHaveCount(0);
 });
 
-test("splitter: the Inspector edits split pins structurally (not a text box)", async ({ page }) => {
+test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
   await page.goto("/");
   await page.locator('[data-group="Wiring"]').click();
   await page.getByRole("button", { name: "SPLIT", exact: true }).click();
@@ -238,23 +238,41 @@ test("splitter: the Inspector edits split pins structurally (not a text box)", a
   await page.keyboard.press("Escape");
   await expect(page.locator(".inspector-id")).toBeVisible();
 
-  // One row per split pin (no textarea).
+  // One row per split (no textarea), and no name field: names are internal
+  // wire identities. The two totals are on top.
   await expect(page.locator(".inspector-textarea")).toHaveCount(0);
-  const rows = await page.locator(".split-row").count();
-  expect(rows).toBeGreaterThan(0);
+  await expect(page.locator(".split-name")).toHaveCount(0);
+  await expect(page.getByLabel("Bus bits")).toBeVisible();
+  await expect(page.getByLabel("Outputs")).toBeVisible();
 
-  // Rename the first pin and set its bits; committed on blur.
-  await page.getByLabel("Split pin 1 name").fill("lo");
-  await page.getByLabel("Split pin 1 bits").fill("0, 1");
-  await page.getByLabel("Split pin 1 bits").press("Enter");
+  // 8 bits / 2 outputs is an even, ascending auto-split.
+  await page.getByLabel("Bus bits").fill("8");
+  await page.getByLabel("Bus bits").press("Enter");
+  await page.getByLabel("Outputs").fill("2");
+  await page.getByLabel("Outputs").press("Enter");
+  await expect(page.getByLabel("Split 1 bits")).toHaveValue("0-3");
+  await expect(page.getByLabel("Split 2 bits")).toHaveValue("4-7");
+
+  // A backwards range parses, and auto-formats back to the same range.
+  await page.getByLabel("Split 1 bits").fill("3-0");
+  await page.getByLabel("Split 1 bits").press("Enter");
+  await expect(page.getByLabel("Split 1 bits")).toHaveValue("3-0");
 
   const d = await doc(page);
   const split = d.circuits[0].components.find((c) => c.type === "wiring.splitter");
-  expect((split?.attrs?.splits as Record<string, number[]>).lo).toEqual([0, 1]);
+  const splits = split?.attrs?.splits as Record<string, number[]>;
+  expect(
+    Object.values(splits)
+      .flat()
+      .sort((a, b) => a - b),
+  ).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  expect(
+    Object.values(splits).some((bits) => JSON.stringify(bits) === JSON.stringify([3, 2, 1, 0])),
+  ).toBe(true);
 
-  // Add a pin → one more row.
-  await page.getByRole("button", { name: "Add pin" }).click();
-  await expect(page.locator(".split-row")).toHaveCount(rows + 1);
+  // Add split fills the next uncovered run (here it extends the bus by a bit).
+  await page.getByRole("button", { name: "Add split" }).click();
+  await expect(page.locator(".split-row")).toHaveCount(3);
 });
 
 test("Gates: BUFFER places the tri-state buffer (with an enable pin)", async ({ page }) => {

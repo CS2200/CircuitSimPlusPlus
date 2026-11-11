@@ -1,5 +1,6 @@
 import { encodeRleHex, hexWidthFor, parseRleHex } from "../lib/rleHex";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
+import { DEFAULT_SPLITS, sortSplits, splitEntries } from "./splits";
 
 /**
  * Component metadata catalog (FRONTEND.md U3): pin geometry + body sizes
@@ -375,40 +376,16 @@ function priorityDecoderSpec(): CompSpec {
 
 const BUS_WIDTH = 32; // sentinel: attr-driven bus pin (boxSpec resolves via bitsOf)
 
-/** Default splitter mapping (format-v2 §4 requires `splits`): b{i} = bus bit i. */
-const DEFAULT_SPLITS: Readonly<Record<string, number[]>> = {
-  b0: [0],
-  b1: [1],
-  b2: [2],
-  b3: [3],
-};
-
-/** Parsed `splits` attr: named pins → bus bit indices (LSB first). */
-function splitsOf(attrs: Readonly<Record<string, unknown>>): { name: string; bits: number[] }[] {
-  const raw = attrs["splits"];
-  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-    const entries: { name: string; bits: number[] }[] = [];
-    for (const [name, bits] of Object.entries(raw as Record<string, unknown>)) {
-      if (!Array.isArray(bits)) continue;
-      entries.push({
-        name,
-        bits: bits.filter(
-          (b): b is number => typeof b === "number" && Number.isInteger(b) && b >= 0,
-        ),
-      });
-    }
-    if (entries.length > 0) return entries;
-  }
-  return Object.entries(DEFAULT_SPLITS).map(([name, bits]) => ({ name, bits: [...bits] }));
-}
-
 /** Bus plumbing: one bidirectional pin per `splits` key plus the bus itself. */
 function splitterSpec(): CompSpec {
   return {
     width: () => 2,
-    height: (attrs) => Math.max(2, splitsOf(attrs).length + 1),
+    // Rows are ordered by bus bit for the Inspector AND the drawn part, so the
+    // pin order is deterministic and does not depend on the file's key order
+    // (the canonical serializer sorts keys anyway).
+    height: (attrs) => Math.max(2, sortSplits(splitEntries(attrs["splits"])).length + 1),
     pins: (attrs) => {
-      const splits = splitsOf(attrs);
+      const splits = sortSplits(splitEntries(attrs["splits"]));
       const h = Math.max(2, splits.length + 1);
       const busWidth = Math.max(
         1,

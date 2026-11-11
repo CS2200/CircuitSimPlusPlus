@@ -52,7 +52,8 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.1 Width mismatch flashes but shows no error
 
-- [ ] **Show the actual error, not only a blink.**
+- [x] **Show the actual error, not only a blink.** Done: a steady ⚠ badge sits at the
+  net's midpoint, and the hover card explains the disagreeing widths.
   - Today: `DocScene` computes the conflicting net widths and flashes the wire halo
     (`frontend/src/editor/docScene.ts:1026-1031`, `:1489-1500`). The code comment promises a
     per-net ⚠ badge, but no badge is drawn. The only text is the Inspector note, and only when
@@ -64,7 +65,8 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.2 Hovering a flashing warning explains it
 
-- [ ] **Hover diagnostics for warnings.**
+- [x] **Hover diagnostics for warnings.** Done: `warningAt` resolves mismatch, dangling
+  pin, and open wire end; the hover card explains the one under the pointer.
   - Today: hover deliberately ignores plain wires (`frontend/src/editor/tools.ts:1009-1020`);
     pins show only a name/width and components only a truncated readout
     (`frontend/src/editor/docScene.ts:2496-2535`).
@@ -76,7 +78,8 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.3 Default CLK/RST sources spawn on top of each other
 
-- [ ] **Give the default clock and reset sources distinct, free positions.**
+- [x] **Give the default clock and reset sources distinct, free positions.** Done: a
+  clearance-aware slot search places them apart and the router leaves the body cleanly.
   - Root cause: `applyClockDefaults` creates both missing sources at the SAME fixed offset —
     root `[placed.x, placed.y - 6]` for both `wiring.clock` and `wiring.reset`
     (`frontend/src/editor/clockDefaults.ts:111-116`), subcircuit `[placed.x - 8, placed.y]`
@@ -90,7 +93,9 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.4 Splitter editor: ranges, direction, totals, ordering
 
-- [ ] **Improve the splitter UI without changing the `.csx` format.**
+- [x] **Improve the splitter UI without changing the `.csx` format.** Done: names are
+  hidden, rows are ordered by bus bit, ranges accept both directions, and the two totals
+  sit at the top. Invalid edits are not written to the document.
   - Decisions: do **not** change the file format; do **not** expose pin names to users. Keep
     the internal `splits` map/arrays, use generated opaque names, and order rows sensibly in
     the UI. A comma-separated display is fine; ranges are the real missing feature.

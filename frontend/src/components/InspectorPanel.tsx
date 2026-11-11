@@ -10,6 +10,17 @@ import {
   typeDisplayName,
   type AttrField,
 } from "../editor/catalog";
+import {
+  evenSplit,
+  formatSplitBits,
+  parseSplitBits,
+  resizeSplits,
+  sortSplits,
+  splitCoverage,
+  splitEntries,
+  type SplitCoverage,
+  type SplitEntry,
+} from "../editor/splits";
 import { wireInfo } from "../model/wireInfo";
 import { encodeRleHex, hexWidthFor, parseRleHex, wordsFromPasted } from "../lib/rleHex";
 import { pickHexFile, relativeToCircuit } from "../files";
@@ -660,39 +671,76 @@ function withoutNulls(attrs: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** One splitter-pin row in the editor's local state (UI_OVERHAUL §41). */
+/** One splitter row in the editor's local state (UI_OVERHAUL §41). The pin name
+ * is an invisible wire identity; `text` is the range spelling being edited. */
 interface SplitRow {
   name: string;
-  /** Comma-separated bit indices, kept as text while editing. */
-  bits: string;
+  text: string;
 }
 
 function splitsToRows(value: unknown): SplitRow[] {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
-  return Object.entries(value as Record<string, unknown>).map(([name, bits]) => ({
-    name,
-    bits: Array.isArray(bits) ? bits.join(", ") : "",
+  return sortSplits(splitEntries(value)).map((entry) => ({
+    name: entry.name,
+    text: formatSplitBits(entry.bits),
   }));
 }
 
-function rowsToSplits(rows: readonly SplitRow[]): Record<string, number[]> | null {
-  const out: Record<string, number[]> = {};
-  for (const r of rows) {
-    const name = r.name.trim();
-    if (name === "") continue;
-    out[name] = r.bits
-      .split(",")
-      .map((s) => Number(s.trim()))
-      .filter((n) => Number.isInteger(n) && n >= 0);
+/** A fresh internal pin name no existing row uses. */
+function nextSplitName(rows: readonly SplitRow[]): string {
+  const taken = new Set(rows.map((r) => r.name));
+  for (let i = 0; ; i++) if (!taken.has(`b${i}`)) return `b${i}`;
+}
+
+/** Names for `count` rows, reusing the first existing names so wires stay put. */
+function rowNames(count: number, rows: readonly SplitRow[]): string[] {
+  const taken = new Set<string>();
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    let name = rows[i]?.name ?? "";
+    if (name === "" || taken.has(name)) {
+      let n = 0;
+      while (taken.has(`b${n}`) || rows.some((r) => r.name === `b${n}`)) n++;
+      name = `b${n}`;
+    }
+    taken.add(name);
+    names.push(name);
   }
-  return Object.keys(out).length === 0 ? null : out;
+  return names;
+}
+
+function rowsToSplits(rows: readonly SplitRow[]): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const row of rows) {
+    const name = row.name.trim();
+    if (name !== "") out[name] = parseSplitBits(row.text).bits;
+  }
+  return out;
+}
+
+/** One human line for an incomplete mapping, or null when it is exactly-once. */
+function coverageProblem(coverage: SplitCoverage): string | null {
+  const parts: string[] = [];
+  const short = (bits: readonly number[]): string =>
+    bits.length > 8 ? `${bits.slice(0, 8).join(", ")}…` : bits.join(", ");
+  if (coverage.duplicates.length > 0) {
+    parts.push(`bits ${short(coverage.duplicates)} mapped more than once`);
+  }
+  if (coverage.missing.length > 0) parts.push(`bits ${short(coverage.missing)} not mapped`);
+  return parts.length === 0
+    ? null
+    : `Every bus bit must be mapped exactly once — ${parts.join("; ")}.`;
 }
 
 /**
- * Structured splitter editor (UI_OVERHAUL §41): one row per split pin with a
- * name and its bus-bit indices, plus add/remove — instead of a raw text box.
- * Text edits commit on blur/Enter (NOT per keystroke: a rename would drop the
- * old pin and prune its wires); add/remove commit immediately.
+ * Structured splitter editor (UI_OVERHAUL §41).
+ *
+ * The pin NAMES are wire identities, not labels, so they are hidden. Rows are
+ * ordered by the bus bits they carry, and each row's field accepts a
+ * comma-separated range spelling (`0-3`, `7-4` — the direction is meaningful)
+ * that auto-formats back to ranges on commit. The two numbers at the very top
+ * are the total bus bits and the number of outputs: changing either reflows the
+ * mapping (extend/truncate for bits, even split for outputs). Text commits on
+ * blur/Enter, so a half-typed range never prunes wires mid-keystroke.
  */
 function SplitsField({
   value,
@@ -712,61 +760,151 @@ function SplitsField({
     setRowsFor(serialized);
     setRows(splitsToRows(JSON.parse(serialized)));
   }
+  // Top fields keep their own draft while typing; they commit on Enter/blur.
+  const [busDraft, setBusDraft] = useState<string | null>(null);
+  const [outDraft, setOutDraft] = useState<string | null>(null);
 
-  const commit = (next: SplitRow[]): void => {
+  const parsed = rows.map((r) => parseSplitBits(r.text));
+  const entries: SplitEntry[] = rows.map((r, i) => ({ name: r.name, bits: parsed[i].bits }));
+  const coverage = splitCoverage(entries);
+  const busBits = coverage.busBits;
+  const outputs = rows.length;
+  const parseError = parsed.map((p) => p.error).find((e) => e !== null) ?? null;
+  const coverageError = coverageProblem(coverage);
+
+  /** A mapping is valid only when every bus bit is covered exactly once. */
+  const splitIsValid = (next: readonly SplitEntry[]): boolean => {
+    if (next.length === 0 || next.some((e) => e.bits.length === 0)) return false;
+    const c = splitCoverage(next);
+    return c.missing.length === 0 && c.duplicates.length === 0;
+  };
+  const commitRows = (next: SplitRow[]): void => {
     setRows(next);
-    const parsed = rowsToSplits(next);
-    if (parsed !== null) onCommit(parsed);
+    // Invalid edits stay in the row (so the user can fix them) but are not
+    // written to the document: the engine would reject the file.
+    const entriesNext = next.map((r) => ({ name: r.name, bits: parseSplitBits(r.text).bits }));
+    if (splitIsValid(entriesNext)) onCommit(rowsToSplits(next));
+  };
+  const commitEntries = (next: readonly SplitEntry[]): void => {
+    commitRows(next.map((e) => ({ name: e.name, text: formatSplitBits(e.bits) })));
   };
 
-  const bitCount = new Set(
-    rows.flatMap((r) =>
-      r.bits
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s !== ""),
-    ),
-  ).size;
+  /** Removing a split merges its bits into the previous row, so the bus stays
+   * exactly-once instead of becoming a gap. */
+  const removeRow = (index: number): void => {
+    if (rows.length <= 1) return;
+    const removed = rows[index];
+    if (removed === undefined) return;
+    const next = rows.filter((_, j) => j !== index);
+    const target = next[Math.max(0, index - 1)];
+    if (target !== undefined) {
+      const merged = [...parseSplitBits(target.text).bits, ...parseSplitBits(removed.text).bits];
+      next[Math.max(0, index - 1)] = { ...target, text: formatSplitBits(merged) };
+    }
+    commitRows(next);
+  };
+
+  const commitBus = (raw: string): void => {
+    setBusDraft(null);
+    const n = Math.round(Number(raw));
+    if (raw.trim() === "" || !Number.isFinite(n)) return;
+    const clamped = Math.max(1, Math.min(32, n));
+    if (clamped === busBits) return;
+    commitEntries(resizeSplits(entries, clamped));
+  };
+  const commitOutputs = (raw: string): void => {
+    setOutDraft(null);
+    const n = Math.round(Number(raw));
+    if (raw.trim() === "" || !Number.isFinite(n)) return;
+    const clamped = Math.max(1, Math.min(32, n));
+    if (clamped === outputs) return;
+    const slice = evenSplit(busBits, clamped);
+    const names = rowNames(slice.length, rows);
+    commitEntries(slice.map((bits, i) => ({ name: names[i], bits })));
+  };
+
+  /** Add a row carrying the next uncovered run, or one bit past the end. */
+  const addRow = (): void => {
+    const covered = new Set(entries.flatMap((e) => e.bits));
+    let bit = 0;
+    while (covered.has(bit)) bit++;
+    if (bit >= busBits) {
+      // Everything is mapped: extend the bus by one bit.
+      commitRows([...rows, { name: nextSplitName(rows), text: String(busBits) }]);
+      return;
+    }
+    const run: number[] = [];
+    while (bit < busBits && !covered.has(bit)) {
+      run.push(bit);
+      bit++;
+    }
+    commitRows([...rows, { name: nextSplitName(rows), text: formatSplitBits(run) }]);
+  };
 
   return (
     <div className="inspector-field">
       <span className="inspector-field-label">{label}</span>
+      <div className="split-totals">
+        <label className="split-total">
+          <span>Bus bits</span>
+          <input
+            type="number"
+            min={1}
+            max={32}
+            value={busDraft ?? String(busBits)}
+            aria-label="Bus bits"
+            onChange={(e) => setBusDraft(e.target.value)}
+            onBlur={() => {
+              if (busDraft !== null) commitBus(busDraft);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
+        <label className="split-total">
+          <span>Outputs</span>
+          <input
+            type="number"
+            min={1}
+            max={32}
+            value={outDraft ?? String(outputs)}
+            aria-label="Outputs"
+            onChange={(e) => setOutDraft(e.target.value)}
+            onBlur={() => {
+              if (outDraft !== null) commitOutputs(outDraft);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
+      </div>
       <div className="split-rows">
         {rows.map((r, i) => (
-          <div className="split-row" key={i}>
-            <input
-              className="split-name"
-              value={r.name}
-              placeholder="pin"
-              spellCheck={false}
-              aria-label={`Split pin ${i + 1} name`}
-              onChange={(e) =>
-                setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
-              }
-              onBlur={() => commit(rows)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-            />
+          <div className="split-row" key={r.name}>
+            <span className="split-index" aria-hidden="true">
+              {i + 1}
+            </span>
             <input
               className="split-bits"
-              value={r.bits}
-              placeholder="0, 1"
+              value={r.text}
+              placeholder="0-3"
               spellCheck={false}
-              aria-label={`Split pin ${i + 1} bits`}
+              aria-label={`Split ${i + 1} bits`}
               onChange={(e) =>
-                setRows(rows.map((x, j) => (j === i ? { ...x, bits: e.target.value } : x)))
+                setRows(rows.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
               }
-              onBlur={() => commit(rows)}
+              onBlur={() => commitRows(rows)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}
             />
             <button
               className="secondary split-remove"
-              aria-label={`Remove split pin ${r.name || i + 1}`}
+              aria-label={`Remove split ${i + 1}`}
               disabled={rows.length <= 1}
-              onClick={() => commit(rows.filter((_, j) => j !== i))}
+              onClick={() => removeRow(i)}
             >
               ×
             </button>
@@ -774,17 +912,16 @@ function SplitsField({
         ))}
       </div>
       <div className="inspector-buttons inspector-buttons-full">
-        <button
-          className="secondary"
-          onClick={() => commit([...rows, { name: `b${rows.length}`, bits: "" }])}
-        >
-          Add pin
+        <button className="secondary" onClick={addRow}>
+          Add split
         </button>
       </div>
       <p className="settings-hint inspector-hint">
-        {rows.length} pin{rows.length === 1 ? "" : "s"} · bus {bitCount} bit
-        {bitCount === 1 ? "" : "s"}
+        {busBits} bit{busBits === 1 ? "" : "s"} · {outputs} output{outputs === 1 ? "" : "s"}
       </p>
+      {(parseError !== null || coverageError !== null) && (
+        <p className="inspector-note">⚠ {parseError ?? coverageError}</p>
+      )}
     </div>
   );
 }
