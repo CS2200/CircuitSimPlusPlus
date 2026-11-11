@@ -1,5 +1,5 @@
 # Frontend CI — React app + Tauri shell (docs/tasks/FRONTEND.md).
-# Produces unsigned desktop bundles on all three OSes (DESIGN.md §9, D14).
+# Produces desktop bundles on all three OSes (DESIGN.md §9, D14).
 #
 # CI runs on the PUBLIC github.com mirror only: GT's GHES has no runners, so the
 # `if:` guard keeps pushes to GHES from queueing jobs forever. See
@@ -64,11 +64,11 @@ jobs:
       - name: Add macOS Intel target
         if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin
-      - name: Tauri build (unsigned, universal macOS)
+      - name: Tauri build (CI, universal macOS)
         if: runner.os == 'macOS'
         working-directory: crates/app
         run: ../../frontend/node_modules/.bin/tauri build --target universal-apple-darwin
-      - name: Tauri build (unsigned)
+      - name: Tauri build (CI)
         if: runner.os != 'macOS'
         working-directory: crates/app
         run: ../../frontend/node_modules/.bin/tauri build

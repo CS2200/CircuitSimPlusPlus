@@ -33,6 +33,13 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": {
+        "NSDocumentsFolderUsageDescription": "CircuitSim++ opens and saves your circuit files in the Documents folder.",
+        "NSDesktopFolderUsageDescription": "CircuitSim++ opens and saves your circuit files on the Desktop.",
+        "NSDownloadsFolderUsageDescription": "CircuitSim++ opens and saves your circuit files in the Downloads folder."
+      }
+    }
   }
 }

@@ -81,7 +81,7 @@ Three independent facts line up:
    laptops — and the release job — can still talk to it for the optional copy
    back.
 
-Nothing about *the app* changes. It still runs on students' machines, unsigned,
+Nothing about *the app* changes. It still runs on students' machines, self-signed,
 and still talks to a GitHub API. We're just moving the build/release/update
 signal from a private GHES to a public github.com copy.
 
@@ -197,7 +197,7 @@ gh auth login --hostname github.gatech.edu      # once
 gh release download v0.2.0 --repo OWNER/CircuitSimPlusPlus --dir dist
 gh release create v0.2.0 dist/* \
   --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus \
-  --title v0.2.0 --notes-file /tmp/unsigned-notes.md
+  --title v0.2.0 --notes-file /tmp/signing-notes.md
 # or, if the GHES release exists:
 gh release upload v0.2.0 dist/* --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus --clobber
 ```
@@ -233,7 +233,7 @@ what `DESIGN.md §9` describes.
 *consent-based* install — "Update to X?" → **Install** / **Later**, never forced
 and never silent. It needs a minisign keypair, `createUpdaterArtifacts`, a
 `latest.json` manifest on the public host, and it revises §9's "never
-auto-installs". Its weak spot is **macOS on unsigned builds**, where the updater
+auto-installs". Its weak spot is **macOS on self-signed builds**, where the updater
 is flaky. Revisit only if the nudge link isn't enough.
 
 ## Optional: backport installers to GHES
@@ -248,7 +248,7 @@ gh release download v0.2.0 --repo <owner>/CircuitSimPlusPlus --dir dist
 # 2) publish them on GHES (create, or upload if it already exists)
 gh release create v0.2.0 dist/* \
   --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus \
-  --title v0.2.0 --notes-file /tmp/unsigned-notes.md
+  --title v0.2.0 --notes-file /tmp/signing-notes.md
 # ...or, if the GHES release already exists:
 gh release upload v0.2.0 dist/* \
   --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus --clobber

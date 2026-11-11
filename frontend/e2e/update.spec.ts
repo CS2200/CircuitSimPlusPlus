@@ -42,7 +42,7 @@ test("U8: offline check fails silently (no dialog, no crash)", async ({ page }) 
   await expect(page.locator(".update-nudge")).toHaveCount(0);
 });
 
-test("U8: About card warns about the unsigned build and links the download page", async ({
+test("U8: About card warns about the self-signed build and links the download page", async ({
   page,
 }) => {
   await page.goto("/");
@@ -50,7 +50,7 @@ test("U8: About card warns about the unsigned build and links the download page"
   await page.getByRole("menuitem", { name: "About CircuitSim++" }).click();
   const card = page.locator(".help-card");
   await expect(card).toContainText(`Version ${APP_VERSION}`);
-  await expect(card).toContainText("unsigned");
+  await expect(card).toContainText("self-signed");
   // No per-OS workaround instructions (the reader is already past the warning) —
   // just a link to the releases page.
   const link = card.getByRole("link", { name: /download page/i });

@@ -48,7 +48,7 @@ Execute in order. U9 (mock core) comes before anything that needs a running simu
 - `frontend.yml` CI: lint, unit tests, `tauri build` matrix (ubuntu, windows, macos).
 - Write `docs/ipc.md`: the README §3 contract as normative prose + TS types.
 
-**Done when:** `npm run tauri dev` opens a themed empty window; CI produces (unsigned) dmg/zip artifacts on all three OSes.
+**Done when:** `npm run tauri dev` opens a themed empty window; CI produces (self-signed) dmg/zip artifacts on all three OSes.
 
 ## U1 — Canvas renderer core
 
@@ -121,7 +121,7 @@ Execute in order. U9 (mock core) comes before anything that needs a running simu
 
 **Spec:** DESIGN.md §9. **Depends on:** U0 CI
 
-- Release workflow: tag → matrix builds → GitHub Release with dmg/zip + the unsigned-build workaround text (right-click→Open / SmartScreen note) in the release body and in-app About page.
+- Release workflow: tag → matrix builds → GitHub Release with dmg/zip + the self-signed-build workaround text (right-click→Open / SmartScreen note) in the release body and in-app About page.
 - Startup check: fetch latest release tag from our GitHub repo, semver-compare, "please upgrade" dialog with link. Never forced, never auto-installs. Offline = silent skip.
 
 **Done when:** dry-run release on a fork: artifacts downloadable, nudge dialog appears when version is behind, dismissed-permanently option works.

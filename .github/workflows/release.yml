@@ -1,6 +1,6 @@
 # Release — a version tag (v*) builds the desktop bundles on GitHub-hosted
 # runners and publishes ONE GitHub Release (DESIGN.md §9, D14). The release body
-# carries the unsigned-build workaround text students need.
+# carries the self-signed-build workaround text students need.
 #
 # Runs on the PUBLIC github.com mirror only: GT's GHES has no runners, so the
 # `if:` guard keeps a tag pushed to GHES from queueing jobs forever. See
@@ -37,7 +37,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RELEASE_BODY: |
-    **These builds are unsigned** (team decision — no paid signing certificate).
+    **These builds use a self-signed certificate** (no paid Apple Developer ID).
     Your OS will warn; the builds are fine. One-time workaround:
 
     - **macOS:** right-click the app → **Open** → Open. (Or: `xattr -d com.apple.quarantine "CircuitSim++.app"`)
@@ -81,9 +81,34 @@ jobs:
       - name: Add macOS Intel target
         if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin
-      - name: Tauri build (unsigned, universal macOS)
+      # A stable self-signed certificate keeps macOS TCC's "Files and Folders"
+      # grant tied to the app's identity instead of the binary's cdhash. An
+      # unsigned build (or an ad-hoc one) gets a new cdhash on every rebuild, so
+      # TCC re-prompts for the folder on every save. The certificate is stored
+      # in a repository secret; the app is still not notarized, so the
+      # "unidentified developer" workaround still applies.
+      - name: Import self-signed certificate (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "::warning::APPLE_CERTIFICATE is not set; macOS will fall back to an unsigned build and TCC may re-prompt."
+            exit 0
+          fi
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
+          rm certificate.p12
+      - name: Tauri build (self-signed, universal macOS)
         if: runner.os == 'macOS'
         working-directory: crates/app
+        env:
+          APPLE_SIGNING_IDENTITY: "CircuitSim++ Self-Signed"
         run: ../../frontend/node_modules/.bin/tauri build --target universal-apple-darwin
       - name: Tauri build (unsigned)
         if: runner.os != 'macOS'

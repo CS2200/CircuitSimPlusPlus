@@ -42,7 +42,7 @@ No Rust or Node needed — grab the latest build from the
 | Any Linux, no install | `CircuitSim++_<version>_amd64.AppImage` | `chmod +x` it, then run it |
 | Headless autograder CLI | `csim` | static x86_64-musl binary — `chmod +x csim`, then run it |
 
-**These builds are unsigned** (decision D14 — no paid signing certificate), so
+**These builds are self-signed** (decision D14 — no paid Apple Developer ID), so
 the OS warns on first launch:
 
 - **macOS:** right-click the app → **Open** → **Open**. (Or:
@@ -205,7 +205,7 @@ cd crates/app
 VITE_MOCK_CORE=0 ../../frontend/node_modules/.bin/tauri dev
 
 # Packaged desktop app (production builds don't read .env.development, so the
-# real core is the default there; unsigned dmg/zip/exe — see "Releasing")
+# real core is the default there; self-signed dmg/zip/exe — see "Releasing")
 cd crates/app
 ../../frontend/node_modules/.bin/tauri build
 ./../../target/release/csim-app        # or install the bundle
@@ -244,7 +244,7 @@ in-app update nudge reads.
 
 **Prebuilt installers** live on the public [releases
 page](https://github.com/CS2200/CircuitSimPlusPlus/releases) — see
-[Install](#install-prebuilt-binaries) above. All unsigned (decision D14).
+[Install](#install-prebuilt-binaries) above. All self-signed (decision D14).
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
 

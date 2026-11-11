@@ -6,7 +6,8 @@
 > what the in-app update nudge reads.
 
 Related: [`DESIGN.md`](../DESIGN.md) §9 (rolling releases), decision **D14**
-(we ship unsigned). Local commit gate: `node scripts/build.mjs check`.
+(we ship a self-signed certificate, not a paid Apple Developer ID). Local commit gate:
+`node scripts/build.mjs check`.
 
 ---
 
@@ -26,7 +27,7 @@ git tag v0.2.0 && git push public v0.2.0
 #    https://github.com/CS2200/CircuitSimPlusPlus/releases
 ```
 
-No self-hosted runners, no signing keys, no three-machine choreography.
+No self-hosted runners, no paid signing keys, no three-machine choreography.
 
 ---
 
@@ -59,7 +60,8 @@ are **skipped** instead of queueing forever on a runner-less server.
 to `ubuntu-24.04` (ubuntu-latest is migrating to 26), **Node 24**, Rust from
 `rust-toolchain.toml`. macOS ships a **universal** `.dmg` (Apple Silicon +
 Intel). Every job has a timeout; CI runs cancel on a newer push, releases never
-do. No secrets are needed — `GITHUB_TOKEN` is automatic.
+do. Two secrets are needed for the macOS self-signed certificate
+(`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`); `GITHUB_TOKEN` is automatic.
 
 ---
 
@@ -176,7 +178,7 @@ gh auth login --hostname github.gatech.edu      # once
 gh release download v0.2.0 --repo CS2200/CircuitSimPlusPlus --dir dist
 gh release create v0.2.0 dist/* \
   --repo github.gatech.edu/CS2200TAs/CircuitSimPlusPlus \
-  --title v0.2.0 --notes "See the mirror release for the unsigned-build notes."
+  --title v0.2.0 --notes "See the mirror release for the self-signed-build notes."
 ```
 
 ---

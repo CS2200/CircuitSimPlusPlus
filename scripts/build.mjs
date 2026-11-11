@@ -38,6 +38,7 @@ const cargo = (...args) => ({ cmd: "cargo", args });
 // The fixture drift gate is a script, not a command under some other tool: the
 // runner re-invokes it with the Node it is already running on.
 const CHECK_FIXTURES = path.join(ROOT, "scripts", "check-fixtures.mjs");
+const CHECK_SIGNING = path.join(ROOT, "scripts", "check-signing.mjs");
 
 // --- targets -----------------------------------------------------------------
 // Each target is a list of steps run in order, stopping at the first failure.
@@ -70,6 +71,11 @@ const TARGETS = {
     steps: ["fixtures", "lint", "test"],
   },
 
+  signing: {
+    help: "release signing gate: stable macOS certificate + app bundle docs",
+    steps: [{ cmd: process.execPath, args: [CHECK_SIGNING] }],
+  },
+
   ui: {
     help: "frontend production build — tsc --noEmit && vite build -> frontend/dist",
     requiresFrontend: true,
@@ -83,8 +89,8 @@ const TARGETS = {
   },
 
   check: {
-    help: "the full commit gate: backend then frontend (default target)",
-    steps: ["check:backend", "check:frontend"],
+    help: "the full commit gate: signing, backend then frontend (default target)",
+    steps: ["signing", "check:backend", "check:frontend"],
   },
 
   e2e: {

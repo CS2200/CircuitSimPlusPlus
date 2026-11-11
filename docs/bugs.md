@@ -113,15 +113,21 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.5 macOS folder-access permission keeps re-prompting
 
-- [ ] **Stop the repeated macOS TCC folder-access prompt on save.**
+- [x] **Stop the repeated macOS TCC folder-access prompt on save.** Done: the app is
+  signed with a stable self-signed certificate (see `scripts/macos-signing.sh` and the
+  release workflow), so TCC's grant is tied to the certificate's identity instead of the
+  binary's cdhash. The app is still not notarized; the "Open anyway" workaround remains.
   - Confirmed in review: the prompt is macOS's folder-access permission dialog (not the
     in-app save dialog or the disk-conflict banner), and it keeps re-appearing.
   - The app writes through the Tauri shell (`std::fs`) and is not sandboxed; TCC ties the
     grant to the app's identity/path. Unsigned or dev builds can look like a new app each time.
-  - Investigate: stable signing/identity for release builds, whether the native dialog's
-    granted path should be retained as a security-scoped bookmark, and whether writes should be
-    routed through a scoped file handle rather than a bare path.
+  - Fix: a stable self-signed certificate (not a paid Apple Developer ID) gives the app a
+    stable code-signing identity. TCC stores the certificate's designated requirement, so
+    rebuilding the app does not invalidate the folder grant.
   - Acceptance: after the first grant, saving to the same folder does not prompt again.
+  - Test: `node scripts/check-signing.mjs` (part of `node scripts/build.mjs check`)
+    verifies the certificate import, the signing identity, and the folder-usage
+    descriptions in the app bundle.
 
 ### 4.6 Copy/paste a register loses its default CLK/RST wiring
 

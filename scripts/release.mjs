@@ -42,8 +42,9 @@ const BUNDLE = path.join(ROOT, "target", "release", "bundle");
 const TAURI_CONF = path.join(ROOT, "crates", "app", "tauri.conf.json");
 const FRONTEND_PKG = path.join(ROOT, "frontend", "package.json");
 
-const UNSIGNED_NOTES = `**These builds are unsigned** (team decision — no paid signing certificate).
-Your OS will warn; the builds are fine. One-time workaround:
+const SIGNING_NOTES = `**These builds are self-signed** (team decision — no paid Apple Developer ID).
+Your OS will still warn because the app is not notarized; the builds are fine.
+One-time workaround:
 
 - **macOS:** right-click the app → **Open** → Open. (Or: \`xattr -d com.apple.quarantine "CircuitSim++.app"\`)
 - **Windows:** SmartScreen → **More info** → **Run anyway**.
@@ -218,7 +219,7 @@ function publish(tag, repo, files, opts) {
 function notesFile(opts) {
   if (opts.notesFile) return opts.notesFile;
   const tmp = path.join(tmpdir(), `circuitsimpp-release-notes-${opts.tag}.md`);
-  if (!DRY) writeFileSync(tmp, UNSIGNED_NOTES + "\n");
+  if (!DRY) writeFileSync(tmp, SIGNING_NOTES + "\n");
   return tmp;
 }
 
@@ -350,7 +351,7 @@ Options:
   --status         Show the release's assets and which platforms are missing.
   --publish        Flip a draft release live (and mark it latest).
   --prerelease     Mark the release a prerelease (never latest; nudge ignores it).
-  --notes-file <f> Release notes. Default: the unsigned-build workaround text.
+  --notes-file <f> Release notes. Default: the self-signed-build workaround text.
   --no-check       Skip the commit gate (scripts/build.mjs check) before building.
   --no-build       Publish bundles already under target/release/bundle/ (skip tauri build).
   -n, --dry-run    Print the plan; change nothing.
