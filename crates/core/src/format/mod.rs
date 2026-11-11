@@ -1309,7 +1309,10 @@ mod tests {
             }]
         }"#;
         let doc = load_document(json.as_bytes()).expect("midpoints must load");
-        assert_eq!(doc.circuits[0].wires[0].midpoints, vec![[2.0, 0.0], [2.0, 5.0]]);
+        assert_eq!(
+            doc.circuits[0].wires[0].midpoints,
+            vec![[2.0, 0.0], [2.0, 5.0]]
+        );
         let text = to_canonical_json(&doc);
         assert!(text.contains("\"midpoints\""));
         let back = load_document(text.as_bytes()).expect("canonical output must reload");
@@ -1365,7 +1368,10 @@ mod tests {
         assert!(doc.circuits[0].wires[0].flip);
         let text = to_canonical_json(&doc);
         assert!(text.contains("\"flip\""));
-        assert_eq!(doc, load_document(text.as_bytes()).expect("canonical must reload"));
+        assert_eq!(
+            doc,
+            load_document(text.as_bytes()).expect("canonical must reload")
+        );
 
         let without = r#"{
             "format": "circuitsim-plus-plus",
