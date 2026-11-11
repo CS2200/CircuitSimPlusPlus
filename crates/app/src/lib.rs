@@ -10,6 +10,7 @@
 //! and pushes events through a [`TauriSink`]. The concrete `Sim`
 //! implementation is [`csim_core::session::Session`].
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 mod history;
@@ -466,14 +467,54 @@ fn resume(state: State<SimState>, path: String) -> Result<(), String> {
     Ok(())
 }
 
-pub fn run() {
-    // A desktop shell launched from a terminal is otherwise silent — no sign it
-    // came up, and a startup failure is just a bare panic. One line on each side
-    // (starting / ready) is enough to tell success from a startup crash; the
-    // running app stays quiet.
-    eprintln!("CircuitSim++ {} starting…", env!("CARGO_PKG_VERSION"));
+/// Startup diagnostics (used by [`run`] only): one line per initialization step
+/// and its outcome, so a silent startup death points at the step that didn't
+/// finish. Kept to startup — the running app logs nothing.
+mod startup {
+    /// Context worth knowing, or a step about to be attempted.
+    pub fn info(msg: &str) {
+        eprintln!("  info {msg}");
+    }
+    /// A step that completed.
+    pub fn ok(msg: &str) {
+        eprintln!("  ok   {msg}");
+    }
+    /// A step that failed; the caller decides whether to abort.
+    pub fn fail(msg: &str, err: impl std::fmt::Display) {
+        eprintln!("  FAIL {msg}: {err}");
+    }
+}
 
-    let app = tauri::Builder::default()
+/// The first `on_page_load` pair is the startup load; anything after it (a dev
+/// server's HMR reloads) is not startup and stays unlogged.
+static STARTUP_PAGE_STARTED: AtomicBool = AtomicBool::new(false);
+static STARTUP_PAGE_FINISHED: AtomicBool = AtomicBool::new(false);
+
+pub fn run() {
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    eprintln!(
+        "CircuitSim++ {} starting ({profile}, {} {})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+
+    let context = tauri::generate_context!();
+    if tauri::is_dev() {
+        match context.config().build.dev_url.as_ref() {
+            Some(url) => startup::info(&format!("frontend: dev server {url}")),
+            None => startup::info("frontend: bundled assets (dev build)"),
+        }
+    } else {
+        startup::info("frontend: bundled assets");
+    }
+    startup::info("plugins: dialog, fs, opener");
+
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Opens external links (the update nudge's "Download" and the About
@@ -512,19 +553,66 @@ pub fn run() {
             snapshot,
             resume,
         ])
-        .build(tauri::generate_context!());
+        // The webview's first page load, logged for context. It is *not* a
+        // success gate: see the Finished arm below. Only the first load is
+        // startup; a dev server's HMR reloads stay unlogged.
+        .on_page_load(|_webview, payload| {
+            let url = payload.url();
+            match payload.event() {
+                tauri::webview::PageLoadEvent::Started => {
+                    if !STARTUP_PAGE_STARTED.swap(true, Ordering::Relaxed) {
+                        startup::info(&format!("webview loading {url}"));
+                    }
+                }
+                tauri::webview::PageLoadEvent::Finished => {
+                    if !STARTUP_PAGE_FINISHED.swap(true, Ordering::Relaxed) {
+                        // Informational only: this fires even when the frontend
+                        // is unreachable (the webview finishes on its error page),
+                        // so it is not proof the UI rendered.
+                        startup::info(&format!("webview load finished {url}"));
+                    }
+                }
+            }
+        })
+        // Tauri builds the configured windows just before this hook runs, so a
+        // missing `main` here is a real startup failure, not a race.
+        .setup(|app| match app.get_webview_window("main") {
+            Some(window) => {
+                let size = match (window.inner_size(), window.scale_factor()) {
+                    (Ok(physical), Ok(scale)) => {
+                        let logical = physical.to_logical::<u32>(scale);
+                        format!("{}x{}", logical.width, logical.height)
+                    }
+                    _ => "size unknown".to_string(),
+                };
+                startup::ok(&format!("window 'main' created ({size})"));
+                Ok(())
+            }
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "the 'main' window was not created",
+            )
+            .into()),
+        })
+        .build(context);
 
-    let app = match app {
-        Ok(app) => app,
+    let app = match built {
+        Ok(app) => {
+            startup::ok("app built (runtime + plugins initialized)");
+            app
+        }
         Err(e) => {
-            eprintln!("CircuitSim++ failed to start: {e}");
+            startup::fail("app build", &e);
             std::process::exit(1);
         }
     };
 
-    app.run(|_app, event| {
-        if let tauri::RunEvent::Ready = event {
+    app.run(|_app, event| match event {
+        tauri::RunEvent::Ready => {
+            startup::ok("event loop ready");
             eprintln!("CircuitSim++ ready.");
         }
+        tauri::RunEvent::Exit => startup::info("exited"),
+        _ => {}
     });
 }
