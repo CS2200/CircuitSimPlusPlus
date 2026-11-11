@@ -153,7 +153,10 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.7 Arrow keys must not flip a pin's input/output direction
 
-- [ ] **Decouple a `wiring.pin`'s direction from its rotation.**
+- [x] **Decouple a `wiring.pin`'s direction from its rotation.** Done: rotation
+  (arrows, `R`, the palette ghost) is visual only. The direction is the
+  `isOutput` toggle in the Inspector's "Output" checkbox (and the palette's
+  INPUT/OUTPUT tiles seed it at placement).
   - Today: `rotatedComponent` rewrites `attrs.isOutput` when a pin's rotation becomes `W`
     (`frontend/src/model/document.ts:1329-1349`). Arrow keys call `setRotation`, and `R` calls
     `rotateComponents`; both go through that helper. So pressing left/right both rotates the
@@ -163,6 +166,9 @@ recorded with each item so implementation does not need to re-litigate them.
     explicitly (Inspector control and/or the palette's INPUT/OUTPUT tiles).
   - Acceptance: rotating a pin through all four facings never changes its `isOutput` value;
     a subcircuit instance's port side still follows the pin's actual direction.
+  - Test: `frontend/src/model/document.test.ts` rotates an input and an output pin through
+    all four facings and checks the attribute; `catalog.test.ts` still checks the instance
+    side follows `isOutput`.
 
 ### 4.8 Later / parked idea
 

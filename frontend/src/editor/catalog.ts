@@ -1113,6 +1113,8 @@ export type AttrField =
       /** The value the *engine* applies when the attribute is absent (format-v2 §4),
        * so the checkbox shows the effective default rather than a misleading unchecked. */
       dflt?: boolean;
+      /** Write an unchecked box as `null` (absent) instead of `false`. */
+      nullWhenFalse?: boolean;
       group?: string;
       hint?: string;
     }
@@ -1379,9 +1381,21 @@ function baseFields(type: string): AttrField[] {
   }
   switch (type) {
     case "wiring.pin":
-      // Direction (input/output) is chosen by the palette tile, not here
-      // (UI_OVERHAUL §36) — so the panel only edits width + radix.
-      return [BITSIZE_FIELD, RADIX_FIELD];
+      // Rotation is visual only; the direction is an explicit toggle. The
+      // palette's INPUT/OUTPUT tiles seed it at placement, and this checkbox
+      // changes it on an existing pin (UI_OVERHAUL §77).
+      return [
+        {
+          key: "isOutput",
+          label: "Output",
+          kind: "boolean",
+          dflt: false,
+          nullWhenFalse: true,
+          group: "Direction",
+        },
+        BITSIZE_FIELD,
+        RADIX_FIELD,
+      ];
     case "wiring.constant":
       // The value is edited in whichever radix is selected, so you never have
       // to think in hex unless you pick hex (UI_OVERHAUL §55); double-click

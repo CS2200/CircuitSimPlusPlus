@@ -100,6 +100,7 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(keys("plexers.decoder")).toEqual(["inputBits"]);
     expect(keys("plexers.priority-decoder")).toEqual(["inputBits"]);
     expect(keys("wiring.probe")).toEqual(["bitsize", "radix"]);
+    expect(keys("wiring.pin")).toEqual(["isOutput", "bitsize", "radix"]);
     expect(keys("wiring.splitter")).toEqual(["splits"]);
     // A breakpoint's value is edited in the chosen radix, exactly like a
     // constant's (§55), and `radix` is display-only on both (§90).
@@ -371,8 +372,9 @@ describe("an instance's terminals follow its definition (§77)", () => {
   });
 
   it("a port that crosses west swaps edges on the instance", () => {
-    // The rotation itself pairs rot ↔ isOutput (document.ts, §77); what is checked
-    // here is the consequence on the other side of the hierarchy.
+    // A port's direction is `isOutput` (rotation is visual only, document.ts
+    // §77); what is checked here is the consequence on the other side of the
+    // hierarchy.
     const edited: CsxCircuit = {
       ...ALU,
       components: ALU.components.map((c) =>

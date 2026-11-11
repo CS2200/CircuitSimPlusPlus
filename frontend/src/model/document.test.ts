@@ -890,27 +890,36 @@ describe("removeWiresCascade (pure helper)", () => {
   });
 });
 
-describe("rotating a port pin keeps its direction in step (§77)", () => {
+describe("rotating a port pin is visual only (§77)", () => {
   const port = (doc: CircuitDocument) =>
     doc.addComponent(0, { type: "wiring.pin", pos: [2, 2], name: "a" });
 
-  it("faces west → output (canonical true), anything else → input (attr absent)", () => {
+  it("never changes isOutput across all four facings", () => {
     const doc = CircuitDocument.create("t");
     const id = port(doc);
     const at = () => doc.circuit(0).components.find((c) => c.id === id);
 
     expect(at()?.rot ?? "E").toBe("E"); // the palette's input facing
     expect(at()?.attrs?.isOutput).toBeUndefined();
+    for (const rot of ["W", "N", "E", "S"] as const) {
+      doc.setRotation(0, new Set([id]), rot);
+      expect(at()?.rot).toBe(rot);
+      expect(at()?.attrs?.isOutput).toBeUndefined();
+    }
 
-    doc.setRotation(0, new Set([id]), "W");
-    expect(at()?.rot).toBe("W");
-    expect(at()?.attrs?.isOutput).toBe(true);
-
-    // A quarter turn off west is an input again, and the attr is REMOVED rather
-    // than set false: the canonical form keeps the version diff quiet.
-    doc.rotateComponents(0, new Set([id]));
-    expect(at()?.rot).toBe("N");
-    expect(at()?.attrs === undefined || "isOutput" in (at()?.attrs ?? {}) === false).toBe(true);
+    // An output pin keeps its direction through every rotation too.
+    const out = doc.addComponent(0, {
+      type: "wiring.pin",
+      pos: [2, 2],
+      name: "b",
+      attrs: { isOutput: true },
+    });
+    const outAt = () => doc.circuit(0).components.find((c) => c.id === out);
+    for (const rot of ["E", "S", "W", "N"] as const) {
+      doc.setRotation(0, new Set([out]), rot);
+      expect(outAt()?.rot ?? "E").toBe(rot);
+      expect(outAt()?.attrs?.isOutput).toBe(true);
+    }
   });
 
   it("turns a plain part without touching its attrs", () => {

@@ -480,13 +480,11 @@ export class CircuitDocument {
     const updatedCircuits = this.data.circuits.map((cc, i) => (i === circuitIdx ? updated : cc));
     const wires = this.followWithReroute(c.wires, ids, byId, updated, updatedCircuits);
     const label = ids.size === 1 ? `${verb} ${[...ids][0]}` : `${verb} ${ids.size} components`;
-    let circuits = this.replaceCircuit(circuitIdx, { ...c, components, wires });
-    // Rotating a PORT flips its direction (rot ↔ isOutput), moving the pin to the
-    // opposite edge of every instance — so re-anchor the parent sheets too.
-    if (components.some((x) => ids.has(x.id) && x.type === "wiring.pin")) {
-      circuits = this.refreshInstances(circuits, c.name);
-    }
-    this.exec(label, undefined, circuits);
+    // Rotation is visual only: a pin's `isOutput` is unchanged, so a subcircuit
+    // instance's port side does not move. Direction changes go through the
+    // Inspector's "Output" toggle, which calls `updateComponent` and re-anchors
+    // the parent sheets there.
+    this.exec(label, undefined, this.replaceCircuit(circuitIdx, { ...c, components, wires }));
   }
 
   /**
@@ -1327,27 +1325,21 @@ export function validateWire(c: CsxCircuit, w: WireInit): void {
 /**
  * Rotate one component (UI_OVERHAUL §77).
  *
- * A `wiring.pin` also carries its DIRECTION, and the format keeps that in
- * `attrs.isOutput`: the core derives a subcircuit's interface from it (its
- * `is_output` flag, not from rotation), and the palette seeds the pairing "faces
- * west = output, anything else = input". Keeping the two in step is what makes
- * rotating a port inside a definition move that pin's terminal to the other side
- * of every instance of the circuit.
+ * Rotation is VISUAL ONLY: a `wiring.pin`'s direction is its `attrs.isOutput`
+ * (the core derives a subcircuit's interface from it), and the two are now
+ * decoupled — rotating a pin through all four facings never changes whether it
+ * is an input or an output. Direction is changed explicitly in the Inspector's
+ * "Output" toggle (or by choosing the palette's INPUT/OUTPUT tile).
  *
  * The attribute is kept canonical — an output writes `isOutput: true`, an input
- * leaves it out, exactly as the palette does — so rotating a pin back and forth
- * cannot leave a trail of `isOutput: false` for the version diff to report.
+ * leaves it out — so the Inspector's toggle cannot leave a trail of
+ * `isOutput: false` for the version diff to report.
  */
 function rotatedComponent(
   comp: CsxComponent,
   map: (rot: CsxComponent["rot"]) => CsxComponent["rot"],
 ): CsxComponent {
-  const rot = map(comp.rot);
-  if (comp.type !== "wiring.pin") return { ...comp, rot };
-  const attrs = { ...(comp.attrs ?? {}) };
-  if (rot === "W") attrs.isOutput = true;
-  else delete attrs.isOutput;
-  return { ...comp, rot, attrs };
+  return { ...comp, rot: map(comp.rot) };
 }
 
 export function removeWiresCascade(wires: CsxWire[], roots: ReadonlySet<number>): CsxWire[] {
