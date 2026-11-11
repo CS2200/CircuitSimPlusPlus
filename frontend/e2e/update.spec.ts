@@ -55,5 +55,7 @@ test("U8: About card warns about the unsigned build and links the download page"
   // just a link to the releases page.
   const link = card.getByRole("link", { name: /download page/i });
   await expect(link).toHaveAttribute("href", /\/releases$/);
+  // The card promises Esc dismisses it — the app's key handler must honour that.
   await page.keyboard.press("Escape");
+  await expect(card).toHaveCount(0);
 });

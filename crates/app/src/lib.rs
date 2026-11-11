@@ -470,6 +470,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // Opens external links (the update nudge's "Download" and the About
+        // card's download-page link) in the system browser. Without it, a
+        // `target="_blank"` click is a no-op inside the webview.
+        .plugin(tauri_plugin_opener::init())
         .manage(SimState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             load_circuit,

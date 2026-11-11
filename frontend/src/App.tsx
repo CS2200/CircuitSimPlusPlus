@@ -2017,8 +2017,9 @@ export default function App() {
     };
   }, [sim, doc]);
 
-  // "?" toggles the shortcut overlay; Escape closes it. Mod+O/S/Shift+S are
-  // the file shortcuts (Ctrl+N is browser-reserved — New is menu-only).
+  // "?" toggles the shortcut overlay; Escape closes it (and the About card).
+  // Mod+O/S/Shift+S are the file shortcuts (Ctrl+N is browser-reserved — New is
+  // menu-only).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -2101,7 +2102,10 @@ export default function App() {
         return;
       }
       if (e.key === "?") setShowHelp((v) => !v);
-      if (e.key === "Escape") setShowHelp(false);
+      if (e.key === "Escape") {
+        setShowHelp(false);
+        setShowAbout(false);
+      }
       // `/` jumps to the palette search (§94) — the GitHub/Slack convention.
       if (e.key === "/" && !mod && !e.altKey && paletteSearchRef.current !== null) {
         e.preventDefault();
