@@ -77,10 +77,10 @@ test("a lassoed selection drags its wires — bends and junctions included", asy
   await page.mouse.up();
 
   const after = await doc(page);
-  // The parts moved… (the AND was placed centered at (2.5,1.5) → body [1,0]
-  // under the 4-wide MIPS-era gate; +10 puts it at [11,0]).
+  // The parts moved… (the AND was placed centered at (2.5,1.5) → body [0,0]
+  // under the always-extended 5-wide gate; +10 puts it at [10,0]).
   expect(after.circuits[0].components.map((c) => c.pos)).toEqual([
-    [11, 0],
+    [10, 0],
     [20, 0],
   ]);
   // …and EVERY point of the wire moved with them: the whole route, not just the
