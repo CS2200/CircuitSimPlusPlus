@@ -625,6 +625,7 @@ export class CircuitDocument {
     components: CsxComponent[],
     wires: CsxWire[],
     offset: { x: number; y: number },
+    coalesceKey?: string,
   ): string[] {
     const c = this.circuit(circuitIdx);
     const idMap = new Map<string, string>();
@@ -678,7 +679,7 @@ export class CircuitDocument {
     }
     this.exec(
       `paste ${components.length} components`,
-      undefined,
+      coalesceKey,
       this.replaceCircuit(circuitIdx, {
         ...c,
         components: [...c.components, ...moved],

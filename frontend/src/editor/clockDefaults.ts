@@ -23,12 +23,13 @@
  * One undo step: the caller passes the placement's coalesce key, so the part and the wiring
  * it caused undo together.
  */
-import { compSize, compSpec } from "./catalog";
+import { compPins, compSize, compSpec } from "./catalog";
 import { compLayout, pinPosition } from "./layout";
 import { inflateRect, rectIntersects, type Rect, type Vec2 } from "../render/geom";
 import { routeLeg, type LegEnd } from "./route";
 import type { CircuitDocument } from "../model/document";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
+import { isPinEndpoint } from "../model/csx";
 
 /** Which pins are wired by default, the names a source may already carry, and the label a
  * created source gets. Case-insensitive on the way *in*, canonical on the way *out*. */
@@ -186,15 +187,16 @@ export function applyClockDefaults(
   doc: CircuitDocument,
   circuitIdx: number,
   compId: string,
-  type: string,
   coalesceKey: string,
+  only?: ReadonlySet<string>,
 ): void {
   const placed = doc.circuits[circuitIdx]?.components.find((x) => x.id === compId);
   if (placed === undefined) return;
 
-  for (const pin of compSpec(type).pins(placed.attrs ?? {})) {
+  for (const pin of compPins(placed, doc.circuits)) {
     const def = DEFAULTS[pin.name.toLowerCase()];
     if (def === undefined) continue;
+    if (only !== undefined && !only.has(pin.name)) continue;
 
     let circuit = doc.circuits[circuitIdx];
     let source: CsxComponent | undefined = findSource(circuit, def.aliases);
@@ -264,4 +266,46 @@ export function applyClockDefaults(
       coalesceKey,
     );
   }
+}
+
+/**
+ * A copied clocked part's default control, recorded in the clipboard: the pin's
+ * index in the copied component list, and the pin name. The original source is
+ * NOT copied, so the paste reconnects to the destination's existing clock/reset
+ * (a new source is only created when the destination has none).
+ *
+ * A pin whose original source was custom logic is deliberately not recorded: the
+ * paste leaves it dangling rather than silently re-routing it to the global
+ * clock, which is the "preserve intent" rule in the review.
+ */
+export interface ClipboardDefault {
+  compIndex: number;
+  pin: string;
+}
+
+/**
+ * Reconnect a pasted part's default clock/reset pins to the destination's
+ * existing source. Pins already wired by a copied wire are skipped, so a
+ * copied custom clock is never replaced by the global clock. The whole paste
+ * (components + wires + this reconnection) is one undo step.
+ */
+export function applyPasteDefaults(
+  doc: CircuitDocument,
+  circuitIdx: number,
+  compId: string,
+  coalesceKey: string,
+  pins: readonly string[],
+): void {
+  const c = doc.circuits[circuitIdx];
+  if (c === undefined) return;
+  const wired = new Set<string>();
+  for (const w of c.wires) {
+    for (const e of [w.a, w.b]) {
+      if (isPinEndpoint(e) && e.comp === compId) wired.add(e.pin);
+    }
+  }
+  // Keep only the pins that are not already wired by a copied wire.
+  const only = new Set(pins.filter((p) => !wired.has(p)));
+  if (only.size === 0) return;
+  applyClockDefaults(doc, circuitIdx, compId, coalesceKey, only);
 }

@@ -548,7 +548,7 @@ export default forwardRef<
             },
             key,
           );
-          applyClockDefaults(doc, sheetRef.current, placed, type, key);
+          applyClockDefaults(doc, sheetRef.current, placed, key);
           bump();
         }
       }}

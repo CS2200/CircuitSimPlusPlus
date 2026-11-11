@@ -4,7 +4,12 @@ import { isJoinEndpoint, isPinEndpoint } from "../model/csx";
 import type { SelectionModel } from "../model/selection";
 import { snap, snapPoint } from "../render/camera";
 import { compPins, compSize, gateInputCount, negateList } from "./catalog";
-import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
+import {
+  applyClockDefaults,
+  applyPasteDefaults,
+  nextPlaceSeq,
+  type ClipboardDefault,
+} from "./clockDefaults";
 import type { Rect, Vec2 } from "../render/geom";
 import type { PointerInfo } from "../components/CanvasHost";
 import { nextRotation, prevRotation } from "./layout";
@@ -278,7 +283,11 @@ export class ToolMachine {
    * from a deliberate drag that happens to end back near where it began.
    */
   private pressMaxDist = 0;
-  private clipboard: { components: CsxComponent[]; wires: CsxWire[] } | null = null;
+  private clipboard: {
+    components: CsxComponent[];
+    wires: CsxWire[];
+    defaults: ClipboardDefault[];
+  } | null = null;
   /** Fired when a component is double-clicked (opens the right-dock Inspector). */
   onEditComponent?: (compId: string, focusField?: string) => void;
   /** Fired by Shift+click on a clock: step the simulation one tick (§47). */
@@ -441,7 +450,7 @@ export class ToolMachine {
         },
         placeKey,
       );
-      applyClockDefaults(this.doc, this.circuitIdx(), placed, p.type, placeKey);
+      applyClockDefaults(this.doc, this.circuitIdx(), placed, placeKey);
       // Select what was just placed: the natural follow-up is to rotate, edit
       // or wire it, and R/arrows/Delete act on the selection (UI_OVERHAUL §23).
       this.selection.set([placed], []);
@@ -1168,6 +1177,7 @@ export class ToolMachine {
       this.clipboard = copySelection(
         this.doc.circuit(this.circuitIdx()),
         this.selection.components,
+        this.doc.circuits,
       );
     }
     this.deleteSelection();
@@ -1175,18 +1185,36 @@ export class ToolMachine {
 
   copy(): void {
     if (this.selection.isEmpty) return;
-    this.clipboard = copySelection(this.doc.circuit(this.circuitIdx()), this.selection.components);
+    this.clipboard = copySelection(
+      this.doc.circuit(this.circuitIdx()),
+      this.selection.components,
+      this.doc.circuits,
+    );
     this.changed();
   }
 
   paste(): void {
     if (this.clipboard === null || this.clipboard.components.length === 0) return;
     this.wiring = null; // fresh geometry under an in-progress wire invalidates it
-    const { components, wires } = this.clipboard;
-    const pasted = this.doc.paste(this.circuitIdx(), components, wires, {
-      x: PASTE_OFFSET,
-      y: PASTE_OFFSET,
-    });
+    const { components, wires, defaults } = this.clipboard;
+    // One undo step for the paste and the default control wiring it reconnects
+    // (the same rule as placement: `applyPasteDefaults` explains the intent).
+    const key = `paste:${nextPlaceSeq()}`;
+    const pasted = this.doc.paste(
+      this.circuitIdx(),
+      components,
+      wires,
+      { x: PASTE_OFFSET, y: PASTE_OFFSET },
+      key,
+    );
+    // A copied register's clk/rst wire was dropped (its source is outside the
+    // selection), so reconnect it to the destination's existing source. A pin
+    // that was on custom logic is not in `defaults`, so it stays dangling.
+    for (let i = 0; i < pasted.length; i++) {
+      const pins = defaults.filter((d) => d.compIndex === i).map((d) => d.pin);
+      if (pins.length === 0) continue;
+      applyPasteDefaults(this.doc, this.circuitIdx(), pasted[i], key, pins);
+    }
     this.selection.set(pasted, []);
     this.changed();
   }
@@ -1536,11 +1564,21 @@ function normRect(a: Vec2, b: Vec2): Rect {
  * whose BOTH endpoints resolve inside the copy (pin → copied component;
  * junction → copied parent wire, recursively). Junction indices are
  * remapped to the new wire order. A wire never dangles.
+ *
+ * `defaults` records clocked pins whose original source was a default
+ * clock/reset (the source part itself is NOT copied, so the paste reconnects
+ * to the destination's existing source). A custom-logic source is not
+ * recorded: the paste leaves that pin dangling instead of re-routing it.
  */
 export function copySelection(
   c: { components: CsxComponent[]; wires: CsxWire[] },
   compSet: ReadonlySet<string>,
-): { components: CsxComponent[]; wires: CsxWire[] } {
+  circuits?: readonly CsxCircuit[],
+): {
+  components: CsxComponent[];
+  wires: CsxWire[];
+  defaults: ClipboardDefault[];
+} {
   const components = c.components.filter((x) => compSet.has(x.id)).map((x) => structuredClone(x));
   const copiedOld = new Set<number>();
   let grew = true;
@@ -1580,5 +1618,39 @@ export function copySelection(
     }
     wires.push(clone);
   });
-  return { components, wires };
+  return { components, wires, defaults: copyDefaults(c, components, circuits) };
+}
+
+/** Clocked pins of the copied components whose original source is a default clock/reset. */
+function copyDefaults(
+  c: { components: CsxComponent[]; wires: CsxWire[] },
+  copied: readonly CsxComponent[],
+  circuits?: readonly CsxCircuit[],
+): ClipboardDefault[] {
+  const defaults: ClipboardDefault[] = [];
+  copied.forEach((comp, compIndex) => {
+    for (const pin of compPins(comp, circuits)) {
+      const name = pin.name.toLowerCase();
+      if (name !== "clk" && name !== "rst") continue;
+      const wire = c.wires.find((w) =>
+        [w.a, w.b].some((e) => isPinEndpoint(e) && e.comp === comp.id && e.pin === pin.name),
+      );
+      if (wire === undefined) continue;
+      const other = [wire.a, wire.b].find(
+        (e) => !(isPinEndpoint(e) && e.comp === comp.id && e.pin === pin.name),
+      );
+      if (other === undefined || !isPinEndpoint(other)) continue;
+      const src = c.components.find((x) => x.id === other.comp);
+      if (src === undefined) continue;
+      if (src.type === "wiring.clock" || src.type === "wiring.reset") {
+        defaults.push({ compIndex, pin: pin.name });
+      } else if (
+        src.type === "wiring.pin" &&
+        ["clk", "clock", "rst", "reset"].includes((src.name ?? "").toLowerCase())
+      ) {
+        defaults.push({ compIndex, pin: pin.name });
+      }
+    }
+  });
+  return defaults;
 }

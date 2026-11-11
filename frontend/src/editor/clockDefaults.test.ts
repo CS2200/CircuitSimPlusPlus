@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CircuitDocument } from "../model/document";
-import { applyClockDefaults, nextPlaceSeq } from "./clockDefaults";
+import { applyClockDefaults, applyPasteDefaults, nextPlaceSeq } from "./clockDefaults";
+import { copySelection } from "./tools";
 import { isPinEndpoint } from "../model/csx";
 import { pinShown } from "./catalog";
 import { compLayout } from "./layout";
@@ -14,7 +15,7 @@ function doc(): CircuitDocument {
 function place(d: CircuitDocument, type: string, pos: [number, number] = [10, 10]): string {
   const key = `place:${nextPlaceSeq()}`;
   const id = d.addComponent(0, { type, pos }, key);
-  applyClockDefaults(d, 0, id, type, key);
+  applyClockDefaults(d, 0, id, key);
   return id;
 }
 
@@ -105,7 +106,7 @@ describe("placing a clocked part wires its clock and reset", () => {
     const sub = d.addCircuit("sub");
     const key = `place:${nextPlaceSeq()}`;
     const r = d.addComponent(sub, { type: "mem.register", pos: [10, 10] }, key);
-    applyClockDefaults(d, sub, r, "mem.register", key);
+    applyClockDefaults(d, sub, r, key);
     const c = d.circuit(sub);
     const ports = c.components.filter((x) => x.type === "wiring.pin");
     expect(ports.map((p) => p.name).sort()).toEqual(["CLK", "RST"]);
@@ -149,5 +150,89 @@ describe("show/hide clock and reset are gone", () => {
     expect(pinShown({ type: "mem.ram", attrs: { showClk: false, showRst: false } }, "clk")).toBe(
       true,
     );
+  });
+});
+
+/** Paste a clipboard and reconnect its default control wiring, as the tool does. */
+function pasteAndReconnect(d: CircuitDocument, clip: ReturnType<typeof copySelection>): string[] {
+  const key = `paste:${nextPlaceSeq()}`;
+  const pasted = d.paste(0, clip.components, clip.wires, { x: 1, y: 1 }, key);
+  for (const dflt of clip.defaults) {
+    applyPasteDefaults(d, 0, pasted[dflt.compIndex], key, [dflt.pin]);
+  }
+  return pasted;
+}
+
+describe("copying a register keeps its default clock and reset", () => {
+  it("reconnects the pasted register to the existing source, without duplicating it", () => {
+    const d = doc();
+    const r = place(d, "mem.register");
+    const c = d.circuit(0);
+    const clock = c.components.find((x) => x.type === "wiring.clock")!;
+    const reset = c.components.find((x) => x.type === "wiring.reset")!;
+
+    const clip = copySelection(c, new Set([r]), d.circuits);
+    expect(clip.defaults).toEqual(
+      expect.arrayContaining([
+        { compIndex: 0, pin: "clk" },
+        { compIndex: 0, pin: "rst" },
+      ]),
+    );
+
+    const pasted = pasteAndReconnect(d, clip);
+    const c2 = d.circuit(0);
+    // The destination reuses its existing source: no second clock/reset.
+    expect(c2.components.filter((x) => x.type === "wiring.clock")).toHaveLength(1);
+    expect(c2.components.filter((x) => x.type === "wiring.reset")).toHaveLength(1);
+    const wired = (id: string, pin: string) =>
+      c2.wires.some((w) =>
+        [w.a, w.b].some((e) => isPinEndpoint(e) && e.comp === id && e.pin === pin),
+      );
+    expect(wired(pasted[0], "clk")).toBe(true);
+    expect(wired(pasted[0], "rst")).toBe(true);
+    expect(wired(clock.id, "out")).toBe(true);
+    expect(wired(reset.id, "out")).toBe(true);
+  });
+
+  it("leaves a custom-logic clock dangling instead of re-routing it", () => {
+    const d = doc();
+    const r = d.addComponent(0, { type: "mem.register", pos: [10, 10] });
+    const src = d.addComponent(0, { type: "wiring.pin", pos: [0, 0], name: "MYCLK" });
+    d.addWire(0, {
+      a: { comp: r, pin: "clk" },
+      b: { comp: src, pin: "pin" },
+      points: [
+        [10, 13],
+        [0, 0],
+      ],
+    });
+
+    const clip = copySelection(d.circuit(0), new Set([r]), d.circuits);
+    expect(clip.defaults).toEqual([]);
+
+    const pasted = pasteAndReconnect(d, clip);
+    const c2 = d.circuit(0);
+    const wired = (id: string, pin: string) =>
+      c2.wires.some((w) =>
+        [w.a, w.b].some((e) => isPinEndpoint(e) && e.comp === id && e.pin === pin),
+      );
+    expect(wired(pasted[0], "clk")).toBe(false);
+    expect(wired(pasted[0], "rst")).toBe(false);
+  });
+
+  it("keeps the paste and its reconnection in one undo step", () => {
+    const d = doc();
+    const r = place(d, "mem.register");
+    const depth = d.historyDepth;
+    const clip = copySelection(d.circuit(0), new Set([r]), d.circuits);
+    const pasted = pasteAndReconnect(d, clip);
+    expect(d.historyDepth).toBe(depth + 1);
+    d.undo();
+    expect(d.circuit(0).components.some((x) => x.id === pasted[0])).toBe(false);
+    expect(
+      d
+        .circuit(0)
+        .wires.some((w) => [w.a, w.b].some((e) => isPinEndpoint(e) && e.comp === pasted[0])),
+    ).toBe(false);
   });
 });

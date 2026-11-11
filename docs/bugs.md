@@ -131,7 +131,11 @@ recorded with each item so implementation does not need to re-litigate them.
 
 ### 4.6 Copy/paste a register loses its default CLK/RST wiring
 
-- [ ] **Reconnect copied clocked parts to the existing clock/reset source.**
+- [x] **Reconnect copied clocked parts to the existing clock/reset source.** Done:
+  `copySelection` records the default clock/reset of a copied clocked part, and
+  `paste` reconnects it to the destination's existing source in the same undo
+  step. A custom-logic source is not copied and is not reconnected, so the pin
+  stays dangling with a warning instead of silently moving to the global clock.
   - Today: `copySelection` drops any wire whose other endpoint is outside the selection
     (`frontend/src/editor/tools.ts:1521-1570`), so copying a register alone loses `clk`/`rst`.
     `document.paste` does no default wiring (`frontend/src/model/document.ts:623-689`); only
@@ -144,6 +148,8 @@ recorded with each item so implementation does not need to re-litigate them.
     clock.
   - Acceptance: copy a register alone, paste it, and it still has both control connections
     without creating a second clock/reset source.
+  - Test: `frontend/src/editor/clockDefaults.test.ts` covers reconnection, the
+    custom-logic case, and the one-undo-step rule.
 
 ### 4.7 Arrow keys must not flip a pin's input/output direction
 
