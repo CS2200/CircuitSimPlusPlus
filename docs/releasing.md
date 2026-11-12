@@ -65,6 +65,86 @@ do. Two secrets are needed for the macOS self-signed certificate
 
 ---
 
+## Signing the macOS build (the TCC fix)
+
+macOS's "Files and Folders" permission store (TCC) keys a folder grant to the
+app's **code-signing identity**. An unsigned or ad-hoc build has no stable
+identity, so every rebuild looks like a new app and TCC asks for permission
+again on every save. We sign with a **stable self-signed certificate** so the
+grant survives rebuilds. This is not a paid Apple Developer ID and the app is
+**not notarized** — the "unidentified developer" workaround still applies.
+
+### One-time setup
+
+1. Generate the certificate (any OS; `openssl` is the only requirement):
+
+   ```bash
+   ./scripts/macos-signing.sh
+   ```
+
+   It writes `./macos-signing/` (`certificate.p12`, `certificate.pem`,
+   `key.pem`) and prints the password plus the base64 of the `.p12`. That
+   directory is gitignored — never commit it.
+
+2. Set the two secrets on the **public mirror** (the repo whose CI runs):
+
+   ```bash
+   gh secret set APPLE_CERTIFICATE          --repo CS2200/CircuitSimPlusPlus < macos-signing/certificate.p12.b64
+   gh secret set APPLE_CERTIFICATE_PASSWORD --repo CS2200/CircuitSimPlusPlus < macos-signing/password.txt
+   ```
+
+   `APPLE_CERTIFICATE` is the base64 of the `.p12`; `APPLE_CERTIFICATE_PASSWORD`
+   is the password the script printed. The script writes both to stdout/stderr
+   when you run it; capture them to files if you want to avoid the terminal.
+
+3. Delete the local `macos-signing/` directory. The private key lives in the
+   repository secret, not on disk.
+
+### What a release does
+
+`release.yml` runs the macOS job only on a `v*` tag. It imports the `.p12` into
+a temporary keychain, sets `APPLE_SIGNING_IDENTITY: "CircuitSim++ Self-Signed"`,
+and runs `tauri build --target universal-apple-darwin`. Tauri's bundler calls
+`codesign` with that identity, so the `.app` is signed and TCC's grant is tied
+to the certificate.
+
+If `APPLE_CERTIFICATE` is not set, the import step prints a warning and skips;
+the macOS build is still produced, but unsigned. TCC will re-prompt.
+
+### Verify
+
+On a Mac:
+
+```bash
+codesign -dv --verbose=4 "CircuitSim++.app"
+# expect: Authority=CircuitSim++ Self-Signed
+```
+
+`node scripts/check-signing.mjs` (part of `node scripts/build.mjs check`) is a
+config gate: it checks the certificate import, the signing identity, the
+folder-usage descriptions, and the generator script. It does not run a real
+`codesign`.
+
+### If you rotate or lose the secret
+
+- **Rotate:** regenerate the certificate, update both secrets. The next release
+  is signed with the new identity; TCC will re-prompt once for the new app.
+- **Lose it:** the same regeneration works. The app is not broken; the only
+  cost is the one-time re-prompt.
+- **Keep the identity stable.** Changing the certificate means TCC sees a new
+  app, so the folder grant is lost.
+
+### Not covered
+
+- **Notarization.** Signed but not notarized; Gatekeeper still warns
+  "unidentified developer". The "right-click → Open" workaround remains.
+- **Dev builds.** `tauri dev` and `node scripts/build.mjs desktop` are not
+  signed. TCC will prompt there.
+- **CI builds.** `frontend.yml` builds unsigned artifacts (no secret); only
+  release artifacts are signed.
+
+---
+
 ## Versioning — the one thing that must match
 
 Set the **same** version in both files, and make it equal the tag:
@@ -162,6 +242,8 @@ Bump the image tag whenever `@playwright/test` is bumped, then regenerate.
 | `frontend` e2e red after a UI change | Regenerate baselines in the pinned image (above). |
 | Wrong tag / bad release | New patch version. To scrap: `gh release delete vX.Y.Z --cleanup-tag --repo CS2200/CircuitSimPlusPlus` (removes release **and** tag), then redo. |
 | A GHES-side job is "skipped" | That is the guard — CI only runs on github.com. |
+| macOS asks for folder access on every save | The release is unsigned. Set `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` and cut a new release (see [Signing the macOS build](#signing-the-macos-build-the-tcc-fix)). |
+| Release warns "APPLE_CERTIFICATE is not set" | The secret is missing; the macOS artifact is unsigned. Set the secret and rebuild. |
 
 > **Never move a published tag.** Force-updating a tag students already
 > downloaded makes `/releases/latest` lie. Cut a new patch release.

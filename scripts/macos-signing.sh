@@ -17,7 +17,8 @@
 #   ./scripts/macos-signing.sh --force    # overwrite an existing certificate
 #
 # Output: DIR/certificate.p12, DIR/certificate.pem, DIR/key.pem
-# Then set the two repository secrets:
+# Also DIR/certificate.p12.b64 and DIR/password.txt, the two values the release
+# workflow needs. Then set the two repository secrets:
 #   APPLE_CERTIFICATE           base64 of the .p12
 #   APPLE_CERTIFICATE_PASSWORD  the password
 #
@@ -36,7 +37,7 @@ while [ $# -gt 0 ]; do
     --out) OUT="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
     -h|--help)
-      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -84,6 +85,13 @@ openssl pkcs12 -export \
   -out "$P12" \
   -passout "pass:$PASSWORD" \
   >/dev/null 2>&1
+
+# The two values the release workflow needs, written to files so the setup can
+# be scripted without copying them out of the terminal. The directory is 0700
+# (umask) and the files are 0600.
+base64 < "$P12" | tr -d '\n' > "$OUT/certificate.p12.b64"
+printf '%s\n' "$PASSWORD" > "$OUT/password.txt"
+chmod 600 "$OUT/certificate.p12.b64" "$OUT/password.txt"
 
 echo "wrote $P12" >&2
 echo "identity: $IDENTITY" >&2

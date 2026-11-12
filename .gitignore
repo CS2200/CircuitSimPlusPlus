@@ -17,6 +17,9 @@ frontend/.vite
 .env.local
 .env.*.local
 
+# Generated macOS signing certificate (private key + .p12). Never commit.
+macos-signing/
+
 # Editor / OS / incremental-build noise.
 .DS_Store
 *.tsbuildinfo

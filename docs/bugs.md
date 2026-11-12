@@ -130,6 +130,8 @@ recorded with each item so implementation does not need to re-litigate them.
     descriptions in the app bundle. The descriptions live in `crates/app/Info.plist`,
     which `bundle.macOS.infoPlist` points at (Tauri v2 wants a plist path, not an
     inline object).
+  - The certificate is generated and both secrets are set on the mirror; the full
+    procedure is in [`docs/releasing.md` §Signing the macOS build](releasing.md#signing-the-macos-build-the-tcc-fix).
 
 ### 4.6 Copy/paste a register loses its default CLK/RST wiring
 
