@@ -65,8 +65,8 @@ if [ -z "$PASSWORD" ]; then
   PASSWORD="$(openssl rand -hex 16)"
 fi
 
-mkdir -p "$OUT"
 umask 077
+mkdir -p "$OUT"
 
 # 10 years is plenty for a semester course; the key is only used for the
 # release build, not for anything else.
