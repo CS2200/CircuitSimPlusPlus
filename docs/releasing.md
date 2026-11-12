@@ -83,8 +83,14 @@ grant survives rebuilds. This is not a paid Apple Developer ID and the app is
    ```
 
    It writes `./macos-signing/` (`certificate.p12`, `certificate.pem`,
-   `key.pem`) and prints the password plus the base64 of the `.p12`. That
-   directory is gitignored — never commit it.
+   `key.pem`, `certificate.p12.b64`, `password.txt`) and prints the password
+   plus the base64 of the `.p12`. That directory is gitignored — never commit it.
+
+   **Keep a backup of the `.p12` and its password** in a password manager or
+   another encrypted vault. GitHub Actions secrets are **write-only**: the
+   workflow can read them, but you cannot read them back. If you lose the
+   backup, the only way to sign again is to regenerate a certificate, which
+   changes the app's identity and costs one TCC re-prompt.
 
 2. Set the two secrets on the **public mirror** (the repo whose CI runs):
 
@@ -97,8 +103,10 @@ grant survives rebuilds. This is not a paid Apple Developer ID and the app is
    is the password the script printed. The script writes both to stdout/stderr
    when you run it; capture them to files if you want to avoid the terminal.
 
-3. Delete the local `macos-signing/` directory. The private key lives in the
-   repository secret, not on disk.
+3. Keep the local `macos-signing/` directory as a backup (password manager or
+   encrypted vault), or delete it if you already have a copy there. The secret
+   is the only copy the workflow can read; the local copy is the only copy you
+   can recover.
 
 ### What a release does
 
@@ -129,8 +137,8 @@ folder-usage descriptions, and the generator script. It does not run a real
 
 - **Rotate:** regenerate the certificate, update both secrets. The next release
   is signed with the new identity; TCC will re-prompt once for the new app.
-- **Lose it:** the same regeneration works. The app is not broken; the only
-  cost is the one-time re-prompt.
+- **Lose it:** restore the backup `.p12` and password, or regenerate. The app
+  is not broken; the only cost is the one-time re-prompt.
 - **Keep the identity stable.** Changing the certificate means TCC sees a new
   app, so the folder grant is lost.
 
