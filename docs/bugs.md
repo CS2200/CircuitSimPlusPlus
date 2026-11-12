@@ -103,8 +103,9 @@ recorded with each item so implementation does not need to re-litigate them.
     **output count**.
   - Support ranges with direction: `0-3` = `[0,1,2,3]`, `7-4` = `[7,6,5,4]`. Canonicalize the
     display back to ranges; accept mixed lists such as `0-3, 8, 12-15`.
-  - Add live coverage validation: every bit mapped exactly once, with missing/duplicate bits
-    named. Do not silently write an invalid mapping.
+  - Add live coverage validation: every bit mapped **at most** once, with duplicate bits
+    named. Unmapped bus bits are allowed — a splitter may tap just the fields it uses.
+    Do not silently write an invalid mapping.
   - Auto-order rows in a meaningful way; auto-fill the next uncovered run for a new row.
   - Add convenience actions such as even distribution and “fill the remaining bits” (presets
     optional).

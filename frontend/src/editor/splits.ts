@@ -116,7 +116,7 @@ export function formatSplitBits(bits: readonly number[]): string {
 export interface SplitCoverage {
   /** Total bus bits (max mapped bit + 1); 0 for no bits. */
   busBits: number;
-  /** Bus bits in 0..busBits-1 that no split carries. */
+  /** Bus bits in 0..busBits-1 that no split carries (allowed; shown as unmapped). */
   missing: number[];
   /** Bus bits carried by more than one split (in more than one position). */
   duplicates: number[];
@@ -124,7 +124,11 @@ export interface SplitCoverage {
   outputs: number;
 }
 
-/** Coverage facts for the editor's live summary and the engine's exactly-once rule. */
+/**
+ * Coverage facts for the editor's live summary. Unmapped bits are legal — a
+ * splitter can tap a subset of a bus. The only invalid mapping is a bit carried
+ * by more than one pin (plus empty splits, which the engine also rejects).
+ */
 export function splitCoverage(entries: readonly SplitEntry[]): SplitCoverage {
   const counts = new Map<number, number>();
   let max = -1;

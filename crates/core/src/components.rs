@@ -810,15 +810,14 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             }
             let mut sorted = seen.clone();
             sorted.sort_unstable();
-            for (i, &b) in sorted.iter().enumerate() {
-                if b != i as u32 {
-                    c_issue(
-                        &mut c,
-                        "splits must cover every bus bit exactly once (bit missing or duplicated)"
-                            .to_string(),
-                    );
-                    break;
-                }
+            // Bits MAY be left unmapped: a splitter can tap a subset of a bus,
+            // so the unused bits are simply not carried. A bit mapped to two
+            // pins is still an error — the same bus bit cannot feed two pins.
+            if sorted.windows(2).any(|w| w[0] == w[1]) {
+                c_issue(
+                    &mut c,
+                    "splits map the same bus bit more than once".to_string(),
+                );
             }
             let bus_width = sorted.last().map_or(0, |m| m + 1);
             let mut sigs = vec![PinSig::io("bus", bus_width)];
@@ -1621,21 +1620,31 @@ mod tests {
         // Split pin names iterate in sorted (map) order — deterministic.
         assert_eq!(p.unwrap(), vec!["bus", "hi", "lo"]);
 
-        // Gap in coverage.
-        let (_, e) = pins(
+        // Gaps are allowed: a splitter may tap a subset of a bus. The bus width
+        // is still derived from the highest mapped bit (here bit 3 -> 4 bits).
+        let (p, e) = pins(
             "wiring.splitter",
             json!({"splits": {"lo": [0, 1], "hi": [3]}}),
         );
-        assert_eq!(e.len(), 1);
-        assert!(e[0].message.contains("exactly once"));
+        assert!(e.is_empty(), "{e:?}");
+        assert_eq!(p.unwrap(), vec!["bus", "hi", "lo"]);
+        let sigs = pin_sigs(
+            "wiring.splitter",
+            json!({"splits": {"lo": [0, 1], "hi": [3]}})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        // bus = max mapped bit + 1, even though bit 2 is unmapped.
+        assert_eq!(sigs[0].width, 4);
 
-        // Duplicated bit.
+        // A bit mapped to two pins is still an error.
         let (_, e) = pins(
             "wiring.splitter",
             json!({"splits": {"a": [0, 1], "b": [1]}}),
         );
         assert_eq!(e.len(), 1);
-        assert!(e[0].message.contains("exactly once"));
+        assert!(e[0].message.contains("more than once"));
     }
 
     #[test]

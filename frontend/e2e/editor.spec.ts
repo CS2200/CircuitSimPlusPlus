@@ -270,7 +270,22 @@ test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
     Object.values(splits).some((bits) => JSON.stringify(bits) === JSON.stringify([3, 2, 1, 0])),
   ).toBe(true);
 
-  // Add split fills the next uncovered run (here it extends the bus by a bit).
+  // Unmapped bus bits are allowed: dropping 4-5 from the second split commits,
+  // and they stay out of the file (bus width is still max mapped bit + 1).
+  await page.getByLabel("Split 2 bits").fill("6-7");
+  await page.getByLabel("Split 2 bits").press("Enter");
+  await expect(page.getByLabel("Split 2 bits")).toHaveValue("6-7");
+  const gapped = await doc(page);
+  const gappedSplit = gapped.circuits[0].components.find((c) => c.type === "wiring.splitter");
+  const gappedSplits = gappedSplit?.attrs?.splits as Record<string, number[]>;
+  expect(
+    Object.values(gappedSplits)
+      .flat()
+      .sort((a, b) => a - b),
+  ).toEqual([0, 1, 2, 3, 6, 7]);
+  await expect(page.getByText("2 unmapped")).toBeVisible();
+
+  // Add split fills the next uncovered run (here the gap at 4-5).
   await page.getByRole("button", { name: "Add split" }).click();
   await expect(page.locator(".split-row")).toHaveCount(3);
 });

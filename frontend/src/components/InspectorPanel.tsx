@@ -717,18 +717,22 @@ function rowsToSplits(rows: readonly SplitRow[]): Record<string, number[]> {
   return out;
 }
 
-/** One human line for an incomplete mapping, or null when it is exactly-once. */
-function coverageProblem(coverage: SplitCoverage): string | null {
+/**
+ * One human line for a mapping the engine rejects, or null when it is legal.
+ * Unmapped bus bits are allowed (the splitter may tap a subset of a bus); a bit
+ * carried by two pins, or a split with no bits, is not.
+ */
+function coverageProblem(coverage: SplitCoverage, entries: readonly SplitEntry[]): string | null {
   const parts: string[] = [];
   const short = (bits: readonly number[]): string =>
     bits.length > 8 ? `${bits.slice(0, 8).join(", ")}…` : bits.join(", ");
+  if (entries.some((e) => e.bits.length === 0)) {
+    parts.push("each split must carry at least one bit");
+  }
   if (coverage.duplicates.length > 0) {
     parts.push(`bits ${short(coverage.duplicates)} mapped more than once`);
   }
-  if (coverage.missing.length > 0) parts.push(`bits ${short(coverage.missing)} not mapped`);
-  return parts.length === 0
-    ? null
-    : `Every bus bit must be mapped exactly once — ${parts.join("; ")}.`;
+  return parts.length === 0 ? null : `Invalid mapping — ${parts.join("; ")}.`;
 }
 
 /**
@@ -737,10 +741,11 @@ function coverageProblem(coverage: SplitCoverage): string | null {
  * The pin NAMES are wire identities, not labels, so they are hidden. Rows are
  * ordered by the bus bits they carry, and each row's field accepts a
  * comma-separated range spelling (`0-3`, `7-4` — the direction is meaningful)
- * that auto-formats back to ranges on commit. The two numbers at the very top
- * are the total bus bits and the number of outputs: changing either reflows the
- * mapping (extend/truncate for bits, even split for outputs). Text commits on
- * blur/Enter, so a half-typed range never prunes wires mid-keystroke.
+ * that auto-formats back to ranges on commit. A mapping may leave bus bits
+ * unmapped, so a splitter can tap just the fields it uses. The two numbers at
+ * the very top are the total bus bits and the number of outputs: changing either
+ * reflows the mapping (extend/truncate for bits, even split for outputs). Text
+ * commits on blur/Enter, so a half-typed range never prunes wires mid-keystroke.
  */
 function SplitsField({
   value,
@@ -770,13 +775,13 @@ function SplitsField({
   const busBits = coverage.busBits;
   const outputs = rows.length;
   const parseError = parsed.map((p) => p.error).find((e) => e !== null) ?? null;
-  const coverageError = coverageProblem(coverage);
+  const coverageError = coverageProblem(coverage, entries);
 
-  /** A mapping is valid only when every bus bit is covered exactly once. */
+  /** Valid when every split carries at least one bit and no bus bit is carried
+   * twice. Bus bits may be left unmapped. */
   const splitIsValid = (next: readonly SplitEntry[]): boolean => {
     if (next.length === 0 || next.some((e) => e.bits.length === 0)) return false;
-    const c = splitCoverage(next);
-    return c.missing.length === 0 && c.duplicates.length === 0;
+    return splitCoverage(next).duplicates.length === 0;
   };
   const commitRows = (next: SplitRow[]): void => {
     setRows(next);
@@ -789,8 +794,8 @@ function SplitsField({
     commitRows(next.map((e) => ({ name: e.name, text: formatSplitBits(e.bits) })));
   };
 
-  /** Removing a split merges its bits into the previous row, so the bus stays
-   * exactly-once instead of becoming a gap. */
+  /** Removing a split merges its bits into the previous row, so they do not
+   * silently become unmapped (or shorten the bus). */
   const removeRow = (index: number): void => {
     if (rows.length <= 1) return;
     const removed = rows[index];
@@ -918,6 +923,7 @@ function SplitsField({
       </div>
       <p className="settings-hint inspector-hint">
         {busBits} bit{busBits === 1 ? "" : "s"} · {outputs} output{outputs === 1 ? "" : "s"}
+        {coverage.missing.length > 0 ? ` · ${coverage.missing.length} unmapped` : ""}
       </p>
       {(parseError !== null || coverageError !== null) && (
         <p className="inspector-note">⚠ {parseError ?? coverageError}</p>

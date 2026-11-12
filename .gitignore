@@ -2,7 +2,7 @@
 node_modules
 frontend/dist
 frontend/playwright-report
-frontend/test-results
+frontend/test-results*
 *.log
 __pycache__/
 frontend/tmp-*.png
