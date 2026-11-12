@@ -11,7 +11,8 @@
 //   node scripts/check-signing.mjs
 //
 // It checks:
-//   * the app's `bundle.macOS.infoPlist` documents the folder access it uses,
+//   * the app's `bundle.macOS.infoPlist` points at a plist that documents the
+//     folder access the app uses,
 //   * the release workflow imports a certificate and signs the macOS build,
 //   * the certificate generator exists and is executable.
 //
@@ -37,7 +38,19 @@ const read = (file) => readFileSync(file, "utf8");
 // --- app bundle ---------------------------------------------------------------
 const conf = JSON.parse(read(TAURI_CONF));
 const macos = conf.bundle?.macOS ?? {};
-const info = macos.infoPlist ?? {};
+// Tauri v2 wants a path to a plist file (it also auto-detects `Info.plist`
+// next to the config). Read that file and check the folder-usage keys.
+const infoPlistPath =
+  typeof macos.infoPlist === "string" && macos.infoPlist.trim() !== ""
+    ? macos.infoPlist
+    : "Info.plist";
+const infoPlistFile = path.resolve(path.dirname(TAURI_CONF), infoPlistPath);
+let plist = "";
+try {
+  plist = read(infoPlistFile);
+} catch {
+  plist = "";
+}
 
 for (const key of [
   "NSDocumentsFolderUsageDescription",
@@ -45,8 +58,8 @@ for (const key of [
   "NSDownloadsFolderUsageDescription",
 ]) {
   check(
-    typeof info[key] === "string" && info[key].trim().length > 0,
-    `crates/app/tauri.conf.json: bundle.macOS.infoPlist.${key} is missing`,
+    plist.includes(`<key>${key}</key>`),
+    `crates/app/${path.relative(path.dirname(TAURI_CONF), infoPlistFile)}: missing ${key}`,
   );
 }
 

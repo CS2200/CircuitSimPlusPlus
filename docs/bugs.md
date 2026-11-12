@@ -127,7 +127,9 @@ recorded with each item so implementation does not need to re-litigate them.
   - Acceptance: after the first grant, saving to the same folder does not prompt again.
   - Test: `node scripts/check-signing.mjs` (part of `node scripts/build.mjs check`)
     verifies the certificate import, the signing identity, and the folder-usage
-    descriptions in the app bundle.
+    descriptions in the app bundle. The descriptions live in `crates/app/Info.plist`,
+    which `bundle.macOS.infoPlist` points at (Tauri v2 wants a plist path, not an
+    inline object).
 
 ### 4.6 Copy/paste a register loses its default CLK/RST wiring
 
