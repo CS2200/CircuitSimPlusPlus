@@ -79,7 +79,10 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -addext "extendedKeyUsage=codeSigning" \
   >/dev/null 2>&1
 
-openssl pkcs12 -export \
+# -legacy + SHA-1 MAC keeps the .p12 importable by macOS's Security
+# framework; OpenSSL 3's default PBES2/AES-256 MAC is rejected by
+# `security import` on some macOS runners.
+openssl pkcs12 -export -legacy -macalg sha1 \
   -inkey "$OUT/key.pem" \
   -in "$OUT/certificate.pem" \
   -out "$P12" \
