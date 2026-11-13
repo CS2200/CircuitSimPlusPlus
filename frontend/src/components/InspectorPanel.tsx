@@ -909,7 +909,7 @@ function SplitsField({
         {rows.map((r, i) => (
           <div className="split-row" key={r.name}>
             <span className="split-index" title={`Split ${i}`}>
-              Split {i}
+              Split {i}:
             </span>
             <input
               className="split-bits"

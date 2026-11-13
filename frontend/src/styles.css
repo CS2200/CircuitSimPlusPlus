@@ -718,6 +718,7 @@ kbd {
 .inspector-row select,
 .settings-row select,
 .split-row input,
+.split-total input,
 .sim-runto input,
 .history-rename,
 .sheet-tab-input,
@@ -737,6 +738,7 @@ kbd {
 .inspector-row select:hover,
 .settings-row select:hover,
 .split-row input:hover,
+.split-total input:hover,
 .sim-runto input:hover,
 .inspector-textarea:hover,
 .select-btn:hover:not(:disabled) {
@@ -747,6 +749,7 @@ kbd {
 .inspector-row select:focus,
 .settings-row select:focus,
 .split-row input:focus,
+.split-total input:focus,
 .sim-runto input:focus,
 .history-rename:focus,
 .sheet-tab-input:focus,

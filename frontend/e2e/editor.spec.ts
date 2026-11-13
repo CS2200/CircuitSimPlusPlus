@@ -243,7 +243,7 @@ test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
   await expect(page.locator(".inspector-textarea")).toHaveCount(0);
   await expect(page.locator(".split-name")).toHaveCount(0);
   // Rows are labelled 0-based, matching the bus-bit indices.
-  await expect(page.locator(".split-index").first()).toHaveText("Split 0");
+  await expect(page.locator(".split-index").first()).toHaveText("Split 0:");
   await expect(page.getByLabel("Bus bits")).toBeVisible();
   await expect(page.getByLabel("Outputs")).toBeVisible();
 
