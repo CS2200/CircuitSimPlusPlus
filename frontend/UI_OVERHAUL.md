@@ -2972,3 +2972,59 @@ derivation in `lib/subcircuit.test.ts`.
   semantics over its demo circuit, so the dialog works in the browser dev flow.
 
 **Acceptance:** frontend lint / 588 unit / build green.
+
+## 106. The hover menus stop slipping out from under the pointer (2026-11-12)
+
+Hover had a hairline problem (§20): the menu closed on the very frame the
+pointer left the bar's box, and the bar's box is only as tall as the buttons.
+Two seams did it.
+
+- **Button → popup.** The popup sits 2 px below its button. Reaching down into
+  the menu crossed a 2 px dead zone where the pointer was over neither, so
+  `mouseleave` fired and the menu vanished just as you went to click it. An
+  invisible 4 px **hover bridge** along the bar's lower edge (`.menubar::after`,
+  part of the bar, so hovering it counts as staying put) now spans that seam —
+  and the 2 px gaps _between_ buttons, too.
+- **Bar → bar.** With no grace window, a sweep that clipped the bar's lower
+  edge between two menus (or a diagonal path out of a popup) closed and
+  reopened on alternate frames — the "flicker, unable to decide which list"
+  report. Leaving the bar now **schedules** a close 140 ms out; re-entering the
+  bar, crossing into a popup (a DOM child) or the bridge cancels it. A real
+  departure still closes promptly.
+
+Neither change touches the open-on-hover contract: crossing the bar still
+switches menus instantly, and a click still only ever opens.
+
+**Acceptance:** `e2e/menubar.spec.ts` (4 cases) fails on the old code for the
+reach-in and skim paths and passes with the fix; frontend lint / 634 unit /
+build green.
+
+## 107. The macOS window wears the app's own header (2026-11-13)
+
+The two-row header is the product's chrome; on macOS it sat under a stock
+title bar that said nothing the header did not. The packaged macOS window now
+uses an **overlay title bar** (`titleBarStyle: "Overlay"`, `hiddenTitle: true`)
+so the traffic lights float over row 1 and the header reads as the window.
+
+- **Both rows inset to clear the lights** (`.app[data-platform="macos"]`), so
+  the app mark starts after them and the menu row stays aligned under it. The
+  flag comes from `isMacOS()` (`lib/env.ts`) — gated on `isTauri()` so a macOS
+  browser (dev/e2e) keeps the normal layout.
+- **The window still moves.** With the native bar hidden, the header rows carry
+  `data-tauri-drag-region` (inert outside Tauri), added to the window capability
+  as `core:window:allow-start-dragging`. Interactive children — the title
+  button, status chip, menu buttons, transport — keep their own clicks; only the
+  bars' empty space drags. Double-click to maximize comes free
+  (`internal_toggle_maximize` is a default permission).
+- **Windows/Linux are untouched:** the same config rides along but the overlay
+  style is macOS-only in effect, and the inset is keyed on the platform flag.
+
+This is the cheap half of "native on macOS": it does **not** move File/Edit/
+View/Help into the system menu bar. That (a Tauri `MenuBuilder` plus event
+routing and two-way check/disabled sync) is a larger change, deferred until it
+can be hand-tested on a Mac — CI only builds the macOS bundle, it never drives
+its UI.
+
+**Acceptance:** frontend lint / build green; the Rust shell `cargo check`s with
+the new capability. The overlay's exact traffic-light inset needs one visual
+confirmation on a Mac release.

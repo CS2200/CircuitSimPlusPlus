@@ -12,6 +12,20 @@ stand in for a changelog.
 
 ## [Unreleased]
 
+### Added
+
+- **The macOS window uses the app's own header instead of a stock title bar.**
+  The traffic lights overlay the first row, which insets to clear them, and the
+  header bars are now window drag regions. Windows and Linux are unchanged.
+
+### Fixed
+
+- **The top-bar menus no longer flicker shut.** Reaching from a menu button
+  into its popup, or sweeping across the bar while clipping its lower edge,
+  could close the menu right as you went to click. The seams between the
+  buttons and their popups are bridged and leaving the bar closes it after a
+  short grace window.
+
 ## [0.4.1] - 2026-11-12
 
 A mostly-fix cycle: the splitter gained a real editor and an explicit bus

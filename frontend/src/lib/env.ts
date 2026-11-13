@@ -9,3 +9,17 @@
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
+
+/**
+ * True only in the Tauri shell on macOS (§107). The macOS window uses an
+ * overlay title bar, so its traffic lights float over the app's own header and
+ * the header insets to clear them; that chrome exists only in the packaged app,
+ * not a macOS browser (dev/e2e), hence the `isTauri()` gate. The webview's
+ * `navigator.userAgent` ("Macintosh; Intel Mac OS X") is the probe — there is no
+ * os plugin dependency for a single boolean.
+ */
+export function isMacOS(): boolean {
+  return (
+    isTauri() && typeof navigator !== "undefined" && /Macintosh|Mac OS X/.test(navigator.userAgent)
+  );
+}

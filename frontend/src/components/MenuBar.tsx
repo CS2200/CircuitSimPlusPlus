@@ -29,6 +29,29 @@ export interface MenuDef {
 export default function MenuBar({ menus }: { menus: MenuDef[] }) {
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  /**
+   * Leaving the bar closes it, but not on the very frame the pointer crosses
+   * the hairline between a button and its popup (§106): without a grace window
+   * a diagonal path — or a sweep that clips the bar's lower edge between two
+   * menus — closes and reopens, which reads as a flicker. Crossing into the
+   * popup (a DOM child) cancels the timer, so the pointer resting inside the
+   * menu never closes it.
+   */
+  const closeTimer = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimer.current !== null) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setOpen(null);
+    }, 140);
+  };
+  useEffect(() => cancelClose, []);
 
   useEffect(() => {
     if (open === null) return;
@@ -38,6 +61,7 @@ export default function MenuBar({ menus }: { menus: MenuDef[] }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
+        cancelClose();
         setOpen(null);
       }
     };
@@ -54,8 +78,9 @@ export default function MenuBar({ menus }: { menus: MenuDef[] }) {
       className="menubar"
       ref={barRef}
       // Hover opens (UI_OVERHAUL §20); leaving the bar (or its popup, which is
-      // a child) closes again.
-      onMouseLeave={() => setOpen(null)}
+      // a child) closes again after a short grace (§106).
+      onMouseEnter={cancelClose}
+      onMouseLeave={scheduleClose}
     >
       {menus.map((m) => (
         <div className="menu" key={m.label}>
@@ -65,8 +90,14 @@ export default function MenuBar({ menus }: { menus: MenuDef[] }) {
             aria-expanded={open === m.label}
             // Click only ever OPENS (hover already opened it — toggling here
             // would close a menu the pointer is resting on).
-            onClick={() => setOpen(m.label)}
-            onMouseEnter={() => setOpen(m.label)}
+            onClick={() => {
+              cancelClose();
+              setOpen(m.label);
+            }}
+            onMouseEnter={() => {
+              cancelClose();
+              setOpen(m.label);
+            }}
           >
             {m.label}
           </button>
@@ -82,6 +113,7 @@ export default function MenuBar({ menus }: { menus: MenuDef[] }) {
                     className="menu-item"
                     disabled={item.disabled ?? false}
                     onClick={() => {
+                      cancelClose();
                       setOpen(null);
                       item.onSelect();
                     }}

@@ -86,6 +86,7 @@ import {
   siblingPath,
   statFile,
 } from "./files";
+import { isMacOS } from "./lib/env";
 import { relativeAge } from "./lib/time";
 import { scopeHue } from "./lib/scope";
 import { instantiators, usedByText } from "./lib/subcircuit";
@@ -2241,7 +2242,14 @@ export default function App() {
     activeCircuit.wires.length === 0;
 
   return (
-    <div className="app" data-theme={theme} data-accent={accent}>
+    <div
+      className="app"
+      data-theme={theme}
+      data-accent={accent}
+      // The macOS shell uses an overlay title bar (§107); this flag lets the
+      // header inset for the traffic lights. Absent everywhere else.
+      data-platform={isMacOS() ? "macos" : undefined}
+    >
       <AppHeader
         logo={<AppLogoIcon />}
         title={stress ? "stress harness — ?stress=1" : docTitle}

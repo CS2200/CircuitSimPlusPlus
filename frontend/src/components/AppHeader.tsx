@@ -71,7 +71,11 @@ export default function AppHeader({
       {/* The app name stays in the accessibility tree; the bar itself is the
        *  chrome (the document name is what belongs on screen). */}
       <h1 className="sr-only">CircuitSim++</h1>
-      <div className="appheader-top">
+      {/* `data-tauri-drag-region` (Tauri only; inert in the browser) makes the
+       *  bar's empty space move the window once macOS hides the title bar for
+       *  the overlay chrome (§107). Interactive children still get their own
+       *  clicks — Tauri keys the gesture on the exact target. */}
+      <div className="appheader-top" data-tauri-drag-region>
         <span className="app-logo" title="CircuitSim++">
           {logo}
         </span>
@@ -110,7 +114,7 @@ export default function AppHeader({
         <div className="appheader-actions">{actions}</div>
       </div>
       {(menus !== undefined || transport !== undefined) && (
-        <div className="appheader-bottom">
+        <div className="appheader-bottom" data-tauri-drag-region>
           {menus}
           {transport !== undefined && <div className="appheader-transport">{transport}</div>}
         </div>

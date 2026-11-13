@@ -963,6 +963,17 @@ input[type="number"] {
   padding: 0 8px 0 12px;
 }
 
+/* macOS overlay title bar (§107): the traffic lights float over row 1, so both
+ * rows inset to clear them — keeping the menu row aligned under the app mark.
+ * Only the packaged macOS app carries the flag (see isMacOS). */
+.app[data-platform="macos"] .appheader-top {
+  padding-left: 84px;
+}
+
+.app[data-platform="macos"] .appheader-bottom {
+  padding-left: 84px;
+}
+
 /* The app mark sits in a small accent tile, like an app icon. */
 .app-logo {
   display: grid;
@@ -1131,6 +1142,7 @@ input[type="number"] {
 /* ---- menu bar ---- */
 
 .menubar {
+  position: relative; /* anchors the hover bridge below the buttons */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1139,6 +1151,22 @@ input[type="number"] {
   flex: 0 0 auto;
   min-width: 0;
   user-select: none;
+}
+
+/* Hover bridge (§106): an invisible strip along the bar's lower edge closes the
+ * dead zone between a button, its popup (which starts 2px below) and the next
+ * button. Without it, a pointer travelling into a menu — or sweeping across
+ * the bar while clipping its bottom edge — repeatedly leaves `.menubar` for a
+ * frame and the menu flickers shut. It is part of `.menubar`, so hovering it
+ * counts as staying inside; at 4px it fits the header row and never reaches the
+ * popup items or the tab strip underneath. */
+.menubar::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 4px;
 }
 
 .menu {
