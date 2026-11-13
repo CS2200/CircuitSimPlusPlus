@@ -860,8 +860,9 @@ const REGISTRY: Record<string, CompSpec> = {
   // digit has a display-like aspect (UI decisions).
   "io.hexdisplay": boxSpec(3, 4, [{ name: "in", dx: 0, dy: 2, kind: "in", bitsize: 4 }], "HEX"),
 
-  // Misc (UI_OVERHAUL §37): a free-form text annotation. No pins, no body box
-  // on the canvas; width tracks the text so selection/marquee match it.
+  // A free-form text annotation (UI_OVERHAUL §37; palette group Debugging since
+  // §108). No pins, no body box on the canvas; width tracks the text so
+  // selection/marquee match it.
   "misc.text": {
     width: (attrs) => {
       const text = typeof attrs.text === "string" ? attrs.text : "";
@@ -967,22 +968,13 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
     // Input and output are SEPARATE tiles (UI_OVERHAUL §36): the direction is
     // chosen by which pin you place, never by an Inspector toggle. An output
     // pin seeds `isOutput` and faces west (body points right).
+    // CLK/RST live in I/O and the probe in Debugging (§108): they are the CPU's
+    // external inputs and a watcher, not wiring plumbing.
     items: [
       { type: "wiring.pin", label: "INPUT" },
       { type: "wiring.pin", label: "OUTPUT", attrs: { isOutput: true }, rot: "W" },
-      // The design's clock and reset are **sources**, not pins: `wiring.clock` drives the
-      // square wave, `wiring.reset` is the square reset button — the one clearly deliberate
-      // button on a sheet. A placed part wires itself to whichever is in its circuit, and
-      // to a `wiring.pin` named `CLK`/`RST` only where a subcircuit boundary needs a port
-      // (a net cannot cross one). There is deliberately no "CLK PIN"/"RST PIN" tile: the
-      // CLK/RST *names* are a convenience the editor uses when it looks for a source (any
-      // capitalisation accepted), never a joining rule (format-v2 §9) — and the engine
-      // binds nothing by name, so an old file's `CLK`/`RST` pins keep working unchanged.
-      { type: "wiring.clock" },
-      { type: "wiring.reset" },
       { type: "wiring.constant" },
       { type: "wiring.splitter" },
-      { type: "wiring.probe" },
       { type: "wiring.power" },
       { type: "wiring.ground" },
       { type: "wiring.transistor" },
@@ -1016,17 +1008,37 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   },
   {
     group: "I/O",
-    items: [{ type: "io.button" }, { type: "io.led" }, { type: "io.hexdisplay" }],
-  },
-  {
-    group: "Misc",
-    items: [{ type: "misc.text", label: "TEXT" }],
+    // CLK and RST are **sources**, not pins, and they are the CPU's external
+    // inputs, so they sit with the buttons rather than the wiring plumbing
+    // (§108). `wiring.clock` drives the square wave; `wiring.reset` is the
+    // square reset button — the one clearly deliberate button on a sheet. A
+    // placed part wires itself to whichever is in its circuit, and to a
+    // `wiring.pin` named `CLK`/`RST` only where a subcircuit boundary needs a
+    // port (a net cannot cross one). There is deliberately no "CLK PIN"/"RST
+    // PIN" tile: the CLK/RST *names* are a convenience the editor uses when it
+    // looks for a source (any capitalisation accepted), never a joining rule
+    // (format-v2 §9) — and the engine binds nothing by name, so an old file's
+    // `CLK`/`RST` pins keep working unchanged.
+    items: [
+      { type: "wiring.clock" },
+      { type: "wiring.reset" },
+      { type: "io.button" },
+      { type: "io.led" },
+      { type: "io.hexdisplay" },
+    ],
   },
   {
     // Its own section, like CircuitSim CE's "Debugging": a breakpoint is not a
     // building block, it is a way to stop the run and look (UI_OVERHAUL §90).
+    // The probe is a watcher too, and a text annotation is the label you leave
+    // beside what you are looking at — both belong here, not in Misc/Wiring
+    // (§108).
     group: "Debugging",
-    items: [{ type: "debug.breakpoint" }],
+    items: [
+      { type: "debug.breakpoint" },
+      { type: "wiring.probe" },
+      { type: "misc.text", label: "TEXT" },
+    ],
   },
 ];
 

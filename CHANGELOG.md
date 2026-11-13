@@ -18,6 +18,13 @@ stand in for a changelog.
   The traffic lights overlay the first row, which insets to clear them, and the
   header bars are now window drag regions. Windows and Linux are unchanged.
 
+### Changed
+
+- **The component palette is regrouped.** The one-item Misc tab is gone: its
+  Text annotation and the Probe now live in Debugging, and the Clock and Reset
+  sources moved from Wiring to I/O (they are the CPU's external inputs). No
+  component types or file formats changed.
+
 ### Fixed
 
 - **The top-bar menus no longer flicker shut.** Reaching from a menu button

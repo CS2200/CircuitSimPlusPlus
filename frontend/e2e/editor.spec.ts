@@ -361,7 +361,7 @@ test("palette tooltips name the part, with no gesture boilerplate", async ({ pag
 test("clock: Shift+click ticks the sim in place", async ({ page }) => {
   await page.goto("/");
   await page.waitForFunction(() => (window as unknown as { __sim?: unknown }).__sim !== undefined);
-  await page.locator('[data-group="Wiring"]').click();
+  await page.locator('[data-group="I/O"]').click();
   await page.getByRole("button", { name: "CLK", exact: true }).click();
   const spot = await world(page, 0, 0);
   await page.mouse.click(spot.x, spot.y);

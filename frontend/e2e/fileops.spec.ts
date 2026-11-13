@@ -363,10 +363,10 @@ test("the header title edits in place, and Ctrl+S then writes without asking aga
   await expect(page.locator(".app-title")).not.toHaveText("(unsaved)");
 });
 
-test("Misc: a text annotation stores and edits its text", async ({ page }) => {
+test("Debugging: a text annotation stores and edits its text", async ({ page }) => {
   await page.goto("/");
 
-  await openPaletteGroup(page, "Misc");
+  await openPaletteGroup(page, "Debugging");
   await page.getByRole("button", { name: "TEXT", exact: true }).click();
   const spot = await world(page, 0, 0);
   await page.mouse.click(spot.x, spot.y);

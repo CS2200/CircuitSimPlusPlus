@@ -3028,3 +3028,26 @@ its UI.
 **Acceptance:** frontend lint / build green; the Rust shell `cargo check`s with
 the new capability. The overlay's exact traffic-light inset needs one visual
 confirmation on a Mac release.
+
+## 108. The palette loses Misc and sorts its watchers (2026-11-13)
+
+The rail had a one-item **Misc** tab, and two parts sat in the wrong place. The
+groups now say what a part is _for_:
+
+- **Misc is gone.** Its only tile, the free-form **TEXT** annotation, moved to
+  **Debugging** — a note is the label you leave beside what you are looking at.
+- **Probe moved from Wiring to Debugging.** It is a live readout, not a wire:
+  the same "stop and look" family as the breakpoint.
+- **CLK and RST moved from Wiring to I/O.** They are the CPU's external inputs,
+  not part of the CPU or its wiring. (They are the `wiring.clock` /
+  `wiring.reset` **sources**, not `wiring.pin`s — the editor still auto-wires a
+  placed part to whichever source it finds, `editor/clockDefaults.ts`.) I/O now
+  reads Clock, Reset, Button, LED, Hex Display: inputs first, then outputs.
+
+No type strings, file format, or engine behavior changed — only the palette
+grouping. The rail is one tab shorter — seven groups plus Subcircuits, eight
+tabs — and the now-unused Misc rail glyph was removed.
+
+**Acceptance:** `e2e/panels.spec.ts` checks the new groups and the 8-tab rail;
+`e2e/fileops.spec.ts` places TEXT from Debugging; `e2e/editor.spec.ts` places
+CLK from I/O. Frontend lint / unit / build green.

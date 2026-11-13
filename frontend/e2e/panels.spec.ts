@@ -80,8 +80,9 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   // One rail tab per registry group (Debugging included, §90), plus Subcircuits
   // — which is always on the rail now (UI_OVERHAUL §80), hint and all, so the
   // feature is discoverable before anyone has made one. The circuit hierarchy is
-  // NOT a rail group: it is the right dock's empty state (CircuitTree).
-  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(9);
+  // NOT a rail group: it is the right dock's empty state (CircuitTree). Misc is
+  // gone (§108): its text annotation moved into Debugging.
+  await expect(page.locator(".palette-rail [role=tab]")).toHaveCount(8);
 
   // Gates is the default group.
   await expect(page.getByRole("button", { name: "AND", exact: true })).toBeVisible();
@@ -109,8 +110,13 @@ test("palette rail groups: hover swaps the body; every item keeps its icon", asy
   await checkGroup("Arithmetic", "ADD");
   await checkGroup("Memory", "RAM");
   await checkGroup("I/O", "LED");
-  await checkGroup("Misc", "TEXT");
+  // CLK/RST are sources and external inputs, so they share the I/O rail (§108).
+  await checkGroup("I/O", "CLK");
+  await checkGroup("I/O", "RST");
+  // Debugging now holds every watcher/annotation: breakpoint, probe, text.
   await checkGroup("Debugging", "Breakpoint");
+  await checkGroup("Debugging", "PROBE");
+  await checkGroup("Debugging", "TEXT");
   await checkGroup("Gates", "NAND");
 
   // Subcircuits has no tiles to check yet (there is nothing to place), and that is

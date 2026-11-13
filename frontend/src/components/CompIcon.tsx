@@ -346,37 +346,6 @@ function MemoryGroupGlyph({ height }: { height: number }) {
   );
 }
 
-/** A text mark in a dotted frame — the Misc group (annotations). */
-function MiscGroupGlyph({ height }: { height: number }) {
-  return (
-    <RailGlyph height={height}>
-      <rect
-        x="0.4"
-        y="0.3"
-        width="2.4"
-        height="2"
-        rx="0.14"
-        strokeDasharray="0.22 0.16"
-        strokeOpacity={0.5}
-      />
-      <text
-        x="1.6"
-        y="1.34"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={1.25}
-        fontFamily="Georgia, 'Times New Roman', serif"
-        fontWeight={600}
-        fill="currentColor"
-        stroke="none"
-        opacity={0.9}
-      >
-        T
-      </text>
-    </RailGlyph>
-  );
-}
-
 /** A module with an inner box and pins on both sides — the Subcircuits group. */
 function SubcircuitGroupGlyph({ height }: { height: number }) {
   return (
@@ -400,7 +369,6 @@ function SubcircuitGroupGlyph({ height }: { height: number }) {
 export function PaletteGroupIcon({ group, height = 26 }: { group: string; height?: number }) {
   if (group === "Wiring") return <WireGroupGlyph height={height} />;
   if (group === "Memory") return <MemoryGroupGlyph height={height} />;
-  if (group === "Misc") return <MiscGroupGlyph height={height} />;
   if (group === "Subcircuits") return <SubcircuitGroupGlyph height={height} />;
   return <CompIcon type={GROUP_GLYPHS[group] ?? "subcircuit"} height={height} />;
 }
