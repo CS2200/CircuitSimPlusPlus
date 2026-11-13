@@ -242,6 +242,8 @@ test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
   // wire identities. The two totals are on top.
   await expect(page.locator(".inspector-textarea")).toHaveCount(0);
   await expect(page.locator(".split-name")).toHaveCount(0);
+  // Rows are labelled 0-based, matching the bus-bit indices.
+  await expect(page.locator(".split-index").first()).toHaveText("Split 0");
   await expect(page.getByLabel("Bus bits")).toBeVisible();
   await expect(page.getByLabel("Outputs")).toBeVisible();
 
@@ -250,13 +252,13 @@ test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
   await page.getByLabel("Bus bits").press("Enter");
   await page.getByLabel("Outputs").fill("2");
   await page.getByLabel("Outputs").press("Enter");
-  await expect(page.getByLabel("Split 1 bits")).toHaveValue("0-3");
-  await expect(page.getByLabel("Split 2 bits")).toHaveValue("4-7");
+  await expect(page.getByLabel("Split 0 bits")).toHaveValue("0-3");
+  await expect(page.getByLabel("Split 1 bits")).toHaveValue("4-7");
 
   // A backwards range parses, and auto-formats back to the same range.
-  await page.getByLabel("Split 1 bits").fill("3-0");
-  await page.getByLabel("Split 1 bits").press("Enter");
-  await expect(page.getByLabel("Split 1 bits")).toHaveValue("3-0");
+  await page.getByLabel("Split 0 bits").fill("3-0");
+  await page.getByLabel("Split 0 bits").press("Enter");
+  await expect(page.getByLabel("Split 0 bits")).toHaveValue("3-0");
 
   const d = await doc(page);
   const split = d.circuits[0].components.find((c) => c.type === "wiring.splitter");
@@ -271,13 +273,15 @@ test("splitter: hidden names, ranges, and the two totals", async ({ page }) => {
   ).toBe(true);
 
   // Unmapped bus bits are allowed: dropping 4-5 from the second split commits,
-  // and they stay out of the file (bus width is still max mapped bit + 1).
-  await page.getByLabel("Split 2 bits").fill("6-7");
-  await page.getByLabel("Split 2 bits").press("Enter");
-  await expect(page.getByLabel("Split 2 bits")).toHaveValue("6-7");
+  // and they stay out of the file. The width is the explicit `busBits`, so the
+  // bus stays 8 bits even though the highest mapped bit is now 7.
+  await page.getByLabel("Split 1 bits").fill("6-7");
+  await page.getByLabel("Split 1 bits").press("Enter");
+  await expect(page.getByLabel("Split 1 bits")).toHaveValue("6-7");
   const gapped = await doc(page);
   const gappedSplit = gapped.circuits[0].components.find((c) => c.type === "wiring.splitter");
   const gappedSplits = gappedSplit?.attrs?.splits as Record<string, number[]>;
+  expect(gappedSplit?.attrs?.busBits).toBe(8);
   expect(
     Object.values(gappedSplits)
       .flat()

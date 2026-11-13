@@ -908,15 +908,19 @@ function SplitsField({
       <div className="split-rows">
         {rows.map((r, i) => (
           <div className="split-row" key={r.name}>
-            <span className="split-index" aria-hidden="true">
-              {i + 1}
+            <span className="split-index" title={`Split ${i}`}>
+              Split {i}
             </span>
             <input
               className="split-bits"
               value={r.text}
               placeholder="0-3"
               spellCheck={false}
-              aria-label={`Split ${i + 1} bits`}
+              // The full range text may be wider than the field; the title
+              // makes the whole mapping readable on hover (the input also
+              // scrolls natively with the caret/arrow keys).
+              title={r.text}
+              aria-label={`Split ${i} bits`}
               onChange={(e) =>
                 setRows(rows.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
               }
@@ -927,7 +931,7 @@ function SplitsField({
             />
             <button
               className="secondary split-remove"
-              aria-label={`Remove split ${i + 1}`}
+              aria-label={`Remove split ${i}`}
               disabled={rows.length <= 1}
               onClick={() => removeRow(i)}
             >
@@ -943,10 +947,14 @@ function SplitsField({
       </div>
       <p className="settings-hint inspector-hint">
         {busBits} bit{busBits === 1 ? "" : "s"} · {outputs} output{outputs === 1 ? "" : "s"}
-        {coverage.missing.length > 0 ? ` · ${coverage.missing.length} unmapped` : ""}
+        {coverage.missing.length > 0 ? (
+          <span className="split-unmapped"> · {coverage.missing.length} unmapped</span>
+        ) : null}
       </p>
       {(parseError !== null || coverageError !== null) && (
-        <p className="inspector-note">⚠ {parseError ?? coverageError}</p>
+        <p className="inspector-note" data-note="split-error">
+          ⚠ {parseError ?? coverageError}
+        </p>
       )}
     </div>
   );
