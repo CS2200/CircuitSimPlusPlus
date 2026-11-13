@@ -17,11 +17,12 @@ Related: [`DESIGN.md`](../DESIGN.md) §9 (rolling releases), decision **D14**
 # one time:
 git remote add public git@github.com:CS2200/CircuitSimPlusPlus.git
 
-# 1. bump the version in BOTH files (they must equal the tag), commit, push:
-git commit -am "release: v0.2.0" && git push origin master && git push public master
+# 1. bump the version in ALL THREE files and add the CHANGELOG.md section for
+#    it (all must equal the tag), then commit and push:
+git commit -am "release: v0.4.1" && git push origin master && git push public master
 
 # 2. tag, and push the tag to the MIRROR (that is where CI runs):
-git tag v0.2.0 && git push public v0.2.0
+git tag v0.4.1 && git push public v0.4.1
 
 # 3. watch it build; the release appears here:
 #    https://github.com/CS2200/CircuitSimPlusPlus/releases
@@ -155,35 +156,63 @@ folder-usage descriptions, and the generator script. It does not run a real
 
 ## Versioning — the one thing that must match
 
-Set the **same** version in both files, and make it equal the tag:
+Set the **same** version in all three files, and make it equal the tag:
 
 ```
-tag v0.2.0  ==  crates/app/tauri.conf.json "0.2.0"  ==  frontend/package.json "0.2.0"
+tag v0.4.1  ==  Cargo.toml "0.4.1"  ==  crates/app/tauri.conf.json "0.4.1"  ==  frontend/package.json "0.4.1"
 ```
 
+- `Cargo.toml` (`[workspace.package].version`) — what the shell logs at startup.
 - `crates/app/tauri.conf.json` — the version baked into the bundle.
 - `frontend/package.json` — `APP_VERSION`, what the update nudge compares against.
 
 Get this wrong and every installed app nags forever (it thinks it is always
-behind). Check before tagging:
+behind). A `v*` tag whose core version disagrees with `tauri.conf.json` also
+fails `release.yml` before publishing. Check before tagging:
 
 ```bash
-node scripts/release.mjs --tag v0.2.0 --dry-run --no-build   # refuses on a mismatch
+node scripts/release.mjs --tag v0.4.1 --dry-run --no-build   # refuses on a mismatch
 ```
+
+---
+
+## Release notes
+
+The GitHub Release body is **not** generated from the git log and is **not** a
+wall of signing boilerplate. It is the hand-written section for the version in
+[`CHANGELOG.md`](../CHANGELOG.md), plus a short install footer:
+
+```bash
+node scripts/changelog.mjs --tag v0.4.1 --install-notes   # what the release body will be
+node scripts/changelog.mjs --check                        # the version has a section?
+```
+
+- **Write the entry by hand when the work lands.** Note the user-visible change
+  and why, with the commit hash for detail; don't paste commit subjects.
+- `release.yml` extracts the section at tag time (`scripts/changelog.mjs`) and
+  publishes it with `body_path`. `scripts/release.mjs` uses the same source.
+- `node scripts/build.mjs check` includes the changelog gate, so a version bump
+  with no section fails the commit gate rather than shipping an empty release.
+- Override once with `--notes-file <f>` (local release) if you need to.
+
+The install footer covers the download-per-platform and first-launch warning
+(right-click → Open on macOS, SmartScreen → Run anyway on Windows). Keep it
+short: the long-form install guide lives in the README.
 
 ---
 
 ## Cutting a release
 
 ```bash
-# 1. bump the version in both files, commit, push BOTH remotes
-git commit -am "release: v0.2.0"
+# 1. bump the version in all three files + add the CHANGELOG.md section, then
+#    commit and push BOTH remotes
+git commit -am "release: v0.4.1"
 git push origin master
 git push public master
 
 # 2. tag and push the tag to the mirror
-git tag v0.2.0
-git push public v0.2.0
+git tag v0.4.1
+git push public v0.4.1
 ```
 
 3. Watch it: `gh run watch --repo CS2200/CircuitSimPlusPlus` (the `release`
@@ -191,7 +220,7 @@ git push public v0.2.0
 4. Verify the release:
 
 ```bash
-gh release view v0.2.0 --repo CS2200/CircuitSimPlusPlus
+gh release view v0.4.1 --repo CS2200/CircuitSimPlusPlus
 ```
 Expect a macOS **universal** `.dmg` (Apple Silicon + Intel), a Windows NSIS `.exe`
 (+ portable zip), Linux `.deb` / `.rpm` / `.AppImage`, and the static `csim`
@@ -250,8 +279,10 @@ Bump the image tag whenever `@playwright/test` is bumped, then regenerate.
 | `frontend` e2e red after a UI change | Regenerate baselines in the pinned image (above). |
 | Wrong tag / bad release | New patch version. To scrap: `gh release delete vX.Y.Z --cleanup-tag --repo CS2200/CircuitSimPlusPlus` (removes release **and** tag), then redo. |
 | A GHES-side job is "skipped" | That is the guard — CI only runs on github.com. |
-| macOS asks for folder access on every save | The release is unsigned. Set `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` and cut a new release (see [Signing the macOS build](#signing-the-macos-build-the-tcc-fix)). |
-| Release warns "APPLE_CERTIFICATE is not set" | The secret is missing; the macOS artifact is unsigned. Set the secret and rebuild. |
+| macOS asks for folder access on every save | Either the macOS build is unsigned (secret missing) or the signing identity changed (certificate rotated). Set `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` and cut a new release; a rotation costs one re-prompt (see [Signing the macOS build](#signing-the-macos-build-the-tcc-fix)). |
+| Release warns "APPLE_CERTIFICATE is not set" | The secret is missing; the macOS artifact is unsigned. Set the secret and cut a new release. |
+| Release fails "tag … does not match the bundled version" | Bump `tauri.conf.json` (and `Cargo.toml`, `frontend/package.json`) to match, or push the matching tag. |
+| Release body is empty or has no changelog | Add a `## [X.Y.Z]` section to `CHANGELOG.md`. `node scripts/build.mjs changelog` catches it locally. |
 
 > **Never move a published tag.** Force-updating a tag students already
 > downloaded makes `/releases/latest` lie. Cut a new patch release.
@@ -279,10 +310,10 @@ If the mirror (or github.com) is unavailable, you can still cut a release by han
 from the three OS machines — same result, entirely local:
 
 ```bash
-node scripts/release.mjs --tag v0.2.0 --draft       # any OS: create the draft
-node scripts/release.mjs --tag v0.2.0 --attach-only # other OSes: attach their bundle
-node scripts/release.mjs --tag v0.2.0 --status      # ✓ macOS ✓ Windows ✓ Linux
-node scripts/release.mjs --tag v0.2.0 --publish     # draft -> live
+node scripts/release.mjs --tag v0.4.1 --draft       # any OS: create the draft
+node scripts/release.mjs --tag v0.4.1 --attach-only # other OSes: attach their bundle
+node scripts/release.mjs --tag v0.4.1 --status      # ✓ macOS ✓ Windows ✓ Linux
+node scripts/release.mjs --tag v0.4.1 --publish     # draft -> live
 ```
 
 Flags: `--tag`, `--target <ref>`, `--draft`, `--attach-only`, `--status`,

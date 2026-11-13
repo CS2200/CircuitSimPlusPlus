@@ -27,9 +27,15 @@
 // Everyone needs the `gh` CLI authenticated once:
 //   gh auth login --hostname github.gatech.edu
 //
-// Bump `version` in BOTH crates/app/tauri.conf.json and frontend/package.json
-// and commit before releasing: the first names the bundle, the second is what
-// the update nudge compares against. The script refuses a mismatch.
+// Bump `version` in ALL THREE places and commit before releasing:
+// Cargo.toml ([workspace.package]), crates/app/tauri.conf.json, and
+// frontend/package.json. The first is what the shell logs at startup, the
+// second names the bundle, and the third is what the update nudge compares
+// against. The script refuses a mismatch.
+//
+// Release notes come from the hand-written CHANGELOG.md (scripts/changelog.mjs):
+// the section for the tag plus a short install footer. Pass --notes-file to
+// override.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -41,16 +47,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLE = path.join(ROOT, "target", "release", "bundle");
 const TAURI_CONF = path.join(ROOT, "crates", "app", "tauri.conf.json");
 const FRONTEND_PKG = path.join(ROOT, "frontend", "package.json");
-
-const SIGNING_NOTES = `**These builds are self-signed** (team decision — no paid Apple Developer ID).
-Your OS will still warn because the app is not notarized; the builds are fine.
-One-time workaround:
-
-- **macOS:** right-click the app → **Open** → Open. (Or: \`xattr -d com.apple.quarantine "CircuitSim++.app"\`)
-- **Windows:** SmartScreen → **More info** → **Run anyway**.
-
-Linux: desktop \`.deb\`/\`.AppImage\` builds are attached when built on Linux; the
-autograder CLI (\`csim\`) is built separately with \`node scripts/build.mjs musl\`.`;
+const CARGO_TOML = path.join(ROOT, "Cargo.toml");
+const CHANGELOG = path.join(ROOT, "scripts", "changelog.mjs");
 
 let DRY = false;
 
@@ -118,6 +116,13 @@ function remoteInfo() {
 
 function readJson(file) {
   return JSON.parse(readFileSync(file, "utf8"));
+}
+
+/** The workspace version from Cargo.toml (`[workspace.package].version`). */
+function cargoVersion() {
+  const text = readFileSync(CARGO_TOML, "utf8");
+  const m = text.match(/\[workspace\.package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/);
+  return m ? m[1] : null;
 }
 
 function bundleFiles() {
@@ -219,7 +224,15 @@ function publish(tag, repo, files, opts) {
 function notesFile(opts) {
   if (opts.notesFile) return opts.notesFile;
   const tmp = path.join(tmpdir(), `circuitsimpp-release-notes-${opts.tag}.md`);
-  if (!DRY) writeFileSync(tmp, SIGNING_NOTES + "\n");
+  const notes = capture(process.execPath, [CHANGELOG, "--tag", opts.tag, "--install-notes"]);
+  if (notes.status !== 0) {
+    fail(
+      `could not build release notes for ${opts.tag}`,
+      notes.err,
+      `add a \`## [${opts.tag.replace(/^v/, "")}]\` section to CHANGELOG.md, or pass --notes-file`,
+    );
+  }
+  if (!DRY) writeFileSync(tmp, notes.out + "\n");
   return tmp;
 }
 
@@ -351,7 +364,7 @@ Options:
   --status         Show the release's assets and which platforms are missing.
   --publish        Flip a draft release live (and mark it latest).
   --prerelease     Mark the release a prerelease (never latest; nudge ignores it).
-  --notes-file <f> Release notes. Default: the self-signed-build workaround text.
+  --notes-file <f> Release notes. Default: the CHANGELOG.md section + install footer.
   --no-check       Skip the commit gate (scripts/build.mjs check) before building.
   --no-build       Publish bundles already under target/release/bundle/ (skip tauri build).
   -n, --dry-run    Print the plan; change nothing.
@@ -375,7 +388,9 @@ function main() {
 
   // --status / --publish act on a tag, not on a build; skip the version guard.
   if (!opts.statusMode && !opts.publishMode) {
-    if (tag.replace(/^v/, "") !== version) {
+    // The prerelease suffix is ignored: v0.5.0-rc.1 is version 0.5.0.
+    const tagCore = tag.replace(/^v/, "").replace(/-.*$/, "");
+    if (tagCore !== version) {
       fail(
         `tag ${tag} does not match the version in crates/app/tauri.conf.json (${version})`,
         "bump the version and commit, or pass the matching --tag",
@@ -384,7 +399,21 @@ function main() {
     if (frontend.version !== version) {
       fail(
         `frontend/package.json is ${frontend.version} but tauri.conf.json is ${version}`,
-        "the in-app update nudge reads the frontend version; bump both and commit",
+        "the in-app update nudge reads the frontend version; bump all three and commit",
+      );
+    }
+    const cargo = cargoVersion();
+    if (cargo !== version) {
+      fail(
+        `Cargo.toml [workspace.package] is ${cargo} but tauri.conf.json is ${version}`,
+        "the shell logs the Cargo version at startup; bump all three and commit",
+      );
+    }
+    const notes = capture(process.execPath, [CHANGELOG, "--tag", tag]);
+    if (notes.status !== 0) {
+      fail(
+        `CHANGELOG.md has no section for ${tag}`,
+        `add a \`## [${tag.replace(/^v/, "")}]\` section before releasing`,
       );
     }
   }

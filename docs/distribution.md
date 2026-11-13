@@ -42,7 +42,8 @@ Notes that drove the choice:
   **public mirror on github.com** is pushed for builds and distribution.
 - **CI runs on github.com.** Free hosted macOS + Windows + Linux runners build
   the bundles on a tag and publish a **GitHub Release** there. No self-hosted
-  runners, no keys, no three-machine choreography.
+  runners, no paid signing keys (macOS uses a self-signed certificate — see
+  [`releasing.md`](releasing.md)), no three-machine choreography.
 - **The update nudge polls `api.github.com`** (public, unauthenticated, works
   from anywhere).
 - **Installers are copied back to GHES manually**, from a maintainer's machine
@@ -132,8 +133,10 @@ one `release` job with `permissions: contents: write` downloads them and
 publishes once.
 
 > Tip: `release.yml` should keep `on: push: tags: ["v*"]` and drop the `prod`
-> branch trigger (that was for the GHES world). The `GITHUB_TOKEN` is automatic;
-> **no secrets are needed**.
+> branch trigger (that was for the GHES world). The `GITHUB_TOKEN` is automatic.
+> The only secrets are the two for the macOS self-signed certificate
+> (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`); without them the macOS
+> build is simply unsigned. Nothing else needs a secret.
 
 ### 4. Point the update nudge at github.com ✅ done
 

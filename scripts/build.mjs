@@ -39,6 +39,7 @@ const cargo = (...args) => ({ cmd: "cargo", args });
 // runner re-invokes it with the Node it is already running on.
 const CHECK_FIXTURES = path.join(ROOT, "scripts", "check-fixtures.mjs");
 const CHECK_SIGNING = path.join(ROOT, "scripts", "check-signing.mjs");
+const CHECK_CHANGELOG = path.join(ROOT, "scripts", "changelog.mjs");
 
 // --- targets -----------------------------------------------------------------
 // Each target is a list of steps run in order, stopping at the first failure.
@@ -76,6 +77,11 @@ const TARGETS = {
     steps: [{ cmd: process.execPath, args: [CHECK_SIGNING] }],
   },
 
+  changelog: {
+    help: "the version in tauri.conf.json has a CHANGELOG.md section",
+    steps: [{ cmd: process.execPath, args: [CHECK_CHANGELOG, "--check"] }],
+  },
+
   ui: {
     help: "frontend production build — tsc --noEmit && vite build -> frontend/dist",
     requiresFrontend: true,
@@ -89,8 +95,8 @@ const TARGETS = {
   },
 
   check: {
-    help: "the full commit gate: signing, backend then frontend (default target)",
-    steps: ["signing", "check:backend", "check:frontend"],
+    help: "the full commit gate: signing, changelog, backend then frontend (default target)",
+    steps: ["signing", "changelog", "check:backend", "check:frontend"],
   },
 
   e2e: {

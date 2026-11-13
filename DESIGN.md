@@ -453,10 +453,10 @@ until it halts" — the old tool's Ctrl-K, automated.
 
 ## 9. Distribution & Updates
 
-- **Packaging:** GitHub Actions matrix builds → Tauri bundles: macOS `.dmg`, Windows `.zip`/`.exe`. Hosted on GitHub Releases (and/or mirrored to Canvas).
-- **Self-signed (team decision — no paid Apple Developer ID; resolved D14):** ship with a stable self-signed certificate, so macOS TCC's folder grant survives rebuilds; the app is still not notarized, so distribute a one-line workaround with the download — macOS: right-click → Open (or `xattr -d com.apple.quarantine`); Windows: SmartScreen → "More info" → "Run anyway." If the professor ever wants to fund/own an Apple Developer ID, notarization slots into CI unchanged.
+- **Packaging:** GitHub Actions matrix builds → Tauri bundles: a macOS universal `.dmg` (Apple silicon + Intel), a Windows NSIS `.exe` (+ portable `.zip`), and Linux `.deb`/`.rpm`/`.AppImage`, plus the static `csim` autograder CLI. Hosted on GitHub Releases on the public github.com mirror (and/or mirrored to Canvas). The release body is the hand-written `CHANGELOG.md` section for the tag plus a one-line install note (`docs/releasing.md` §Release notes).
+- **Self-signed on macOS (team decision — no paid Apple Developer ID; resolved D14):** ship with a stable self-signed certificate, so macOS TCC's folder grant survives rebuilds; the app is still not notarized, so distribute a one-line workaround with the download — macOS: right-click → Open (or `xattr -d com.apple.quarantine`); Windows: SmartScreen → "More info" → "Run anyway." Windows and Linux bundles are unsigned (macOS only is signed). If the professor ever wants to fund/own an Apple Developer ID, notarization slots into CI unchanged.
 - **Update nudge:** on startup the app fetches the latest release tag from our GitHub repo, semver-compares, and (if behind) shows a friendly "please upgrade" dialog with a download link. Never forced, never auto-installs. This is what makes rolling development safe: ship an MVP better than CircuitSim, perfect it over the semester.
-- Linux: no packaged desktop build promised; the autograder CLI is the Linux artifact (TAs can build the app from source).
+- **Linux:** desktop bundles are built and published alongside macOS and Windows; the static `csim` CLI is the headless artifact for Gradescope.
 
 ---
 

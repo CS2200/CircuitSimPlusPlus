@@ -8,8 +8,7 @@ import { APP_VERSION, checkForUpdate, dismiss, GITHUB_REPO, type UpdateInfo } fr
  * dismissible for that version ("don't show again" persists per version),
  * never forced, never auto-installs.
  *
- * AboutCard: version + the self-signed-build workaround text (also in the
- * release body), opened from the header.
+ * AboutCard: version + the first-launch warning, opened from the header.
  */
 
 export function UpdateNudge({ enabled = true }: { enabled?: boolean }) {
@@ -67,9 +66,10 @@ export function AboutCard({ onClose }: { onClose: () => void }) {
           Version <strong>{APP_VERSION}</strong> — the CS 2200 circuit simulator.
         </p>
         <p>
-          This build is <strong>self-signed</strong> (not notarized), so your operating system may
-          warn the first time you launch it. That warning is expected and safe to dismiss — since
-          you are reading this, you have already got past it.
+          Release builds aren't <strong>notarized</strong> — macOS is self-signed, Windows and Linux
+          are unsigned — so your operating system may warn the first time you launch it. That
+          warning is expected and safe to dismiss; since you are reading this, you have already got
+          past it.
         </p>
         <p>
           If you ever need a fresh copy, download it from the{" "}

@@ -17,6 +17,7 @@ CLI for Gradescope, and a Tauri + React desktop app.
 | [`docs/ipc.md`](docs/ipc.md) | **Normative** core↔UI contract (v1.2) |
 | [`docs/releasing.md`](docs/releasing.md) | How releases are cut (public github.com mirror + CI; universal macOS) |
 | [`docs/distribution.md`](docs/distribution.md) | Why the mirror: decision record (option C) and the update nudge |
+| [`CHANGELOG.md`](CHANGELOG.md) | Hand-written release notes — the source of each release body |
 | [`docs/dependencies.md`](docs/dependencies.md) | Keeping deps current: the couplings, the caps, how to bump |
 | [`docs/tasks/`](docs/tasks/README.md) | Execution history: ownership map, agent task lists, status |
 
@@ -42,8 +43,9 @@ No Rust or Node needed — grab the latest build from the
 | Any Linux, no install | `CircuitSim++_<version>_amd64.AppImage` | `chmod +x` it, then run it |
 | Headless autograder CLI | `csim` | static x86_64-musl binary — `chmod +x csim`, then run it |
 
-**These builds are self-signed** (decision D14 — no paid Apple Developer ID), so
-the OS warns on first launch:
+**Release builds are not notarized** (decision D14 — no paid Apple Developer
+ID): macOS is signed with a self-signed certificate, while Windows and Linux
+are unsigned. So the OS warns on first launch:
 
 - **macOS:** right-click the app → **Open** → **Open**. (Or:
   `xattr -d com.apple.quarantine "CircuitSim++.app"`.)
@@ -102,7 +104,9 @@ node scripts/build.mjs musl ui    # run targets in order, stop on first failure
 | `check:backend` | `fixtures` + `lint` + `test` |
 | `ui` | frontend production build → `frontend/dist` |
 | `check:frontend` | `lint` + `test` + `build` |
-| `check` | `check:backend` + `check:frontend` (default) |
+| `signing` | release signing gate: stable macOS certificate + app bundle docs |
+| `changelog` | the version in `tauri.conf.json` has a `CHANGELOG.md` section |
+| `check` | `signing` + `changelog` + `check:backend` + `check:frontend` (default) |
 | `e2e` | Playwright (needs browsers, see prerequisites) |
 | `musl` | static musl release of the CLI |
 | `desktop` | packaged Tauri bundles (needs Linux webview deps) |
@@ -205,7 +209,7 @@ cd crates/app
 VITE_MOCK_CORE=0 ../../frontend/node_modules/.bin/tauri dev
 
 # Packaged desktop app (production builds don't read .env.development, so the
-# real core is the default there; self-signed dmg/zip/exe — see "Releasing")
+# real core is the default there; release bundles — see "Releasing")
 cd crates/app
 ../../frontend/node_modules/.bin/tauri build
 ./../../target/release/csim-app        # or install the bundle
@@ -244,14 +248,16 @@ in-app update nudge reads.
 
 **Prebuilt installers** live on the public [releases
 page](https://github.com/CS2200/CircuitSimPlusPlus/releases) — see
-[Install](#install-prebuilt-binaries) above. All self-signed (decision D14).
+[Install](#install-prebuilt-binaries) above. macOS is self-signed; Windows and
+Linux are unsigned (decision D14).
 
 **Full guide — read [`docs/releasing.md`](docs/releasing.md).** The short form:
 
 ```bash
-# bump the SAME version in crates/app/tauri.conf.json AND frontend/package.json, then:
+# bump the SAME version in Cargo.toml, crates/app/tauri.conf.json AND
+# frontend/package.json, and add the CHANGELOG.md section, then:
 git push origin master && git push public master
-git tag v0.2.0 && git push public v0.2.0     # tag the MIRROR — that is where CI runs
+git tag v0.4.1 && git push public v0.4.1     # tag the MIRROR — that is where CI runs
 ```
 
 ## CI

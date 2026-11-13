@@ -1,6 +1,10 @@
 # Release — a version tag (v*) builds the desktop bundles on GitHub-hosted
-# runners and publishes ONE GitHub Release (DESIGN.md §9, D14). The release body
-# carries the self-signed-build workaround text students need.
+# runners and publishes ONE GitHub Release (DESIGN.md §9, D14).
+#
+# The release body is the CHANGELOG.md section for the tag plus a short install
+# footer (scripts/changelog.mjs). The tag must match the bundled version; the
+# "Verify tag" step fails otherwise, so a release can never carry the wrong
+# version. See docs/releasing.md §Release notes.
 #
 # Runs on the PUBLIC github.com mirror only: GT's GHES has no runners, so the
 # `if:` guard keeps a tag pushed to GHES from queueing jobs forever. See
@@ -36,18 +40,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RELEASE_BODY: |
-    **These builds use a self-signed certificate** (no paid Apple Developer ID).
-    Your OS will warn; the builds are fine. One-time workaround:
-
-    - **macOS:** right-click the app → **Open** → Open. (Or: `xattr -d com.apple.quarantine "CircuitSim++.app"`)
-    - **Windows:** SmartScreen → **More info** → **Run anyway**.
-
-    Windows ships an NSIS `-setup.exe` and a portable zip.
-    macOS is a universal build (Apple Silicon + Intel).
-
-    Linux: `.deb` / `.AppImage` / `.rpm`, plus the static autograder CLI
-    (`csim`, x86_64-musl) for headless / Gradescope use.
 
 jobs:
   build:
@@ -191,12 +183,31 @@ jobs:
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+      # A tag that disagrees with the bundled version makes the in-app nudge
+      # lie (it semver-compares the tag against the baked-in version). The
+      # prerelease suffix is ignored, so v0.5.0-rc.1 needs version 0.5.0.
+      - name: Verify tag matches the bundled version
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' crates/app/tauri.conf.json | head -n1)
+          core="${TAG#v}"; core="${core%%-*}"
+          if [ "$core" != "$version" ]; then
+            echo "::error::tag ${TAG} does not match the bundled version ${version} (crates/app/tauri.conf.json)"
+            exit 1
+          fi
+          echo "tag ${TAG} matches version ${version}"
+
+      # Release notes = the changelog section for this version + install footer.
+      - name: Build release notes
+        run: node scripts/changelog.mjs --tag "${{ steps.meta.outputs.tag }}" --install-notes > release-notes.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.tag }}
-          body: ${{ env.RELEASE_BODY }}
+          body_path: release-notes.md
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           files: artifacts/**/*
         env:
