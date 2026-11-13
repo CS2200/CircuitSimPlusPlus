@@ -125,7 +125,7 @@ function cargoVersion() {
   return m ? m[1] : null;
 }
 
-function bundleFiles() {
+function bundleFiles(version) {
   const plan = {
     darwin: [["dmg", /\.dmg$/i]],
     win32: [["nsis", /\.exe$/i]],
@@ -137,16 +137,25 @@ function bundleFiles() {
   }[process.platform];
   if (!plan) fail(`unsupported release platform: ${process.platform}`);
 
+  // Bundles are named with the version — CircuitSim++_0.4.1_amd64.deb,
+  // CircuitSim++-0.4.1-1.x86_64.rpm — so filter to the version being released.
+  // Otherwise a stale bundle left in target/release/bundle/ from an earlier
+  // build would be attached to this release. The surrounding delimiters keep
+  // "0.4.1" from matching "0.4.10".
+  const isCurrent = (name) => name.includes(`_${version}_`) || name.includes(`-${version}-`);
+
   const files = [];
   for (const [kind, re] of plan) {
     const dir = path.join(BUNDLE, kind);
     if (!existsSync(dir)) continue;
-    for (const name of readdirSync(dir)) if (re.test(name)) files.push(path.join(dir, name));
+    for (const name of readdirSync(dir)) {
+      if (re.test(name) && isCurrent(name)) files.push(path.join(dir, name));
+    }
   }
   if (files.length === 0) {
     fail(
-      `no ${process.platform} bundles under ${path.relative(ROOT, BUNDLE)}/`,
-      "build them first (drop --no-build), or run this on the OS you are shipping for",
+      `no ${process.platform} bundles for version ${version} under ${path.relative(ROOT, BUNDLE)}/`,
+      "build them first (drop --no-build), or clear stale bundles from target/release/bundle/",
     );
   }
   return files;
@@ -427,7 +436,7 @@ function main() {
   if (opts.build) run(process.execPath, [path.join(ROOT, "scripts", "build.mjs"), "desktop"]);
   if (!opts.attachOnly) ensureTag(tag, opts.target);
 
-  const files = bundleFiles();
+  const files = bundleFiles(version);
   process.stdout.write(`    assets:\n${files.map((f) => `      ${path.relative(ROOT, f)}`).join("\n")}\n`);
   publish(tag, repo, files, opts);
 
