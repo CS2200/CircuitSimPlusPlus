@@ -178,6 +178,35 @@ describe("CircuitDocument.create/fromJson", () => {
     expect(doc.circuit(0).wires).toHaveLength(0);
   });
 
+  it("migrates a v11 splitter to an explicit busBits (v11 → v12)", () => {
+    const v11 = JSON.stringify({
+      format: CSX_FORMAT,
+      version: 11,
+      name: "split",
+      settings: { clockHz: 1, delayTable: "mips-r2000-2um-v1" },
+      circuits: [
+        {
+          name: "main",
+          components: [
+            {
+              id: "s0",
+              type: "wiring.splitter",
+              pos: [0, 0],
+              attrs: { splits: { lo: [0, 1], hi: [3] } },
+            },
+          ],
+          wires: [],
+        },
+      ],
+    });
+    const doc = CircuitDocument.fromJson(v11);
+    expect(doc.data.version).toBe(CSX_VERSION);
+    // The old reader derived the width as max mapped bit + 1; the migration
+    // stamps that value, leaving the gap at bit 2.
+    expect(doc.circuit(0).components[0].attrs?.busBits).toBe(4);
+    expect(doc.circuit(0).components[0].attrs?.splits).toEqual({ lo: [0, 1], hi: [3] });
+  });
+
   it("parses a v7 wire with a free (dangling) endpoint", () => {
     const v7 = JSON.stringify({
       format: CSX_FORMAT,

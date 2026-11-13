@@ -197,8 +197,9 @@ describe("properties coverage (UI_OVERHAUL §18)", () => {
     expect(groups).toEqual(["Width", "Width", "Options"]);
   });
 
-  it("seeds the REQUIRED splitter mapping on placement", () => {
+  it("seeds the REQUIRED splitter mapping and width on placement", () => {
     expect(defaultAttrs("wiring.splitter")).toEqual({
+      busBits: 4,
       splits: { b0: [0], b1: [1], b2: [2], b3: [3] },
     });
     expect(defaultAttrs("gate.and")).toBeUndefined();

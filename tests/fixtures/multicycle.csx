@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 11,
+  "version": 12,
   "name": "multicycle",
   "settings": {
     "clockHz": 1,
@@ -218,7 +218,8 @@
                 30,
                 31
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {
@@ -266,7 +267,8 @@
                 30,
                 31
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {
@@ -320,7 +322,8 @@
                 15,
                 16
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {
@@ -802,7 +805,8 @@
               "b31": [
                 31
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {
@@ -1207,7 +1211,8 @@
               "b1": [
                 1
               ]
-            }
+            },
+            "busBits": 2
           }
         },
         {

@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 11,
+  "version": 12,
   "name": "alu",
   "settings": {
     "clockHz": 1,
@@ -145,7 +145,8 @@
                 30,
                 31
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {
@@ -289,7 +290,8 @@
               "b31": [
                 31
               ]
-            }
+            },
+            "busBits": 32
           }
         },
         {

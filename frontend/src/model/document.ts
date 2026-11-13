@@ -1151,8 +1151,41 @@ function migrate(data: CsxDocument): void {
     // older wire keeps the default — so only the stamp changes.
     version = 11;
   }
+  if (version === 11) {
+    // v12 makes a splitter's bus width explicit (`busBits`). The old reader
+    // derived it from the mapping (max mapped bit + 1); stamp that so the width
+    // is unchanged while gaining the ability to widen it.
+    stampSplitterBusBits(data);
+    version = 12;
+  }
   if (version !== (data.version as number)) {
     data.version = version as typeof CSX_VERSION;
+  }
+}
+
+/**
+ * v11 → v12: give every splitter an explicit `busBits`, backfilled with the
+ * value the old inference produced (max mapped bit + 1). Mirrors Rust's
+ * `format::stamp_splitter_bus_bits`.
+ */
+function stampSplitterBusBits(data: CsxDocument): void {
+  for (const circuit of data.circuits ?? []) {
+    for (const comp of circuit.components ?? []) {
+      if (comp.type !== "wiring.splitter") continue;
+      const attrs = (comp.attrs ??= {});
+      if (typeof attrs.busBits === "number") continue;
+      let max = -1;
+      const splits = attrs.splits;
+      if (splits !== null && typeof splits === "object" && !Array.isArray(splits)) {
+        for (const bits of Object.values(splits as Record<string, unknown>)) {
+          if (!Array.isArray(bits)) continue;
+          for (const bit of bits) {
+            if (typeof bit === "number" && Number.isInteger(bit) && bit > max) max = bit;
+          }
+        }
+      }
+      attrs.busBits = Math.max(1, max + 1);
+    }
   }
 }
 

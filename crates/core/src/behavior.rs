@@ -1978,7 +1978,7 @@ mod tests {
         // splits sorted by name: pin order is [bus, hi, lo].
         let sp = mk(
             "wiring.splitter",
-            json!({"splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
+            json!({"busBits": 8, "splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
         );
         // Bus driven by others → the splits read it. The splitter does NOT drive the
         // bus back: it merely taps it, and echoing the bus would make it a second
@@ -2008,7 +2008,7 @@ mod tests {
     fn a_split_driving_a_bus_bit_is_a_short_the_net_merge_reports() {
         let sp = mk(
             "wiring.splitter",
-            json!({"splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
+            json!({"busBits": 8, "splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
         );
         // Bus driven 0x00 by others while lo is driven 0xF. The splitter states its
         // authority over the bits it assembles; the *net merge* is what turns the
@@ -2043,7 +2043,10 @@ mod tests {
     #[test]
     fn splitter_bit_reversal_map() {
         // Array position = split-pin bit; value = bus bit index.
-        let sp = mk("wiring.splitter", json!({"splits": {"rev": [3, 2, 1, 0]}}));
+        let sp = mk(
+            "wiring.splitter",
+            json!({"busBits": 4, "splits": {"rev": [3, 2, 1, 0]}}),
+        );
         let nets = [k(4, 0b1000), Value::z(4)];
         let out = sp.eval_splitter(&nets);
         assert_eq!(out[0], Value::z(4)); // tapping, not driving
@@ -2461,7 +2464,10 @@ mod tests {
         let add32 = mk("arith.adder", json!({"bitsize": 32}));
         assert_eq!(add32.timing(&table).prop, 8 + 31);
         // Ideal parts have zero delay.
-        let sp = mk("wiring.splitter", json!({"splits": {"a": [0]}}));
+        let sp = mk(
+            "wiring.splitter",
+            json!({"busBits": 1, "splits": {"a": [0]}}),
+        );
         assert_eq!(sp.timing(&table).prop, 0);
         let bp = mk("debug.breakpoint", json!({"value": "1"}));
         assert_eq!(bp.timing(&table).prop, 0);

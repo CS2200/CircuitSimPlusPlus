@@ -1,7 +1,7 @@
 # `.csx` — CircuitSim++ File Format v5 (normative)
 
 > The file name is historical (`format-v2.md`); this document specifies the
-> **current** format, version 11.
+> **current** format, version 12.
 
 **Status:** Implemented by `crates/core/src/format/` (BACKEND.md task B2). Where this file and
 `DESIGN.md` §5 disagree, `DESIGN.md` wins (route corrections through the human). The §5.2 block
@@ -11,8 +11,8 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 
 - File extension: `.csx` (DESIGN.md §5.3, D4).
 - Top-level `format` must be the string `"circuitsim-plus-plus"`.
-- Top-level `version` must be `11`. Breaking changes bump `version` and ship with a migration
-  (§5.1); this build understands version 11 and walks older files forward one version at a
+- Top-level `version` must be `12`. Breaking changes bump `version` and ship with a migration
+  (§5.1); this build understands version 12 and walks older files forward one version at a
   time (see below).
 - Top-level `notice` (v8): a standing note for any reader, human or machine. The app owns the
   string (`format::NOTICE`) and **stamps it on every save**, so a file always carries the current
@@ -29,7 +29,7 @@ in `DESIGN.md` is a _sketch_; this document is the _normative_ realization.
 ```jsonc
 {
   "format": "circuitsim-plus-plus",
-  "version": 11,
+  "version": 12,
   "name": "LC-5200 Datapath",
   "notice": "This circuit was authored with CircuitSim++ … (standing reader notice)",
   "settings": {
@@ -78,6 +78,10 @@ Circuit names are unique within a document. One circuit is conventionally `"main
   so only the version stamp changes.
 - **v10 → v11** adds a wire's optional `flip` (§2): the X "turn early" corner preference. Purely
   additive — an older wire simply keeps the default — so only the version stamp changes.
+- **v11 → v12** makes a splitter's bus width explicit (§4): every `wiring.splitter` gains a
+  `busBits` attr, backfilled with the value the old reader inferred (max mapped bit + 1), so
+  the width is unchanged while a splitter becomes able to tap only some bits of a wider bus.
+  No geometry or connectivity changes.
 - Version 1 predates the migration chain and is rejected with an
   `unsupported format version` error.
 
@@ -213,7 +217,7 @@ delay attribute**: timing is unit-wide, from the published delay table (§6).
 | `wiring.constant`                         | `out`                                                              | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only                                                                                                                                                                                                                                                                                                                    |
 | `wiring.clock`                            | `out`                                                              | —                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `wiring.reset`                            | `out`                                                              | —                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `wiring.splitter`                         | `bus` + one per `splits` key                                       | `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). A bus bit may be **left unmapped** (a splitter can tap a subset of a bus); the same bit mapped to two pins is an error. Bus width = max mapped index + 1. It is plumbing in **both** directions, as in CircuitSim CE's `Splitter.valueChanged`: a bus change drives every slice from the value received on the bus (what *other* parts drive there), and a slice change drives the bus with the bits the splitter has assembled plus that slice's bits. Conflict is never decided inside the part — the net merge reports it                                                                                                                                                                                                                                            |
+| `wiring.splitter`                         | `bus` + one per `splits` key                                       | `busBits` (required): the width of the `bus` pin. `splits` (required): object mapping pin name → array of bus bit indices (index 0 of each array = that pin's LSB). Every mapped bit must be `< busBits`, and a bus bit may be **left unmapped** (a splitter can tap a subset of a bus); the same bit mapped to two pins is an error. It is plumbing in **both** directions, as in CircuitSim CE's `Splitter.valueChanged`: a bus change drives every slice from the value received on the bus (what *other* parts drive there), and a slice change drives the bus with the bits the splitter has assembled plus that slice's bits. Conflict is never decided inside the part — the net merge reports it                                                                                                                                                                                                                                            |
 | `wiring.probe`                            | `in`                                                               | `bitsize` (1), `radix` ("unsigned" \| "signed" \| "hex" \| "bin" \| "dec") — display-only                                                                                                                                                                                                                                                                                                                                          |
 | `debug.breakpoint`                        | `in`, `en`                                                         | `bitsize` (1), `value` ("0") — hex string, must fit `bitsize`; `radix` ("hex" \| "bin" \| "dec") — display-only. The run **pauses** when `in` becomes `value` while `en` is a driven `1` (§9)                                                                                                                                                                                                                                  |
 | `plexers.mux`                             | `in0`..`in{2^sel−1}`, `sel`, `out`                                 | `bitsize` (1), `selectBits` (1; 1..=8)                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -268,8 +272,9 @@ Checks, in order:
 1. `format` / `version` values.
 2. Circuit names unique.
 3. Per circuit: component ids unique; component names unique; `wiring.pin` components named;
-   type known; attrs valid (types, ranges, known keys, splitter mappings — no
-   bit mapped twice; unmapped bits are allowed — `value` fits
+   type known; attrs valid (types, ranges, known keys, splitter `busBits` and
+   mappings — no bit mapped twice, no bit outside the bus; unmapped bits are
+   allowed — `value` fits
    `bitsize`, `contents` parses as RLE-hex within the depth limit).
 4. Per wire: endpoint comp refs resolve; pin names resolve (including subcircuit pins against
    the target circuit's named pins); joins resolve (wire exists, not self, segment in range);

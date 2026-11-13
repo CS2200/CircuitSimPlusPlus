@@ -24,7 +24,7 @@ pub mod validate;
 pub const FORMAT_NAME: &str = "circuitsim-plus-plus";
 /// Current `version` field value. Every breaking change bumps this and adds
 /// a migration to [`migrate`] (`docs/format-v2.md` §1/§5.1).
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 
 /// The standing notice every saved file carries (v8). It is written for any
 /// reader, human or machine: see `docs/format-v2.md` §1. The app owns this
@@ -398,7 +398,7 @@ pub struct JoinRef {
 /// reads a floating control as a value; see `materialise_unwired_resets`), and
 /// v7 → v8 stamps the reader `notice`. Files that already match the current
 /// version parse directly, and every loaded document is returned sealed (see
-/// [`Document::sealed`]).
+/// [`Document::sealed`]). v11 → v12 gives every splitter an explicit `busBits`.
 pub fn load_document(bytes: &[u8]) -> Result<Document, Vec<LoadError>> {
     let mut raw: Json = match serde_json::from_slice(bytes) {
         Ok(v) => v,
@@ -489,6 +489,13 @@ fn migrate(v: &mut Json) {
         // older wire simply keeps the default — so only the version stamp changes.
         version = 11;
     }
+    if version == 11 {
+        // v12 makes a splitter's bus width explicit (`busBits`). Old files had
+        // it derived from the mapping (max mapped bit + 1); stamp that value so
+        // the file keeps the same width while gaining the ability to widen it.
+        stamp_splitter_bus_bits(v);
+        version = 12;
+    }
     if version != start {
         v["version"] = Json::from(version);
     }
@@ -498,6 +505,53 @@ fn migrate(v: &mut Json) {
 fn stamp_notice(v: &mut Json) {
     if let Some(obj) = v.as_object_mut() {
         obj.insert("notice".to_string(), Json::from(NOTICE));
+    }
+}
+
+/// The v11 → v12 step: give every splitter an explicit `busBits`.
+///
+/// Through v11 the bus width was an inference: the reader used
+/// `max(mapped bit) + 1`. That cannot express a splitter that taps only some
+/// bits of a wider bus, so v12 makes the width a real attribute and backfills
+/// it with the value the inference produced.
+fn stamp_splitter_bus_bits(v: &mut Json) {
+    let Some(circuits) = v.get_mut("circuits").and_then(Json::as_array_mut) else {
+        return;
+    };
+    for circuit in circuits {
+        let Some(components) = circuit.get_mut("components").and_then(Json::as_array_mut) else {
+            continue;
+        };
+        for comp in components {
+            let Some(obj) = comp.as_object_mut() else {
+                continue;
+            };
+            if obj.get("type").and_then(Json::as_str) != Some("wiring.splitter") {
+                continue;
+            }
+            let attrs = obj
+                .entry("attrs")
+                .or_insert_with(|| Json::Object(Map::new()));
+            let Some(attrs) = attrs.as_object_mut() else {
+                continue;
+            };
+            if attrs.contains_key("busBits") {
+                continue;
+            }
+            let mut max: Option<u32> = None;
+            if let Some(Json::Object(splits)) = attrs.get("splits") {
+                for bits in splits.values() {
+                    if let Json::Array(items) = bits {
+                        for bit in items {
+                            if let Some(b) = bit.as_u64().and_then(|n| u32::try_from(n).ok()) {
+                                max = Some(max.map_or(b, |m| m.max(b)));
+                            }
+                        }
+                    }
+                }
+            }
+            attrs.insert("busBits".to_string(), Json::from(max.map_or(1, |m| m + 1)));
+        }
     }
 }
 
@@ -1394,6 +1448,29 @@ mod tests {
         assert_eq!(d2.version, FORMAT_VERSION);
         assert!(!d2.circuits[0].wires[0].flip);
         assert!(!to_canonical_json(&d2).contains("flip"));
+    }
+
+    #[test]
+    fn v11_splitter_gains_explicit_bus_bits() {
+        // v11 derived the bus width from the mapping; v12 stamps it. The value
+        // must be identical (max mapped bit + 1) and a gap must survive.
+        let json = r#"{
+            "format": "circuitsim-plus-plus",
+            "version": 11,
+            "name": "split",
+            "settings": { "clockHz": 1, "delayTable": "mips-r2000-2um-v1" },
+            "circuits": [{
+                "name": "main",
+                "components": [
+                    { "id": "s0", "type": "wiring.splitter", "pos": [0, 0],
+                      "attrs": { "splits": { "lo": [0, 1], "hi": [3] } } }
+                ],
+                "wires": []
+            }]
+        }"#;
+        let doc = load_document(json.as_bytes()).expect("v11 must load and migrate");
+        assert_eq!(doc.version, FORMAT_VERSION);
+        assert!(to_canonical_json(&doc).contains("\"busBits\": 4"));
     }
 
     #[test]

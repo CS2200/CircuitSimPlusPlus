@@ -17,7 +17,7 @@
 
 export const CSX_FORMAT = "circuitsim-plus-plus";
 /** Must equal `FORMAT_VERSION` in `crates/core/src/format/mod.rs`. */
-export const CSX_VERSION = 11;
+export const CSX_VERSION = 12;
 
 /** The one graded delay table (v9); mirrors `TimingTable::default_name()` in Rust. */
 export const DEFAULT_DELAY_TABLE = "mips-r2000-2um-v1";

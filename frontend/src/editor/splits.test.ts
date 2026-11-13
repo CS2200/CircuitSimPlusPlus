@@ -4,10 +4,11 @@ import {
   evenSplit,
   formatSplitBits,
   parseSplitBits,
-  resizeSplits,
   sortSplits,
+  splitBusBits,
   splitCoverage,
   splitEntries,
+  trimSplits,
 } from "./splits";
 
 /**
@@ -115,13 +116,39 @@ describe("splitCoverage", () => {
     expect(coverage.busBits).toBe(4);
     expect(coverage.duplicates).toEqual([2]);
     expect(coverage.missing).toEqual([]);
+    expect(coverage.outside).toEqual([]);
   });
 
-  it("reports gaps up to the highest mapped bit", () => {
+  it("reports gaps up to the highest mapped bit when no width is given", () => {
     const coverage = splitCoverage([{ name: "a", bits: [0, 3] }]);
     expect(coverage.busBits).toBe(4);
     expect(coverage.missing).toEqual([1, 2]);
     expect(coverage.duplicates).toEqual([]);
+    expect(coverage.outside).toEqual([]);
+  });
+
+  it("uses the declared width, so low bits can be tapped from a wide bus", () => {
+    const coverage = splitCoverage([{ name: "lo", bits: [0, 1] }], 32);
+    expect(coverage.busBits).toBe(32);
+    expect(coverage.missing).toEqual([
+      2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      27, 28, 29, 30, 31,
+    ]);
+  });
+
+  it("flags mapped bits at or above the declared width", () => {
+    const coverage = splitCoverage([{ name: "a", bits: [0, 4] }], 4);
+    expect(coverage.outside).toEqual([4]);
+    expect(coverage.missing).toEqual([1, 2, 3]);
+  });
+});
+
+describe("splitBusBits", () => {
+  it("prefers the explicit width and falls back to max+1", () => {
+    expect(splitBusBits(32, { lo: [0, 1] })).toBe(32);
+    expect(splitBusBits(undefined, { lo: [0, 1] })).toBe(2);
+    expect(splitBusBits(0, { lo: [0, 1] })).toBe(2);
+    expect(splitBusBits(undefined, undefined)).toBe(4); // DEFAULT_SPLITS
   });
 });
 
@@ -146,34 +173,34 @@ describe("evenSplit", () => {
   });
 });
 
-describe("resizeSplits", () => {
-  it("extends the last split with the new bits", () => {
-    const resized = resizeSplits(
-      [
-        { name: "lo", bits: [0, 1] },
-        { name: "hi", bits: [2, 3] },
-      ],
-      6,
-    );
-    expect(resized).toEqual([
-      { name: "lo", bits: [0, 1] },
-      { name: "hi", bits: [2, 3, 4, 5] },
-    ]);
-  });
-
-  it("truncates and drops a split that becomes empty", () => {
-    const resized = resizeSplits(
+describe("trimSplits", () => {
+  it("drops bits that fall outside the new width and removes empty splits", () => {
+    const trimmed = trimSplits(
       [
         { name: "lo", bits: [0, 1] },
         { name: "hi", bits: [2, 3] },
       ],
       2,
     );
-    expect(resized).toEqual([{ name: "lo", bits: [0, 1] }]);
+    expect(trimmed).toEqual([{ name: "lo", bits: [0, 1] }]);
   });
 
-  it("fills a gap from the last split when the bus grows", () => {
-    const resized = resizeSplits([{ name: "sparse", bits: [0, 2] }], 4);
-    expect(resized[0].bits).toEqual([0, 2, 1, 3]);
+  it("keeps interior gaps when the width still contains them", () => {
+    const trimmed = trimSplits(
+      [
+        { name: "lo", bits: [0, 1] },
+        { name: "hi", bits: [4, 5] },
+      ],
+      8,
+    );
+    expect(trimmed).toEqual([
+      { name: "lo", bits: [0, 1] },
+      { name: "hi", bits: [4, 5] },
+    ]);
+  });
+
+  it("falls back to one even split when everything is trimmed away", () => {
+    const trimmed = trimSplits([{ name: "hi", bits: [4, 5] }], 2);
+    expect(trimmed).toEqual([{ name: "b0", bits: [0, 1] }]);
   });
 });

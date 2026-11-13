@@ -114,22 +114,34 @@ export function formatSplitBits(bits: readonly number[]): string {
 }
 
 export interface SplitCoverage {
-  /** Total bus bits (max mapped bit + 1); 0 for no bits. */
+  /** Declared bus width (the `busBits` attr), or max(mapped)+1 for old docs. */
   busBits: number;
   /** Bus bits in 0..busBits-1 that no split carries (allowed; shown as unmapped). */
   missing: number[];
+  /** Mapped bits at or above `busBits` — invalid. */
+  outside: number[];
   /** Bus bits carried by more than one split (in more than one position). */
   duplicates: number[];
   /** Number of split outputs. */
   outputs: number;
 }
 
+/** The declared bus width, falling back to the legacy max(mapped)+1 inference. */
+export function splitBusBits(busBits: unknown, splits: unknown): number {
+  if (typeof busBits === "number" && Number.isInteger(busBits) && busBits >= 1) return busBits;
+  return splitCoverage(splitEntries(splits)).busBits;
+}
+
 /**
  * Coverage facts for the editor's live summary. Unmapped bits are legal — a
- * splitter can tap a subset of a bus. The only invalid mapping is a bit carried
- * by more than one pin (plus empty splits, which the engine also rejects).
+ * splitter can tap a subset of a bus. The invalid mappings are a bit outside
+ * the declared width, a bit carried by more than one pin, and an empty split
+ * (which the engine also rejects).
  */
-export function splitCoverage(entries: readonly SplitEntry[]): SplitCoverage {
+export function splitCoverage(
+  entries: readonly SplitEntry[],
+  declaredBusBits?: number,
+): SplitCoverage {
   const counts = new Map<number, number>();
   let max = -1;
   for (const entry of entries) {
@@ -138,13 +150,18 @@ export function splitCoverage(entries: readonly SplitEntry[]): SplitCoverage {
       if (bit > max) max = bit;
     }
   }
+  const busBits =
+    declaredBusBits !== undefined && Number.isInteger(declaredBusBits) && declaredBusBits >= 1
+      ? declaredBusBits
+      : Math.max(1, max + 1);
   const missing: number[] = [];
-  for (let bit = 0; bit <= max; bit++) if (!counts.has(bit)) missing.push(bit);
+  for (let bit = 0; bit < busBits; bit++) if (!counts.has(bit)) missing.push(bit);
+  const outside = [...counts.keys()].filter((bit) => bit >= busBits).sort((a, b) => a - b);
   const duplicates = [...counts.entries()]
     .filter(([, n]) => n > 1)
     .map(([bit]) => bit)
     .sort((a, b) => a - b);
-  return { busBits: max + 1, missing, duplicates, outputs: entries.length };
+  return { busBits, missing, outside, duplicates, outputs: entries.length };
 }
 
 /**
@@ -169,26 +186,18 @@ export function evenSplit(bits: number, outputs: number): number[][] {
 }
 
 /**
- * Extend or truncate a mapping to `busBits`, preserving every existing split:
- * new bits append to the LAST split; bits past the new width are dropped and a
- * split left empty is removed. Used when the top "bus bits" number changes.
+ * Trim a mapping to `busBits`: bits at or above the width are dropped, splits
+ * left empty are removed, and a fully-empty mapping falls back to one even
+ * split. Used when the top "Bus bits" number shrinks; widening leaves the
+ * mapping alone, so the extra bits stay unmapped.
  */
-export function resizeSplits(entries: readonly SplitEntry[], busBits: number): SplitEntry[] {
-  if (entries.length === 0) {
-    return evenSplit(busBits, 1).map((bits, i) => ({ name: `b${i}`, bits }));
-  }
-  const kept = entries.map((entry) => ({
-    name: entry.name,
-    bits: entry.bits.filter((bit) => bit < busBits),
-  }));
-  const next = kept.filter((entry) => entry.bits.length > 0);
-  if (next.length === 0) return evenSplit(busBits, 1).map((bits, i) => ({ name: `b${i}`, bits }));
-  const used = new Set(next.flatMap((entry) => entry.bits));
-  const missing: number[] = [];
-  for (let bit = 0; bit < busBits; bit++) if (!used.has(bit)) missing.push(bit);
-  if (missing.length > 0) {
-    const last = next[next.length - 1];
-    if (last !== undefined) last.bits.push(...missing);
-  }
-  return next;
+export function trimSplits(entries: readonly SplitEntry[], busBits: number): SplitEntry[] {
+  const next = entries
+    .map((entry) => ({
+      name: entry.name,
+      bits: entry.bits.filter((bit) => bit < busBits),
+    }))
+    .filter((entry) => entry.bits.length > 0);
+  if (next.length > 0) return next;
+  return evenSplit(busBits, 1).map((bits, i) => ({ name: `b${i}`, bits }));
 }

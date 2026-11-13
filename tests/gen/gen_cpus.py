@@ -104,6 +104,15 @@ class Circuit:
         comp = {"id": cid, "type": type_, "pos": [0, 0]}
         if name:
             comp["name"] = name
+        # v12 requires an explicit bus width. A generated fixture derives the
+        # same value the v11 reader did (max mapped bit + 1), so the fixture
+        # keeps its width while the format gains the ability to widen it.
+        if type_ == "wiring.splitter" and "busBits" not in attrs:
+            maxbit = -1
+            for bits in (attrs.get("splits") or {}).values():
+                for b in bits:
+                    maxbit = max(maxbit, b)
+            attrs["busBits"] = max(1, maxbit + 1)
         clean = {}
         for k, v in attrs.items():
             if v is not None and not (k == "bitsize" and v == 1):
@@ -132,7 +141,7 @@ class Circuit:
     def json(self, name):
         return {
             "format": "circuitsim-plus-plus",
-            "version": 11,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
+            "version": 12,  # == FORMAT_VERSION (crates/core/src/format/mod.rs)
             "name": name,
             "settings": SETTINGS,
             "circuits": [{"name": "main", "components": self.components, "wires": self.wires}],

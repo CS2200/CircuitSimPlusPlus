@@ -106,6 +106,10 @@ recorded with each item so implementation does not need to re-litigate them.
   - Add live coverage validation: every bit mapped **at most** once, with duplicate bits
     named. Unmapped bus bits are allowed — a splitter may tap just the fields it uses.
     Do not silently write an invalid mapping.
+  - Follow-up (v12): the bus width is now the explicit **`busBits`** attr, not inferred from
+    the mapping, so a splitter can tap only some bits of a wider bus (e.g. the low 8 bits of
+    a 32-bit net). The v11 → v12 migration backfills `busBits` as max mapped bit + 1, so an
+    existing file keeps its width. A mapped bit outside `busBits` is rejected.
   - Auto-order rows in a meaningful way; auto-fill the next uncovered run for a new row.
   - Add convenience actions such as even distribution and “fill the remaining bits” (presets
     optional).

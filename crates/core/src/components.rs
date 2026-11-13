@@ -757,7 +757,13 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
         // resolved dynamically (DESIGN.md §6 "arbitrary bit mapping — the
         // bus plumbing").
         "wiring.splitter" => {
-            let mut c = AttrCheck::new(attrs, &["splits"]);
+            let mut c = AttrCheck::new(attrs, &["busBits", "splits"]);
+            // The bus width is a real property, not an inference from the
+            // mapping: a splitter may tap only some bits of a wider bus.
+            if attrs.get("busBits").is_none() {
+                c_issue(&mut c, "splitter requires attr 'busBits'".to_string());
+            }
+            let bus_bits = c.uint("busBits", 1, 1, MAX_BITSIZE);
             let splits = match attrs.get("splits") {
                 None => {
                     c_issue(&mut c, "splitter requires attr 'splits'".to_string());
@@ -810,6 +816,13 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
             }
             let mut sorted = seen.clone();
             sorted.sort_unstable();
+            // A mapped bit belongs to the declared bus.
+            if let Some(&bit) = seen.iter().find(|&&b| b >= bus_bits) {
+                c_issue(
+                    &mut c,
+                    format!("splits bit {bit} is outside the bus (busBits = {bus_bits})"),
+                );
+            }
             // Bits MAY be left unmapped: a splitter can tap a subset of a bus,
             // so the unused bits are simply not carried. A bit mapped to two
             // pins is still an error — the same bus bit cannot feed two pins.
@@ -819,7 +832,7 @@ fn analyze(type_: &str, attrs: &Map<String, Json>) -> Option<(Vec<PinSig>, Vec<S
                     "splits map the same bus bit more than once".to_string(),
                 );
             }
-            let bus_width = sorted.last().map_or(0, |m| m + 1);
+            let bus_width = bus_bits;
             let mut sigs = vec![PinSig::io("bus", bus_width)];
             sigs.extend(
                 split_cfgs
@@ -1614,34 +1627,62 @@ mod tests {
     fn splitter_validation() {
         let (p, e) = pins(
             "wiring.splitter",
-            json!({"splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
+            json!({"busBits": 8, "splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}}),
         );
         assert!(e.is_empty());
         // Split pin names iterate in sorted (map) order — deterministic.
         assert_eq!(p.unwrap(), vec!["bus", "hi", "lo"]);
 
-        // Gaps are allowed: a splitter may tap a subset of a bus. The bus width
-        // is still derived from the highest mapped bit (here bit 3 -> 4 bits).
+        // Gaps are allowed: a splitter may tap a subset of a bus.
         let (p, e) = pins(
             "wiring.splitter",
-            json!({"splits": {"lo": [0, 1], "hi": [3]}}),
+            json!({"busBits": 4, "splits": {"lo": [0, 1], "hi": [3]}}),
         );
         assert!(e.is_empty(), "{e:?}");
         assert_eq!(p.unwrap(), vec!["bus", "hi", "lo"]);
         let sigs = pin_sigs(
             "wiring.splitter",
-            json!({"splits": {"lo": [0, 1], "hi": [3]}})
+            json!({"busBits": 4, "splits": {"lo": [0, 1], "hi": [3]}})
                 .as_object()
                 .unwrap(),
         )
         .unwrap();
-        // bus = max mapped bit + 1, even though bit 2 is unmapped.
+        // The declared width wins; bit 2 is unmapped.
         assert_eq!(sigs[0].width, 4);
+
+        // The width may be wider than the highest mapped bit: tap the low bits
+        // of a 32-bit bus without mapping the rest.
+        let sigs = pin_sigs(
+            "wiring.splitter",
+            json!({"busBits": 32, "splits": {"lo": [0, 1], "hi": [3]}})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sigs[0].width, 32);
+
+        // The width is required. (A missing width falls back to 1 while the
+        // error is collected, so the mapped bit 3 also reports as outside.)
+        let (_, e) = pins(
+            "wiring.splitter",
+            json!({"splits": {"lo": [0, 1], "hi": [3]}}),
+        );
+        assert!(e
+            .iter()
+            .any(|e| e.message.contains("requires attr 'busBits'")));
+
+        // A mapped bit must fit in the declared bus.
+        let (_, e) = pins(
+            "wiring.splitter",
+            json!({"busBits": 2, "splits": {"lo": [0, 1], "hi": [3]}}),
+        );
+        assert_eq!(e.len(), 1);
+        assert!(e[0].message.contains("outside the bus"));
 
         // A bit mapped to two pins is still an error.
         let (_, e) = pins(
             "wiring.splitter",
-            json!({"splits": {"a": [0, 1], "b": [1]}}),
+            json!({"busBits": 4, "splits": {"a": [0, 1], "b": [1]}}),
         );
         assert_eq!(e.len(), 1);
         assert!(e[0].message.contains("more than once"));
@@ -1649,7 +1690,7 @@ mod tests {
 
     #[test]
     fn splitter_widths() {
-        let attrs = json!({"splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}});
+        let attrs = json!({"busBits": 8, "splits": {"lo": [0, 1, 2, 3], "hi": [4, 5, 6, 7]}});
         let sigs = pin_sigs("wiring.splitter", attrs.as_object().unwrap()).unwrap();
         let widths: Vec<(&str, u32)> = sigs.iter().map(|s| (s.name.as_str(), s.width)).collect();
         assert_eq!(widths, vec![("bus", 8), ("hi", 4), ("lo", 4)]);

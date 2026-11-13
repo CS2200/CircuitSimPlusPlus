@@ -1,6 +1,6 @@
 import { encodeRleHex, hexWidthFor, parseRleHex } from "../lib/rleHex";
 import type { CsxCircuit, CsxComponent } from "../model/csx";
-import { DEFAULT_SPLITS, sortSplits, splitEntries } from "./splits";
+import { DEFAULT_SPLITS, sortSplits, splitBusBits, splitEntries } from "./splits";
 
 /**
  * Component metadata catalog (FRONTEND.md U3): pin geometry + body sizes
@@ -387,10 +387,9 @@ function splitterSpec(): CompSpec {
     pins: (attrs) => {
       const splits = sortSplits(splitEntries(attrs["splits"]));
       const h = Math.max(2, splits.length + 1);
-      const busWidth = Math.max(
-        1,
-        ...splits.map((s) => (s.bits.length === 0 ? 1 : Math.max(...s.bits) + 1)),
-      );
+      // The width is the splitter's own `busBits`, not an inference from the
+      // mapping: a splitter may tap only some bits of a wider bus.
+      const busWidth = splitBusBits(attrs["busBits"], attrs["splits"]);
       const pins: PinSpec[] = [{ name: "bus", dx: 0, dy: h / 2, kind: "inout", bitsize: busWidth }];
       splits.forEach((s, i) => {
         pins.push({
@@ -414,7 +413,7 @@ function splitterSpec(): CompSpec {
  * (the splitter's bit mapping).
  */
 export function defaultAttrs(type: string): Record<string, unknown> | undefined {
-  if (type === "wiring.splitter") return { splits: { ...DEFAULT_SPLITS } };
+  if (type === "wiring.splitter") return { busBits: 4, splits: { ...DEFAULT_SPLITS } };
   // A constant always carries a value so it drives its net from the start
   // (UI_OVERHAUL §36): default 0.
   if (type === "wiring.constant") return { value: "0" };

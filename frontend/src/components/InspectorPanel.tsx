@@ -14,10 +14,11 @@ import {
   evenSplit,
   formatSplitBits,
   parseSplitBits,
-  resizeSplits,
   sortSplits,
+  splitBusBits,
   splitCoverage,
   splitEntries,
+  trimSplits,
   type SplitCoverage,
   type SplitEntry,
 } from "../editor/splits";
@@ -720,7 +721,8 @@ function rowsToSplits(rows: readonly SplitRow[]): Record<string, number[]> {
 /**
  * One human line for a mapping the engine rejects, or null when it is legal.
  * Unmapped bus bits are allowed (the splitter may tap a subset of a bus); a bit
- * carried by two pins, or a split with no bits, is not.
+ * outside the declared width, a bit carried by two pins, or a split with no
+ * bits is not.
  */
 function coverageProblem(coverage: SplitCoverage, entries: readonly SplitEntry[]): string | null {
   const parts: string[] = [];
@@ -728,6 +730,9 @@ function coverageProblem(coverage: SplitCoverage, entries: readonly SplitEntry[]
     bits.length > 8 ? `${bits.slice(0, 8).join(", ")}…` : bits.join(", ");
   if (entries.some((e) => e.bits.length === 0)) {
     parts.push("each split must carry at least one bit");
+  }
+  if (coverage.outside.length > 0) {
+    parts.push(`bits ${short(coverage.outside)} outside the ${coverage.busBits}-bit bus`);
   }
   if (coverage.duplicates.length > 0) {
     parts.push(`bits ${short(coverage.duplicates)} mapped more than once`);
@@ -741,20 +746,23 @@ function coverageProblem(coverage: SplitCoverage, entries: readonly SplitEntry[]
  * The pin NAMES are wire identities, not labels, so they are hidden. Rows are
  * ordered by the bus bits they carry, and each row's field accepts a
  * comma-separated range spelling (`0-3`, `7-4` — the direction is meaningful)
- * that auto-formats back to ranges on commit. A mapping may leave bus bits
- * unmapped, so a splitter can tap just the fields it uses. The two numbers at
- * the very top are the total bus bits and the number of outputs: changing either
- * reflows the mapping (extend/truncate for bits, even split for outputs). Text
- * commits on blur/Enter, so a half-typed range never prunes wires mid-keystroke.
+ * that auto-formats back to ranges on commit. The bus width is the explicit
+ * `busBits` attr: a mapping may leave bits unmapped, and the bus may be wider
+ * than the highest mapped bit. The two numbers at the very top are that width
+ * and the number of outputs; shrinking the width trims bits that no longer fit,
+ * while changing the outputs redistributes the bits evenly. Text commits on
+ * blur/Enter, so a half-typed range never prunes wires mid-keystroke.
  */
 function SplitsField({
   value,
+  busBits: busBitsAttr,
   label,
   onCommit,
 }: {
   value: unknown;
+  busBits: unknown;
   label: string;
-  onCommit: (v: Record<string, number[]>) => void;
+  onCommit: (v: { busBits: number; splits: Record<string, number[]> }) => void;
 }) {
   const [rows, setRows] = useState<SplitRow[]>(() => splitsToRows(value));
   const serialized = JSON.stringify(value ?? null);
@@ -771,27 +779,33 @@ function SplitsField({
 
   const parsed = rows.map((r) => parseSplitBits(r.text));
   const entries: SplitEntry[] = rows.map((r, i) => ({ name: r.name, bits: parsed[i].bits }));
-  const coverage = splitCoverage(entries);
-  const busBits = coverage.busBits;
+  const busBits = splitBusBits(busBitsAttr, value);
+  const coverage = splitCoverage(entries, busBits);
   const outputs = rows.length;
   const parseError = parsed.map((p) => p.error).find((e) => e !== null) ?? null;
   const coverageError = coverageProblem(coverage, entries);
 
-  /** Valid when every split carries at least one bit and no bus bit is carried
-   * twice. Bus bits may be left unmapped. */
-  const splitIsValid = (next: readonly SplitEntry[]): boolean => {
+  /** Valid when every split carries at least one bit, no bit is carried twice,
+   * and every mapped bit fits in `width`. Unmapped bits are allowed. */
+  const mappingIsValid = (next: readonly SplitEntry[], width: number): boolean => {
     if (next.length === 0 || next.some((e) => e.bits.length === 0)) return false;
-    return splitCoverage(next).duplicates.length === 0;
+    const c = splitCoverage(next, width);
+    return c.duplicates.length === 0 && c.outside.length === 0;
   };
-  const commitRows = (next: SplitRow[]): void => {
+  const commitRows = (next: SplitRow[], width = busBits): void => {
     setRows(next);
     // Invalid edits stay in the row (so the user can fix them) but are not
     // written to the document: the engine would reject the file.
     const entriesNext = next.map((r) => ({ name: r.name, bits: parseSplitBits(r.text).bits }));
-    if (splitIsValid(entriesNext)) onCommit(rowsToSplits(next));
+    if (mappingIsValid(entriesNext, width)) {
+      onCommit({ busBits: width, splits: rowsToSplits(next) });
+    }
   };
-  const commitEntries = (next: readonly SplitEntry[]): void => {
-    commitRows(next.map((e) => ({ name: e.name, text: formatSplitBits(e.bits) })));
+  const commitEntries = (next: readonly SplitEntry[], width = busBits): void => {
+    commitRows(
+      next.map((e) => ({ name: e.name, text: formatSplitBits(e.bits) })),
+      width,
+    );
   };
 
   /** Removing a split merges its bits into the previous row, so they do not
@@ -815,7 +829,9 @@ function SplitsField({
     if (raw.trim() === "" || !Number.isFinite(n)) return;
     const clamped = Math.max(1, Math.min(32, n));
     if (clamped === busBits) return;
-    commitEntries(resizeSplits(entries, clamped));
+    // Shrinking drops bits that no longer fit; widening leaves the new bits
+    // unmapped, which is the point of the explicit width.
+    commitEntries(trimSplits(entries, clamped), clamped);
   };
   const commitOutputs = (raw: string): void => {
     setOutDraft(null);
@@ -825,7 +841,10 @@ function SplitsField({
     if (clamped === outputs) return;
     const slice = evenSplit(busBits, clamped);
     const names = rowNames(slice.length, rows);
-    commitEntries(slice.map((bits, i) => ({ name: names[i], bits })));
+    commitEntries(
+      slice.map((bits, i) => ({ name: names[i], bits })),
+      busBits,
+    );
   };
 
   /** Add a row carrying the next uncovered run, or one bit past the end. */
@@ -834,8 +853,9 @@ function SplitsField({
     let bit = 0;
     while (covered.has(bit)) bit++;
     if (bit >= busBits) {
-      // Everything is mapped: extend the bus by one bit.
-      commitRows([...rows, { name: nextSplitName(rows), text: String(busBits) }]);
+      // Everything is mapped: widen the bus by one bit for the new split.
+      if (busBits >= 32) return;
+      commitRows([...rows, { name: nextSplitName(rows), text: String(busBits) }], busBits + 1);
       return;
     }
     const run: number[] = [];
@@ -1120,7 +1140,12 @@ function FieldRow({
 
   if (field.kind === "splits") {
     return (
-      <SplitsField value={value} label={field.label} onCommit={(v) => onCommitAttr(field.key, v)} />
+      <SplitsField
+        value={value}
+        busBits={comp.attrs?.busBits}
+        label={field.label}
+        onCommit={(v) => onCommitAttrs(v)}
+      />
     );
   }
 

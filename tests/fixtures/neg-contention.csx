@@ -1,6 +1,6 @@
 {
   "format": "circuitsim-plus-plus",
-  "version": 11,
+  "version": 12,
   "name": "neg-contention",
   "settings": {
     "clockHz": 1,
