@@ -43,6 +43,16 @@ test("autosave keeps a recovery copy as soon as the edit happens", async ({ page
   // state is a recovery copy only (the shell reads "Saved <time>").
   await expect(page.locator(INDICATOR)).not.toHaveText(/^Saved/);
   await expect(page.locator(INDICATOR)).toContainText("Autosaved locally", { timeout: 15000 });
+
+  // A recovery copy already on disk is a STEADY state: the amber dot must not
+  // pulse forever (UI_OVERHAUL §109). Only an in-flight write animates.
+  await expect(page.locator(INDICATOR)).not.toHaveAttribute("data-pulse", "true");
+  expect(
+    await page
+      .locator(INDICATOR)
+      .locator(".save-dot")
+      .evaluate((el) => getComputedStyle(el).animationName),
+  ).toBe("none");
 });
 
 test("crash recovery: the autosaved copy survives a relaunch and restores", async ({ page }) => {

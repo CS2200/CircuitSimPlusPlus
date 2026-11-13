@@ -3051,3 +3051,23 @@ tabs — and the now-unused Misc rail glyph was removed.
 **Acceptance:** `e2e/panels.spec.ts` checks the new groups and the 8-tab rail;
 `e2e/fileops.spec.ts` places TEXT from Debugging; `e2e/editor.spec.ts` places
 CLK from I/O. Frontend lint / unit / build green.
+
+## 109. The save dot stops pulsing when the write is done (2026-11-13)
+
+The header save chip's amber **pending** tone covered three states — `dirty`,
+`saving` and `recovered` — and its dot pulsed for all of them. But only the
+first two are transient: `recovered` ("Autosaved locally — not saved to the
+file yet") is a **resting** state, and so is an autosave-off dirty document, so
+their dot blinked forever and read as unfinished work that never finished.
+
+- **Colour and motion are now separate.** `tone()` still colours the dot amber
+  for every pending state, but a new `saveStatePulses()` (unit-tested) sets
+  `data-pulse` only for `dirty`/`saving` while autosave is on. The CSS animation
+  moved from `[data-kind="pending"]` to `[data-pulse="true"]`, so a recovery
+  copy already on disk sits still.
+- **Nothing else changed:** the text, title and colours are untouched; an
+  in-flight write still pulses, and reduced-motion still disables the animation.
+
+**Acceptance:** `SaveIndicator.test.ts` pins the pulse predicate; the autosave
+e2e checks the recovered chip's dot computes `animation-name: none` (it read
+`soft-pulse` before the fix). Frontend lint / unit / build green.

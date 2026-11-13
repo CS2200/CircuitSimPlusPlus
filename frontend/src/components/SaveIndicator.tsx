@@ -57,6 +57,17 @@ function tone(state: SaveState, autosaveOn: boolean): "ok" | "pending" | "error"
   }
 }
 
+/**
+ * Whether the dot blinks — i.e. a write is in flight or queued (UI_OVERHAUL
+ * §109). Colour and motion are separate: a **steady** amber state (a recovery
+ * copy that is already on disk, or unsaved changes while autosave is off) is
+ * "pending" but sits still, because nothing is happening. Only the transient
+ * `dirty`/`saving` window during an autosave pulses.
+ */
+export function saveStatePulses(state: SaveState, autosaveOn: boolean): boolean {
+  return autosaveOn && (state.kind === "dirty" || state.kind === "saving");
+}
+
 export default function SaveIndicator({
   state,
   autosaveOn,
@@ -73,6 +84,7 @@ export default function SaveIndicator({
     <span
       className={`save-state${state.kind === "error" ? " save-state-error" : ""}`}
       data-kind={tone(state, autosaveOn)}
+      data-pulse={saveStatePulses(state, autosaveOn) ? "true" : undefined}
       role="status"
       aria-live="polite"
       title={title}

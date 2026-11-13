@@ -1104,6 +1104,11 @@ input[type="number"] {
 .save-state[data-kind="pending"] .save-dot {
   background: var(--warn);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
+/* Only a write in flight pulses (§109); a steady amber state (a recovery copy
+ * on disk, or unsaved changes with autosave off) keeps the amber dot still. */
+.save-state[data-pulse="true"] .save-dot {
   animation: soft-pulse 1.3s ease-in-out infinite;
 }
 

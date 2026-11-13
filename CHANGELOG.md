@@ -27,6 +27,10 @@ stand in for a changelog.
 
 ### Fixed
 
+- **The save indicator's dot no longer pulses in a steady state.** It blinked
+  forever once a recovery copy was on disk ("Autosaved locally…") and while
+  autosave was off with unsaved changes. Only an in-flight write pulses now;
+  the amber colour still marks a pending state.
 - **The top-bar menus no longer flicker shut.** Reaching from a menu button
   into its popup, or sweeping across the bar while clipping its lower edge,
   could close the menu right as you went to click. The seams between the
