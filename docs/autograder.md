@@ -17,6 +17,7 @@ csim validate file.csx
 csim timing file.csx [--paths K] [--cycles N] [--json out.json]
 csim snapshot file.csx --out state.json [--cycles N]
 csim resume state.json [--cycles N] [--json out.json]
+csim nets file.csx [--pin id.pin] [--comp id] [--label name] [--cycles N] [--compat]
 ```
 
 - `run` — the grading flow: load → preload memories → run under limits → assertions →
@@ -31,6 +32,11 @@ csim resume state.json [--cycles N] [--json out.json]
   informational structural bound (`--sta`, `t_sta`, `sta_paths`, `sta_note`) is **gone** —
   retired with the derived clock (`docs/derived-clock.md`).
 - `snapshot`/`resume` — savestates, §5.
+- `nets` — a **conversion-debugging aid**, not part of grading: dump the engine's own view
+  of the nets — id, width, resolved value, and the pins it merged as drivers and sinks.
+  `--pin id.pin` narrows to one net, `--comp id` dumps one component's class/pins/views, and
+  `--label name` finds the net a named wire sits on (how a bus is identified); `--compat`
+  applies the CE floating-`Z` rules.
 
 ## 2. Exit codes (§8.2)
 
@@ -100,6 +106,10 @@ are rejected. Relative load paths resolve against the **spec file's directory** 
   "rss_cap_bytes": 268435456,
   "baseline_est_time": 100000,
   "expect_halt": false, // with "stop", means "one of them must hold"
+  // Pause controls. Both default off: a graded run carries on past an unknown read (the X
+  // shows up in the assertion results) and ignores `debug.breakpoint`s (§8.1).
+  "pause_on_unknown": false, // pause when a component reads a value the model called X
+  "pause_on_breakpoints": false, // pause at `debug.breakpoint`s
   // §8.4 stop conditions: run until one holds instead of for a fixed count. `cycles` then
   // *is* the cycle count to completion, and the report's `stop` names which held and when.
   "stop": [

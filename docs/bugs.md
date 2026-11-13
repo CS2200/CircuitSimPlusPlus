@@ -40,10 +40,10 @@ option entirely.
 
 ## 3. Documentation gaps (not lies — omissions)
 
-- `docs/autograder.md` §1 does not list the `csim nets` subcommand (a conversion-debugging
-  aid), and §5 does not document the test-spec fields `pause_on_unknown` /
-  `pause_on_breakpoints` — their CLI flags *are* listed, and `pause_on_breakpoints` also
-  appears in §3's `halt_reason` note.
+- [x] **Closed.** `docs/autograder.md` §1 now lists the `csim nets` subcommand (a
+  conversion-debugging aid), and §5 documents the test-spec fields `pause_on_unknown` /
+  `pause_on_breakpoints` (their CLI flags were already listed, and `pause_on_breakpoints`
+  already appeared in §3's `halt_reason` note).
 
 ## 4. Editor UX backlog — 2026-11-11 review
 
