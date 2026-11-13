@@ -12,6 +12,12 @@ stand in for a changelog.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-13
+
+A small polish release: the macOS window now wears the app's own header, the
+palette is grouped by what each part is for, and two hovering/indicator
+annoyances are gone.
+
 ### Added
 
 - **The macOS window uses the app's own header instead of a stock title bar.**
@@ -174,7 +180,8 @@ width, and the macOS build now carries a stable signing identity.
 - CI builds macOS + Windows + Linux bundles on a public github.com mirror and
   publishes one GitHub Release, which the in-app update nudge reads.
 
-[Unreleased]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/CS2200/CircuitSimPlusPlus/compare/v0.3.0...v0.3.1
